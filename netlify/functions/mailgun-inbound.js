@@ -1042,7 +1042,19 @@ exports.handler = async (event) => {
             }
             // Filter by active hours
             if (r.hoursStart && r.hoursEnd) {
-              const tz = STATE_TIMEZONES[ticketState] || 'America/New_York';
+              // Bug fixed 2026-07-22: this used to compute "now" in the
+              // TICKET's state timezone (STATE_TIMEZONES[ticketState]),
+              // not the recipient's own. That silently shifted a
+              // recipient's active-hours window for any ticket from a
+              // state in a different timezone than their own -- e.g. a GA-
+              // based recipient's morning could read as pre-7am Pacific
+              // for an NV ticket and get filtered out. Confirmed via WO
+              // 00147417 (NV) showing zero SMS recipients despite Mark
+              // covering NV and being Active. Now uses the recipient's own
+              // r.timezone (set in admin.html's notification settings,
+              // defaulting to Eastern -- correct for GA/IN/MI/OH/most of
+              // the roster today) instead of the ticket's state.
+              const tz = r.timezone || 'America/New_York';
               const now = new Date();
               const localStr = now.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
               const [h, m] = localStr.split(':').map(Number);

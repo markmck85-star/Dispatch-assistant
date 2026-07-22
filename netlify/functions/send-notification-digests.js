@@ -14,11 +14,14 @@
  *
  * Uses the same hoursStart/hoursEnd window logic as mailgun-inbound.js's
  * live filter (including the "00:00 means midnight/end-of-day, not
- * minute 0" fix). Since there's no specific ticket driving this check,
- * the recipient's own timezone is approximated from the first state in
- * their coverage list (falls back to America/New_York, matching every
- * other undated fallback already in this codebase) rather than a
- * ticket's state.
+ * minute 0" fix). Uses the recipient's own r.timezone field (set in
+ * admin.html's notification settings), falling back to America/New_York
+ * if unset -- matches the same fix applied to mailgun-inbound.js
+ * 2026-07-22. Previously approximated the recipient's timezone from the
+ * first state in their coverage list, which had the same root problem as
+ * mailgun-inbound.js's original bug: a recipient covering multiple states
+ * across timezones got evaluated in whichever state happened to be listed
+ * first, not their own.
  */
 const { getStore, connectLambda } = require('@netlify/blobs');
 
@@ -98,7 +101,7 @@ exports.handler = async (event) => {
       // Recipient was removed or turned off since being queued -- nothing to deliver to
       if (!r || r.enabled === false) { delete pending[addr]; changed = true; summary.dropped++; continue; }
 
-      const tz = STATE_TIMEZONES[(r.states && r.states[0]) || ''] || 'America/New_York';
+      const tz = r.timezone || 'America/New_York';
       if (!inWindow(r.hoursStart, r.hoursEnd, tz)) { summary.stillWaiting++; continue; }
 
       const lines = items.slice(0, 15).map(it => `#${it.ticketId || '?'} ${it.siteCode || ''}: ${it.summary || ''}`.trim());
