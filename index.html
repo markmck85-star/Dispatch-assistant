@@ -2958,6 +2958,17 @@ function distanceMatrixStatus(state) {
                     } else if (preferred && !unavailable.has(preferred) && allTechNames.includes(preferred)) {
                         // Preferred exists and not marked unavailable (edge case)
                         tech = preferred;
+                    } else if (!preferred) {
+                        // No saved primaryTech/defaultTech at all for this site --
+                        // this is the "landed on Tim by array-order luck" case Mark
+                        // caught 2026-07-22: reassignStop()'s dropdown excludes the
+                        // currently-assigned tech from its own options, so there's
+                        // no way to "reassign" a stop to the tech it's already on
+                        // to trigger the save-as-default prompt, even when that
+                        // tech is actually correct. Flagged here so the UI can offer
+                        // an explicit "Set as Default" action instead.
+                        tech = availableTechs[0] || allTechNames[0];
+                        item.noSavedDefault = true;
                     } else {
                         tech = availableTechs[0] || allTechNames[0];
                     }
@@ -3135,6 +3146,9 @@ function distanceMatrixStatus(state) {
                     const reassignBadge = item.reassignedFrom 
                         ? `<span style="background:#856404;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">↔ from ${item.reassignedFrom.split(' ')[0]}</span>` 
                         : '';
+                    const noDefaultBadge = item.noSavedDefault
+                        ? `<span style="background:#5a2d82;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">⚠ no saved default</span>`
+                        : '';
                     const restockByStr = item.restockBy ? `<span style="font-size:11px;color:#888;margin-left:6px;">by ${item.restockBy}</span>` : '';
                     const ticketInfoStr = item.fromTicket
                         ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(item.ticketSlaEnd)}</strong>` : ''}</div>`
@@ -3154,7 +3168,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div>
-                                    <div><strong>${item.code}</strong> - ${loc.name} ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${restockByStr}</div>
+                                    <div><strong>${item.code}</strong> - ${loc.name} ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     ${ticketInfoStr}
                                     ${window.driveTimeEnabled ? `<div id="dt-${techKey}-${index}" style="font-size:11px;color:#5bc8af;margin-top:2px;">🕐 —</div>` : ''}
@@ -3165,6 +3179,7 @@ function distanceMatrixStatus(state) {
                                         ${buildTechOptions(Object.keys(TECHS).filter(t => !currentUnavailableTechs.has(t)), item.code, CURRENT_STATE, '', new Set([tech]))}
                                     </select>
                                     <button class="control-btn" onclick="pushToTomorrow('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">${window._isFriday ? '→ Mon' : window._isSaturday ? '→ Mon' : '→ Tomorrow'}</button>
+                                    ${item.noSavedDefault ? `<button class="control-btn" onclick="setAsDefaultTech('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#5a2d82;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Set Default</button>` : ''}
                                     <div style="display:flex;gap:3px;margin-top:2px;">
                                         <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'completed')" style="font-size:10px;padding:2px 6px;background:#1a6b1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Done</button>
                                         <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'canceled')" style="font-size:10px;padding:2px 6px;background:#6b1a1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✗ Cancel</button>
@@ -3640,6 +3655,44 @@ function distanceMatrixStatus(state) {
             }
             window.removedStops.splice(removedIndex, 1);
             renderReviewBoard(true);
+        }
+
+        // Companion to showReassignPrompt's "Yes, save it" path -- but for stops
+        // that landed on the naive last-resort fallback (no saved primaryTech at
+        // all) where the fallback tech is actually correct. reassignStop()'s
+        // dropdown excludes the currently-assigned tech from its own options, so
+        // there's no way to trigger the normal save-as-default prompt by
+        // "reassigning" a stop to the tech it's already on. This is the explicit
+        // action for that case, found 2026-07-22.
+        function setAsDefaultTech(tech, index) {
+            const item = window.currentAssignments[tech][index];
+            const loc = LOCATIONS[item.code];
+            if (!loc) return;
+            const state = item.code.substring(0, 2);
+            fetch('/.netlify/functions/save-location', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    code: item.code,
+                    state: state,
+                    name: loc.name || '',
+                    address: loc.address || '',
+                    primaryTech: tech,
+                    fallbackTech: loc.fallbackTech || '',
+                    contractorOverride: false,
+                    contractorName: loc.contractorName || ''
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    loc.primaryTech = tech;
+                    loc.defaultTech = tech;
+                    item.noSavedDefault = false;
+                    renderReviewBoard(true);
+                }
+            })
+            .catch(() => {});
         }
 
         function reassignStop(oldTech, index, newTech) {
