@@ -3150,6 +3150,7 @@ function distanceMatrixStatus(state) {
     onmousedown="(function(btn,t,i){btn._lpt=setTimeout(()=>{btn._lpt=null;moveStopToTop(t,i);},600);})(this,'${tech}',${index})"
     onmouseup="(function(btn){if(btn._lpt){clearTimeout(btn._lpt);btn._lpt=null;}})(this)"
     title="Tap: move up one | Hold: move to top">▲</button>
+                                    ${index > 0 ? `<button class="move-btn" onclick="moveStopToTop('${tech}', ${index})" title="Move to top (shows mileage from this tech)" style="font-size:9px;line-height:1;">⤒</button>` : ''}
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div>
