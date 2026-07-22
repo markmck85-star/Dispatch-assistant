@@ -2958,15 +2958,20 @@ function distanceMatrixStatus(state) {
                     } else if (preferred && !unavailable.has(preferred) && allTechNames.includes(preferred)) {
                         // Preferred exists and not marked unavailable (edge case)
                         tech = preferred;
-                    } else if (!preferred) {
-                        // No saved primaryTech/defaultTech at all for this site --
-                        // this is the "landed on Tim by array-order luck" case Mark
-                        // caught 2026-07-22: reassignStop()'s dropdown excludes the
-                        // currently-assigned tech from its own options, so there's
-                        // no way to "reassign" a stop to the tech it's already on
-                        // to trigger the save-as-default prompt, even when that
-                        // tech is actually correct. Flagged here so the UI can offer
-                        // an explicit "Set as Default" action instead.
+                    } else if (!preferred || !allTechNames.includes(preferred)) {
+                        // No usable saved default at all -- either nothing saved,
+                        // OR a stale/mismatched name that doesn't match anyone on
+                        // the current roster. Found 2026-07-22: index.html's
+                        // legacy hardcoded LOCATIONS_NV/OH/etc objects (leftover
+                        // from before the Supabase migration) already have
+                        // defaultTech values for many of these "missing default"
+                        // sites, but with drifted names -- e.g. "Timothy Stoffel"
+                        // vs the real roster's "Tim Stoffel", or "AJ Willis" who
+                        // isn't on the current NV roster at all. A truthy-but-
+                        // wrong value silently passed the old `!preferred` check
+                        // and skipped the flag entirely, which is why the "Set
+                        // Default" button wasn't showing up for the NV sites that
+                        // already had a (wrong) hardcoded name.
                         tech = availableTechs[0] || allTechNames[0];
                         item.noSavedDefault = true;
                     } else {
