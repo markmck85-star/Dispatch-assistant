@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCR Dispatch Tool — Help</title>
+<style>
+  :root {
+    --bg: #121212; --surface: #1e1e2e; --border: #2a2a3e;
+    --blue: #4a9eff; --amber: #ffa500; --green: #4caf50;
+    --red: #e05555; --text: #e0e0e0; --muted: #888; --code-bg: #0d1117;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
+  header { background: #0a1628; border-bottom: 2px solid var(--amber); padding: 20px 24px; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  header h1 { font-size: 18px; color: var(--amber); font-weight: 700; }
+  header span { font-size: 12px; color: var(--muted); }
+  .back-btn { background: var(--surface); color: var(--amber); border: 1px solid var(--amber); border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; text-decoration: none; }
+  .print-btn { background: #1a3a1a; color: var(--green); border: 1px solid var(--green); border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; text-decoration: none; }
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 24px; display: flex; gap: 16px; flex-wrap: wrap; }
+  nav a { color: var(--blue); font-size: 13px; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  main { max-width: 800px; margin: 0 auto; padding: 24px 20px 60px; }
+  section { margin-bottom: 40px; }
+  h2 { font-size: 20px; color: var(--amber); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px; }
+  h3 { font-size: 16px; color: var(--blue); margin: 20px 0 10px; }
+  p { margin-bottom: 10px; color: var(--text); }
+  ol, ul { padding-left: 22px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  li ul { margin-top: 6px; }
+  .step { background: var(--surface); border-left: 3px solid var(--blue); border-radius: 0 6px 6px 0; padding: 10px 14px; margin-bottom: 10px; }
+  .step strong { color: var(--blue); }
+  .msg-box { background: var(--code-bg); border-left: 3px solid var(--amber); border-radius: 0 6px 6px 0; padding: 12px 16px; font-family: 'Courier New', monospace; font-size: 13px; color: #ccc; white-space: pre; margin: 12px 0; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th { background: #1a3a5c; color: #fff; padding: 8px 12px; text-align: left; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: var(--surface); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-right: 4px; }
+  .badge-amber { background: #3a2800; color: var(--amber); border: 1px solid var(--amber); }
+  .badge-green { background: #1a3a1a; color: var(--green); }
+  .badge-red { background: #3a1a1a; color: var(--red); }
+  .badge-blue { background: #1a2a3a; color: var(--blue); }
+  .note { background: #2a2000; border: 1px solid #554400; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #ccc; margin: 12px 0; }
+  .note strong { color: var(--amber); }
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+  @media (max-width: 560px) { .feature-grid { grid-template-columns: 1fr; } }
+  .feature-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .feature-card h4 { color: var(--blue); font-size: 14px; margin-bottom: 8px; }
+  .feature-card ul { padding-left: 16px; font-size: 13px; color: #bbb; }
+  .feature-card li { margin-bottom: 4px; }
+  .tag { display: inline-block; background: #1a3a1a; color: var(--green); border-radius: 4px; padding: 1px 7px; font-size: 11px; margin-left: 6px; vertical-align: middle; }
+  .tag-soon { background: #2a2000; color: var(--amber); }
+
+  @media print {
+    body { background: #fff; color: #000; font-size: 12px; }
+    header { background: #fff; border-bottom: 2px solid #333; position: static; }
+    header h1 { color: #333; }
+    header span { color: #666; }
+    .back-btn, .print-btn { display: none; }
+    nav { display: none; }
+    h2 { color: #333; border-bottom: 1px solid #ccc; }
+    h3 { color: #1a4a8a; }
+    .step { background: #f5f5f5; border-left: 3px solid #1a4a8a; }
+    .note { background: #fff8e1; border: 1px solid #f0c040; color: #333; }
+    .msg-box { background: #f5f5f5; color: #333; border-left: 3px solid #888; }
+    th { background: #1a4a8a; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .badge-amber { background: #fff8e1; color: #8a6000; border: 1px solid #c8a000; }
+    .badge-green { background: #e8f5e9; color: #1a5c1a; }
+    .badge-red { background: #fce8e8; color: #8a0000; }
+    .badge-blue { background: #e8f0ff; color: #1a3a8a; }
+    .feature-card { background: #f9f9f9; border: 1px solid #ccc; }
+    .feature-card h4 { color: #1a4a8a; }
+    .feature-card ul { color: #333; }
+    section { page-break-inside: avoid; }
+    a { color: #1a4a8a; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ MCR Dispatch Tool — Help</h1>
+  <span>v9.49 / blobs-123 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <a class="back-btn" href="/">← Back to App</a>
+  <button class="print-btn" onclick="window.print()">🖨️ Print</button>
+</header>
+<nav>
+  <a href="#whats-new">What's New</a>
+  <a href="#login">Login</a>
+  <a href="#daily">Daily Dispatch</a>
+  <a href="#card-controls">Card Controls</a>
+  <a href="#session-actions">Session Actions</a>
+  <a href="#urgent">Urgent / Trouble Ticket</a>
+  <a href="#unknown">Unknown Codes</a>
+  <a href="#saturday">Saturday On-Call</a>
+  <a href="#admin">Admin Panel</a>
+  <a href="#features">Features</a>
+  <a href="#planned">Planned</a>
+  <a href="#limits">Known Limitations</a>
+</nav>
+<main>
+
+  <!-- WHAT'S NEW -->
+  <section id="whats-new">
+    <h2>🆕 What's New</h2>
+
+    <h3>Inbound Dispatch via Email</h3>
+    <p>Forward any dispatch list or trouble ticket email to <strong>dispatch@mcrdispatch.net</strong> and the app processes it automatically. A gold banner appears at the top when a new dispatch list arrives — tap <strong>Load</strong> to import it instantly.</p>
+
+    <h3>Trouble Ticket SMS Alerts</h3>
+    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an SMS alert fires automatically to all configured recipients with the WO number, site name, issue, and SLA deadline.</p>
+
+    <h3>Send Dispatches Directly to Technicians</h3>
+    <p>After generating dispatches, tap the <strong>📤 Send</strong> button on any tech's message card. The app sends a full formatted email to their MCR address and a short SMS ping to their phone — no copy-paste needed. Set up each tech's carrier and SMS address in the Admin Panel under Technicians.</p>
+
+    <h3>Technician Availability Board</h3>
+    <p>The availability panel shows all techs with real-time status. Comp days and Saturday on-call rules apply automatically. Tap <strong>Mark Out</strong> to manually mark a tech unavailable for unscheduled absences — the dispatch engine routes around them immediately. Availability persists across page reloads for the current day.</p>
+
+    <h3>Fallback Assignment Improvements</h3>
+    <p>When a tech is unavailable and no fallback is set, a prompt appears to assign coverage. If the designated fallback is also unavailable, the prompt correctly shows <strong>Fallback also unavailable</strong> and hides the permanent save option to prevent accidental database changes. Use <strong>Skip All</strong> to dismiss all pending prompts at once.</p>
+
+    <h3>Permanent Assignment Saving</h3>
+    <p>Use <strong>Assign &amp; save as fallback</strong> in the fallback prompt, or <strong>Yes, save it</strong> in the inline Reassign dropdown, to permanently update a site's default or fallback technician in the database.</p>
+  </section>
+  <section id="login">
+    <h2>Logging In</h2>
+    <p>Navigate to <strong>mcrdispatch.net</strong> and tap <strong>Admin Panel</strong> at the bottom of the screen.</p>
+    <table>
+      <tr><th>Username</th><th>PIN</th><th>Access</th></tr>
+      <tr><td>gina</td><td>2847</td><td>Georgia / NC / SC dispatch</td></tr>
+      <tr><td>admin</td><td>2847</td><td>All states + admin functions</td></tr>
+    </table>
+  </section>
+
+  <!-- DAILY DISPATCH -->
+  <section id="daily">
+    <h2>Daily Dispatch — Standard (Next Day)</h2>
+    <div class="step"><strong>Step 1 — Check date and region.</strong><br>
+      Confirm the Region and Dispatch Date are correct at the top of the screen.<br>
+      The date defaults to the next business day automatically. Friday defaults to Monday. Saturday defaults to today (urgent mode).
+    </div>
+    <div class="step"><strong>Step 2 — Review technician availability.</strong><br>
+      The board auto-marks comp days from the on-call schedule.<br>
+      Tap <strong>Mark Out</strong> to manually mark a tech unavailable. Tap again to restore.
+    </div>
+    <div class="step"><strong>Step 3 — Paste the dispatch email.</strong><br>
+      Copy the full dispatch email from your inbox and paste it into the Location Codes field.
+    </div>
+    <div class="step"><strong>Step 4 — Generate.</strong><br>
+      Tap <strong>Generate Dispatches</strong>.
+    </div>
+    <div class="step"><strong>Step 5 — Review and adjust.</strong><br>
+      Use the Reassign dropdown on any stop to move it to a different tech.<br>
+      After reassigning, a prompt asks if you want to save the new tech as permanent primary for that location.<br>
+      If a location has no fallback and the primary is out, a queue prompt cycles through each affected location asking who should cover.
+    </div>
+    <div class="step"><strong>Step 6 — Send messages.</strong><br>
+      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send.
+    </div>
+    <div class="step"><strong>Step 7 — Print or open Restock Tracker.</strong><br>
+      Tap <strong>Print Dispatch Summary</strong> at the top to open a printable summary in a new tab.<br>
+      Tap <strong>📊 Restock Tracker</strong> (desktop) or <strong>📄 Report</strong> (mobile) next to the Messages button for quick access to the restock tracker or a mobile-friendly route report.
+    </div>
+  </section>
+
+  <!-- CARD CONTROLS -->
+  <section id="card-controls">
+    <h2>Dispatch Card Controls</h2>
+    <p>Each stop on a technician's card has the following controls:</p>
+    <table>
+      <tr><th>Control</th><th>What it does</th></tr>
+      <tr><td>🚦 <strong>Traffic</strong></td><td>Opens Google Maps traffic view from the tech's home to their first stop.</td></tr>
+      <tr><td>🗺️ <strong>Route</strong></td><td>Opens a multi-stop Google Maps route for all of the tech's stops in order.</td></tr>
+      <tr><td>▲ / ▼</td><td>Reorder stops within a tech's list before generating messages or a route.</td></tr>
+      <tr><td><strong>Reassign</strong></td><td>Move a stop to a different tech. Prompts to save the change as permanent.</td></tr>
+      <tr><td>→ <strong>Tomorrow</strong></td><td>Pushes a same-day stop to the next day. Only appears on TODAY-flagged stops.</td></tr>
+      <tr><td>✓ <strong>Done</strong></td><td>Marks a stop completed and moves it to the Session Actions list below.</td></tr>
+      <tr><td>✗ <strong>Cancel</strong></td><td>Marks a stop canceled and moves it to the Session Actions list below.</td></tr>
+    </table>
+    <h3>Stop Badges</h3>
+    <table>
+      <tr><th>Badge</th><th>Meaning</th></tr>
+      <tr><td><span class="badge badge-red">TODAY</span></td><td>Must be completed today — SLA or same-day restock.</td></tr>
+      <tr><td><span class="badge badge-green">Right Forms</span></td><td>Right-side (previous year) registration forms requested. Confirm tech is carrying them. GA SK/BK only.</td></tr>
+      <tr><td><span class="badge badge-blue">Reassigned</span></td><td>Stop was moved from its default tech this session.</td></tr>
+    </table>
+    <h3>Cluster / Corridor Banner</h3>
+    <p>When a dispatched site is in a known remote cluster (Augusta area, Charlotte NC, Fayette/Clayton corridor), a blue banner appears suggesting you check the Restock Tracker for nearby sites that may benefit from a preemptive restock.</p>
+  </section>
+
+  <!-- SESSION ACTIONS -->
+  <section id="session-actions">
+    <h2>Session Actions — Undo</h2>
+    <p>When you mark a stop Done, Cancel, or push it to Tomorrow, it moves to a session log at the bottom of the results. Each entry has an <strong>↩ Undo</strong> button that fully restores the stop to its original position in the queue with all badges and flags intact.</p>
+    <p>Two separate sections appear when populated:</p>
+    <ul>
+      <li><strong>→ Pushed to Tomorrow This Session</strong> — stops that were pushed from today to tomorrow. Undo reverts the date and urgency.</li>
+      <li><strong>✓ Completed / Removed This Session</strong> — stops marked Done or Canceled. Undo re-inserts them at their original queue position.</li>
+    </ul>
+    <div class="note"><strong>Note:</strong> Undo is session-only. Refreshing the page clears all session actions and undo history.</div>
+  </section>
+
+  <!-- URGENT -->
+  <section id="urgent">
+    <h2>Urgent / Trouble Ticket Dispatch</h2>
+    <div class="step"><strong>Step 1.</strong> Select <strong>⚡ URGENT (Same Day)</strong> from the Paste Mode dropdown. On Saturdays this is selected automatically.</div>
+    <div class="step"><strong>Step 2.</strong> Paste the full trouble ticket email into the Location Codes field.</div>
+    <div class="step"><strong>Step 3.</strong> Tap <strong>Generate Dispatches</strong>. The SLA end time is calculated automatically from the ticket's Earliest Start Permitted field.</div>
+    <div class="step"><strong>Step 4.</strong> Tap <strong>✅ Messages</strong>. The tech message reads:</div>
+    <div class="msg-box">⚡ URGENT - Hey Nyzier, a trouble ticket for
+Cobb County Kroger Whitlock #455 just came in:
+
+1. Printer Jam (SLA ends Sat 1:27 PM)
+
+Please acknowledge receipt.</div>
+  </section>
+
+  <!-- UNKNOWN CODES -->
+  <section id="unknown">
+    <h2>Unknown Location Codes</h2>
+    <p>If a site code in the dispatch list isn't in the database, an <strong class="badge-amber" style="color:#ffa500;">amber banner</strong> appears listing each unknown code with an <strong>+ Add to database</strong> button.</p>
+    <p>Tap it to enter:</p>
+    <ul>
+      <li><strong>Location name</strong> — e.g. Hillsborough County Gunn Hwy Publix</li>
+      <li><strong>Full address</strong></li>
+      <li><strong>Primary tech</strong> (optional)</li>
+      <li><strong>Machine type</strong> — SK (Small Kahuna), SB (Surfboard), or BK (Big Kahuna). This affects form count thresholds and restock rules. Defaults to SK if unsure.</li>
+    </ul>
+    <p>The new location saves to the database immediately and the dispatch re-runs automatically with it included.</p>
+    <div class="note"><strong>Note:</strong> If some codes are known and some aren't, the board generates for the known ones while the amber banner lists the unknowns above the results.</div>
+  </section>
+
+  <!-- SATURDAY -->
+  <section id="saturday">
+    <h2>Saturday On-Call</h2>
+    <p>On Saturdays the availability board automatically marks everyone <strong>Not on call</strong> except the two scheduled on-call techs. Dispatch assignments only go to on-call techs.</p>
+    <table>
+      <tr><th>Saturdays</th><th>On-Call Techs</th><th>Comp Day</th></tr>
+      <tr><td>Odd (05/09, 05/23…)</td><td>Nyzier Moore + Sean Reich</td><td>Monday before</td></tr>
+      <tr><td>Even (05/16, 05/30…)</td><td>Omari Williams + Robert Medley</td><td>Thu before (Robert M.) / Mon before (Omari)</td></tr>
+    </table>
+    <div class="note"><strong>Note:</strong> Robert Whitehead covers Savannah only and is not in the on-call rotation. He does not take a comp day.</div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="admin">
+    <h2>Admin Panel</h2>
+    <p>Access via the <strong>Admin Panel</strong> button at the bottom of the main screen.</p>
+    <h3>Locations Tab</h3>
+    <ul>
+      <li>Search by site code, name, or address.</li>
+      <li>Edit any location to set Primary Tech, Fallback Tech, and Machine Type (SK/SB/BK).</li>
+      <li>Add new locations manually.</li>
+      <li>Delete locations — hardcoded locations will reappear on next load; edit them to create a Blob override instead.</li>
+    </ul>
+    <h3>Technicians Tab</h3>
+    <ul>
+      <li>Add, edit, or remove technicians for any state. Changes take effect immediately.</li>
+    </ul>
+    <h3>Backup / Restore</h3>
+    <ul>
+      <li>Download a JSON backup of all saved data for the selected state.</li>
+      <li>Restore from a previous backup file if needed.</li>
+    </ul>
+  </section>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <h2>Current Features</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h4>📋 Dispatch</h4>
+        <ul>
+          <li>Auto date defaulting (Fri→Mon, Sat→today)</li>
+          <li>Technician availability board</li>
+          <li>Comp day auto-flagging</li>
+          <li>Saturday on-call auto-mark</li>
+          <li>Primary + fallback tech per location</li>
+          <li>No-fallback queue prompt</li>
+          <li>Reassignment with permanent save option</li>
+          <li>Unknown code detection + add flow with machine type</li>
+          <li>URGENT mode with automatic SLA calculation</li>
+          <li>Done / Cancel / Tomorrow controls with ↩ Undo</li>
+          <li>Traffic + Route buttons</li>
+          <li>Print dispatch summary</li>
+          <li>Desktop responsive layout</li>
+        </ul>
+      </div>
+      <div class="feature-card">
+        <h4>🔧 Machine Type Rules</h4>
+        <ul>
+          <li>SK / BK (Small / Big Kahuna) — 800 form max count</li>
+          <li>SB (Surfboard) — 700 form max count, all states</li>
+          <li>Right Forms badge + confirmation — GA SK/BK only</li>
+          <li>Partial restock SWAP warning — GA SK/BK only</li>
+          <li>Color/decal rules — GA only</li>
+          <li>Cluster/corridor banners — GA only</li>
+          <li>NC all-surfboard auto-detected</li>
+          <li>SC auto-assigns to Michael Newboult</li>
+        </ul>
+      </div>
+      <div class="feature-card">
+        <h4>⚙️ Admin</h4>
+        <ul>
+          <li>State-scoped location management</li>
+          <li>Location search bar</li>
+          <li>Primary + fallback + machine type per location</li>
+          <li>Blob-based persistent storage</li>
+          <li>Backup and restore per state</li>
+        </ul>
+      </div>
+      <div class="feature-card">
+        <h4>🔔 Watchdog</h4>
+        <ul>
+          <li>Email monitoring (dispatch + RMA)</li>
+          <li>SMS alert on trouble tickets</li>
+          <li>PC Name, WO number, issue category + detail parsed into alerts</li>
+          <li>Duplicate reply filtering</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANNED -->
+  <section id="planned">
+    <h2>Planned Features &amp; Future Upgrades</h2>
+    <h3>Short Term</h3>
+    <ul>
+      <li>Watchdog subject classifier fix</li>
+      <li>Watchdog <code>--test</code> mode — process a local sample email without touching live mailbox</li>
+      <li>Watchdog → Mailgun inbound webhook migration (event-driven, replaces polling)</li>
+      <li>On-call schedule to Blobs with admin edit UI</li>
+      <li>DCO toggle for right/left form selection</li>
+      <li>FL location database reconciliation (33 sites pending code verification)</li>
+    </ul>
+    <h3>Medium Term</h3>
+    <ul>
+      <li>Salesforce API integration — live WO data feed to dispatch tool</li>
+      <li>Remote location cluster flag on dispatch cards (Columbus, Albany, Augusta, south of Macon)</li>
+      <li>FL on-call schedule support</li>
+      <li>Supabase parts tracking (via Watchdog)</li>
+      <li>PWA share target — share dispatch email directly from any email app</li>
+    </ul>
+    <h3>Longer Term</h3>
+    <ul>
+      <li>Distance matrix for automatic proximity-based tech assignment</li>
+      <li>Two-tech travel comparison — compare drive time and mileage before assigning</li>
+      <li>Supabase migration — replace Netlify Blobs as primary state store</li>
+      <li>Full dynamic location loading from Blobs</li>
+    </ul>
+  </section>
+
+  <!-- LIMITS -->
+  <section id="limits">
+    <h2>Known Limitations</h2>
+    <ul>
+      <li>Hardcoded locations cannot be permanently deleted from admin — edit them to create a Blob override, or request removal in the next code update.</li>
+      <li>FL technician list is currently hardcoded — Dynamic TECHS from Blobs will fix this.</li>
+      <li>On-call schedule is hardcoded through early 2027 — Blobs migration will make it editable without a code deploy.</li>
+      <li>SLA calculation requires the Earliest Start Permitted field to be present in the ticket email.</li>
+      <li>NC and SC share the GA location database in admin — separate NC/SC databases not yet implemented.</li>
+      <li>FL location codes are partially unreconciled — 33 sites are pending correct PC code verification. Unknown codes will prompt for manual entry at dispatch time.</li>
+      <li>Undo is session-only — refreshing the page clears all session action history.</li>
+    </ul>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: May 14, 2026 &nbsp;·&nbsp; Deploy 80 / blobs-51</p>
+  </section>
+
+</main>
+</body>
+</html>

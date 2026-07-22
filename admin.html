@@ -1,0 +1,1672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Admin – Dispatch Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.6; font-size: 16px; }
+        .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 15px; }
+        h1 { color: #333; margin-bottom: 8px; font-size: 24px; }
+        h2 { color: #333; font-size: 20px; margin-bottom: 10px; }
+        .subtitle { color: #666; font-size: 13px; margin-top: -8px; margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; color: #333; }
+        input, select { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px; background: white; }
+        input[type="file"] { padding: 10px; }
+        .big-btn { width: 100%; padding: 15px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: 600; margin-top: 10px; cursor: pointer; }
+        .big-btn:active { background: #0056b3; }
+        .big-btn:disabled { background: #aaa; cursor: not-allowed; }
+        .big-btn.save-btn { background: #28a745; }
+        .big-btn.save-btn:active { background: #1e7e34; }
+        .big-btn.delete-btn { background: #dc3545; }
+        .big-btn.delete-btn:active { background: #a71d2a; }
+        .big-btn.back-btn { background: #6c757d; }
+        .big-btn.back-btn:active { background: #545b62; }
+        .tab-bar { display: flex; gap: 5px; margin-bottom: 15px; }
+        .tab-bar button { flex: 1; padding: 12px; border: 2px solid #ddd; background: #f8f9fa; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; color: #333; }
+        .tab-bar button.active { background: #007bff; color: white; border-color: #007bff; }
+        .section { display: none; }
+        .section.active { display: block; }
+        .card { background: #f8f9fa; border-left: 4px solid #007bff; padding: 12px; margin-bottom: 10px; border-radius: 5px; position: relative; }
+        .card .card-title { font-weight: 700; font-size: 16px; }
+        .card .card-detail { font-size: 14px; color: #555; }
+        .card .card-actions { margin-top: 8px; display: flex; gap: 8px; }
+        .card .card-actions button { padding: 6px 14px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer; color: white; }
+        .card .card-actions .edit-btn { background: #007bff; }
+        .card .card-actions .del-btn { background: #dc3545; }
+        .form-section { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e9ecef; margin-bottom: 15px; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .checkbox-row input[type="checkbox"] { width: auto; margin: 0; }
+        .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .count-badge { background: #007bff; color: white; padding: 2px 10px; border-radius: 12px; font-size: 13px; }
+
+        /* Login */
+        .login-box { max-width: 380px; margin: 60px auto; background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 30px; }
+        .login-box h1 { text-align: center; margin-bottom: 5px; }
+        .login-box .subtitle { text-align: center; }
+        .login-error { color: #dc3545; font-size: 14px; text-align: center; margin-top: 8px; display: none; }
+
+        /* State selector bar */
+        .state-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding: 10px 15px; background: #e7f3ff; border-radius: 8px; border: 1px solid #b8daff; flex-wrap: wrap; }
+        .state-bar label { margin: 0; font-size: 14px; white-space: nowrap; }
+        .state-bar select { width: auto; flex: 1; min-width: 80px; margin: 0; padding: 8px; font-size: 15px; }
+        .state-bar .user-info { font-size: 13px; color: #555; white-space: nowrap; }
+        .state-bar .logout-link { font-size: 13px; color: #dc3545; cursor: pointer; text-decoration: underline; }
+
+        /* Toast */
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+        .toast { padding: 12px 20px; border-radius: 8px; color: white; font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,0.2); opacity: 0; transform: translateX(100%); transition: all 0.3s ease; max-width: 320px; }
+        .toast.show { opacity: 1; transform: translateX(0); }
+        .toast.success { background: #28a745; }
+        .toast.error { background: #dc3545; }
+        .toast.info { background: #007bff; }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- LOGIN SCREEN -->
+    <div class="login-box" id="loginScreen">
+        <h1>Admin Login</h1>
+        <div class="subtitle">Dispatch Tool</div>
+        <label for="loginUser">Username</label>
+        <input type="text" id="loginUser" placeholder="Username" autocomplete="username" autocapitalize="none">
+        <label for="loginPin">PIN</label>
+        <input type="password" id="loginPin" placeholder="PIN" inputmode="numeric" maxlength="10" autocomplete="current-password">
+        <button class="big-btn" onclick="doLogin()">Log In</button>
+        <div class="login-error" id="loginError"></div>
+    </div>
+
+    <!-- ADMIN PANEL (hidden until login) -->
+    <div class="container" id="adminPanel" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <h1>Admin Panel</h1>
+            <a href="#" onclick="history.back(); return false;" style="text-decoration:none;">
+                <button type="button" style="padding:8px 16px;background:#6c757d;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">← Back to App</button>
+            </a>
+        </div>
+        <div class="subtitle">Dispatch Tool – Manage Locations &amp; Technicians</div>
+
+        <!-- State selector bar -->
+        <div class="state-bar">
+            <label for="stateSelect">State:</label>
+            <select id="stateSelect" onchange="onStateChange()"></select>
+            <span class="user-info" id="userInfo"></span>
+            <span class="logout-link" onclick="doLogout()">Logout</span>
+        </div>
+
+        <div class="tab-bar">
+            <button id="tabLocations" class="active" onclick="switchTab('locations')">Locations</button>
+            <button id="tabTechnicians" onclick="switchTab('technicians')">Technicians</button>
+            <button id="tabBackup" onclick="switchTab('backup')">Backup</button>
+            <button id="tabNotifications" onclick="switchTab('notifications')">Notifications</button>
+            <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
+        </div>
+
+        <!-- LOCATIONS TAB -->
+        <div id="sectionLocations" class="section active">
+            <div class="form-section">
+                <h2 id="locFormTitle">Add Location</h2>
+                <label for="locCode">Site Code</label>
+                <input type="text" id="locCode" placeholder="e.g. GA001" autocapitalize="characters">
+                <label for="locName">Location Name</label>
+                <input type="text" id="locName" placeholder="Location name">
+                <label for="locAddress">Address</label>
+                <input type="text" id="locAddress" placeholder="Full address">
+                <label for="locPrimaryTech">Primary Technician</label>
+                <select id="locPrimaryTech">
+                    <option value="">— Select primary tech —</option>
+                </select>
+                <label for="locFallbackTech">Fallback Technician</label>
+                <select id="locFallbackTech">
+                    <option value="">— None —</option>
+                </select>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="locContractorOverride">
+                    <label for="locContractorOverride" style="margin:0;font-weight:400;">Contractor Override</label>
+                </div>
+                <label for="locMachineType">Machine Type</label>
+                <select id="locMachineType">
+                    <option value="SK">SK — Small Kahuna (800 forms)</option>
+                    <option value="SB">SB — Surfboard (700 forms)</option>
+                    <option value="BK">BK — Big Kahuna / Cash Side (800 forms)</option>
+                    <option value="BH">BH — Big Hoku 7000 (4 printers)</option>
+                </select>
+                <div class="checkbox-row" style="margin-top:4px;">
+                    <input type="checkbox" id="locRemote">
+                    <label for="locRemote" style="margin:0;font-weight:400;">Remote location <span style="color:#888;font-size:12px;">(triggers Restock Tracker suggestion when dispatched)</span></label>
+                </div>
+                <label for="locContractorName">Contractor Name</label>
+                <input type="text" id="locContractorName" placeholder="Contractor name (if override)">
+                <button class="big-btn save-btn" onclick="saveLocation()">Save Location</button>
+                <button class="big-btn" onclick="clearLocForm()" style="background:#6c757d;margin-top:5px;">Clear Form</button>
+            </div>
+            <div class="list-header">
+                <h2>Saved Locations</h2>
+                <span class="count-badge" id="locCount">0</span>
+            </div>
+            <input type="search" id="locSearch" placeholder="Search by code, name, or address…"
+                style="width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border:1px solid #ccc;border-radius:6px;font-size:14px;"
+                oninput="locSearchQuery=this.value;renderLocations()">
+            <div id="locList"></div>
+        </div>
+
+        <!-- TECHNICIANS TAB -->
+        <div id="sectionTechnicians" class="section">
+            <div class="form-section">
+                <h2 id="techFormTitle">Add Technician</h2>
+                <label for="techName">Name</label>
+                <input type="text" id="techName" placeholder="Technician name">
+                <label for="techPhone">Phone</label>
+                <input type="tel" id="techPhone" placeholder="Phone number" oninput="updateTechSmsAddress()">
+                <label for="techEmail">Email</label>
+                <input type="email" id="techEmail" placeholder="Email address">
+                <label for="techCarrier">Carrier</label>
+                <select id="techCarrier" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;" onchange="updateTechSmsAddress()">
+                    <option value="">-- Select carrier --</option>
+                    <option value="@vtext.com">Verizon</option>
+                    <option value="@tmomail.net">T-Mobile</option>
+                    <option value="@txt.att.net">AT&T</option>
+                    <option value="@messaging.sprintpcs.com">Sprint</option>
+                </select>
+                <label for="techSmsAddress">SMS Address (auto-filled)</label>
+                <input type="text" id="techSmsAddress" placeholder="e.g. 4045551234@vtext.com" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;">
+                <label for="techRegion">Region</label>
+                <input type="text" id="techRegion" placeholder="e.g. Southeast">
+                <label for="techStartLocation">Start Location (home address for drive time)</label>
+                <input type="text" id="techStartLocation" placeholder="123 Main St, City, ST 12345" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;">
+                <div class="checkbox-row">
+                    <input type="checkbox" id="techActive" checked>
+                    <label for="techActive" style="margin:0;font-weight:400;">Active</label>
+                </div>
+                <button class="big-btn save-btn" onclick="saveTechnician()">Save Technician</button>
+                <button id="techClearBtn" class="big-btn" onclick="clearTechForm()" style="background:#6c757d;margin-top:5px;">Clear Form</button>
+            </div>
+            <div class="list-header">
+                <h2>Saved Technicians</h2>
+                <span class="count-badge" id="techCount">0</span>
+            </div>
+            <div id="techList"></div>
+        </div>
+
+        <!-- BACKUP TAB -->
+        <div id="sectionNotifications" class="section">
+            <h2>SMS Notification Settings</h2>
+            <p style="color:#666;font-size:13px;margin-bottom:20px;">Control who receives SMS alerts when trouble tickets arrive. Check specific states to filter alerts, or check "All States" to receive alerts for every state.</p>
+            <div id="notifRecipientList" style="margin-bottom:20px;"></div>
+            <div style="background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:20px;">
+                <h3 style="margin:0 0 12px;">Add Recipient</h3>
+                <label>Name</label>
+                <input type="text" id="notifName" placeholder="Jane Smith" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;">
+                <label>Carrier</label>
+                <select id="notifCarrier" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;" onchange="updateNotifAddress()">
+                    <option value="">-- Select carrier --</option>
+                    <option value="@vtext.com">Verizon</option>
+                    <option value="@tmomail.net">T-Mobile</option>
+                    <option value="@txt.att.net">AT&T</option>
+                    <option value="@messaging.sprintpcs.com">Sprint</option>
+                </select>
+                <label>Phone Number</label>
+                <input type="text" id="notifPhone" placeholder="5551234567" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;" oninput="updateNotifAddress()">
+                <label>Email-to-SMS Address (auto-filled)</label>
+                <input type="text" id="notifAddress" placeholder="5551234567@vtext.com" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;">
+                <label>Alert States — check the states this person covers:</label>
+                <div id="notifStatesBox" style="border:1px solid #ccc;border-radius:4px;padding:10px;margin-bottom:16px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:600;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid #eee;">
+                        <input type="checkbox" value="ALL" class="notif-state-cb" id="notifStateAll" onchange="toggleAllStates(this)" style="width:18px;height:18px;"> Saturday On-Call (auto-selects GA/IN/MI/NV only)
+                    </label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="GA" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Georgia/NC/SC</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="FL" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Florida</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="MI" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Michigan</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="IN" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Indiana</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="OH" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Ohio</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="NV" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Nevada</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="IL" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Illinois</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="MN" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Minnesota</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="WV" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> West Virginia</label>
+                        <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="OR" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Oregon</label>
+                    </div>
+                </div>
+                <label style="display:block;margin-bottom:6px;font-weight:500;">Active Hours (leave blank for 24/7)</label>
+                <div style="display:flex;gap:10px;margin-bottom:10px;align-items:center;">
+                    <div style="flex:1;">
+                        <label style="font-size:12px;color:#555;">From</label>
+                        <input type="time" id="notifHoursStart" value="07:00" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-size:12px;color:#555;">To</label>
+                        <input type="time" id="notifHoursEnd" value="22:00" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;">
+                    </div>
+                    <div style="padding-top:18px;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                            <input type="checkbox" id="notifHours247"> 24/7
+                        </label>
+                    </div>
+                </div>
+                <button id="addRecipientBtn" onclick="addNotifRecipient()" style="width:100%;padding:10px;background:#2c7be5;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">Add Recipient</button>
+            </div>
+        </div>
+
+        <div id="sectionBackup" class="section">
+            <div class="form-section">
+                <h2>Download Backup</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Download a JSON backup of the selected state's technicians and locations.</p>
+                <button class="big-btn" id="downloadBtn" onclick="downloadBackup()">Download State Backup</button>
+            </div>
+            <div class="form-section" style="margin-top:15px;">
+                <h2>Export All Locations (XLSX)</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Export all locations across every state as a multi-tab Excel workbook — one tab per state, matching TJ's format plus primary/fallback tech assignments.</p>
+                <button class="big-btn" style="background:#17a2b8;" onclick="exportLocationsCSV()">📊 Export All States to Excel</button>
+            </div>
+            <div class="form-section" style="margin-top:15px;">
+                <h2>Restore from File</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Upload a backup JSON file. The file's state must match the selected state.</p>
+                <label for="restoreFile">Select Backup File:</label>
+                <input type="file" id="restoreFile" accept=".json">
+                <button class="big-btn save-btn" id="restoreBtn" onclick="restoreBackup()">Restore from File</button>
+            </div>
+            <div class="form-section" style="margin-top:15px;">
+                <h2>Audit Default Technicians</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Compare current default technician assignments against the distance matrix. Flags locations where a closer tech exists and fills in any missing defaults. Requires the distance matrix to be built for this state.</p>
+                <button class="big-btn" style="background:#6f42c1;color:white;" id="auditBtn" onclick="auditDefaultTechs()">🔍 Audit Default Techs</button>
+                <div id="auditResults" style="margin-top:12px;display:none;">
+                    <div id="auditSummary" style="font-size:13px;margin-bottom:10px;padding:8px;background:#f8f9fa;border-radius:4px;border:1px solid #dee2e6;"></div>
+                    <div id="auditList" style="max-height:400px;overflow-y:auto;font-size:13px;"></div>
+                    <div style="margin-top:10px;display:flex;gap:8px;">
+                        <button class="big-btn save-btn" style="flex:1;" id="applyAuditBtn" onclick="applyAllAuditChanges()">✅ Apply All</button>
+                        <button class="big-btn" style="flex:1;background:#6c757d;color:white;" onclick="document.getElementById('auditResults').style.display='none'">✖ Dismiss</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="sectionDistancematrix" class="section">
+            <div class="form-section">
+                <h2>Distance Matrix</h2>
+<!--
+  DISTANCE MATRIX — Admin Panel Snippet
+  ──────────────────────────────────────
+  Paste this block into admin.html, inside the main admin panel container,
+  after the existing technician or location management sections.
+  The <style> block can be moved to the existing admin.html <style> section.
+-->
+
+<style>
+  .dm-panel { margin-top: 24px; padding: 16px; background: #1a1a2e; border-radius: 8px; border: 1px solid #333; }
+  .dm-panel h3 { margin: 0 0 12px 0; color: #f0f0f0; font-size: 15px; }
+  .dm-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .dm-btn { flex: 1; min-width: 140px; padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; color: #fff; }
+  .dm-btn.blue  { background: #1565c0; }
+  .dm-btn.blue:hover  { background: #1976d2; }
+  .dm-btn.green { background: #2e7d32; }
+  .dm-btn.green:hover { background: #388e3c; }
+  .dm-btn.orange{ background: #e65100; }
+  .dm-btn.orange:hover{ background: #f4511e; }
+  .dm-status { color: #ccc; font-size: 12px; min-height: 44px; padding: 8px 10px; background: #111; border-radius: 4px; white-space: pre-wrap; word-break: break-word; }
+  .dm-select { width: 100%; padding: 7px 9px; border-radius: 5px; border: 1px solid #555; background: #2a2a3e; color: #f0f0f0; font-size: 13px; box-sizing: border-box; margin-bottom: 10px; }
+</style>
+
+<div class="dm-panel">
+  <h3>📍 Distance Matrix</h3>
+
+  <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px;">State</label>
+  <select id="dm-state" class="dm-select">
+    <option value="GA">GA — Georgia (119 locations)</option>
+    <option value="FL">FL — Florida (93 locations)</option>
+    <option value="NC">NC — North Carolina (9 locations)</option>
+    <option value="SC">SC — South Carolina (3 locations)</option>
+    <option value="MI">MI — Michigan</option>
+    <option value="IN">IN — Indiana</option>
+    <option value="OH">OH — Ohio</option>
+    <option value="NV">NV — Nevada</option>
+    <option value="IL">IL — Illinois</option>
+    <option value="MN">MN — Minnesota</option>
+    <option value="WV">WV — West Virginia</option>
+    <option value="OR">OR — Oregon</option>
+    <option value="CO">CO — Colorado</option>
+    <option value="ID">ID — Idaho</option>
+  </select>
+
+  <!-- Step 1: Geocode addresses (one-time, idempotent) -->
+  <p style="color:#aaa;font-size:12px;margin:0 0 6px 0;">
+    <strong style="color:#f0f0f0;">Step 1</strong> — Geocode addresses (first-time setup or after adding new locations/techs).
+    Skips records that already have coordinates unless Force is checked.
+  </p>
+  <div class="dm-row">
+    <button class="dm-btn blue" onclick="dmGeocode('locations')">📌 Geocode Locations</button>
+    <button class="dm-btn blue" onclick="dmGeocode('techs')">👤 Geocode Techs</button>
+    <button class="dm-btn blue" onclick="dmGeocode('all')">🔄 Geocode All</button>
+  </div>
+  <div style="margin:6px 0 2px 0;">
+    <label style="color:#ccc;font-size:12px;cursor:pointer;">
+      <input type="checkbox" id="dm-force-geocode" style="margin-right:5px;">
+      Force re-geocode (re-processes records that already have coordinates — use after correcting an address)
+    </label>
+  </div>
+
+  <!-- Step 2: Build matrix -->
+  <p style="color:#aaa;font-size:12px;margin:8px 0 6px 0;">
+    <strong style="color:#f0f0f0;">Step 2</strong> — Build the distance matrix.
+    Haversine is free and instant. Drive-time uses Google Maps API (~$5–6 per GA+FL refresh).
+  </p>
+  <div class="dm-row">
+    <button class="dm-btn green" onclick="dmBuildMatrix('haversine')">📐 Build (Straight-Line, Free)</button>
+    <button class="dm-btn orange" onclick="dmBuildMatrix('driving')">🚗 Build (Drive-Time, ~$6)</button>
+  </div>
+
+  <div id="dm-status" class="dm-status">Ready.</div>
+</div>
+
+<script>
+(function () {
+  function dmState() {
+    return document.getElementById('dm-state').value;
+  }
+  function dmSetStatus(msg) {
+    document.getElementById('dm-status').textContent = msg;
+  }
+
+  window.dmGeocode = async function (type) {
+    const state = dmState();
+    const force = document.getElementById('dm-force-geocode').checked;
+    const forceLabel = force ? ' (force mode)' : '';
+    dmSetStatus('Geocoding ' + type + ' for ' + state + forceLabel + '… (may take 10–15 s for large states)');
+    try {
+      const res = await fetch('/.netlify/functions/geocode-addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, type, force }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const parts = [];
+        if (type === 'locations' || type === 'all') {
+          const r = data.results.locations;
+          parts.push('Locations: ' + r.geocoded + ' geocoded, ' + r.skipped + ' skipped' +
+            (r.failed.length ? ', ' + r.failed.length + ' failed: ' + r.failed.map(f => f.code).join(', ') : ''));
+        }
+        if (type === 'techs' || type === 'all') {
+          const r = data.results.techs;
+          parts.push('Techs: ' + r.geocoded + ' geocoded, ' + r.skipped + ' skipped' +
+            (r.failed.length ? ', ' + r.failed.length + ' failed: ' + r.failed.map(f => f.key).join(', ') : ''));
+        }
+        dmSetStatus('✅ ' + state + ' geocoding done.\n' + parts.join('\n'));
+      } else {
+        dmSetStatus('❌ ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message);
+    }
+  };
+
+  window.dmBuildMatrix = async function (mode) {
+    const state = dmState();
+    const label = mode === 'driving' ? 'drive-time (calls Google Maps API — confirm intent)' : 'straight-line haversine';
+    if (mode === 'driving' && !confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
+    dmSetStatus('Building ' + label + ' matrix for ' + state + '…');
+    try {
+      const res = await fetch('/.netlify/functions/compute-distance-matrix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, mode }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const { meta } = data;
+        dmSetStatus(
+          '✅ Matrix built for ' + state + ' (' + mode + ').\n' +
+          data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations\n' +
+          'Computed: ' + meta.computedAt +
+          (meta.failedPairs?.length ? '\n⚠️ ' + meta.failedPairs.length + ' failed pairs (haversine fallback used)' : '')
+        );
+      } else {
+        dmSetStatus('❌ ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message);
+    }
+  };
+})();
+</script>
+
+            </div>
+        </div>
+
+        <a href="/" style="text-decoration:none;">
+            <button class="big-btn back-btn" type="button" style="margin-top:20px;" onclick="history.back()">Back to Dispatch Tool</button>
+        </a>
+    </div>
+
+    <script>
+        var locationsData = {};
+        var techniciansData = {};
+        var currentUser = null;
+        var currentState = '';
+
+        // --- TOAST ---
+        function showToast(msg, type) {
+            var container = document.getElementById('toastContainer');
+            var toast = document.createElement('div');
+            toast.className = 'toast ' + (type || 'success');
+            toast.textContent = msg;
+            container.appendChild(toast);
+            toast.offsetHeight; // trigger reflow
+            toast.classList.add('show');
+            setTimeout(function() {
+                toast.classList.remove('show');
+                setTimeout(function() { if (toast.parentNode) container.removeChild(toast); }, 300);
+            }, 3000);
+        }
+
+        // --- LOGIN ---
+        async function doLogin() {
+            var username = document.getElementById('loginUser').value.trim();
+            var pin = document.getElementById('loginPin').value.trim();
+            var errEl = document.getElementById('loginError');
+            errEl.style.display = 'none';
+
+            if (!username || !pin) {
+                errEl.textContent = 'Enter username and PIN.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                var res = await fetch('/.netlify/functions/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username, pin: pin })
+                });
+                var data = await res.json();
+                if (!res.ok) {
+                    errEl.textContent = data.error || 'Login failed';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                currentUser = data;
+                sessionStorage.setItem('dispatchUser', JSON.stringify(data));
+                showAdminPanel();
+            } catch (e) {
+                errEl.textContent = 'Connection error. Try again.';
+                errEl.style.display = 'block';
+            }
+        }
+
+        function doLogout() {
+            currentUser = null;
+            sessionStorage.removeItem('dispatchUser');
+            document.getElementById('adminPanel').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'block';
+            document.getElementById('loginUser').value = '';
+            document.getElementById('loginPin').value = '';
+        }
+
+        function showAdminPanel() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('adminPanel').style.display = 'block';
+            document.getElementById('userInfo').textContent = currentUser.username + ' (' + currentUser.role + ')';
+
+            var sel = document.getElementById('stateSelect');
+            sel.innerHTML = '';
+            var states = currentUser.role === 'admin'
+                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID']
+                : (currentUser.states || []);
+            for (var i = 0; i < states.length; i++) {
+                var opt = document.createElement('option');
+                opt.value = states[i];
+                opt.textContent = states[i];
+                sel.appendChild(opt);
+            }
+            currentState = states[0] || '';
+            // Restore state from dispatch tool if available
+            var returnState = localStorage.getItem('dispatchReturnState');
+            if (returnState && states.includes(returnState)) {
+                currentState = returnState;
+            } else {
+                // Restore last used admin state on normal refresh
+                var lastAdminState = localStorage.getItem('lastAdminState');
+                if (lastAdminState && states.includes(lastAdminState)) {
+                    currentState = lastAdminState;
+                }
+            }
+            sel.value = currentState;
+            onStateChange();
+        }
+
+        function onStateChange() {
+            currentState = document.getElementById('stateSelect').value;
+            localStorage.setItem('lastAdminState', currentState);
+            // Keep Distance Matrix state dropdown in sync
+            var dmSel = document.getElementById('dm-state');
+            if (dmSel && dmSel.querySelector('option[value="' + currentState + '"]')) {
+                dmSel.value = currentState;
+            }
+            clearLocForm();
+            clearTechForm();
+            loadLocations();
+            loadTechnicians();
+        }
+
+        // Check for saved session on load
+        (function() {
+            var saved = sessionStorage.getItem('dispatchUser');
+            if (saved) {
+                try {
+                    currentUser = JSON.parse(saved);
+                    showAdminPanel();
+                    return;
+                } catch (e) {}
+            }
+            document.getElementById('loginPin').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') doLogin();
+            });
+            document.getElementById('loginUser').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') document.getElementById('loginPin').focus();
+            });
+        })();
+
+        // --- TAB SWITCHING ---
+        function switchTab(tab) {
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix'];
+            for (var i = 0; i < tabs.length; i++) {
+                var t = tabs[i];
+                var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
+                var tabId = 'tab' + t.charAt(0).toUpperCase() + t.slice(1);
+                document.getElementById(secId).className = 'section' + (t === tab ? ' active' : '');
+                document.getElementById(tabId).className = (t === tab ? 'active' : '');
+            }
+        }
+
+        // --- LOCATIONS ---
+        async function loadLocations() {
+            if (!currentState) return;
+            // Start with hardcoded baseline from parent page context (not available in admin)
+            // so we seed from the embedded BASELINE_LOCATIONS if present
+            var baseline = {};
+            try { if (typeof BASELINE_LOCATIONS !== 'undefined' && BASELINE_LOCATIONS && BASELINE_LOCATIONS[currentState]) baseline = BASELINE_LOCATIONS[currentState]; } catch(e) {}
+            try {
+                var res = await fetch('/.netlify/functions/get-locations?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                var blobData = (await res.json()) || {};
+                // Blob records override baseline — same merge logic as dispatch tool
+                locationsData = Object.assign({}, baseline, blobData);
+            } catch (e) {
+                locationsData = Object.assign({}, baseline);
+            }
+            renderLocations();
+        }
+
+        var locSearchQuery = '';
+
+        function renderLocations() {
+            var keys = Object.keys(locationsData).sort();
+            var q = locSearchQuery.trim().toLowerCase();
+            document.getElementById('locCount').textContent = keys.length;
+            var html = '';
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i];
+                var loc = locationsData[key];
+                var code = loc.code || key;
+                if (q && !(code.toLowerCase().includes(q) || (loc.name || '').toLowerCase().includes(q) || (loc.address || '').toLowerCase().includes(q))) continue;
+                var locCardId = 'loc-card-' + escAttr(code);
+                html += '<div class="card" id="' + locCardId + '">' +
+                    '<div class="card-title">' + esc(code) + ' — ' + esc(loc.name) + '</div>' +
+                    '<div class="card-detail">' + esc(loc.address) + '</div>' +
+                    '<div class="card-detail">State: ' + esc(loc.state || currentState) + ' | Primary: ' + esc(loc.primaryTech || loc.defaultTech || '—') + (loc.fallbackTech ? ' | Fallback: ' + esc(loc.fallbackTech) : '') + '</div>' +
+                    (loc.contractorOverride ? '<div class="card-detail">Contractor: ' + esc(loc.contractorName) + '</div>' : '') +
+                    (loc.machineType === 'SB' ? '<div class="card-detail" style="color:#f0a500;">🏄 Surfboard (SB)</div>' : loc.machineType === 'BK' ? '<div class="card-detail" style="color:#17a2b8;">💰 Big Kahuna / Cash Side (BK)</div>' : loc.machineType === 'BH' ? '<div class="card-detail" style="color:#9b59b6;">🏛️ Big Hoku 7000 (BH)</div>' : '') +
+                    '<div class="card-actions">' +
+                    '<button class="edit-btn" onclick="editLocation(\'' + escAttr(code) + '\')">Edit</button>' +
+                    '<button class="del-btn" onclick="deleteLocation(\'' + escAttr(code) + '\', \'' + locCardId + '\')">Delete</button>' +
+                    '</div></div>';
+            }
+            document.getElementById('locList').innerHTML = html || '<p style="color:#999;">' + (q ? 'No locations match “' + esc(q) + '”.' : 'No locations saved for ' + esc(currentState) + '.') + '</p>';
+        }
+        function clearLocForm() {
+            document.getElementById('locCode').value = '';
+            document.getElementById('locCode').disabled = false;
+            document.getElementById('locName').value = '';
+            document.getElementById('locAddress').value = '';
+            document.getElementById('locPrimaryTech').value = '';
+            document.getElementById('locFallbackTech').value = '';
+            document.getElementById('locContractorOverride').checked = false;
+            document.getElementById('locRemote').checked = false;
+            document.getElementById('locContractorName').value = '';
+            document.getElementById('locFormTitle').textContent = 'Add Location';
+        }
+
+        function editLocation(code) {
+            var loc = locationsData[code];
+            if (!loc) { console.warn('editLocation: no record for key', code); return; }
+            // Normalize: older records may not have code inside the value
+            if (!loc.code) loc.code = code;
+            document.getElementById('locCode').value = code;
+            document.getElementById('locCode').disabled = true;
+            document.getElementById('locName').value = loc.name || '';
+            document.getElementById('locAddress').value = loc.address || '';
+            document.getElementById('locPrimaryTech').value = loc.primaryTech || loc.defaultTech || '';
+            // If value didn't match (display name vs key mismatch), try finding by tech name
+            if (document.getElementById('locPrimaryTech').value === '' && (loc.primaryTech || loc.defaultTech)) {
+                var wantedName = (loc.primaryTech || loc.defaultTech).toLowerCase().replace(/\s+/g, '-');
+                var opts = document.getElementById('locPrimaryTech').options;
+                for (var i = 0; i < opts.length; i++) {
+                    if (opts[i].value.toLowerCase() === wantedName || 
+                        (techniciansData[opts[i].value] && techniciansData[opts[i].value].name && 
+                         techniciansData[opts[i].value].name.toLowerCase() === (loc.primaryTech || loc.defaultTech).toLowerCase())) {
+                        document.getElementById('locPrimaryTech').value = opts[i].value;
+                        break;
+                    }
+                }
+            }
+            document.getElementById('locFallbackTech').value = loc.fallbackTech || '';
+            document.getElementById('locContractorOverride').checked = !!loc.contractorOverride;
+            document.getElementById('locMachineType').value = loc.machineType || 'SK';
+            document.getElementById('locRemote').checked = !!loc.remote;
+            document.getElementById('locContractorName').value = loc.contractorName || '';
+            document.getElementById('locFormTitle').textContent = 'Edit Location — ' + code;
+            document.getElementById('adminPanel').scrollTo({ top: 0, behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function saveLocation() {
+            var code = document.getElementById('locCode').value.trim().toUpperCase();
+            if (!code) { showToast('Site code is required.', 'error'); return; }
+
+            var isEdit = document.getElementById('locCode').disabled;
+            var payload = {
+                code: code,
+                state: currentState,
+                name: document.getElementById('locName').value.trim(),
+                address: document.getElementById('locAddress').value.trim(),
+                primaryTech: document.getElementById('locPrimaryTech').value,
+                fallbackTech: document.getElementById('locFallbackTech').value,
+                contractorOverride: document.getElementById('locContractorOverride').checked,
+                machineType: document.getElementById('locMachineType').value,
+                remote: document.getElementById('locRemote').checked,
+                surfboard: document.getElementById('locMachineType').value === 'SB',
+                cashSide: document.getElementById('locMachineType').value === 'BK',
+                contractorName: document.getElementById('locContractorName').value.trim()
+            };
+
+            try {
+                var res = await fetch('/.netlify/functions/save-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                var data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+                showToast(isEdit ? 'Location updated' : 'Location added', 'success');
+                clearLocForm();
+                await loadLocations();
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteLocation(code, cardId) {
+            if (!confirm('Delete location ' + code + '?')) return;
+            try {
+                var res = await fetch('/.netlify/functions/delete-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code, state: currentState })
+                });
+                var data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+                showToast('Location deleted', 'success');
+                if (cardId) {
+                    var el = document.getElementById(cardId);
+                    if (el) el.remove();
+                }
+                var remaining = document.getElementById('locCount');
+                if (remaining) remaining.textContent = Math.max(0, parseInt(remaining.textContent || '0') - 1);
+                delete locationsData[code];
+            } catch (e) {
+                showToast('Delete failed: ' + e.message, 'error');
+            }
+        }
+
+        // --- TECHNICIANS ---
+        async function loadTechnicians() {
+            if (!currentState) return;
+            try {
+                var res = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                techniciansData = (await res.json()) || {};
+            } catch (e) {
+                techniciansData = {};
+            }
+            renderTechnicians();
+            populateTechDropdowns();
+        }
+
+        function populateTechDropdowns() {
+            var names = Object.keys(techniciansData).sort();
+            var primarySel = document.getElementById('locPrimaryTech');
+            var fallbackSel = document.getElementById('locFallbackTech');
+            // Preserve current selections
+            var prevPrimary = primarySel.value;
+            var prevFallback = fallbackSel.value;
+            // Rebuild options
+            primarySel.innerHTML = '<option value="">— Select primary tech —</option>';
+            fallbackSel.innerHTML = '<option value="">— None —</option>';
+            names.forEach(function(name) {
+                primarySel.innerHTML += '<option value="' + name + '">' + name + '</option>';
+                fallbackSel.innerHTML += '<option value="' + name + '">' + name + '</option>';
+            });
+            // Restore selections if still valid
+            if (prevPrimary) primarySel.value = prevPrimary;
+            if (prevFallback) fallbackSel.value = prevFallback;
+        }
+
+        function renderTechnicians() {
+            var keys = Object.keys(techniciansData).sort();
+            document.getElementById('techCount').textContent = keys.length;
+            var html = '';
+            for (var i = 0; i < keys.length; i++) {
+                var tech = techniciansData[keys[i]];
+                var techKey = keys[i];
+                var displayName = tech.name || techKey;
+                var techCardId = 'tech-card-' + techKey;
+                html += '<div class="card" id="' + escAttr(techCardId) + '">' +
+                    '<div class="card-title">' + esc(displayName) + (tech.active === false ? ' <span style="color:#dc3545;">(inactive)</span>' : '') + '</div>' +
+                    '<div class="card-detail">Phone: ' + esc(tech.phone || '—') + ' | Email: ' + esc(tech.email || '—') + '</div>' +
+                    '<div class="card-detail">Address: ' + esc(tech.homeAddress || 'not set') + '</div>' +
+                    '<div class="card-detail">SMS: ' + esc(tech.smsAddress || 'not set') + '</div>' +
+                    '<div class="card-actions">' +
+                    '<button class="edit-btn" onclick="editTechnician(\'' + escAttr(techKey) + '\')">Edit</button>' +
+                    '<button class="del-btn" onclick="deleteTechnician(\'' + escAttr(tech.name || techKey) + '\', \'' + escAttr(techCardId) + '\', \'' + escAttr(techKey) + '\')">Delete</button>' +
+                    '</div></div>';
+            }
+            document.getElementById('techList').innerHTML = html || '<p style="color:#999;">No technicians saved for ' + esc(currentState) + '.</p>';
+        }
+
+        function updateTechSmsAddress() {
+            const phone = document.getElementById('techPhone').value.trim().replace(/\D/g, '');
+            const carrier = document.getElementById('techCarrier').value;
+            if (phone && carrier) {
+                document.getElementById('techSmsAddress').value = phone + carrier;
+            }
+        }
+
+        function clearTechForm() {
+            document.getElementById('techName').value = '';
+            document.getElementById('techName').disabled = false;
+            document.getElementById('techPhone').value = '';
+            document.getElementById('techEmail').value = '';
+            document.getElementById('techCarrier').value = '';
+            document.getElementById('techSmsAddress').value = '';
+            document.getElementById('techRegion').value = '';
+            document.getElementById('techStartLocation').value = '';
+            document.getElementById('techActive').checked = true;
+            document.getElementById('techFormTitle').textContent = 'Add Technician';
+            document.getElementById('techClearBtn').textContent = 'Clear Form';
+        }
+
+        function editTechnician(techKey) {
+            var tech = techniciansData[techKey];
+            if (!tech) return;
+            document.getElementById('techName').value = tech.name;
+            document.getElementById('techName').disabled = true;
+            document.getElementById('techPhone').value = tech.phone || '';
+            document.getElementById('techEmail').value = tech.email || '';
+            document.getElementById('techRegion').value = tech.region || '';
+            document.getElementById('techStartLocation').value = tech.homeAddress || '';
+            document.getElementById('techActive').checked = tech.active !== false;
+            document.getElementById('techFormTitle').textContent = 'Edit Technician — ' + tech.name;
+            document.getElementById('techClearBtn').textContent = '+ Add New Technician Instead';
+            // Restore SMS address and try to detect carrier
+            if (tech.smsAddress) {
+                document.getElementById('techSmsAddress').value = tech.smsAddress;
+                const carriers = ['@vtext.com', '@tmomail.net', '@txt.att.net', '@messaging.sprintpcs.com'];
+                const carrier = carriers.find(c => tech.smsAddress.endsWith(c));
+                if (carrier) document.getElementById('techCarrier').value = carrier;
+            }
+            document.getElementById('adminPanel').scrollTo({ top: 0, behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function saveTechnician() {
+            var name = document.getElementById('techName').value.trim();
+            if (!name) { showToast('Technician name is required.', 'error'); return; }
+
+            var isEdit = document.getElementById('techName').disabled;
+            var payload = {
+                name: name,
+                state: currentState,
+                phone: document.getElementById('techPhone').value.trim(),
+                email: document.getElementById('techEmail').value.trim(),
+                region: document.getElementById('techRegion').value.trim(),
+                homeAddress: document.getElementById('techStartLocation').value.trim(),
+                smsAddress: document.getElementById('techSmsAddress').value.trim(),
+                active: document.getElementById('techActive').checked
+            };
+
+            try {
+                var res = await fetch('/.netlify/functions/save-technician', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                var data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+                showToast(isEdit ? 'Technician updated' : 'Technician added', 'success');
+                clearTechForm();
+                await loadTechnicians();
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteTechnician(name, cardId, techKey) {
+            if (!confirm('Delete technician ' + name + '?')) return;
+            var keyToDelete = techKey || name.toLowerCase().replace(/\s+/g, '-');
+            try {
+                var res = await fetch('/.netlify/functions/delete-technician', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: keyToDelete, state: currentState })
+                });
+                var data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+                showToast('Technician deleted', 'success');
+                if (cardId) {
+                    var el = document.getElementById(cardId);
+                    if (el) el.remove();
+                }
+                var remaining = document.getElementById('techCount');
+                if (remaining) remaining.textContent = Math.max(0, parseInt(remaining.textContent || '0') - 1);
+                delete techniciansData[keyToDelete];
+                delete techniciansData[name];
+                populateTechDropdowns();
+            } catch (e) {
+                showToast('Delete failed: ' + e.message, 'error');
+            }
+        }
+
+        // --- EXPORT ALL STATES XLSX ---
+        async function exportLocationsCSV() {
+            showToast('Building multi-state export...', 'info');
+            
+            const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+            
+            const allStates = ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR'];
+            const wb = XLSX.utils.book_new();
+
+            const MODEL_MAP = { 'SK': '6500', 'BK': '6500', 'SB': '6000', 'BH': '7000' };
+
+            for (const state of allStates) {
+                try {
+                    const res = await fetch('/.netlify/functions/get-locations?state=' + state, { cache: 'no-store' });
+                    if (!res.ok) continue;
+                    const data = await res.json();
+                    if (!data || Object.keys(data).length === 0) continue;
+
+                    const rows = [['PC Name', 'SST Name', 'Status', 'Type', 'Model', 'Address', 'County', 'City', 'State', 'Primary Tech', 'Fallback Tech', 'Contractor']];
+
+                    Object.entries(data).sort((a, b) => a[0].localeCompare(b[0])).forEach(([code, loc]) => {
+                        const type = loc.machineType || 'SB';
+                        const model = MODEL_MAP[type] || '6000';
+                        // Parse city/county from address
+                        const addrParts = (loc.address || '').split(',');
+                        const city = addrParts.length >= 2 ? addrParts[addrParts.length - 2].trim().replace(/\s+[A-Z]{2}\s*$/, '').trim() : '';
+                        const county = (loc.name || '').split(' ')[0] || '';
+                        const sstName = (loc.state || state) + ' - ' + (loc.name || code) + ' - ' + code;
+
+                        rows.push([
+                            code,
+                            sstName,
+                            'Installed',
+                            type,
+                            model,
+                            loc.address || '',
+                            county,
+                            city,
+                            loc.state || state,
+                            loc.primaryTech || loc.defaultTech || '',
+                            loc.fallbackTech || '',
+                            loc.contractorOverride ? (loc.contractorName || 'Yes') : ''
+                        ]);
+                    });
+
+                    const ws = XLSX.utils.aoa_to_sheet(rows);
+                    // Column widths
+                    ws['!cols'] = [
+                        {wch:10},{wch:45},{wch:10},{wch:6},{wch:8},{wch:45},
+                        {wch:20},{wch:20},{wch:6},{wch:20},{wch:20},{wch:20}
+                    ];
+                    XLSX.utils.book_append_sheet(wb, ws, state);
+                } catch(e) {
+                    console.warn('Failed to load state', state, e);
+                }
+            }
+
+            if (wb.SheetNames.length === 0) {
+                showToast('No location data found', 'error');
+                return;
+            }
+
+            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([wbout], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'MCR_service_locations_' + new Date().toISOString().split('T')[0] + '.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Exported ' + wb.SheetNames.length + ' states to MCR_service_locations.xlsx', 'success');
+        }
+
+        // --- BACKUP / RESTORE ---
+        async function downloadBackup() {
+            if (!currentState) { showToast('Select a state first.', 'error'); return; }
+            var btn = document.getElementById('downloadBtn');
+            btn.disabled = true;
+            btn.textContent = 'Downloading...';
+
+            try {
+                var resp = await fetch('/.netlify/functions/backup-restore?state=' + encodeURIComponent(currentState));
+                if (!resp.ok) throw new Error('Server returned ' + resp.status);
+                var data = await resp.json();
+
+                var dateStr = new Date().toISOString().slice(0, 10);
+                var filename = 'dispatch-backup-' + currentState + '-' + dateStr + '.json';
+
+                var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showToast('Backup downloaded for ' + currentState, 'success');
+            } catch (err) {
+                showToast('Download failed: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Download State Backup';
+            }
+        }
+
+        async function restoreBackup() {
+            var fileInput = document.getElementById('restoreFile');
+            var btn = document.getElementById('restoreBtn');
+
+            if (!currentState) { showToast('Select a state first.', 'error'); return; }
+            if (!fileInput.files || !fileInput.files.length) {
+                showToast('Please select a backup JSON file.', 'error');
+                return;
+            }
+
+            var file = fileInput.files[0];
+            var text;
+            try {
+                text = await file.text();
+            } catch (err) {
+                showToast('Failed to read file: ' + err.message, 'error');
+                return;
+            }
+
+            var payload;
+            try {
+                payload = JSON.parse(text);
+            } catch (err) {
+                showToast('Invalid JSON file.', 'error');
+                return;
+            }
+
+            if (payload.state && payload.state.toUpperCase() !== currentState) {
+                showToast('Backup is for ' + payload.state + ', but ' + currentState + ' is selected.', 'error');
+                return;
+            }
+
+            if (!payload.locations && !payload.technicians) {
+                showToast('Backup must contain locations and/or technicians.', 'error');
+                return;
+            }
+
+            if (!confirm('⚠️ WARNING: You are about to overwrite ALL ' + currentState + ' technician and location data with this backup file.\n\nSelected state: ' + currentState + '\n\nThis cannot be undone. Are you sure?')) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Restoring...';
+
+            try {
+                var resp = await fetch('/.netlify/functions/backup-restore?state=' + encodeURIComponent(currentState), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-restore-key': 'mcr2026'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                var result = await resp.json();
+                if (!resp.ok) throw new Error(result.error || 'Server returned ' + resp.status);
+
+                showToast('Restore complete for ' + currentState, 'success');
+                fileInput.value = '';
+                await loadLocations();
+                await loadTechnicians();
+            } catch (err) {
+                showToast('Restore failed: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Restore from File';
+            }
+        }
+
+
+        // --- AUDIT DEFAULT TECHS ---
+        var _auditChanges = [];
+
+        async function auditDefaultTechs() {
+            if (!currentState) { showToast('Select a state first.', 'error'); return; }
+            var btn = document.getElementById('auditBtn');
+            btn.disabled = true;
+            btn.textContent = 'Auditing...';
+            document.getElementById('auditResults').style.display = 'none';
+
+            try {
+                // Fetch distance matrix
+                var matrixResp = await fetch('/.netlify/functions/get-distance-matrix?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                if (!matrixResp.ok) throw new Error('Distance matrix not available for ' + currentState + '. Build it first.');
+                var matrixData = await matrixResp.json();
+                var matrix = matrixData.matrix || {};
+                var techKeys = [...new Set(Object.keys(matrix).map(k => k.split('|')[0]))];
+
+                if (!techKeys.length) throw new Error('Matrix is empty — rebuild the distance matrix for ' + currentState + '.');
+
+                // Fetch locations
+                var locResp = await fetch('/.netlify/functions/get-locations?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                var locations = locResp.ok ? (await locResp.json()) : {};
+
+                _auditChanges = [];
+                var missing = 0, wrong = 0, ok = 0;
+                var listHtml = '';
+
+                var locCodes = Object.keys(locations);
+                locCodes.sort();
+
+                for (var code of locCodes) {
+                    var loc = locations[code];
+                    // Find closest tech from matrix
+                    var best = null, bestDist = Infinity;
+                    for (var tk of techKeys) {
+                        var entry = matrix[tk + '|' + code];
+                        if (entry && entry.distanceMi < bestDist) {
+                            bestDist = entry.distanceMi;
+                            best = tk;
+                        }
+                    }
+                    if (!best) continue;
+
+                    // Convert techKey back to display name
+                    var bestDisplay = best.replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase());
+
+                    var currentDefault = loc.primaryTech || loc.defaultTech || '';
+                    var currentKey = currentDefault.toLowerCase().replace(/\s+/g, '-');
+                    var currentEntry = matrix[currentKey + '|' + code];
+                    var currentDist = currentEntry ? currentEntry.distanceMi : null;
+
+                    if (!currentDefault) {
+                        // Missing default
+                        missing++;
+                        _auditChanges.push({ code, name: loc.name || code, action: 'add', newTech: bestDisplay, newDist: bestDist, currentTech: '', currentDist: null });
+                        var idx = _auditChanges.length - 1;
+                        listHtml += `<div id="audit-row-${idx}" style="padding:6px 0;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+                            <div>
+                                <span style="color:#6f42c1;font-weight:bold;">➕ ADD</span>
+                                <strong>${esc(code)}</strong> ${esc(loc.name || '')}
+                                <br><span style="color:#555;">No default → assign <strong>${esc(bestDisplay)}</strong> (~${bestDist} mi)</span>
+                            </div>
+                            <div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0;">
+                                <button onclick="applySingleAudit(${idx})" style="background:#2e7d32;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;">✔</button>
+                                <button onclick="skipSingleAudit(${idx})" style="background:#6c757d;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;">✖</button>
+                            </div>
+                        </div>`;
+                    } else if (currentKey !== best) {
+                        // Check if closer tech is significantly better (>15% closer)
+                        if (currentDist !== null && bestDist < currentDist) {
+                            wrong++;
+                            _auditChanges.push({ code, name: loc.name || code, action: 'update', newTech: bestDisplay, newDist: bestDist, currentTech: currentDefault, currentDist });
+                            var idx = _auditChanges.length - 1;
+                            listHtml += `<div id="audit-row-${idx}" style="padding:6px 0;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+                                <div>
+                                    <span style="color:#dc3545;font-weight:bold;">⚠️ UPDATE</span>
+                                    <strong>${esc(code)}</strong> ${esc(loc.name || '')}
+                                    <br><span style="color:#555;">Current: <strong>${esc(currentDefault)}</strong> (${currentDist} mi) → Closer: <strong>${esc(bestDisplay)}</strong> (${bestDist} mi)</span>
+                                </div>
+                                <div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0;">
+                                    <button onclick="applySingleAudit(${idx})" style="background:#2e7d32;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;">✔</button>
+                                    <button onclick="skipSingleAudit(${idx})" style="background:#6c757d;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;">✖</button>
+                                </div>
+                            </div>`;
+                        } else {
+                            ok++;
+                        }
+                    } else {
+                        ok++;
+                    }
+                }
+
+                var summary = `<strong>${locCodes.length}</strong> locations checked &nbsp;|&nbsp; `;
+                summary += `<span style="color:#6f42c1"><strong>${missing}</strong> missing defaults</span> &nbsp;|&nbsp; `;
+                summary += `<span style="color:#dc3545"><strong>${wrong}</strong> suboptimal assignments</span> &nbsp;|&nbsp; `;
+                summary += `<span style="color:#2e7d32"><strong>${ok}</strong> already optimal</span>`;
+
+                document.getElementById('auditSummary').innerHTML = summary;
+                document.getElementById('auditList').innerHTML = listHtml || '<p style="color:#2e7d32;">All locations are optimally assigned!</p>';
+                document.getElementById('applyAuditBtn').style.display = _auditChanges.length ? 'block' : 'none';
+                document.getElementById('auditResults').style.display = 'block';
+
+            } catch (err) {
+                showToast('Audit failed: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 Audit Default Techs';
+            }
+        }
+
+        async function applySingleAudit(idx) {
+            var change = _auditChanges[idx];
+            if (!change || change.done) return;
+            try {
+                var locResp = await fetch('/.netlify/functions/get-locations?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                var locs = await locResp.json();
+                var loc = locs[change.code];
+                if (!loc) { showToast('Location not found: ' + change.code, 'error'); return; }
+                loc.primaryTech = change.newTech;
+                loc.defaultTech = change.newTech;
+                var saveResp = await fetch('/.netlify/functions/save-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...loc, code: change.code, state: currentState })
+                });
+                if (!saveResp.ok) throw new Error('Save failed');
+                change.done = true;
+                var row = document.getElementById('audit-row-' + idx);
+                if (row) row.style.opacity = '0.4';
+                showToast(change.newTech + ' assigned to ' + change.code, 'success');
+            } catch(e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        }
+
+        function skipSingleAudit(idx) {
+            var change = _auditChanges[idx];
+            if (!change) return;
+            change.done = true;
+            var row = document.getElementById('audit-row-' + idx);
+            if (row) row.style.opacity = '0.4';
+        }
+
+        async function applyAllAuditChanges() {
+            var pending = _auditChanges.filter(c => !c.done);
+            if (!pending.length) { showToast('Nothing left to apply.', 'info'); return; }
+            var btn = document.getElementById('applyAuditBtn');
+            btn.disabled = true;
+            btn.textContent = 'Applying...';
+            var success = 0, failed = 0;
+            for (var change of pending) {
+                try {
+                    var locResp = await fetch('/.netlify/functions/get-locations?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                    var locs = await locResp.json();
+                    var loc = locs[change.code];
+                    if (!loc) { failed++; continue; }
+                    loc.primaryTech = change.newTech;
+                    loc.defaultTech = change.newTech;
+                    var saveResp = await fetch('/.netlify/functions/save-location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...loc, code: change.code, state: currentState })
+                    });
+                    if (saveResp.ok) { success++; change.done = true; } else failed++;
+                } catch(e) { failed++; }
+            }
+            showToast(success + ' applied' + (failed ? ', ' + failed + ' failed' : ''), success > 0 ? 'success' : 'error');
+            btn.disabled = false;
+            btn.textContent = '✅ Apply All';
+            if (success > 0) await loadLocations();
+        }
+
+
+        // --- UTILS ---
+        // Baseline locations from hardcoded dispatch tool data
+        // These are merged with Blob data so admin can see and edit all locations
+        const LOCATIONS_GA = {
+            "GA1001":{"name":"Cobb County Kroger Whitlock #455","address":"1000 Whitlock Ave NW, Marietta, GA 30064","state":"GA","defaultTech":"Robert Medley"},
+            "GA1002":{"name":"Cobb County Kroger Johnson Ferry","address":"3162 Johnson Ferry Rd. STE 300, Marietta, GA 30062","state":"GA","defaultTech":"Robert Medley"},
+            "GA1004":{"name":"South Meadows","address":"4125 Welcome All Road SW, Atlanta, GA 30349","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1005":{"name":"Cobb County Canton","address":"2932 Canton Rd Ste 300, Marietta, GA 30066","state":"GA","defaultTech":"Robert Medley"},
+            "GA1006":{"name":"Rockdale County Kroger Conyers","address":"1745 Hwy 138 SE, Conyers, GA 30013","state":"GA","defaultTech":"Omari Williams"},
+            "GA1007":{"name":"Carroll County Kroger Park","address":"1355 S Park St, Carrollton, GA 30117","state":"GA","defaultTech":"Robert Medley"},
+            "GA1008":{"name":"Cobb South","address":"4700 Austell Rd, Austell, GA 30106","state":"GA","defaultTech":"Robert Medley"},
+            "GA1009":{"name":"Walton County Kroger Atlanta Hwy","address":"4753 Atlanta Hwy, Loganville, GA 30052","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1010":{"name":"Henry County Kroger Jonesboro","address":"301 Jonesboro Rd, McDonough, GA 30253","state":"GA","defaultTech":"Omari Williams"},
+            "GA1011":{"name":"Hall County Kroger Jesse Jewell","address":"1931 Jesse Jewell Pkwy SE, Gainesville, GA 30501","state":"GA","defaultTech":"Gina Ownbey"},
+            "GA1012":{"name":"Newton County Kroger","address":"5341 Highway 20S, Covington, GA 30016","state":"GA","defaultTech":"Omari Williams"},
+            "GA1014":{"name":"Henry County Kroger Fairview","address":"101 Fairview Rd., Ellenwood, GA 30294","state":"GA","defaultTech":"Omari Williams"},
+            "GA1015":{"name":"Douglas County Kroger Hospital","address":"8501 Hospital Dr, Douglasville, GA 30134","state":"GA","defaultTech":"Robert Medley"},
+            "GA1016":{"name":"Gwinnett County Kroger - Lawrenceville Lilburn","address":"4155 Lawrenceville Hwy NW, Lilburn, GA 30047","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1017":{"name":"Richmond County","address":"3463A Peach Orchard Rd, Augusta, GA 30906","state":"GA","defaultTech":"Sean Reich"},
+            "GA1018":{"name":"Gwinnett North Tag Office","address":"2735 Mall of Georgia Blvd, Buford, GA 30519","state":"GA","defaultTech":"Gina Ownbey"},
+            "GA1019":{"name":"Dekalb County Lawrenceville Kroger","address":"4357 Lawrenceville Hwy, Tucker, GA 30084","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1020":{"name":"Fulton Kroger Sandy Springs","address":"227 Sandy Springs Pl NE, Sandy Springs, GA 30328","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1021":{"name":"Bibb County Kroger - Tom Hill","address":"220 TOM HILL SR. BLVD., Macon, GA 31210","state":"GA","defaultTech":"Sean Reich"},
+            "GA1022":{"name":"Fulton Kroger Metropolitan","address":"2685 METROPOLITAN AVENUE, Atlanta, GA 30315","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1023":{"name":"Dekalb Kroger N. Decatur","address":"2875 N Decatur Rd, Decatur, GA 30033","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1025":{"name":"Coweta County Kroger - Newnan","address":"1751 Newnan Crossing Blvd E. Newnan, GA 30265","state":"GA","defaultTech":"Omari Williams"},
+            "GA1026":{"name":"Clayton County Kroger Tara","address":"10375 Tara Blvd., Jonesboro, GA 30236","state":"GA","defaultTech":"Omari Williams"},
+            "GA1027":{"name":"DeKalb County Kroger Covington","address":"6678 Covington Hwy, Lithonia, GA 30058","state":"GA","defaultTech":"Omari Williams"},
+            "GA1029":{"name":"Cobb County Kroger S Cobb","address":"3240 S Cobb Dr, Smyrna, GA 30080","state":"GA","defaultTech":"Robert Medley"},
+            "GA1030":{"name":"Gwinnett County Kroger - Singleton","address":"6050 Singleton Rd, Norcross, GA 30093","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1031":{"name":"Cherokee County Kroger Woodstock","address":"2295 Towne Lake Parkway, Woodstock, GA 30189","state":"GA","defaultTech":"Robert Medley"},
+            "GA1033":{"name":"Fulton County Kroger State Bridge","address":"10945 State Bridge Rd., Alpharetta, GA 30022","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1034":{"name":"Fulton County Kroger Ponce de Leon","address":"725 Ponce De Leon Ave NE, Atlanta, GA 30306","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1035":{"name":"Fulton County Greenbriar DMV","address":"2841 Greenbriar Parkway SW Suite 124, Atlanta, GA 30331","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1036":{"name":"Cherokee County Kroger Canton","address":"6766 Hickory Flat Highway, Canton, GA 30115","state":"GA","defaultTech":"Robert Medley"},
+            "GA1037":{"name":"Gwinnett County Lawrenceville","address":"750 S Perry St, Lawrenceville, GA 30519","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1038":{"name":"Forsyth Co Kroger Freedom Pkwy","address":"2655 Freedom Pkwy, Cumming, GA 30041","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1039":{"name":"Forsyth Co Kroger Atlanta Hwy","address":"5665 Atlanta Hwy, Alpharetta, GA 30004","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1040":{"name":"Forsyth Co Kroger Bethelview","address":"5550 Bethelview Road, Cumming, GA 30040","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1041":{"name":"Fulton Co Kroger Roswell","address":"4920 Roswell Rd, Atlanta, GA, 30342","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1042":{"name":"Fulton Co Kroger Glenwood","address":"800 Glenwood Ave., Atlanta, GA 30316","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1043":{"name":"Gwinnett County Kroger Steve Reynolds","address":"3093 Steve Reynolds Blvd, Duluth, GA 30096","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1044":{"name":"Gwinnett County Kroger Rockbridge","address":"1227 Rockbridge Rd, Stone Mountain, GA 30087","state":"GA","defaultTech":"Omari Williams"},
+            "GA1045":{"name":"Gwinnett Kroger Lawrenceville","address":"2121 Lawrenceville-Suwanee Rd, Suwanee, GA 30024","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1046":{"name":"Gwinnett County Kroger Dacula","address":"505 Dacula Rd, Dacula, GA 30019","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1047":{"name":"DeKalb Cnty Kroger Dunwoody","address":"4498 Chamblee Dunwoody Rd., Dunwoody, GA 30338","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1048":{"name":"DeKalb Co Kroger Flat Shoals","address":"4919 Flat Shoals Pkwy Chapel Hill Commons, Decatur, GA 30034","state":"GA","defaultTech":"Omari Williams"},
+            "GA1049":{"name":"Clayton County Kroger Hwy 85","address":"7125 GA Highway 85, Riverdale, GA 30274","state":"GA","defaultTech":"Omari Williams"},
+            "GA1050":{"name":"Richmond County Kroger Washington","address":"2801 Washington Road, Augusta, GA 30909","state":"GA","defaultTech":"Sean Reich"},
+            "GA1052":{"name":"DeKalb County DMV 1","address":"4380 Memorial Dr Ste 100, Decatur, GA 30032","state":"GA","defaultTech":"Omari Williams"},
+            "GA1055":{"name":"Bibb County Kroger Hartley Bridge","address":"4321 Hartley Bridge Rd, Macon, GA 31216","state":"GA","defaultTech":"Sean Reich"},
+            "GA1056":{"name":"Cobb County Kroger Brownsville","address":"4400 Brownsville Rd., Powder Springs, GA 30127","state":"GA","defaultTech":"Robert Medley"},
+            "GA1057":{"name":"Clayton County Kroger Jonesboro","address":"5664 Jonesboro Rd., Lake City, GA 30260","state":"GA","defaultTech":"Omari Williams"},
+            "GA1058":{"name":"Douglas County Kroger Hwy 5","address":"3251 Highway 5, Douglasville, GA 30135","state":"GA","defaultTech":"Robert Medley"},
+            "GA1059":{"name":"DeKalb Chamblee Tucker Kroger","address":"3559 Chamblee Tucker Rd, Atlanta, GA 30341","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1061":{"name":"Cobb County East Marietta","address":"4400 Lower Roswell Road, Marietta, GA 30068","state":"GA","defaultTech":"Robert Medley"},
+            "GA1063":{"name":"Fulton County Alpharetta","address":"11575 Maxwell Road, Alpharetta, GA 30004","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1064":{"name":"Fulton County Kroger - Cascade #412","address":"590 Cascade Ave SW, Atlanta, GA 30310","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1065":{"name":"Fayette County Kroger Crosstown","address":"564 Crosstown Drive, Peachtree City, GA 30269","state":"GA","defaultTech":"Omari Williams"},
+            "GA1066":{"name":"Houston County Kroger Highway 96","address":"774 GA Hwy 96, Bonaire, GA 31005","state":"GA","defaultTech":"Sean Reich"},
+            "GA1067":{"name":"Hall County Kroger Sprout Springs","address":"7380 Spout Springs Rd, Flowery Branch, GA 30542","state":"GA","defaultTech":"Gina Ownbey"},
+            "GA1068":{"name":"Fulton County North","address":"7741 Roswell Road, Sandy Springs, GA 30350","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1069":{"name":"Fulton County South","address":"5600 Stonewall Tell Road, College Park, GA 303449","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1070":{"name":"Cobb County Kroger - Cherokee","address":"3895 Cherokee St NW, Kennesaw, GA 30144","state":"GA","defaultTech":"Robert Medley"},
+            "GA1071":{"name":"Paulding County Kroger - Nathan Dean","address":"455 Nathan Dean Blvd, Dallas, GA 30132","state":"GA","defaultTech":"Robert Medley"},
+            "GA1072":{"name":"Chatham Co Kroger Mall","address":"318 Mall Boulevard, Savannah, GA 31406","state":"GA","defaultTech":"Robert Whitehead"},
+            "GA1073":{"name":"Chatham County Kroger Ogeechee","address":"5720 Ogeechee Road, Savannah, GA 31405","state":"GA","defaultTech":"Robert Whitehead"},
+            "GA1074":{"name":"Chatham Co Kroger – Johnny Mercer","address":"495 Johnny Mercer Blvd, Savannah, GA 31410","state":"GA","defaultTech":"Robert Whitehead"},
+            "GA1075":{"name":"Lowndes County Publix - Inner Perimeter","address":"3330 Inner Perimeter Rd., Valdosta, GA 31602","state":"GA","defaultTech":"Sean Reich"},
+            "GA1076":{"name":"Muscogee County Publix - Macon","address":"3201 Macon Rd. Ste 201, Columbus, GA 31906","state":"GA","defaultTech":"Sean Reich"},
+            "GA1077":{"name":"Dougherty County Publix - Dawson","address":"2715 Dawson Rd., Albany, GA 31707","state":"GA","defaultTech":"Sean Reich"},
+            "GA1078":{"name":"Fulton County Kroger - Monroe","address":"1700 Monroe Drive NE, Atlanta, GA 30324","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1079":{"name":"Fulton County Kroger - Howell Mill","address":"1715 Howell Mill Rd NW, Atlanta, GA 30318","state":"GA","defaultTech":"Nyzier Moore"},
+            "GA1080":{"name":"Muscogee County Publix - Bradley","address":"1639 Bradley Park Dr. Ste 600, Columbus, GA 31904","state":"GA","defaultTech":"Sean Reich"},
+            "GA1081":{"name":"Rockdale County 0 Quick Pass Emission","address":"1185 Old Salem Road SE, Conyers, GA 30094","state":"GA","defaultTech":"Omari Williams"},
+            "GA1082":{"name":"Gwinnett County Five Forks Trickum Kroger","address":"3050 Five Forks Trickum Rd SW, Lilburn, GA 30047","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1083":{"name":"Gwinnett County Mall of Georgia DMV","address":"2735 Mall of Georgia Blvd, Buford, GA 30519","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1084":{"name":"Gwinnett Centerville Hwy Publix","address":"3550 Centerville Highway, Snellville, GA 30039","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1085":{"name":"Hall County Winder Highway Kroger","address":"4025 Winder Highway, Flowery Branch, GA 30542","state":"GA","defaultTech":"Gina Ownbey"},
+            "GA1086":{"name":"Cobb County Kroger - Powers Ferry","address":"1310 Powers Ferry Rd, Marietta, GA 30067","state":"GA","defaultTech":"Robert Medley"},
+            "GA1088":{"name":"Chatham County Pooler Publix","address":"467 Pooler Pkwy, Pooler, GA 31322","state":"GA","defaultTech":"Robert Whitehead"},
+            "GA1089":{"name":"Coweta County Thomas Crossroads Kroger","address":"3150 GA-34 E, Newnan, GA 30265","state":"GA","defaultTech":"Omari Williams"},
+            "GA1090":{"name":"Hall County Kroger Thompson Bridge","address":"3630 Thompson Bridge Rd, Gainesville, GA 30506","state":"GA","defaultTech":"Gina Ownbey"},
+            "GA1091":{"name":"Muscogee County Ray Wright Publix","address":"6901 Ray Wright Way, Columbus, GA 31906","state":"GA","defaultTech":"Sean Reich"},
+            "GA1092":{"name":"Cherokee County Cumming Kroger","address":"8020 Cumming Highway, Canton, GA 30115","state":"GA","defaultTech":"Robert Medley"},
+            "GA1093":{"name":"Oconee County Epps Bridge Kroger","address":"1720 Epps Bridge Pkwy, Athens, GA 30606","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1094":{"name":"Henry County Highway 155 Kroger","address":"2000 Highway 155 N, McDonough, GA 30252","state":"GA","defaultTech":"Omari Williams"},
+            "GA1095":{"name":"Chatham County Tax Collector Office","address":"1145 Eisenhower Drive, Savannah, GA 31406","state":"GA","defaultTech":"Robert Whitehead"},
+            "GA1096":{"name":"Gwinnett County Publix - Holcomb Bridge","address":"3200 Holcomb Bridge Rd, Peachtree Corners, GA 30092","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1097":{"name":"Gwinnett County Kroger - Cumming Hwy","address":"6001 Cumming Hwy NE, Sugar Hill, GA 30518","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1098":{"name":"Jackson County Publix - Old Pendergrass","address":"1685 Old Pendergrass Rd, Jefferson, GA 30549","state":"GA","defaultTech":"Gina Ownbey"},
+            "GA1099":{"name":"Coweta County Publix - Wells","address":"8080 Wells St, Senoia, GA 30276","state":"GA","defaultTech":"Omari Williams"},
+            "GA1100":{"name":"Fayette County Kroger - Banks Crossing","address":"134 Banks Crossing, Fayetteville, GA 30214","state":"GA","defaultTech":"Omari Williams"},
+            "GA1102":{"name":"Richmond County Kroger - Harper Franklin","address":"3942 Harper Franklin Ave, Augusta, GA 30309","state":"GA","defaultTech":"Sean Reich"},
+            "GA1103":{"name":"Forsyth County Publix - Era","address":"3620 Era Dr, Cumming, GA 30028","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1104":{"name":"Walton County Publix - Pavilion","address":"900 Pavilion Pkwy, Monroe, GA 30656","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1105":{"name":"Cobb County Mars Hill Kroger","address":"1720 Mars Hill Rd, Acworth, GA 30101","state":"GA","defaultTech":"Robert Medley"},
+            "GA1106":{"name":"Douglas County Kroger - Thornton","address":"630 Thornton Rd, Lithia Springs, GA 30122","state":"GA","defaultTech":"Robert Medley"},
+            "GA1107":{"name":"Gwinnett County Kroger - Martins Chapel","address":"1006 Martins Chapel Rd, Lawrenceville, GA 30045","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1108":{"name":"Bulloch County Publix Tormenta","address":"101 Tormenta Way, Statesboro, GA 30458","state":"GA","defaultTech":"Sean Reich"},
+            "GA1109":{"name":"Dawson County Marketplace Kroger","address":"378 Marketplace Pkwy, Dawsonville, GA 30534","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1110":{"name":"Henry County Publix - Hwy 81","address":"3479 Hwy 81, McDonough, GA 30252","state":"GA","defaultTech":"Omari Williams"},
+            "GA1112":{"name":"Effingham County Kroger - S Columbia","address":"461 S Columbia Ave, Rincon, GA 31326","state":"GA","defaultTech":"Sean Reich"},
+            "GA1114":{"name":"Gwinnett County Publix - Loganville","address":"2715 Loganville Hwy SW, Loganville, GA 30052","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1115":{"name":"Gwinnett County Snellville Tag Office","address":"2845 Lenora Church Rd, Snellville, GA 30078","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1116":{"name":"Spalding County Kroger - Griffin","address":"1524 GA-16, Griffin, GA 30223","state":"GA","defaultTech":"Omari Williams"},
+            "GA1117":{"name":"Carroll County Publix - Mirror Lake","address":"103 Mirror Lake Connector suite 200, Villa Rica, GA 30180","state":"GA","defaultTech":"Omari Williams"},
+            "GA1118":{"name":"Gwinnett County Publix - Hamilton Mill","address":"2463 Hamilton Mill Pkwy, Dacula, GA 30019","state":"GA","defaultTech":"Mark McKelvey"},
+            "GA1101":{"name":"Paulding County Kroger - Ridge","address":"4815 Ridge Rd, Douglasville, GA 30134","state":"GA","defaultTech":"Robert Medley"},
+            
+            "NC1000":{"name":"Fayetteville Harris Teeter - Raeford","address":"2800 Raeford Road, Fayetteville, NC 28303","city":"Fayetteville","state":"NC","defaultTech":"Evan Zent"},
+            "NC1001":{"name":"Charlotte Harris Teeter - Smith Farm","address":"4701 Smith Farm Road, Charlotte, NC 28216","city":"Charlotte","state":"NC","defaultTech":"Evan Zent"},
+            "NC1002":{"name":"Raleigh Harris Teeter - Corners","address":"4221 Corners Parkway, Raleigh, NC 27617","city":"Raleigh","state":"NC","defaultTech":"Evan Zent"},
+            "NC1003":{"name":"Charlotte Harris Teeter - Park","address":"8538 Park Rd, Charlotte, NC 28210","city":"Charlotte","state":"NC","defaultTech":"Evan Zent"},
+            "NC1004":{"name":"Charlotte Harris Teeter - Central","address":"1704 Central Ave, Charlotte, NC 28205","city":"Charlotte","state":"NC","defaultTech":"Evan Zent"},
+            "NC1005":{"name":"Raleigh Harris Teeter - Oberlin","address":"501 Oberlin Rd, Raleigh, NC 27605","city":"Raleigh","state":"NC","defaultTech":"Evan Zent"},
+            "NC1006":{"name":"Fuquay-Varina Harris Teeter - E Broad","address":"1371 E Broad St, Fuquay-Varina, NC 27526","city":"Fuquay-Varina","state":"NC","defaultTech":"Evan Zent"},
+            "NC1007":{"name":"Cary Harris Teeter - Walnut","address":"885 Walnut St, Cary, NC 27511","city":"Cary","state":"NC","defaultTech":"Evan Zent"},
+            "NC1008":{"name":"Charlotte Harris Teeter - University City","address":"8600 University City Blvd, Charlotte, NC 28262","city":"Charlotte","state":"NC","defaultTech":"Evan Zent"},
+            "SC1000":{"name":"Columbia Kroger Marketplace","address":"1028 Roberts Branch Pkwy, Columbia, SC 29203","city":"Columbia","state":"SC","defaultTech":"Michael Newboult"},
+            "SC1001":{"name":"Greer Publix","address":"411 The Parkway, Duncan, SC 29650","city":"Duncan","state":"SC","defaultTech":"Michael Newboult"},
+            "SC1002":{"name":"Summerville Publix","address":"1724 State Rd, Summerville, SC 29486","city":"Summerville","state":"SC","defaultTech":"Michael Newboult"}
+        };
+        
+        const TECHS_GA = {
+            "Robert Medley": { phone: "972-363-9330", firstName: "Robert", state: "GA", startLocation: "1164 Reading Dr NW, Acworth, GA 30102" },
+            "Nyzier Moore": { phone: "(678) 963-8697", firstName: "Nyzier", state: "GA", startLocation: "396 Piedmont Ave NE Apt 5053, Atlanta, GA 30308" },
+            "Omari Williams": { phone: "(470) 587-3127", firstName: "Omari", state: "GA", startLocation: "40 Sammy Ct, Covington, GA 30016" },
+            "Sean Reich": { phone: "(478) 365-5879", firstName: "Sean", state: "GA", startLocation: "317 Amanda Drive, Macon, GA" },
+            "Mark McKelvey": { phone: "(678) 779-4352", firstName: "Mark", state: "GA", startLocation: "510 Sartain Court, Johns Creek, GA 30097" },
+            "Gina Ownbey": { phone: "(404) 723-5867", firstName: "Gina", state: "GA", startLocation: "Apt A9 6500 Gaines Ferry Rd, Flowery Branch, GA 30542" },
+            "Robert Whitehead": { phone: "(972) 393-9330", firstName: "Robert", state: "GA", startLocation: "Savannah, GA" },
+            "Evan Zent": { phone: "TBD", firstName: "Evan", state: "NC", startLocation: "1225 Alston ridge, Cary, NC" },
+            "Michael Newboult": { phone: "TBD", firstName: "Michael", state: "SC", startLocation: "212 Staffwood Dr, Irmo, SC 29063" }
+        };
+
+        const LOCATIONS_FL = {
+            // ========== CONTRACTOR-MANAGED LOCATIONS (Hard-coded assignments) ==========
+            "FL1049":{"name":"Santa Rosa County Publix - Navarre","address":"8244 Navarre Pkwy, Navarre, FL 32566","state":"FL","defaultTech":"TechSpot"},
+            "FL1030":{"name":"Bay County Publix - 23rd","address":"650 W 23rd Street, Panama City, FL 32405","state":"FL","defaultTech":"Arcitechx"},
+            "FL1093":{"name":"Bay County Publix - Panama City Beach #1241","address":"11240 Panama City Beach Pkwy, Panama City Beach, FL 32407","state":"FL","defaultTech":"Arcitechx"},
+            // ========== MCR TECHNICIAN LOCATIONS ==========
+            "FL1001":{"name":"Hillsborough Publix - New Tampa","address":"1920 County Road 581, Tampa, FL 33647","state":"FL","defaultTech":"John Khoury"},
+            "FL1002":{"name":"Orange Publix - Lake Underhill","address":"4365 N Goldenrod Rd, Winter Park, FL 32792","state":"FL","defaultTech":"John Khoury"},
+            "FL1003":{"name":"Osceola Publix - Buena Ventura","address":"1700 N John Young Pkwy, Kissimmee, FL 34741","state":"FL","defaultTech":"John Khoury"},
+            "FL1005":{"name":"St Johns Publix - Julington Creek","address":"450 State Road 13, St Johns, FL 32259","state":"FL","defaultTech":"John Khoury"},
+            "FL1006":{"name":"Volusia Publix - Port Orange","address":"3821 S Nova Rd, Port Orange, FL 32127","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1007":{"name":"Sarasota Publix - Clark Rd","address":"8300 Bee Ridge Rd, Sarasota, FL 34241","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1008":{"name":"Pasco Publix - Trinity","address":"3240 Little Rd, Trinity, FL 34655","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1009":{"name":"Pinellas Publix - Clearwater","address":"1927 Gulf to Bay Blvd, Clearwater, FL 33765","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1010":{"name":"Seminole Publix - Longwood","address":"851 S State Road 434, Altamonte Springs, FL 32714","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1011":{"name":"Polk Publix - Lakeland","address":"6767 US Hwy 98 N, Lakeland, FL 33809","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1012":{"name":"Lee Publix - Cape Coral","address":"1619 Cape Coral Pkwy E, Cape Coral, FL 33904","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1013":{"name":"Collier Publix - Naples","address":"4601 Tamiami Trail N, Naples, FL 34103","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1014":{"name":"Charlotte Publix - Punta Gorda","address":"3941 Tamiami Trail, Punta Gorda, FL 33950","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1015":{"name":"Brevard Publix - Melbourne","address":"127 East Nasa Blvd, Melbourne, FL 32901","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1016":{"name":"Alachua Publix - Gainesville","address":"3100 SW 35th Blvd, Gainesville, FL 32608","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1017":{"name":"Leon Publix - Tallahassee","address":"3521 Thomasville Rd, Tallahassee, FL 32309","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1018":{"name":"Escambia Publix - Pensacola","address":"5998 Mobile Hwy, Pensacola, FL 32526","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1019":{"name":"Okaloosa Publix - Fort Walton","address":"331 S Mary Esther Cut Off NW, Mary Esther, FL 32569","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1021":{"name":"Bay Publix - Lynn Haven","address":"2310 S Hwy 77, Lynn Haven, FL 32444","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1022":{"name":"Bay Publix - Parker","address":"650 S Tyndall Pkwy, Panama City, FL 32404","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1023":{"name":"Pinellas County South","address":"Address TBD – Pinellas County South, FL","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1024":{"name":"Seminole Publix - Altamonte","address":"951 N State Road 434, Altamonte Springs, FL 32714","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1025":{"name":"Pasco Publix - Wesley Chapel","address":"1920 Bruce B Downs Blvd, Wesley Chapel, FL 33544","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1026":{"name":"Hillsborough Publix - Riverview","address":"13178 US-301 S, Riverview, FL 33578","state":"FL","defaultTech":"John Khoury"},
+            "FL1027":{"name":"Orange Publix - Avalon Park","address":"12001 Avalon Lake Dr, Orlando, FL 32828","state":"FL","defaultTech":"John Khoury"},
+            "FL1028":{"name":"Osceola Publix - St Cloud","address":"4401 13th St, St Cloud, FL 34769","state":"FL","defaultTech":"John Khoury"},
+            "FL1031":{"name":"Volusia Publix - Daytona","address":"150 S Nova Rd, Ormond Beach, FL 32174","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1032":{"name":"Sarasota Publix - University","address":"2875 University Pkwy, Sarasota, FL 34243","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1033":{"name":"Pasco Publix - Hudson","address":"13700 Little Rd, Hudson, FL 34667","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1034":{"name":"Pinellas Publix - Largo","address":"10411 Ulmerton Rd, Largo, FL 33771","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1035":{"name":"Seminole Publix - Winter Springs","address":"5800 Red Bug Lake Rd, Winter Springs, FL 32708","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1036":{"name":"Polk Publix - Winter Haven","address":"1100 3rd St SW, Winter Haven, FL 33880","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1037":{"name":"Hernando County Publix - County Line","address":"Hernando County Publix, County Line Rd, FL","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1038":{"name":"Lee Publix - San Carlos","address":"16950 San Carlos Blvd, Fort Myers, FL 33908","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1039":{"name":"Collier Publix - Golden Gate","address":"4901 Tamiami Trail N, Naples, FL 34103","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1045":{"name":"Duval County Publix - San Jose","address":"San Jose Blvd, Jacksonville, FL","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1047":{"name":"Lake County Publix - Citrus Tower","address":"Citrus Tower Blvd, Clermont, FL","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1050":{"name":"Seminole County Publix - Casselberry","address":"Casselberry, FL","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1054":{"name":"Lee County Publix - Hancock","address":"Hancock Bridge Pkwy, Cape Coral, FL","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1066":{"name":"Palm Beach County Publix - Indiantown","address":"Indiantown Rd, Jupiter, FL","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1067":{"name":"Palm Beach County Publix - Southern","address":"Southern Blvd, West Palm Beach, FL","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1089":{"name":"Miami Dade County Publix - N Homestead","address":"N Homestead, Homestead, FL","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1000":{"name":"Polk County Tax Collector - Lakeland","address":"916 North Massachusetts Ave, Lakeland, FL 33810","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1040":{"name":"Palm Beach County Publix - N Congress","address":"4770 N Congress Ave, Boynton Beach, FL 33426","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1041":{"name":"Palm Beach County Publix - Village","address":"831 Village Boulevard, West Palm Beach, FL 33409","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1042":{"name":"Palm Beach County Publix - Northlake","address":"4200 Northlake Boulevard, Palm Beach Gardens, FL 33410","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1044":{"name":"Duval County Publix - Deerwood","address":"4320 Deerwood Lake Pkwy, Jacksonville, FL 32216","state":"FL","defaultTech":"John Khoury"},
+            "FL1046":{"name":"Martin County Publix - SW Martin","address":"2750 SW Martin Downs Blvd, Palm City, FL 34990","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1048":{"name":"Lake County Publix - US Hwy 441","address":"18955 US Highway 441, Mount Dora, FL 32757","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1051":{"name":"Seminole County Publix - W State","address":"2381 W State Rd 434, Longwood, FL 32779","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1052":{"name":"Duval County Publix - Roosevelt","address":"4495 Roosevelt Blvd, Jacksonville, FL 32210","state":"FL","defaultTech":"John Khoury"},
+            "FL1053":{"name":"Citrus County Publix - N Forest Ridge","address":"2685 N Forest Ridge Blvd, Hernando, FL 34442","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1055":{"name":"Pasco County Publix - Collier","address":"2121 Collier Parkway, Land O Lakes, FL 34639","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1056":{"name":"Hillsborough County Downtown Main","address":"601 East Kennedy Boulevard, Tampa, FL 33602","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1058":{"name":"Leon County Publix - Monroe","address":"1700 North Monroe Street, Tallahassee, FL 32303","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1059":{"name":"Clay County Publix - Blanding","address":"950 Blanding Boulevard, Orange Park, FL 32065","state":"FL","defaultTech":"John Khoury"},
+            "FL1061":{"name":"Citrus County Publix - S Suncoast","address":"3942 South Suncoast Boulevard, Homosassa, FL 34446","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1062":{"name":"Charlotte County Publix - Cypress","address":"42051 Cypress Parkway, Babcock Ranch, FL 33982","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1063":{"name":"Pinellas County Publix - Starkey","address":"10801 Starkey Road, Seminole, FL 33777","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1065":{"name":"Duval County Publix - Duval Station","address":"731 Duval Station Road, Jacksonville, FL 32218","state":"FL","defaultTech":"John Khoury"},
+            "FL1068":{"name":"Palm Beach County Publix - Clint Moore","address":"9720 Clint Moore Rd, Boca Raton, FL 33496","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1070":{"name":"Polk County Tax Collector - Lake Alfred","address":"200 Government Center Blvd, Lake Alfred, FL 33850","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1071":{"name":"Hillsborough County Publix - SR 60","address":"1971 State Road 60, Valrico, FL 33594","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1072":{"name":"Lee County Publix - Bonita Beach","address":"3304 Bonita Beach Road, Bonita Springs, FL 34134","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1073":{"name":"Pinellas County Publix - Belcher","address":"1921 N Belcher Road, Clearwater, FL 33763","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1074":{"name":"Lee County Publix - Summerlin","address":"15880 Summerlin Rd, Fort Myers, FL 33908","state":"FL","defaultTech":"Marshall Smelley"},
+            "FL1075":{"name":"Palm Beach County Publix - S Military","address":"11200 S Military Trail, Golf, FL 33436","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1076":{"name":"Hillsborough County Publix - 2724 Hillsborough","address":"2724 W Hillsborough Ave, Tampa, FL 33614","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1077":{"name":"Hillsborough County Publix - 8701 Hillsborough","address":"8701 W Hillsborough Ave, Tampa, FL 33615","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1078":{"name":"Palm Beach County Publix - Jog Road","address":"5970 Jog Road, Lake Worth Beach, FL 33467","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1079":{"name":"Hillsborough County Plant City DMV","address":"4706 Sydney Rd, Plant City, FL 33566","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1080":{"name":"Alachua County Publix - NW 13th","address":"3720 NW 13th St, Gainesville, FL 32609","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1081":{"name":"Alachua County Publix - Newberry","address":"14130 W Newberry Rd, Newberry, FL 32669","state":"FL","defaultTech":"Anthony Allison"},
+            "FL1082":{"name":"Polk County Tax Collector - Lake Wales","address":"658 Highway 60 West, Lake Wales, FL 33853","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1083":{"name":"Pinellas County Mid County Tax Collector","address":"13025 Starkey Rd, Largo, FL 33773","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1087":{"name":"Miami-Dade County Publix - West Ave","address":"1920 West Ave, Miami Beach, FL 33139","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1088":{"name":"Miami-Dade County Publix - NW 104th","address":"7550 NW 104th Ave, Doral, FL 33178","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1090":{"name":"Miami-Dade County Publix - SW 127th","address":"20201 SW 127th Ave, Miami, FL 33177","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1091":{"name":"Miami-Dade County Publix - SW 152nd","address":"15771 SW 152nd St, Miami, FL 33187","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1092":{"name":"Hillsborough County MacDill AFB","address":"6901 S Dale Mabry Hwy, Tampa, FL 33621","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1097":{"name":"Citrus County Publix - 9525 S Suncoast","address":"9525 S Suncoast Blvd, Homosassa, FL 34446","state":"FL","defaultTech":"Marcus Covington"},
+            "FL1098":{"name":"Palm Beach County Publix - A1A Alternate","address":"9900 Florida A1A Alternate, Palm Beach Gardens, FL 33410","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1099":{"name":"Palm Beach County Publix - Lake Worth","address":"9855 Lake Worth Rd, Lake Worth, FL 33467","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL1100":{"name":"Palm Beach County Publix - SE 18th","address":"501 SE 18th Ave, Boynton Beach, FL 33435","state":"FL","defaultTech":"Allen Levinsky"},
+            "FL2001":{"name":"Leon County DHSMV - Test Unit","address":"2900 Apalachee Pkwy, Tallahassee, FL 32399","state":"FL","defaultTech":"Anthony Allison"},
+        };
+
+        const BASELINE_LOCATIONS = {
+            'GA': LOCATIONS_GA,
+            'NC': LOCATIONS_GA, // NC/SC share GA location set for now
+            'SC': LOCATIONS_GA,
+            'FL': LOCATIONS_FL
+        };
+
+        function esc(str) {
+            var d = document.createElement('div');
+            d.textContent = str || '';
+            return d.innerHTML;
+        }
+
+        function escAttr(str) {
+            return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        }
+
+        function updateNotifAddress() {
+            const carrier = document.getElementById('notifCarrier').value;
+            const phone = document.getElementById('notifPhone').value.replace(/\D/g, '');
+            if (carrier && phone) document.getElementById('notifAddress').value = phone + carrier;
+        }
+
+        // Must match SAT_STATES in netlify/functions/mailgun-inbound.js and
+        // the saturday_coverage column in Supabase's states table. Checking
+        // "Saturday On-Call" should only select states where Saturday
+        // dispatching actually happens -- checking a state with no Saturday
+        // coverage at all doesn't mean anything, so it shouldn't get selected.
+        const SAT_COVERAGE_STATES = ['GA', 'IN', 'MI', 'NV'];
+
+        function toggleAllStates(cb) {
+            document.querySelectorAll('.notif-state-individual').forEach(c => {
+                c.checked = cb.checked && SAT_COVERAGE_STATES.includes(c.value);
+            });
+        }
+
+        // If any individual state gets manually unchecked, the "All States"
+        // master checkbox must follow -- otherwise a save collects every
+        // checked box including "ALL" itself, silently reintroducing
+        // notify-everyone behavior even though the individual boxes look
+        // correctly narrowed down. Added 2026-07-09 after tracing exactly
+        // this trap.
+        document.querySelectorAll('.notif-state-individual').forEach(cb => {
+            cb.addEventListener('change', () => {
+                if (!cb.checked) document.getElementById('notifStateAll').checked = false;
+            });
+        });
+
+        async function loadNotifRecipients() {
+            const list = document.getElementById('notifRecipientList');
+            if (!list) return;
+            list.innerHTML = '<p style="color:#888;font-size:13px;">Loading...</p>';
+            try {
+                const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS');
+                const data = await resp.json();
+                const s = data.settings || {};
+                const recipients = (s.settings && s.settings.recipients) || s.recipients || [];
+                if (recipients.length === 0) {
+                    list.innerHTML = '<p style="color:#888;font-size:13px;">No recipients configured yet.</p>';
+                    return;
+                }
+                list.innerHTML = recipients.map((r, i) => `
+                    <div id="notif-card-${i}" style="padding:10px 14px;border:1px solid #ddd;border-radius:6px;margin-bottom:8px;background:#fff;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                            <div>
+                                <div style="font-weight:bold;font-size:14px;">${r.name}</div>
+                                <div style="font-size:12px;color:#666;">${r.address}</div>
+                                <div style="font-size:11px;color:#888;margin-top:2px;">States: ${r.states && r.states.length > 0 ? r.states.join(', ') : 'All states'}</div>
+                                <div style="font-size:11px;color:#888;margin-top:2px;">Hours: ${r.hoursStart === null || r.hoursEnd === null ? '24/7' : (r.hoursStart && r.hoursEnd ? `${r.hoursStart} – ${r.hoursEnd}` : '24/7')}</div>
+                            </div>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                    <input type="checkbox" ${r.enabled !== false ? 'checked' : ''} onchange="toggleNotifRecipient(${i}, this.checked)"> Active
+                                </label>
+                                <button onclick="editNotifRecipient(${i})" style="padding:4px 10px;background:#2c7be5;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Edit</button>
+                                <button onclick="removeNotifRecipient(${i})" style="padding:4px 10px;background:#e57373;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Remove</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch(e) { list.innerHTML = '<p style="color:red;">Error loading.</p>'; }
+        }
+
+        async function editNotifRecipient(index) {
+            const recipients = await getNotifRecipients();
+            const r = recipients[index];
+            if (!r) return;
+            document.getElementById('notifName').value = r.name;
+            document.getElementById('notifPhone').value = r.address.split('@')[0] || '';
+            document.getElementById('notifAddress').value = r.address;
+            // Try to match carrier
+            const carriers = ['@vtext.com','@tmomail.net','@txt.att.net','@messaging.sprintpcs.com'];
+            const carrier = carriers.find(c => r.address.endsWith(c));
+            if (carrier) document.getElementById('notifCarrier').value = carrier;
+            // Set state checkboxes
+            document.querySelectorAll('.notif-state-cb').forEach(cb => cb.checked = false);
+            if (r.states && r.states.includes('ALL')) {
+                document.getElementById('notifStateAll').checked = true;
+                document.querySelectorAll('.notif-state-individual').forEach(cb => cb.checked = true);
+            } else if (r.states) {
+                r.states.forEach(s => {
+                    const cb = document.querySelector(`.notif-state-cb[value="${s}"]`);
+                    if (cb) cb.checked = true;
+                });
+            }
+            // Restore active hours
+            if (r.hoursStart === null || r.hoursEnd === null) {
+                document.getElementById('notifHours247').checked = true;
+                document.getElementById('notifHoursStart').value = '07:00';
+                document.getElementById('notifHoursEnd').value = '22:00';
+            } else {
+                document.getElementById('notifHours247').checked = false;
+                document.getElementById('notifHoursStart').value = r.hoursStart || '07:00';
+                document.getElementById('notifHoursEnd').value = r.hoursEnd || '22:00';
+            }
+            // Store the index being edited so addNotifRecipient can replace it
+            window._editingNotifIndex = index;
+            document.getElementById('addRecipientBtn').textContent = 'Update Recipient';
+            document.getElementById('adminPanel').scrollTo({ top: document.getElementById('sectionNotifications').offsetTop, behavior: 'smooth' });
+        }
+
+        async function getNotifRecipients() {
+            const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS');
+            const data = await resp.json();
+            // save-settings stores {settings:{recipients:[]}} so get-settings returns
+            // data.settings = {settings:{recipients:[]}, updatedAt:...}
+            const s = data.settings || {};
+            return (s.settings && s.settings.recipients) || s.recipients || [];
+        }
+
+        async function saveNotifRecipients(recipients) {
+            await fetch('/.netlify/functions/save-settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: 'NOTIFICATIONS', settings: { recipients } })
+            });
+        }
+
+        async function addNotifRecipient() {
+            const name = document.getElementById('notifName').value.trim();
+            const address = document.getElementById('notifAddress').value.trim();
+            if (!name || !address) { alert('Name and address required.'); return; }
+            // The master checkbox (id=notifStateAll) is UI convenience only now --
+            // it auto-selects Saturday-coverage states below, but its own literal
+            // "ALL" value should never be saved. Backend treats a stored 'ALL' as
+            // an unconditional match-everything bypass, which would silently
+            // undo per-state filtering regardless of which individual boxes are
+            // checked. Only the individual state values actually get saved.
+            const states = Array.from(document.querySelectorAll('.notif-state-individual:checked')).map(cb => cb.value);
+            const allDay = document.getElementById('notifHours247').checked;
+            const hoursStart = allDay ? null : document.getElementById('notifHoursStart').value;
+            const hoursEnd = allDay ? null : document.getElementById('notifHoursEnd').value;
+            try {
+                const recipients = await getNotifRecipients();
+                const editIndex = window._editingNotifIndex;
+                const entry = { name, address, enabled: true, states, hoursStart, hoursEnd };
+                if (editIndex !== undefined && editIndex !== null && recipients[editIndex]) {
+                    entry.enabled = recipients[editIndex].enabled !== false;
+                    recipients[editIndex] = entry;
+                } else {
+                    recipients.push(entry);
+                }
+                const resp = await fetch('/.netlify/functions/save-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: 'NOTIFICATIONS', settings: { recipients } })
+                });
+                const result = await resp.json();
+                if (!result.ok) throw new Error(result.error || 'Save failed');
+                window._editingNotifIndex = null;
+                document.getElementById('addRecipientBtn').textContent = 'Add Recipient';
+                document.getElementById('notifName').value = '';
+                document.getElementById('notifPhone').value = '';
+                document.getElementById('notifAddress').value = '';
+                document.getElementById('notifCarrier').value = '';
+                document.getElementById('notifHoursStart').value = '07:00';
+                document.getElementById('notifHoursEnd').value = '22:00';
+                document.getElementById('notifHours247').checked = false;
+                document.querySelectorAll('.notif-state-cb').forEach(cb => cb.checked = false);
+                setTimeout(() => loadNotifRecipients(), 800);
+            } catch(e) {
+                alert('Error saving: ' + e.message);
+            }
+        }
+
+        async function toggleNotifRecipient(index, enabled) {
+            const recipients = await getNotifRecipients();
+            if (recipients[index]) { recipients[index].enabled = enabled; await saveNotifRecipients(recipients); }
+        }
+
+        async function removeNotifRecipient(index) {
+            if (!confirm('Remove this recipient?')) return;
+            const recipients = await getNotifRecipients();
+            recipients.splice(index, 1);
+            await saveNotifRecipients(recipients);
+            loadNotifRecipients();
+        }
+
+        // Load notifications when tab opens
+        var _origSwitchTab = switchTab;
+        switchTab = function(tab) { _origSwitchTab(tab); if (tab === 'notifications') loadNotifRecipients(); };
+
+    </script>
+</body>
+</html>

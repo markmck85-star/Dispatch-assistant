@@ -1,0 +1,12 @@
+{
+  "name": "dispatch-tool",
+  "private": true,
+  "version": "9.9.0-blobs-1",
+  "description": "On-Call Dispatch Assistant (static site + Netlify Functions + Blobs)",
+  "dependencies": {
+    "@netlify/blobs": "^7.3.4",
+    "@supabase/supabase-js": "^2.45.0",
+    "fast-xml-parser": "^4.5.0",
+    "nodemailer": "^6.9.9"
+  }
+}

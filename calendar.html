@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<title>Team Calendar – MCR Dispatch</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.5; font-size: 16px; }
+  .container { max-width: 700px; margin: 0 auto; }
+
+  .back-link { display: inline-block; color: #007bff; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+
+  .console {
+    background: #181818; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    padding: 16px; color: #ddd;
+  }
+  .console h1 { color: #f0a500; font-size: 21px; margin-bottom: 2px; }
+  .console .subtitle { color: #888; font-size: 12px; margin-bottom: 14px; }
+
+  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .month-nav { display: flex; align-items: center; gap: 4px; }
+  .nav-btn {
+    background: #2a2a2a; color: #007bff; border: 1px solid #444; border-radius: 6px;
+    width: 34px; height: 34px; font-size: 16px; cursor: pointer;
+  }
+  .nav-btn:active { background: #333; }
+  .month-label { color: #eee; font-weight: 600; font-size: 15px; min-width: 132px; text-align: center; }
+  .today-btn {
+    background: transparent; color: #007bff; border: 1px solid #007bff; border-radius: 6px;
+    padding: 7px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  select#stateFilter {
+    margin-left: auto; background: #2a2a2a; color: #ddd; border: 1px solid #444;
+    border-radius: 6px; padding: 7px 8px; font-size: 13px;
+  }
+
+  .day-row { border-top: 1px solid #2a2a2a; padding: 10px 2px; }
+  .day-row:first-child { border-top: none; }
+  .day-date { color: #eee; font-weight: 600; font-size: 13.5px; margin-bottom: 6px; }
+  .day-date .dow { color: #777; font-weight: 400; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px;
+    border-radius: 14px; font-size: 12.5px; font-weight: 600; color: #fff;
+  }
+  .chip .icon { font-size: 12px; }
+  .chip .synced { opacity: 0.6; font-size: 10px; margin-left: 2px; }
+  .chip.reason-vacation { background: #5c1a1a; }
+  .chip.reason-personal { background: #7a5200; }
+  .chip.reason-pto { background: #4a1a5c; }
+  .chip.reason-comp_day { background: #1a3a5c; }
+  .chip.reason-manual, .chip.reason-other { background: #3a3a3a; }
+
+  .empty-state { color: #666; font-size: 13.5px; text-align: center; padding: 30px 10px; }
+  .loading { color: #666; font-size: 13.5px; text-align: center; padding: 30px 10px; }
+  .error-state { color: #e57373; font-size: 13px; text-align: center; padding: 20px 10px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #2a2a2a; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="index.html" class="back-link">&larr; Back to Dispatch</a>
+  <div class="console">
+    <h1>&#128197; Team Calendar</h1>
+    <div class="subtitle">Vacation, personal days, comp days &mdash; synced from BlueFolder</div>
+
+    <div class="toolbar">
+      <div class="month-nav">
+        <button class="nav-btn" id="prevBtn" aria-label="Previous month">&lsaquo;</button>
+        <div class="month-label" id="monthLabel">&nbsp;</div>
+        <button class="nav-btn" id="nextBtn" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <button class="today-btn" id="todayBtn">Today</button>
+      <select id="stateFilter"><option value="">All states</option></select>
+    </div>
+
+    <div id="calendarBody"><div class="loading">Loading&hellip;</div></div>
+
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#5c1a1a"></span>Vacation</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7a5200"></span>Personal</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#4a1a5c"></span>PTO</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1a3a5c"></span>Comp day</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#3a3a3a"></span>Other</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+// Public-safe: the anon key only grants what RLS explicitly allows (read-only,
+// two tables, see the interim_anon_read_for_calendar migration).
+const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tZWhyZm9xaGxqenltYXplbWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzEzMjEsImV4cCI6MjA5OTEwNzMyMX0.rSMvkmpf9rTT4seMKSNf4xlgPkbxcOvia-sP2ZhvOmE';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const REASON_ICON = { vacation: '&#127958;', personal: '&#128587;', pto: '&#129301;', comp_day: '&#128260;', manual: '&#128100;', other: '&#128100;' };
+const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out' };
+
+let viewDate = new Date();
+viewDate.setDate(1);
+
+function monthLabel(d) {
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function fmtDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  const dow = d.toLocaleDateString('en-US', { weekday: 'short' });
+  const md = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${md} <span class="dow">${dow}</span>`;
+}
+
+async function loadStates() {
+  const { data, error } = await sb.from('technicians').select('home_state').not('home_state', 'is', null);
+  if (error || !data) return;
+  const states = [...new Set(data.map((r) => r.home_state))].sort();
+  const sel = document.getElementById('stateFilter');
+  for (const s of states) {
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadMonth() {
+  const body = document.getElementById('calendarBody');
+  body.innerHTML = '<div class="loading">Loading&hellip;</div>';
+  document.getElementById('monthLabel').textContent = monthLabel(viewDate);
+
+  const year = viewDate.getFullYear(), month = viewDate.getMonth();
+  const monthStart = new Date(year, month, 1).toISOString().slice(0, 10);
+  const monthEnd = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+  const stateFilter = document.getElementById('stateFilter').value;
+
+  let query = sb
+    .from('technician_availability')
+    .select('day, reason, note, bluefolder_appt_id, technicians!inner(name, home_state)')
+    .eq('available', false)
+    .gte('day', monthStart)
+    .lte('day', monthEnd)
+    .order('day', { ascending: true });
+  if (stateFilter) query = query.eq('technicians.home_state', stateFilter);
+
+  const { data, error } = await query;
+  if (error) {
+    body.innerHTML = `<div class="error-state">Couldn't load the calendar: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  if (!data || !data.length) {
+    body.innerHTML = '<div class="empty-state">No time off on the books this month.</div>';
+    return;
+  }
+
+  const byDay = new Map();
+  for (const row of data) {
+    if (!byDay.has(row.day)) byDay.set(row.day, []);
+    byDay.get(row.day).push(row);
+  }
+
+  let html = '';
+  for (const [day, rows] of byDay) {
+    html += `<div class="day-row"><div class="day-date">${fmtDay(day)}</div><div class="chip-row">`;
+    for (const row of rows) {
+      const reason = row.reason || 'other';
+      const icon = REASON_ICON[reason] || REASON_ICON.other;
+      const label = REASON_LABEL[reason] || REASON_LABEL.other;
+      const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
+      html += `<span class="chip reason-${reason}"><span class="icon">${icon}</span>${escapeHtml(row.technicians.name)} &middot; ${label}${synced}</span>`;
+    }
+    html += `</div></div>`;
+  }
+  body.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s ?? '');
+  return div.innerHTML;
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => {
+  viewDate.setMonth(viewDate.getMonth() - 1);
+  loadMonth();
+});
+document.getElementById('nextBtn').addEventListener('click', () => {
+  viewDate.setMonth(viewDate.getMonth() + 1);
+  loadMonth();
+});
+document.getElementById('todayBtn').addEventListener('click', () => {
+  viewDate = new Date(); viewDate.setDate(1);
+  loadMonth();
+});
+document.getElementById('stateFilter').addEventListener('change', loadMonth);
+
+loadStates().then(loadMonth);
+</script>
+</body>
+</html>

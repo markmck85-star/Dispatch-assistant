@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RMA Shipments — MCR Dispatch</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 16px;
+        background: #14161a; color: #e8e8e8;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .subtitle { color: #9aa0a6; font-size: 14px; margin-bottom: 18px; }
+    a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; }
+    .filters {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 14px; margin: 16px 0;
+    }
+    .filters label { font-size: 13px; color: #b8bcc2; }
+    select, input[type=text] {
+        background: #14161a; color: #e8e8e8; border: 1px solid #3a3e46;
+        border-radius: 6px; padding: 8px 10px; font-size: 14px;
+    }
+    .toggle-btn {
+        background: #2a2d33; color: #e8e8e8; border: 1px solid #3a3e46;
+        border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+    }
+    .toggle-btn.active { background: #7a3b1e; border-color: #c9601f; color: #ffd7b0; }
+    .toggle-btn:hover { filter: brightness(1.15); }
+    table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 14px; }
+    th {
+        text-align: left; padding: 10px 12px; color: #9aa0a6; font-weight: 600;
+        border-bottom: 2px solid #2c2f36; position: sticky; top: 0; background: #14161a;
+    }
+    td { padding: 10px 12px; border-bottom: 1px solid #22252b; vertical-align: top; }
+    tr:hover td { background: #1a1d22; }
+    .badge {
+        display: inline-block; padding: 3px 9px; border-radius: 999px;
+        font-size: 12px; font-weight: 600;
+    }
+    .badge.state { background: #24303f; color: #7ec4ff; }
+    .badge.return-needed { background: #4a2020; color: #ff9a9a; }
+    .badge.returned { background: #1f3a24; color: #7edb8e; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #c7cad1; }
+    .muted { color: #7a7f87; }
+    .action-btn {
+        background: #1f3a24; color: #7edb8e; border: 1px solid #2e5a37;
+        border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+    }
+    .action-btn.undo { background: #2a2d33; color: #b8bcc2; border-color: #3a3e46; }
+    .action-btn:hover { filter: brightness(1.2); }
+    .empty-state { text-align: center; color: #7a7f87; padding: 40px 0; }
+    .loading { text-align: center; color: #7a7f87; padding: 30px 0; }
+    .req-details { max-width: 260px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<a class="back-link" href="/">← Back to Dispatch Tool</a>
+<h1>📦 RMA Shipments</h1>
+<div class="subtitle">Parts shipped to/from technicians, parsed from Neumo's shipping notification emails.</div>
+
+<div class="filters">
+    <div>
+        <label>State: </label>
+        <select id="stateFilter"><option value="">All states</option></select>
+    </div>
+    <div>
+        <label>Technician: </label>
+        <select id="techFilter"><option value="">All technicians</option></select>
+    </div>
+    <button class="toggle-btn" id="needsReturnBtn" onclick="toggleNeedsReturn()">🔴 Needs Return Only</button>
+    <button class="toggle-btn" onclick="loadShipments()" style="margin-left:auto;">↻ Refresh</button>
+</div>
+
+<div id="content"><div class="loading">Loading shipments…</div></div>
+
+<script>
+let allShipments = [];
+let needsReturnOnly = false;
+
+async function loadShipments() {
+    document.getElementById('content').innerHTML = '<div class="loading">Loading shipments…</div>';
+    try {
+        const res = await fetch('/.netlify/functions/get-rma-shipments?limit=500');
+        const data = await res.json();
+        allShipments = data.shipments || [];
+        populateFilters();
+        render();
+    } catch (e) {
+        document.getElementById('content').innerHTML = '<div class="empty-state">Failed to load shipments: ' + e.message + '</div>';
+    }
+}
+
+function populateFilters() {
+    const stateSel = document.getElementById('stateFilter');
+    const techSel = document.getElementById('techFilter');
+    const prevState = stateSel.value, prevTech = techSel.value;
+
+    const states = [...new Set(allShipments.map(s => s.state).filter(Boolean))].sort();
+    const techs = [...new Map(allShipments.filter(s => s.technicianId).map(s => [s.technicianId, s.technicianName])).entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]));
+
+    stateSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
+    techSel.innerHTML = '<option value="">All technicians</option>' + techs.map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+    stateSel.value = prevState; techSel.value = prevTech;
+}
+
+function toggleNeedsReturn() {
+    needsReturnOnly = !needsReturnOnly;
+    document.getElementById('needsReturnBtn').classList.toggle('active', needsReturnOnly);
+    render();
+}
+
+function fmtDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function render() {
+    const stateVal = document.getElementById('stateFilter').value;
+    const techVal = document.getElementById('techFilter').value;
+
+    let rows = allShipments;
+    if (stateVal) rows = rows.filter(s => s.state === stateVal);
+    if (techVal) rows = rows.filter(s => s.technicianId === techVal);
+    if (needsReturnOnly) rows = rows.filter(s => s.returnBrokenPart && !s.returnedAt);
+
+    const content = document.getElementById('content');
+    if (!rows.length) {
+        content.innerHTML = '<div class="empty-state">No shipments match these filters.</div>';
+        return;
+    }
+
+    let html = '<table><thead><tr>' +
+        '<th>Received</th><th>Case #</th><th>WO #</th><th>Site</th><th>Technician</th>' +
+        '<th>Tracking (Out / In)</th><th>Request Details</th><th>Return?</th><th></th>' +
+        '</tr></thead><tbody>';
+
+    for (const s of rows) {
+        const stateBadge = s.state ? `<span class="badge state">${s.state}</span>` : '';
+        const siteLabel = s.siteCode || s.accountName || '<span class="muted">—</span>';
+        const techLabel = s.technicianName || (s.warehouseName ? `<span class="muted">${s.warehouseName}</span>` : '<span class="muted">—</span>');
+        const outT = s.outboundTracking ? `<div class="mono">${s.outboundTracking}</div>` : '';
+        const inT = s.inboundTracking ? `<div class="mono">${s.inboundTracking}</div>` : '';
+        let returnCell = '<span class="muted">—</span>';
+        let actionCell = '';
+        if (s.returnBrokenPart) {
+            if (s.returnedAt) {
+                returnCell = `<span class="badge returned">✓ Returned ${fmtDate(s.returnedAt)}</span>`;
+                actionCell = `<button class="action-btn undo" onclick="markReturned('${s.id}', false)">Undo</button>`;
+            } else {
+                returnCell = `<span class="badge return-needed">Return needed</span>`;
+                actionCell = `<button class="action-btn" onclick="markReturned('${s.id}', true)">✓ Mark Returned</button>`;
+            }
+        }
+        html += `<tr>
+            <td class="muted">${fmtDate(s.receivedAt)}</td>
+            <td class="mono">${s.caseNumber || ''}</td>
+            <td class="mono">${s.woNumber || ''}</td>
+            <td>${stateBadge} ${siteLabel}</td>
+            <td>${techLabel}</td>
+            <td>${outT}${inT}</td>
+            <td class="req-details">${s.requestDetails || ''}</td>
+            <td>${returnCell}</td>
+            <td>${actionCell}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    content.innerHTML = html;
+}
+
+async function markReturned(id, returned) {
+    try {
+        await fetch('/.netlify/functions/mark-rma-returned', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, returned }),
+        });
+        await loadShipments();
+    } catch (e) {
+        alert('Failed to update: ' + e.message);
+    }
+}
+
+document.getElementById('stateFilter').addEventListener('change', render);
+document.getElementById('techFilter').addEventListener('change', render);
+
+loadShipments();
+</script>
+</body>
+</html>
