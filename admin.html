@@ -229,6 +229,13 @@
                         <label style="display:flex;align-items:center;gap:8px;font-weight:400;"><input type="checkbox" value="OR" class="notif-state-cb notif-state-individual" style="width:18px;height:18px;flex-shrink:0;"> Oregon</label>
                     </div>
                 </div>
+                <label>Home Timezone — where this person actually is, not the states they cover:</label>
+                <select id="notifTimezone" style="width:100%;padding:8px;margin-bottom:16px;border:1px solid #ccc;border-radius:4px;">
+                    <option value="America/New_York">Eastern (GA/IN/MI/OH/FL/NC/SC/WV)</option>
+                    <option value="America/Chicago">Central (IL/MN)</option>
+                    <option value="America/Denver">Mountain (CO)</option>
+                    <option value="America/Los_Angeles">Pacific (NV/OR)</option>
+                </select>
                 <label style="display:block;margin-bottom:6px;font-weight:500;">Active Hours (leave blank for 24/7)</label>
                 <div style="display:flex;gap:10px;margin-bottom:10px;align-items:center;">
                     <div style="flex:1;">
@@ -1534,6 +1541,7 @@
                                 <div style="font-size:12px;color:#666;">${r.address}</div>
                                 <div style="font-size:11px;color:#888;margin-top:2px;">States: ${r.states && r.states.length > 0 ? r.states.join(', ') : 'All states'}</div>
                                 <div style="font-size:11px;color:#888;margin-top:2px;">Hours: ${r.hoursStart === null || r.hoursEnd === null ? '24/7' : (r.hoursStart && r.hoursEnd ? `${r.hoursStart} – ${r.hoursEnd}` : '24/7')}</div>
+                                <div style="font-size:11px;color:#888;margin-top:2px;">Timezone: ${({ 'America/New_York':'Eastern', 'America/Chicago':'Central', 'America/Denver':'Mountain', 'America/Los_Angeles':'Pacific' })[r.timezone] || 'Eastern (default)'}</div>
                             </div>
                             <div style="display:flex;gap:8px;align-items:center;">
                                 <label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer;">
@@ -1570,6 +1578,7 @@
                     if (cb) cb.checked = true;
                 });
             }
+            document.getElementById('notifTimezone').value = r.timezone || 'America/New_York';
             // Restore active hours
             if (r.hoursStart === null || r.hoursEnd === null) {
                 document.getElementById('notifHours247').checked = true;
@@ -1614,13 +1623,14 @@
             // undo per-state filtering regardless of which individual boxes are
             // checked. Only the individual state values actually get saved.
             const states = Array.from(document.querySelectorAll('.notif-state-individual:checked')).map(cb => cb.value);
+            const timezone = document.getElementById('notifTimezone').value;
             const allDay = document.getElementById('notifHours247').checked;
             const hoursStart = allDay ? null : document.getElementById('notifHoursStart').value;
             const hoursEnd = allDay ? null : document.getElementById('notifHoursEnd').value;
             try {
                 const recipients = await getNotifRecipients();
                 const editIndex = window._editingNotifIndex;
-                const entry = { name, address, enabled: true, states, hoursStart, hoursEnd };
+                const entry = { name, address, enabled: true, states, timezone, hoursStart, hoursEnd };
                 if (editIndex !== undefined && editIndex !== null && recipients[editIndex]) {
                     entry.enabled = recipients[editIndex].enabled !== false;
                     recipients[editIndex] = entry;
@@ -1640,6 +1650,7 @@
                 document.getElementById('notifPhone').value = '';
                 document.getElementById('notifAddress').value = '';
                 document.getElementById('notifCarrier').value = '';
+                document.getElementById('notifTimezone').value = 'America/New_York';
                 document.getElementById('notifHoursStart').value = '07:00';
                 document.getElementById('notifHoursEnd').value = '22:00';
                 document.getElementById('notifHours247').checked = false;
