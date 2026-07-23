@@ -470,6 +470,14 @@
 
                 <button class="big-btn save-btn" id="ctImportBtn" onclick="ctRunImport()" disabled>Import Parsed Rows</button>
 
+                <div style="margin-top:20px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.12);">
+                    <p style="color:#aaa;font-size:12px;margin:0 0 10px 0;">
+                        Found 2026-07-23: a real bug where sites with "Co"/"County" phrasing differences between Salesforce's Account Name and the real site name could get silently matched to the wrong site instead of correctly flagged for review. Fixed for future imports -- this re-checks every already-imported row against the corrected logic and fixes any that were mismatched.
+                    </p>
+                    <button class="big-btn" id="ctRematchBtn" onclick="ctRunRematch()" style="background:#7a3b1e;">Re-check Site Matches (correction pass)</button>
+                    <div id="ctRematchStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin-top:10px;"></div>
+                </div>
+
                 <div id="ctResults" style="margin-top:16px; display:none;">
                     <h3 style="font-size:14px; color:#f0f0f0; margin-bottom:8px;">Import Results</h3>
                     <div id="ctResultsSummary" style="color:#ccc; font-size:13px; line-height:1.6;"></div>
@@ -1826,6 +1834,39 @@
                 reviewDiv.innerHTML = '';
             }
             document.getElementById('ctResults').style.display = 'block';
+        }
+
+        async function ctRunRematch() {
+            const btn = document.getElementById('ctRematchBtn');
+            const statusEl = document.getElementById('ctRematchStatus');
+            btn.disabled = true;
+            let offset = 0;
+            let totalProcessed = 0, totalChanged = 0, totalStillUnmatched = 0;
+            let allSamples = [];
+            let totalRows = null;
+            try {
+                while (true) {
+                    statusEl.textContent = `Checking rows ${offset + 1}-${offset + 300}${totalRows ? ' of ' + totalRows : ''}...`;
+                    const res = await fetch(`/.netlify/functions/rematch-site-visits?offset=${offset}&limit=300`);
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                    totalProcessed += data.processed;
+                    totalChanged += data.changed;
+                    totalStillUnmatched += data.stillUnmatched;
+                    totalRows = data.totalRows;
+                    if (data.changedSamples) allSamples = allSamples.concat(data.changedSamples);
+                    if (data.done) break;
+                    offset = data.nextOffset;
+                }
+                let msg = `Done. Checked ${totalProcessed} rows, fixed ${totalChanged} mismatched site links.`;
+                if (allSamples.length) {
+                    msg += '\n\nExamples corrected:\n' + allSamples.slice(0, 15).map(s => `"${s.account_name_raw}"`).join('\n');
+                }
+                statusEl.textContent = msg;
+            } catch (err) {
+                statusEl.textContent = 'Error during re-check: ' + err.message + `\n(Checked ${totalProcessed} rows before failing, ${totalChanged} fixed so far -- safe to run again, it will continue correctly.)`;
+            }
+            btn.disabled = false;
         }
 
     </script>
