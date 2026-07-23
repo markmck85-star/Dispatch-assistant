@@ -62,6 +62,7 @@
         .toast.error { background: #dc3545; }
         .toast.info { background: #007bff; }
     </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
     <div class="toast-container" id="toastContainer"></div>
@@ -102,6 +103,7 @@
             <button id="tabBackup" onclick="switchTab('backup')">Backup</button>
             <button id="tabNotifications" onclick="switchTab('notifications')">Notifications</button>
             <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
+            <button id="tabClosedtickets" onclick="switchTab('closedtickets')">✅ Closed Tickets</button>
         </div>
 
         <!-- LOCATIONS TAB -->
@@ -441,6 +443,41 @@
             </div>
         </div>
 
+        <!-- CLOSED TICKETS TAB -->
+        <div id="sectionClosedtickets" class="section">
+            <div class="form-section">
+                <h2>Closed Tickets — Salesforce Import</h2>
+                <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
+                    Import the "Completed Service Appointments" report from Salesforce.
+                    Same file restock tracker uses — nothing here changes that, this is a
+                    separate import into the dispatch app's own history.
+                </p>
+
+                <div style="margin-bottom:16px; padding:12px 16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:8px; text-align:center;">
+                    <div style="font-size:12px; color:#aaa; margin-bottom:8px;">Need a fresh report?</div>
+                    <a href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru"
+                       target="_blank"
+                       style="display:inline-block; padding:9px 20px; background:#0070d2; color:white; border-radius:6px; font-size:13px; font-weight:600; text-decoration:none;">
+                        🔗 Open Salesforce Report
+                    </a>
+                    <div style="font-size:11px; color:#aaa; margin-top:8px;">Log in to Salesforce, export as Excel (.xlsx), then load it below.</div>
+                </div>
+
+                <label for="ctFileInput">Select Report File (.xlsx):</label>
+                <input type="file" id="ctFileInput" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="ctHandleFile(this.files[0])" style="width:100%;padding:8px;margin-bottom:12px;">
+
+                <div id="ctStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin-bottom:12px;">Ready.</div>
+
+                <button class="big-btn save-btn" id="ctImportBtn" onclick="ctRunImport()" disabled>Import Parsed Rows</button>
+
+                <div id="ctResults" style="margin-top:16px; display:none;">
+                    <h3 style="font-size:14px; color:#f0f0f0; margin-bottom:8px;">Import Results</h3>
+                    <div id="ctResultsSummary" style="color:#ccc; font-size:13px; line-height:1.6;"></div>
+                    <div id="ctReviewList" style="margin-top:10px;"></div>
+                </div>
+            </div>
+        </div>
+
         <a href="/" style="text-decoration:none;">
             <button class="big-btn back-btn" type="button" style="margin-top:20px;" onclick="history.back()">Back to Dispatch Tool</button>
         </a>
@@ -576,7 +613,7 @@
 
         // --- TAB SWITCHING ---
         function switchTab(tab) {
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix'];
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -1677,6 +1714,119 @@
         // Load notifications when tab opens
         var _origSwitchTab = switchTab;
         switchTab = function(tab) { _origSwitchTab(tab); if (tab === 'notifications') loadNotifRecipients(); };
+
+        // --- CLOSED TICKETS IMPORT ---
+        let ctParsedRows = null;
+
+        function ctSetStatus(msg) {
+            document.getElementById('ctStatus').textContent = msg;
+        }
+
+        function ctHandleFile(file) {
+            if (!file) return;
+            ctParsedRows = null;
+            document.getElementById('ctImportBtn').disabled = true;
+            document.getElementById('ctResults').style.display = 'none';
+            ctSetStatus(`Reading ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)...`);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    ctSetStatus('Parsing spreadsheet...');
+                    const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+                    if (!rows.length) { ctSetStatus('No data found in file.'); return; }
+                    const norm = rows.map(r => {
+                        const out = {};
+                        for (const k of Object.keys(r)) out[k.trim()] = r[k];
+                        return out;
+                    });
+                    const required = ['Account Name', 'Jurisdiction', 'Appointment Number'];
+                    const sample = norm[0];
+                    for (const col of required) {
+                        if (!(col in sample)) {
+                            ctSetStatus('Missing expected column: ' + col + '\n\nColumns found: ' + Object.keys(sample).join(', '));
+                            return;
+                        }
+                    }
+                    ctParsedRows = norm;
+                    ctSetStatus(`Parsed ${norm.length} rows. Ready to import.`);
+                    document.getElementById('ctImportBtn').disabled = false;
+                } catch (err) {
+                    ctSetStatus('Error parsing file: ' + err.message);
+                }
+            };
+            reader.onerror = () => ctSetStatus('Could not read file.');
+            reader.readAsArrayBuffer(file);
+        }
+
+        async function ctRunImport() {
+            if (!ctParsedRows || !ctParsedRows.length) return;
+            const btn = document.getElementById('ctImportBtn');
+            btn.disabled = true;
+            document.getElementById('ctResults').style.display = 'none';
+
+            const rows = ctParsedRows.map(r => ({
+                accountName: String(r['Account Name'] || '').trim(),
+                state: String(r['Jurisdiction'] || '').trim(),
+                woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
+                appointmentNumber: String(r['Appointment Number'] || '').trim(),
+                actualStart: r['Actual Start'] || null,
+                actualEnd: r['Actual End'] || null,
+                durationMin: (r['Actual Duration (Minutes)'] != null && r['Actual Duration (Minutes)'] !== '') ? Number(r['Actual Duration (Minutes)']) : null,
+                techName: String(r['Service Resource: Name'] || '').trim(),
+                remediation: String(r['Remediation'] || '').trim(),
+                remediationDetail: String(r['Remediation Detail'] || '').trim(),
+            })).filter(r => r.appointmentNumber);
+
+            const BATCH_SIZE = 250;
+            let totalInserted = 0, totalSkipped = 0, totalSiteMatched = 0, totalTechMatched = 0, totalNeedsReview = 0;
+            let reviewSamples = [];
+            let errors = [];
+
+            for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+                const batch = rows.slice(i, i + BATCH_SIZE);
+                ctSetStatus(`Importing rows ${i + 1}-${Math.min(i + BATCH_SIZE, rows.length)} of ${rows.length}...`);
+                try {
+                    const res = await fetch('/.netlify/functions/import-service-appointments', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rows: batch })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                    totalInserted += data.inserted || 0;
+                    totalSkipped += data.skippedExisting || 0;
+                    totalSiteMatched += data.siteMatched || 0;
+                    totalTechMatched += data.techMatched || 0;
+                    totalNeedsReview += data.needsReview || 0;
+                    if (data.reviewSamples) reviewSamples = reviewSamples.concat(data.reviewSamples);
+                } catch (err) {
+                    errors.push('Batch starting row ' + (i + 1) + ': ' + err.message);
+                }
+            }
+
+            ctSetStatus(`Done. ${totalInserted} row(s) imported, ${totalSkipped} already existed.` + (errors.length ? ` ${errors.length} batch error(s) -- see below.` : ''));
+            btn.disabled = false;
+
+            const summary = document.getElementById('ctResultsSummary');
+            summary.innerHTML =
+                `Rows imported: <strong>${totalInserted}</strong> of ${rows.length}<br>` +
+                `Already imported previously (skipped): <strong>${totalSkipped}</strong><br>` +
+                `Sites matched: <strong>${totalSiteMatched}</strong><br>` +
+                `Techs matched: <strong>${totalTechMatched}</strong><br>` +
+                `Needs review (site couldn't be matched confidently): <strong>${totalNeedsReview}</strong>` +
+                (errors.length ? `<br><span style="color:#ff8080;">${errors.join('<br>')}</span>` : '');
+
+            const reviewDiv = document.getElementById('ctReviewList');
+            if (reviewSamples.length) {
+                reviewDiv.innerHTML = '<div style="font-size:12px;color:#aaa;margin-bottom:6px;">Examples needing review (site name didn\'t match confidently -- these still imported, just without a linked site):</div>' +
+                    reviewSamples.slice(0, 25).map(s => `<div style="font-size:12px;color:#ddd;padding:4px 0;border-bottom:1px solid #333;">${s.state} — "${s.accountName}"</div>`).join('');
+            } else {
+                reviewDiv.innerHTML = '';
+            }
+            document.getElementById('ctResults').style.display = 'block';
+        }
 
     </script>
 </body>
