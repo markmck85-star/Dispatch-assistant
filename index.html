@@ -4621,6 +4621,20 @@ ${content}</body></html>`;
                         ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
                     </div>`;
                 }).join('');
+                if (data.shipments && data.shipments.length) {
+                    const shipHtml = data.shipments.map(s => {
+                        const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+                        const returnStatus = s.return_broken_part
+                            ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
+                            : '';
+                        return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+                            <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
+                            <div style="color:#555;font-size:12px;">${s.outbound_tracking ? 'Out: ' + s.outbound_tracking : ''}${s.inbound_tracking ? (s.outbound_tracking ? ' · ' : '') + 'In: ' + s.inbound_tracking : ''}</div>
+                            ${returnStatus ? `<div style="font-size:12px;">${returnStatus}</div>` : ''}
+                        </div>`;
+                    }).join('');
+                    body.innerHTML += `<h4 style="margin:16px 0 4px;font-size:13px;color:#333;">Related Shipments</h4>` + shipHtml;
+                }
             } catch (err) {
                 body.innerHTML = '<span style="color:#c62828;">Error loading history: ' + err.message + '</span>';
             }
