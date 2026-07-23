@@ -3173,7 +3173,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div>
-                                    <div><strong>${item.code}</strong> - ${loc.name} ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
+                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     ${ticketInfoStr}
                                     ${window.driveTimeEnabled ? `<div id="dt-${techKey}-${index}" style="font-size:11px;color:#5bc8af;margin-top:2px;">🕐 —</div>` : ''}
@@ -4587,6 +4587,54 @@ ${content}</body></html>`;
             document.getElementById('printableReport').innerHTML = html;
             document.getElementById('mobileReportOverlay').classList.add('active');
         }
+
+        // --- SITE HISTORY MODAL ---
+        function closeSiteHistory() {
+            document.getElementById('siteHistoryOverlay').style.display = 'none';
+        }
+
+        async function showSiteHistory(code) {
+            const overlay = document.getElementById('siteHistoryOverlay');
+            const title = document.getElementById('siteHistoryTitle');
+            const body = document.getElementById('siteHistoryBody');
+            title.textContent = 'Visit History — ' + code;
+            body.innerHTML = 'Loading…';
+            overlay.style.display = 'block';
+            try {
+                const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(code));
+                const data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                title.textContent = 'Visit History — ' + data.site.name + ' (' + data.site.code + ')';
+                if (!data.visits.length) {
+                    body.innerHTML = '<em>No visit history found for this site yet.</em>';
+                    return;
+                }
+                body.innerHTML = data.visits.map(v => {
+                    const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+                    const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+                    const kindColor = v.is_restock ? '#2e7d32' : '#c62828';
+                    const kindLabel = v.is_restock ? 'Restock' : (v.remediation || 'Service');
+                    const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
+                    return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+                        <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
+                        <div style="color:#555;">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
+                        ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                body.innerHTML = '<span style="color:#c62828;">Error loading history: ' + err.message + '</span>';
+            }
+        }
     </script>
+    <!-- Site History Modal -->
+    <div id="siteHistoryOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;" onclick="if(event.target===this)closeSiteHistory()">
+        <div style="background:#fff;max-width:600px;margin:40px auto;padding:20px;border-radius:8px;max-height:80vh;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 id="siteHistoryTitle" style="margin:0;">Visit History</h3>
+                <button onclick="closeSiteHistory()" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+            </div>
+            <div id="siteHistoryBody" style="font-size:13px;color:#333;">Loading…</div>
+        </div>
+    </div>
 </body>
 </html>
