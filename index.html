@@ -4594,6 +4594,72 @@ ${content}</body></html>`;
             document.getElementById('siteHistoryOverlay').style.display = 'none';
         }
 
+        let _siteHistoryState = null; // { code, visits: [], offset, hasMore, shipments: [] }
+
+        function renderSiteHistoryBody() {
+            const body = document.getElementById('siteHistoryBody');
+            const st = _siteHistoryState;
+            let html = st.visits.map(v => {
+                const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+                const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+                const kindColor = v.is_restock ? '#2e7d32' : '#c62828';
+                const kindLabel = v.is_restock ? 'Restock' : (v.remediation || 'Service');
+                const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
+                return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+                    <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
+                    <div style="color:#555;">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
+                    ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>` : ''}
+                    ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            if (st.hasMore) {
+                html += `<button onclick="loadMoreSiteHistory()" id="siteHistoryLoadMoreBtn" style="width:100%;padding:10px;margin-top:8px;background:#eee;border:1px solid #ccc;border-radius:6px;cursor:pointer;">Load 15 more (${st.totalVisits - st.visits.length} remaining)</button>`;
+            }
+
+            if (st.shipments && st.shipments.length) {
+                const shipHtml = st.shipments.map(s => {
+                    const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+                    const returnStatus = s.return_broken_part
+                        ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
+                        : '';
+                    const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#1565c0;">${num}</a>`;
+                    const trackingParts = [];
+                    if (s.outbound_tracking) trackingParts.push('Out: ' + upsLink(s.outbound_tracking));
+                    if (s.inbound_tracking) trackingParts.push('In: ' + upsLink(s.inbound_tracking));
+                    return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+                        <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
+                        <div style="color:#555;font-size:12px;">${trackingParts.join(' · ')}</div>
+                        ${returnStatus ? `<div style="font-size:12px;">${returnStatus}</div>` : ''}
+                    </div>`;
+                }).join('');
+                html += `<h4 style="margin:16px 0 4px;font-size:13px;color:#333;">Related Shipments</h4>` + shipHtml;
+            }
+            body.innerHTML = html;
+        }
+
+        async function loadMoreSiteHistory() {
+            const btn = document.getElementById('siteHistoryLoadMoreBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+            try {
+                const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(_siteHistoryState.code) + '&offset=' + _siteHistoryState.visits.length);
+                const data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                _siteHistoryState.visits = _siteHistoryState.visits.concat(data.visits);
+                _siteHistoryState.hasMore = data.hasMore;
+                _siteHistoryState.totalVisits = data.totalVisits;
+                // Merge in any newly-relevant shipments (dedup by wo_number+outbound_tracking)
+                const seen = new Set(_siteHistoryState.shipments.map(s => s.wo_number + '|' + s.outbound_tracking));
+                for (const s of (data.shipments || [])) {
+                    const key = s.wo_number + '|' + s.outbound_tracking;
+                    if (!seen.has(key)) { _siteHistoryState.shipments.push(s); seen.add(key); }
+                }
+                renderSiteHistoryBody();
+            } catch (err) {
+                if (btn) { btn.disabled = false; btn.textContent = 'Error loading more -- tap to retry'; }
+            }
+        }
+
         async function showSiteHistory(code) {
             const overlay = document.getElementById('siteHistoryOverlay');
             const title = document.getElementById('siteHistoryTitle');
@@ -4608,39 +4674,17 @@ ${content}</body></html>`;
                 title.textContent = 'Visit History — ' + data.site.name + ' (' + data.site.code + ')';
                 if (!data.visits.length) {
                     body.innerHTML = '<em>No visit history found for this site yet.</em>';
+                    _siteHistoryState = null;
                     return;
                 }
-                body.innerHTML = data.visits.map(v => {
-                    const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
-                    const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
-                    const kindColor = v.is_restock ? '#2e7d32' : '#c62828';
-                    const kindLabel = v.is_restock ? 'Restock' : (v.remediation || 'Service');
-                    const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
-                    return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
-                        <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
-                        <div style="color:#555;">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
-                        ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>` : ''}
-                        ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
-                    </div>`;
-                }).join('');
-                if (data.shipments && data.shipments.length) {
-                    const shipHtml = data.shipments.map(s => {
-                        const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
-                        const returnStatus = s.return_broken_part
-                            ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
-                            : '';
-                        const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#1565c0;">${num}</a>`;
-                        const trackingParts = [];
-                        if (s.outbound_tracking) trackingParts.push('Out: ' + upsLink(s.outbound_tracking));
-                        if (s.inbound_tracking) trackingParts.push('In: ' + upsLink(s.inbound_tracking));
-                        return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
-                            <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
-                            <div style="color:#555;font-size:12px;">${trackingParts.join(' · ')}</div>
-                            ${returnStatus ? `<div style="font-size:12px;">${returnStatus}</div>` : ''}
-                        </div>`;
-                    }).join('');
-                    body.innerHTML += `<h4 style="margin:16px 0 4px;font-size:13px;color:#333;">Related Shipments</h4>` + shipHtml;
-                }
+                _siteHistoryState = {
+                    code,
+                    visits: data.visits,
+                    hasMore: data.hasMore,
+                    totalVisits: data.totalVisits,
+                    shipments: data.shipments || [],
+                };
+                renderSiteHistoryBody();
             } catch (err) {
                 body.innerHTML = '<span style="color:#c62828;">Error loading history: ' + err.message + '</span>';
             }

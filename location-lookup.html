@@ -172,6 +172,8 @@ document.addEventListener('click', (e) => {
     if (!e.target.closest('.search-wrap')) resultsDropdown.classList.remove('open');
 });
 
+let historyState = null; // { code, visits, hasMore, totalVisits, shipments }
+
 async function selectSite(site) {
     if (!site || !site.site_code) return;
     searchInput.value = `${site.site_code} - ${site.name}`;
@@ -181,9 +183,43 @@ async function selectSite(site) {
         const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(site.site_code));
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-        renderHistory(data);
+        if (!data.visits.length) {
+            output.innerHTML = `<div class="card"><h2>${escapeHtml(data.site.name)}</h2><div class="meta">${escapeHtml(data.site.state)} · ${escapeHtml(data.site.code)}</div><div class="empty-state">No visit history found for this site yet.</div></div>`;
+            historyState = null;
+            return;
+        }
+        historyState = {
+            code: site.site_code,
+            siteInfo: data.site,
+            visits: data.visits,
+            hasMore: data.hasMore,
+            totalVisits: data.totalVisits,
+            shipments: data.shipments || [],
+        };
+        renderHistory();
     } catch (err) {
         output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading history: ${err.message}</div>`;
+    }
+}
+
+async function loadMoreHistory() {
+    const btn = document.getElementById('loadMoreBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(historyState.code) + '&offset=' + historyState.visits.length);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        historyState.visits = historyState.visits.concat(data.visits);
+        historyState.hasMore = data.hasMore;
+        historyState.totalVisits = data.totalVisits;
+        const seen = new Set(historyState.shipments.map(s => s.wo_number + '|' + s.outbound_tracking));
+        for (const s of (data.shipments || [])) {
+            const key = s.wo_number + '|' + s.outbound_tracking;
+            if (!seen.has(key)) { historyState.shipments.push(s); seen.add(key); }
+        }
+        renderHistory();
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Error loading more — tap to retry'; }
     }
 }
 
@@ -191,16 +227,11 @@ function upsLink(num) {
     return `<a class="ups-link" href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener">${escapeHtml(num)}</a>`;
 }
 
-function renderHistory(data) {
+function renderHistory() {
+    const data = { site: historyState.siteInfo, visits: historyState.visits, shipments: historyState.shipments };
     let html = `<div class="card">
         <h2>${escapeHtml(data.site.name)}</h2>
         <div class="meta">${escapeHtml(data.site.state)} · ${escapeHtml(data.site.code)}</div>`;
-
-    if (!data.visits.length) {
-        html += `<div class="empty-state">No visit history found for this site yet.</div></div>`;
-        output.innerHTML = html;
-        return;
-    }
 
     html += `<h3 class="section-label">Visit History</h3>`;
     html += data.visits.map(v => {
@@ -216,6 +247,10 @@ function renderHistory(data) {
             ${v.wo_number ? `<div class="mono">WO ${escapeHtml(v.wo_number)}</div>` : ''}
         </div>`;
     }).join('');
+
+    if (historyState.hasMore) {
+        html += `<button id="loadMoreBtn" class="toggle-btn" style="width:100%;margin-top:10px;" onclick="loadMoreHistory()">Load 15 more (${historyState.totalVisits - historyState.visits.length} remaining)</button>`;
+    }
 
     if (data.shipments && data.shipments.length) {
         html += `<h3 class="section-label">Related Shipments</h3>`;
