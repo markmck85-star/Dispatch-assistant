@@ -4627,9 +4627,13 @@ ${content}</body></html>`;
                         const returnStatus = s.return_broken_part
                             ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
                             : '';
+                        const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#1565c0;">${num}</a>`;
+                        const trackingParts = [];
+                        if (s.outbound_tracking) trackingParts.push('Out: ' + upsLink(s.outbound_tracking));
+                        if (s.inbound_tracking) trackingParts.push('In: ' + upsLink(s.inbound_tracking));
                         return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
                             <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
-                            <div style="color:#555;font-size:12px;">${s.outbound_tracking ? 'Out: ' + s.outbound_tracking : ''}${s.inbound_tracking ? (s.outbound_tracking ? ' · ' : '') + 'In: ' + s.inbound_tracking : ''}</div>
+                            <div style="color:#555;font-size:12px;">${trackingParts.join(' · ')}</div>
                             ${returnStatus ? `<div style="font-size:12px;">${returnStatus}</div>` : ''}
                         </div>`;
                     }).join('');

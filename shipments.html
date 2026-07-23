@@ -146,8 +146,9 @@ function render() {
         const stateBadge = s.state ? `<span class="badge state">${s.state}</span>` : '';
         const siteLabel = s.siteCode || s.accountName || '<span class="muted">—</span>';
         const techLabel = s.technicianName || (s.warehouseName ? `<span class="muted">${s.warehouseName}</span>` : '<span class="muted">—</span>');
-        const outT = s.outboundTracking ? `<div class="mono">${s.outboundTracking}</div>` : '';
-        const inT = s.inboundTracking ? `<div class="mono">${s.inboundTracking}</div>` : '';
+        const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#5b9dd9;">${num}</a>`;
+        const outT = s.outboundTracking ? `<div class="mono" style="margin-bottom:6px;"><span class="muted" style="font-family:inherit;">Out:</span> ${upsLink(s.outboundTracking)}</div>` : '';
+        const inT = s.inboundTracking ? `<div class="mono"><span class="muted" style="font-family:inherit;">In:</span> ${upsLink(s.inboundTracking)}</div>` : '';
         let returnCell = '<span class="muted">—</span>';
         let actionCell = '';
         if (s.returnBrokenPart) {
