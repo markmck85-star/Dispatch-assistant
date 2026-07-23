@@ -4619,6 +4619,7 @@ ${content}</body></html>`;
                     return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
                         <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
                         <div style="color:#555;">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
+                        ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>` : ''}
                         ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
                     </div>`;
                 }).join('');

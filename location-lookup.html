@@ -212,6 +212,7 @@ function renderHistory(data) {
         return `<div class="visit-row">
             <div><strong>${date}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span>${dur ? ' · ' + dur : ''}</div>
             <div class="muted">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}${reviewNote}</div>
+            ${v.appointment_number ? `<div class="mono" style="color:#e8e8e8;font-weight:600;">${escapeHtml(v.appointment_number)}</div>` : ''}
             ${v.wo_number ? `<div class="mono">WO ${escapeHtml(v.wo_number)}</div>` : ''}
         </div>`;
     }).join('');
