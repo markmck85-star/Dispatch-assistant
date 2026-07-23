@@ -12,7 +12,10 @@ function json(statusCode, obj) {
 }
 
 exports.handler = async (event) => {
-  const code = (event.queryStringParameters || {}).code;
+  const params = event.queryStringParameters || {};
+  const code = params.code;
+  const offset = parseInt(params.offset || '0', 10);
+  const PAGE_SIZE = 15;
   if (!code) return json(400, { ok: false, error: 'Missing ?code=' });
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -25,12 +28,12 @@ exports.handler = async (event) => {
   if (siteErr) return json(500, { ok: false, error: siteErr.message });
   if (!site) return json(404, { ok: false, error: 'No site found for code ' + code });
 
-  const { data: visits, error: visitsErr } = await supabase
+  const { data: visits, error: visitsErr, count: totalVisits } = await supabase
     .from('site_visits')
-    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, appointment_number, needs_review')
+    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, appointment_number, needs_review', { count: 'exact' })
     .eq('site_id', site.id)
     .order('started_at', { ascending: false, nullsFirst: false })
-    .limit(15);
+    .range(offset, offset + PAGE_SIZE - 1);
   if (visitsErr) return json(500, { ok: false, error: visitsErr.message });
 
   // Related shipments: rma_shipments.site_id is only populated on a small
@@ -56,5 +59,9 @@ exports.handler = async (event) => {
     site: { name: site.name, state: site.state, code: site.site_code },
     visits: visits || [],
     shipments,
+    offset,
+    pageSize: PAGE_SIZE,
+    totalVisits: totalVisits != null ? totalVisits : (visits || []).length,
+    hasMore: offset + (visits || []).length < (totalVisits != null ? totalVisits : 0),
   });
 };
