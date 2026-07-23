@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Location Lookup — MCR Dispatch</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 16px;
+        background: #14161a; color: #e8e8e8;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .subtitle { color: #9aa0a6; font-size: 14px; margin-bottom: 18px; }
+    a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; }
+    .filters {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 14px; margin: 16px 0;
+    }
+    .filters label { font-size: 13px; color: #b8bcc2; }
+    select, input[type=text] {
+        background: #14161a; color: #e8e8e8; border: 1px solid #3a3e46;
+        border-radius: 6px; padding: 8px 10px; font-size: 14px;
+    }
+    #searchInput { flex: 1; min-width: 220px; }
+    .search-wrap { position: relative; flex: 1; min-width: 220px; }
+    .results-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+        background: #1e2126; border: 1px solid #3a3e46; border-top: none;
+        border-radius: 0 0 8px 8px; max-height: 320px; overflow-y: auto;
+        display: none;
+    }
+    .results-dropdown.open { display: block; }
+    .result-row {
+        padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #22252b;
+        font-size: 13.5px;
+    }
+    .result-row:hover, .result-row.active { background: #262a31; }
+    .result-row .code { color: #6cb2ff; font-weight: 600; margin-right: 8px; }
+    .result-row .state-tag {
+        display: inline-block; font-size: 11px; font-weight: 700; color: #7ec4ff;
+        background: #24303f; padding: 1px 6px; border-radius: 4px; margin-right: 8px;
+    }
+    .card {
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 18px; margin-top: 18px;
+    }
+    .card h2 { font-size: 18px; margin: 0 0 4px; }
+    .card .meta { color: #9aa0a6; font-size: 13px; margin-bottom: 14px; }
+    .visit-row, .ship-row {
+        padding: 10px 0; border-bottom: 1px solid #22252b; font-size: 13.5px;
+    }
+    .visit-row:last-child, .ship-row:last-child { border-bottom: none; }
+    .kind-restock { color: #7edb8e; }
+    .kind-service { color: #ff9a9a; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #c7cad1; }
+    .muted { color: #7a7f87; }
+    a.ups-link { color: #6cb2ff; }
+    .empty-state { text-align: center; color: #7a7f87; padding: 30px 0; }
+    .loading { text-align: center; color: #7a7f87; padding: 20px 0; }
+    h3.section-label { font-size: 13px; color: #b8bcc2; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+    <a href="/" class="back-link">← Back to Dispatch Tool</a>
+    <h1>🔍 Location Lookup</h1>
+    <div class="subtitle">Search any service location directly and see its closed-ticket history and related shipments — no need to have it on today's board first.</div>
+
+    <div class="filters">
+        <label>State:</label>
+        <select id="stateFilter">
+            <option value="">All states</option>
+        </select>
+        <div class="search-wrap">
+            <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off">
+            <div class="results-dropdown" id="resultsDropdown"></div>
+        </div>
+    </div>
+
+    <div id="output"></div>
+
+<script>
+let allSites = [];
+let filteredResults = [];
+let activeIndex = -1;
+
+const stateFilter = document.getElementById('stateFilter');
+const searchInput = document.getElementById('searchInput');
+const resultsDropdown = document.getElementById('resultsDropdown');
+const output = document.getElementById('output');
+
+async function loadSites() {
+    output.innerHTML = '<div class="loading">Loading site list…</div>';
+    try {
+        const res = await fetch('/.netlify/functions/get-site-list');
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        allSites = data.sites || [];
+        const states = [...new Set(allSites.map(s => s.state))].sort();
+        for (const st of states) {
+            const opt = document.createElement('option');
+            opt.value = st;
+            opt.textContent = st;
+            stateFilter.appendChild(opt);
+        }
+        output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Start typing a name or code above.</div>`;
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading site list: ${err.message}</div>`;
+    }
+}
+loadSites();
+
+function escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function runSearch() {
+    const q = searchInput.value.trim().toLowerCase();
+    const st = stateFilter.value;
+    activeIndex = -1;
+    if (!q) {
+        resultsDropdown.classList.remove('open');
+        resultsDropdown.innerHTML = '';
+        return;
+    }
+    filteredResults = allSites.filter(s => {
+        if (st && s.state !== st) return false;
+        return (s.name || '').toLowerCase().includes(q) || (s.site_code || '').toLowerCase().includes(q);
+    }).slice(0, 40);
+
+    if (!filteredResults.length) {
+        resultsDropdown.innerHTML = '<div class="result-row muted">No matches</div>';
+        resultsDropdown.classList.add('open');
+        return;
+    }
+    resultsDropdown.innerHTML = filteredResults.map((s, i) =>
+        `<div class="result-row" data-i="${i}"><span class="state-tag">${escapeHtml(s.state)}</span><span class="code">${escapeHtml(s.site_code || '')}</span>${escapeHtml(s.name)}</div>`
+    ).join('');
+    resultsDropdown.classList.add('open');
+    resultsDropdown.querySelectorAll('.result-row[data-i]').forEach(row => {
+        row.addEventListener('click', () => selectSite(filteredResults[+row.dataset.i]));
+    });
+}
+
+searchInput.addEventListener('input', runSearch);
+stateFilter.addEventListener('change', runSearch);
+
+searchInput.addEventListener('keydown', (e) => {
+    const rows = resultsDropdown.querySelectorAll('.result-row[data-i]');
+    if (!rows.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIndex = Math.min(activeIndex + 1, rows.length - 1);
+        rows.forEach(r => r.classList.remove('active'));
+        rows[activeIndex].classList.add('active');
+        rows[activeIndex].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIndex = Math.max(activeIndex - 1, 0);
+        rows.forEach(r => r.classList.remove('active'));
+        rows[activeIndex].classList.add('active');
+        rows[activeIndex].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+        e.preventDefault();
+        selectSite(filteredResults[activeIndex]);
+    }
+});
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-wrap')) resultsDropdown.classList.remove('open');
+});
+
+async function selectSite(site) {
+    if (!site || !site.site_code) return;
+    searchInput.value = `${site.site_code} - ${site.name}`;
+    resultsDropdown.classList.remove('open');
+    output.innerHTML = '<div class="loading">Loading history…</div>';
+    try {
+        const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(site.site_code));
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        renderHistory(data);
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading history: ${err.message}</div>`;
+    }
+}
+
+function upsLink(num) {
+    return `<a class="ups-link" href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener">${escapeHtml(num)}</a>`;
+}
+
+function renderHistory(data) {
+    let html = `<div class="card">
+        <h2>${escapeHtml(data.site.name)}</h2>
+        <div class="meta">${escapeHtml(data.site.state)} · ${escapeHtml(data.site.code)}</div>`;
+
+    if (!data.visits.length) {
+        html += `<div class="empty-state">No visit history found for this site yet.</div></div>`;
+        output.innerHTML = html;
+        return;
+    }
+
+    html += `<h3 class="section-label">Visit History</h3>`;
+    html += data.visits.map(v => {
+        const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+        const kindClass = v.is_restock ? 'kind-restock' : 'kind-service';
+        const kindLabel = v.is_restock ? 'Restock' : (v.remediation || 'Service');
+        const reviewNote = v.needs_review ? ' <span class="muted">(site match unconfirmed)</span>' : '';
+        return `<div class="visit-row">
+            <div><strong>${date}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span>${dur ? ' · ' + dur : ''}</div>
+            <div class="muted">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}${reviewNote}</div>
+            ${v.wo_number ? `<div class="mono">WO ${escapeHtml(v.wo_number)}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    if (data.shipments && data.shipments.length) {
+        html += `<h3 class="section-label">Related Shipments</h3>`;
+        html += data.shipments.map(s => {
+            const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+            const returnStatus = s.return_broken_part
+                ? (s.returned_at ? `<span class="kind-restock">Returned ${new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>` : `<span class="kind-service">Return still needed</span>`)
+                : '';
+            const parts = [];
+            if (s.outbound_tracking) parts.push('Out: ' + upsLink(s.outbound_tracking));
+            if (s.inbound_tracking) parts.push('In: ' + upsLink(s.inbound_tracking));
+            return `<div class="ship-row">
+                <div><strong>${date}</strong> — WO ${escapeHtml(s.wo_number || '?')}${s.warehouse_name ? ' · ' + escapeHtml(s.warehouse_name) : ''}</div>
+                <div class="mono">${parts.join(' · ')}</div>
+                ${returnStatus ? `<div>${returnStatus}</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    html += `</div>`;
+    output.innerHTML = html;
+}
+</script>
+</body>
+</html>
