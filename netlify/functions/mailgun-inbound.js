@@ -349,11 +349,100 @@ function parseEmailBody(text, receivedAt) {
     // straight through it. Every multi-word term below now uses \s+ between
     // words instead of a literal space, so a mid-label wrap doesn't let the
     // lazy match blow straight past it into the next field's own value.
-    const m = text.match(new RegExp('(?<!Parent\\s)' + labelPattern + '\\s*:?\\s*(.*?)(?=\\s*(?:Work\\s+Order|Priority|Earliest\\s+Start|Due\\s+Date|Location:|Address:|Phone:|Line\\s+Item\\s+Number|Account\\s+Name|ATM\\s+ID|SST\\s+Name|PC\\s+Name|SST\\s+Type|Out\\s+of\\s+Service|Line\\s+Item\\s+Issue|Line\\s+Item\\s+Description|Device\\s+Errors|Consumable\\s+Counts|Restock\\s+SST|SST\\s+ID|Printer\\s+\\d|Journal\\s+Printer|Outbound\\s+Tracking|Inbound\\s+Tracking|Warehouse\\s+Name|Parent\\s+Case\\s+Number|Case\\s+Number|Transfer\\s+ID|Request\\s+Details|Thank\\s+you)|$)', 'is'));
+    // 2026-07-23: added the ITI/TechWeb closing-email's own field labels
+    // (Service Call Date, Technician, Component, Location, Contact, Ticket
+    // Number, Issue, Call Type, Status, Resolution and Notes, Arrival/End
+    // Time, Travel Time, Mileage, PCI Requirements..., Rogue Devices...,
+    // Credit Card Reader Serial Number) -- without these in the stop-list,
+    // calling getField() on any one of them would swallow straight through
+    // to whichever OTHER ticket type's label happened to appear next (or
+    // to the end of the email), since none of this format's own labels
+    // were previously recognized as a stopping point.
+    const m = text.match(new RegExp('(?<!Parent\\s)' + labelPattern + '\\s*:?\\s*(.*?)(?=\\s*(?:Work\\s+Order|Priority|Earliest\\s+Start|Due\\s+Date|Location:|Address:|Phone:|Line\\s+Item\\s+Number|Account\\s+Name|ATM\\s+ID|SST\\s+Name|PC\\s+Name|SST\\s+Type|Out\\s+of\\s+Service|Line\\s+Item\\s+Issue|Line\\s+Item\\s+Description|Device\\s+Errors|Consumable\\s+Counts|Restock\\s+SST|SST\\s+ID|Printer\\s+\\d|Journal\\s+Printer|Outbound\\s+Tracking|Inbound\\s+Tracking|Warehouse\\s+Name|Parent\\s+Case\\s+Number|Case\\s+Number|Transfer\\s+ID|Request\\s+Details|Service\\s+Call\\s+Date|Technician|Component|Location|Contact|Ticket\\s+Number|Issue|Call\\s+Type|Status|Resolution\\s+and\\s+Notes|Arrival\\s+Time|End\\s+Time|Travel\\s+Time|Mileage|PCI\\s+Requirements|Rogue\\s+Devices|Credit\\s+Card\\s+Reader|Thank\\s+you)|$)', 'is'));
     return m ? m[1].trim() : '';
   };
 
-  // 1. Bulk dispatch list
+  // 0. ITI/TechWeb closing email -- the legacy pre-Salesforce system, still
+  // actively generating these for a handful of sites (GCI GA Prison and
+  // other prison mail-room sites) that never migrated to the newer
+  // Salesforce Field Service setup the rest of the closed-ticket import
+  // covers. Found 2026-07-23. Checked first, ahead of the Maintenance
+  // check below, because "Resolution and Notes" on these often contains
+  // the word "maintenance" in free text (e.g. "Completed preventative
+  // maintenance"), which the loose /Maintenance/i check would otherwise
+  // catch -- misrouting these into the generic maintenance-ticket path
+  // instead of being recognized as this distinct, already-closed format.
+  // Detected on "Service Call Date:" + "Ticket Number:" together, since
+  // neither label is used by any other email type this pipeline handles.
+  if (/Service\s+Call\s*Date\s*:/i.test(text) && /Ticket\s+Number\s*:/i.test(text)) {
+    // The forwarded email's own Subject/Date/From/To/Cc header block
+    // (visible in the plain-text body above the actual data table) can
+    // contain words that collide with this format's own field labels --
+    // e.g. "Subject: ITI Technician Service Response..." contains the
+    // word "Technician", which getField('Technician') would otherwise
+    // match instead of the real field further down, swallowing
+    // everything in between as its "value". Slicing to start at the
+    // first real "Service Call Date:" (a label that doesn't appear
+    // anywhere in the forwarded headers) before running any extraction
+    // sidesteps this for every field, not just the one that happened to
+    // collide in testing.
+    const tableStart = text.search(/Service\s+Call\s*Date\s*:/i);
+    const tableText = tableStart >= 0 ? text.slice(tableStart) : text;
+    const getTWField = (label) => {
+      const labelPattern = label.replace(/ /g, '\\s+');
+      const m = tableText.match(new RegExp('(?<!Parent\\s)' + labelPattern + '\\s*:?\\s*(.*?)(?=\\s*(?:Service\\s+Call\\s+Date|Technician|Component|Location|Contact|Ticket\\s+Number|Issue|Call\\s+Type|Status|Resolution\\s+and\\s+Notes|Arrival\\s+Time|End\\s+Time|Travel\\s+Time|Mileage|PCI\\s+Requirements|Rogue\\s+Devices|Credit\\s+Card\\s+Reader|Thank\\s+you)|$)', 'is'));
+      // Collapse line-wrap newlines (e.g. "Sean \nReich", "Georgia \nMR")
+      // into single spaces -- a literal embedded newline would otherwise
+      // show up in tech names/locations/remediation text everywhere this
+      // gets displayed, and Date() parsing tolerating it was luck, not
+      // something to rely on.
+      return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+    };
+
+    const serviceCallDate = getTWField('Service Call Date');
+    const technician = getTWField('Technician');
+    const component = getTWField('Component');
+    const location = getTWField('Location');
+    const ticketNumber = getTWField('Ticket Number');
+    const callType = getTWField('Call Type');
+    const status = getTWField('Status');
+    const resolutionNotes = getTWField('Resolution and Notes');
+    const arrivalTime = getTWField('Arrival Time');
+    const endTime = getTWField('End Time');
+
+    // No true unique appointment number exists in this legacy format (no
+    // Salesforce SA-#### equivalent) -- synthesize one from the ticket
+    // number so it still works as site_visits' dedup key.
+    const appointmentNumber = ticketNumber ? `TW-${ticketNumber}` : null;
+
+    // "Component: Georgia MR" is the closest thing to a state signal in
+    // this format -- no separate Jurisdiction/State field like the
+    // Salesforce report has. Falls back to detectStates() against the
+    // whole body if Component doesn't parse cleanly.
+    const componentStateM = component.match(/\b(Georgia|Florida|Michigan|Indiana|Ohio|Nevada|Colorado|Illinois|Minnesota|Oregon|Idaho|California|Hawaii|North Carolina|South Carolina|West Virginia)\b/i);
+    const STATE_NAME_TO_ABBR = { georgia: 'GA', florida: 'FL', michigan: 'MI', indiana: 'IN', ohio: 'OH', nevada: 'NV', colorado: 'CO', illinois: 'IL', minnesota: 'MN', oregon: 'OR', idaho: 'ID', california: 'CA', hawaii: 'HI', 'north carolina': 'NC', 'south carolina': 'SC', 'west virginia': 'WV' };
+    const state = componentStateM ? STATE_NAME_TO_ABBR[componentStateM[1].toLowerCase()] : (detectStates(text)[0] || null);
+
+    return {
+      type: 'techweb_closing',
+      alertBody: null, // historical/already-closed, board-only path doesn't apply -- goes straight to site_visits, no SMS
+      siteVisit: {
+        appointmentNumber,
+        accountNameRaw: location || null,
+        state,
+        woNumber: ticketNumber || null,
+        startedAtRaw: arrivalTime || null,
+        endedAtRaw: endTime || null,
+        techNameRaw: technician || null,
+        remediation: callType || null,
+        remediationDetail: resolutionNotes || null,
+        status,
+        serviceCallDateRaw: serviceCallDate || null,
+      },
+    };
+  }
+
+
   if (/Dispatch List/i.test(text) || /Restock Report/i.test(text) || /Restock By/i.test(text)) {
     // Count site codes like GA1007, IN1061 etc as proxy for item count
     const siteCodes = (text.match(/\b[A-Z]{2}\d{3,5}\b/g) || []);
@@ -690,7 +779,7 @@ exports.handler = async (event) => {
     try {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-      const classifiedAsMap = { trouble: 'trouble', maintenance: 'maintenance', restock: 'dispatch_list', rma_shipping: 'rma_shipping' };
+      const classifiedAsMap = { trouble: 'trouble', maintenance: 'maintenance', restock: 'dispatch_list', rma_shipping: 'rma_shipping', techweb_closing: 'closing_note_email' };
       const classifiedAs = isReplyOnly ? 'reply' : (classifiedAsMap[dispatchType] || 'unknown');
       const parseStatus = isReplyOnly ? 'ignored' : (parsed ? 'parsed' : 'failed');
       const mailgunMessageId = fields['Message-Id'] || fields['message-id'] || null;
@@ -728,6 +817,86 @@ exports.handler = async (event) => {
           .single();
         if (error) console.error('[mailgun-inbound] inbound_emails insert failed:', error.message);
         else inboundEmailId = data.id;
+      }
+
+      // ITI/TechWeb closing emails go straight into site_visits, not
+      // `tickets` -- unlike trouble/maintenance emails, these arrive
+      // already CLOSED (they're the legacy system's own after-the-fact
+      // notification, not something needing a board entry). Reuses the
+      // same table/shape as the Salesforce closed-ticket import, just a
+      // different source value, so both flow into the same location
+      // history views without any UI changes needed.
+      if (dispatchType === 'techweb_closing' && parsed && parsed.siteVisit) {
+        const sv = parsed.siteVisit;
+
+        // Site match: token-overlap-coefficient against sites.name within
+        // the same state, same logic and threshold as
+        // import-service-appointments.js/rematch-site-visits.js. Known to
+        // return null for GCI GA Prison specifically -- it was never in
+        // the Salesforce site import this table is otherwise keyed off,
+        // so it'll land here needs_review=true with a real account_name_raw
+        // for reference until/unless it gets added as a real site.
+        let siteId = null;
+        if (sv.state) {
+          const { data: candidateSites } = await supabase
+            .from('sites')
+            .select('id, name')
+            .eq('state', sv.state);
+          if (candidateSites && candidateSites.length && sv.accountNameRaw) {
+            const TOKEN_ALIASES = { co: 'county', cnty: 'county', ave: 'avenue', blvd: 'boulevard', dr: 'drive', rd: 'road', st: 'street', mt: 'mount', hwy: 'highway', pkwy: 'parkway' };
+            const tokenize = (s) => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => TOKEN_ALIASES[t] || t);
+            const targetTokens = tokenize(sv.accountNameRaw);
+            let best = null, bestScore = 0;
+            for (const site of candidateSites) {
+              const siteTokens = tokenize(site.name);
+              const setA = new Set(targetTokens), setB = new Set(siteTokens);
+              const intersection = [...setA].filter((t) => setB.has(t)).length;
+              const smaller = Math.min(setA.size, setB.size);
+              const score = smaller > 0 ? intersection / smaller : 0;
+              if (score > bestScore) { bestScore = score; best = site; }
+            }
+            if (best && bestScore >= 0.65) siteId = best.id;
+          }
+        }
+
+        // Arrival/End Time come as "4/1/2026 10:00:00 AM" -- a plain
+        // Date() parse handles that format fine, same as the Salesforce
+        // report's Actual Start/End columns elsewhere in this pipeline.
+        const parseTs = (raw) => {
+          if (!raw) return null;
+          const d = new Date(raw);
+          return isNaN(d.getTime()) ? null : d.toISOString();
+        };
+        const startedAt = parseTs(sv.startedAtRaw);
+        const endedAt = parseTs(sv.endedAtRaw);
+        let durationMin = null;
+        if (startedAt && endedAt) {
+          durationMin = Math.round((new Date(endedAt) - new Date(startedAt)) / 60000);
+        }
+
+        if (sv.appointmentNumber) {
+          const { error: svError } = await supabase
+            .from('site_visits')
+            .upsert({
+              appointment_number: sv.appointmentNumber,
+              site_id: siteId,
+              account_name_raw: sv.accountNameRaw,
+              state: sv.state,
+              wo_number: sv.woNumber,
+              started_at: startedAt,
+              ended_at: endedAt,
+              duration_min: durationMin,
+              tech_name_raw: sv.techNameRaw,
+              technician_id: null, // not matched here -- TechWeb-era techs (e.g. Sean Reich) may not all be on the current roster; left for a future pass if needed
+              remediation: sv.remediation,
+              remediation_detail: sv.remediationDetail,
+              source: 'closing_note_email',
+              needs_review: !siteId,
+              imported_at: new Date().toISOString(),
+            }, { onConflict: 'appointment_number', ignoreDuplicates: true });
+          if (svError) console.error('[mailgun-inbound] TechWeb site_visits upsert failed:', svError.message);
+          else console.log(`[mailgun-inbound] TechWeb closing email recorded: ${sv.appointmentNumber} (site match: ${siteId ? 'yes' : 'no'})`);
+        }
       }
 
       // Trouble tickets and maintenance/restock tickets both go into
