@@ -237,8 +237,9 @@ function renderHistory() {
     html += data.visits.map(v => {
         const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
         const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
-        const kindClass = v.is_restock ? 'kind-restock' : 'kind-service';
-        const kindLabel = v.is_restock ? 'Restock' : (v.remediation || 'Service');
+        const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+        const kindClass = isRestockLike ? 'kind-restock' : 'kind-service';
+        const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
         const reviewNote = v.needs_review ? ' <span class="muted">(site match unconfirmed)</span>' : '';
         return `<div class="visit-row">
             <div><strong>${date}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span>${dur ? ' · ' + dur : ''}</div>

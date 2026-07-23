@@ -4602,8 +4602,9 @@ ${content}</body></html>`;
             let html = st.visits.map(v => {
                 const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
                 const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
-                const kindColor = v.is_restock ? '#2e7d32' : '#c62828';
-                const kindLabel = v.is_restock ? 'Restock' : (v.remediation || 'Service');
+                const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+                const kindColor = isRestockLike ? '#2e7d32' : '#c62828';
+                const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
                 const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
                 return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
                     <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
