@@ -38,12 +38,36 @@ function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
 }
 
+// Normalizes common abbreviation/full-word variants so token-overlap
+// scoring doesn't lose credit purely for phrasing differences between
+// Salesforce's Account Name and the real site name. Found 2026-07-23:
+// "Fulton Co Kroger Roswell" (real site) vs Salesforce's "Fulton County
+// Roswell Kroger" scored lower than the WRONG site "Fulton County Kroger
+// State Bridge" purely because "Co" != "County" as raw tokens, even
+// though every other word matched -- a real false-positive, not a
+// needs_review case, so it slipped through silently instead of being
+// flagged. Confirmed live: two techs' visits got attributed to State
+// Bridge instead of their real sites (Glenwood, Roswell).
+const TOKEN_ALIASES = {
+  'co': 'county',
+  'cnty': 'county',
+  'ave': 'avenue',
+  'blvd': 'boulevard',
+  'dr': 'drive',
+  'rd': 'road',
+  'st': 'street',
+  'mt': 'mount',
+  'hwy': 'highway',
+  'pkwy': 'parkway',
+};
+
 function tokenize(s) {
   return (s || '')
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((t) => TOKEN_ALIASES[t] || t);
 }
 
 function stripStatePrefix(accountName) {
