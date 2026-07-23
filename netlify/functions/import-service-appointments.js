@@ -169,7 +169,6 @@ exports.handler = async (event) => {
     if (technicianId) techMatchedCount++;
 
     const ticketId = r.woNumber ? ticketByWo[r.woNumber] || null : null;
-    const isRestock = r.remediation === 'Preventative Maintenance';
 
     toInsert.push({
       appointment_number: r.appointmentNumber,
@@ -185,7 +184,9 @@ exports.handler = async (event) => {
       technician_id: technicianId,
       remediation: r.remediation || null,
       remediation_detail: r.remediationDetail || null,
-      is_restock: isRestock,
+      // is_restock is a Postgres GENERATED ALWAYS column (derived from
+      // remediation + remediation_detail) -- omit it, Postgres computes
+      // it and rejects any explicit value here.
       included_restock: null,
       included_restock_source: null,
       source: 'salesforce_completed_appointments',
