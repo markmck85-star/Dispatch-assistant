@@ -33,9 +33,28 @@ exports.handler = async (event) => {
     .limit(15);
   if (visitsErr) return json(500, { ok: false, error: visitsErr.message });
 
+  // Related shipments: rma_shipments.site_id is only populated on a small
+  // fraction of real rows (the inbound RMA email parser was never wired
+  // up to resolve it the way the closed-ticket import now does for
+  // site_visits) -- so cross-reference by WO number against the visits
+  // just fetched instead, plus a direct site_id match as a belt-and-
+  // suspenders check for the rows that do have it.
+  const woNumbers = [...new Set((visits || []).map((v) => v.wo_number).filter(Boolean))];
+  let shipments = [];
+  if (woNumbers.length) {
+    const { data: byWo, error: shipErr } = await supabase
+      .from('rma_shipments')
+      .select('wo_number, warehouse_name, outbound_tracking, inbound_tracking, return_broken_part, returned_at, received_at')
+      .in('wo_number', woNumbers)
+      .order('received_at', { ascending: false, nullsFirst: false });
+    if (shipErr) return json(500, { ok: false, error: shipErr.message });
+    shipments = byWo || [];
+  }
+
   return json(200, {
     ok: true,
     site: { name: site.name, state: site.state, code: site.site_code },
     visits: visits || [],
+    shipments,
   });
 };
