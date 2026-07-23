@@ -27,7 +27,7 @@ exports.handler = async (event) => {
 
   const { data: visits, error: visitsErr } = await supabase
     .from('site_visits')
-    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, needs_review')
+    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, appointment_number, needs_review')
     .eq('site_id', site.id)
     .order('started_at', { ascending: false, nullsFirst: false })
     .limit(15);
