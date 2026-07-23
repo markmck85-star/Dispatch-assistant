@@ -189,7 +189,7 @@ exports.handler = async (event) => {
       // it and rejects any explicit value here.
       included_restock: null,
       included_restock_source: null,
-      source: 'salesforce_completed_appointments',
+      source: 'salesforce_report',
       needs_review: !matched,
       imported_at: new Date().toISOString(),
     });
