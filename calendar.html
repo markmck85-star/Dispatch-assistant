@@ -274,24 +274,34 @@ document.getElementById('openAddModalBtn').addEventListener('click', () => {
 });
 document.getElementById('closeModalBtn').addEventListener('click', () => modal.classList.remove('active'));
 
-// Form Submission (Supabase Direct Insert)
+// Form Submission -- goes through save-tech-availability.js (service-role
+// key, server-side) rather than a direct client-side insert. The direct
+// insert can't work: technician_availability's write RLS policy requires
+// an authenticated admin/dispatcher session, and this page only ever has
+// the anon key with no login step -- every insert attempt would hit a
+// permissions error. Reads (loadMonth, loadStatesAndTechs) are unaffected
+// and stay as direct Supabase calls -- anon SELECT is explicitly allowed
+// by RLS on both tables, so there's nothing to fix there.
 document.getElementById('addAvailabilityForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const techId = document.getElementById('techSelect').value;
+  const technician_id = document.getElementById('techSelect').value;
   const day = document.getElementById('eventDate').value;
   const reason = document.getElementById('eventReason').value;
   const note = document.getElementById('eventNote').value;
 
-  const { error } = await sb.from('technician_availability').insert([
-    { technician_id: techId, day: day, reason: reason, note: note, available: false }
-  ]);
-
-  if (error) {
-    alert('Error saving entry: ' + error.message);
-  } else {
+  try {
+    const res = await fetch('/.netlify/functions/save-tech-availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ technician_id, day, reason, note })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
     modal.classList.remove('active');
     document.getElementById('eventNote').value = '';
     loadMonth();
+  } catch (err) {
+    alert('Error saving entry: ' + err.message);
   }
 });
 
