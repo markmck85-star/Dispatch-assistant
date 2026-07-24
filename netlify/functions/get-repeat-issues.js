@@ -15,6 +15,13 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+// These issue_category values are scheduling or investigative requests, not
+// reported hardware malfunctions — grouping them the same way as a real
+// fault category produces false positives (e.g. an unrelated switch-install
+// job and an unrelated cell signal test both filed under "Technician
+// Request" looking like a repeat complaint). Found 2026-07-24 via OH1008.
+const NON_FAULT_CATEGORIES = new Set(['Technician Request', 'Research']);
+
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
 }
@@ -40,7 +47,7 @@ exports.handler = async (event) => {
 
   const { data: tickets, error } = await supabase
     .from('tickets')
-    .select('site_id, issue_category, received_at, wo_number')
+    .select('site_id, issue_category, issue_detail, description, received_at, wo_number')
     .eq('ticket_kind', 'trouble')
     .not('issue_category', 'is', null)
     .not('site_id', 'is', null)
@@ -52,6 +59,7 @@ exports.handler = async (event) => {
   for (const t of tickets) {
     const site = siteById[t.site_id];
     if (!site) continue; // filtered out by state, or orphaned site_id
+    if (NON_FAULT_CATEGORIES.has(t.issue_category)) continue; // scheduling/investigative, not a fault report
     const key = t.site_id + '|' + t.issue_category;
     if (!groups[key]) {
       groups[key] = {
@@ -60,23 +68,29 @@ exports.handler = async (event) => {
         site_name: site.name,
         state: site.state,
         issue_category: t.issue_category,
-        count: 0,
-        wo_numbers: [],
-        dates: [],
+        tickets: [],
       };
     }
-    groups[key].count++;
-    if (t.wo_number) groups[key].wo_numbers.push(t.wo_number);
-    if (t.received_at) groups[key].dates.push(t.received_at);
+    groups[key].tickets.push({
+      wo_number: t.wo_number || null,
+      received_at: t.received_at || null,
+      issue_detail: t.issue_detail || null,
+      description: t.description || null,
+    });
   }
 
   const results = Object.values(groups)
-    .filter(g => g.count >= minCount)
-    .map(g => ({
-      ...g,
-      first_seen: g.dates.length ? g.dates.reduce((a, b) => a < b ? a : b) : null,
-      last_seen: g.dates.length ? g.dates.reduce((a, b) => a > b ? a : b) : null,
-    }))
+    .filter(g => g.tickets.length >= minCount)
+    .map(g => {
+      const sorted = g.tickets.slice().sort((a, b) => (a.received_at || '').localeCompare(b.received_at || ''));
+      return {
+        ...g,
+        count: g.tickets.length,
+        tickets: sorted,
+        first_seen: sorted.length ? sorted[0].received_at : null,
+        last_seen: sorted.length ? sorted[sorted.length - 1].received_at : null,
+      };
+    })
     .sort((a, b) => b.count - a.count);
 
   return json(200, { ok: true, days, minCount, results });
