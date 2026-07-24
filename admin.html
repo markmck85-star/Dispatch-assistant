@@ -104,6 +104,7 @@
             <button id="tabNotifications" onclick="switchTab('notifications')">Notifications</button>
             <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
             <button id="tabClosedtickets" onclick="switchTab('closedtickets')">✅ Closed Tickets</button>
+            <button id="tabRepeatissues" onclick="switchTab('repeatissues')">⚠️ Repeat Issues</button>
         </div>
 
         <!-- LOCATIONS TAB -->
@@ -486,6 +487,47 @@
             </div>
         </div>
 
+        <!-- REPEAT ISSUES TAB -->
+        <div id="sectionRepeatissues" class="section">
+            <div class="form-section">
+                <h2>⚠️ Repeat Issues</h2>
+                <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
+                    Flags sites with 3+ trouble tickets for the <em>same</em> issue category within a rolling window —
+                    standard practice is to replace the hardware on the 3rd return trip for the same complaint.
+                    Pulled from parsed trouble ticket emails (issue_category field), not closing notes.
+                </p>
+
+                <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+                    <label style="flex:1; min-width:140px; margin:0;">
+                        <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Scope</span>
+                        <select id="riScope" onchange="loadRepeatIssues()" style="margin:0;">
+                            <option value="state">Current state</option>
+                            <option value="all">All states</option>
+                        </select>
+                    </label>
+                    <label style="flex:1; min-width:120px; margin:0;">
+                        <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Window</span>
+                        <select id="riDays" onchange="loadRepeatIssues()" style="margin:0;">
+                            <option value="60">60 days</option>
+                            <option value="90" selected>90 days</option>
+                            <option value="180">180 days</option>
+                        </select>
+                    </label>
+                    <label style="flex:1; min-width:120px; margin:0;">
+                        <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Min. tickets</span>
+                        <select id="riMinCount" onchange="loadRepeatIssues()" style="margin:0;">
+                            <option value="2">2+</option>
+                            <option value="3" selected>3+</option>
+                            <option value="4">4+</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div id="riStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
+                <div id="riResults"></div>
+            </div>
+        </div>
+
         <a href="/" style="text-decoration:none;">
             <button class="big-btn back-btn" type="button" style="margin-top:20px;" onclick="history.back()">Back to Dispatch Tool</button>
         </a>
@@ -621,13 +663,57 @@
 
         // --- TAB SWITCHING ---
         function switchTab(tab) {
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets'];
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
                 var tabId = 'tab' + t.charAt(0).toUpperCase() + t.slice(1);
                 document.getElementById(secId).className = 'section' + (t === tab ? ' active' : '');
                 document.getElementById(tabId).className = (t === tab ? 'active' : '');
+            }
+            if (tab === 'repeatissues') loadRepeatIssues();
+        }
+
+        // --- REPEAT ISSUES ---
+        async function loadRepeatIssues() {
+            var statusEl = document.getElementById('riStatus');
+            var resultsEl = document.getElementById('riResults');
+            var scope = document.getElementById('riScope').value;
+            var days = document.getElementById('riDays').value;
+            var minCount = document.getElementById('riMinCount').value;
+
+            statusEl.textContent = 'Loading…';
+            resultsEl.innerHTML = '';
+
+            var url = '/.netlify/functions/get-repeat-issues?days=' + encodeURIComponent(days) + '&minCount=' + encodeURIComponent(minCount);
+            if (scope === 'state' && currentState) url += '&state=' + encodeURIComponent(currentState);
+
+            try {
+                var res = await fetch(url, { cache: 'no-store' });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+                if (!data.results.length) {
+                    statusEl.textContent = 'No repeat issues found for this scope/window.';
+                    return;
+                }
+                statusEl.textContent = data.results.length + ' site' + (data.results.length === 1 ? '' : 's') + ' flagged.';
+
+                var html = '';
+                data.results.forEach(function(r) {
+                    var firstDate = r.first_seen ? new Date(r.first_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '?';
+                    var lastDate = r.last_seen ? new Date(r.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+                    var woList = r.wo_numbers.filter(Boolean).join(', ');
+                    html += '<div class="card" style="border-left-color:#dc3545;">' +
+                        '<div class="card-title">' + esc(r.site_code) + ' — ' + esc(r.site_name) + '</div>' +
+                        '<div class="card-detail"><strong>' + esc(r.issue_category) + '</strong> · ' + r.count + ' tickets · ' + esc(r.state) + '</div>' +
+                        '<div class="card-detail">' + firstDate + ' → ' + lastDate + '</div>' +
+                        (woList ? '<div class="card-detail" style="font-size:12px;color:#999;">WO: ' + esc(woList) + '</div>' : '') +
+                        '</div>';
+                });
+                resultsEl.innerHTML = html;
+            } catch (e) {
+                statusEl.textContent = 'Error loading repeat issues: ' + e.message;
             }
         }
 
