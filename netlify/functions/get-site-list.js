@@ -16,7 +16,7 @@ exports.handler = async () => {
 
   const { data, error } = await supabase
     .from('sites')
-    .select('site_code, name, state')
+    .select('id, site_code, name, state')
     .order('state', { ascending: true })
     .order('name', { ascending: true });
 
