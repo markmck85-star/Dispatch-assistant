@@ -319,7 +319,7 @@ function formatSlaDeadline(d) {
 
 // ── Email classifier & parser (ported from watchdog.py) ──────────────────────
 
-function parseEmailBody(text, receivedAt) {
+function parseEmailBody(text, receivedAt, subject) {
   if (!receivedAt) receivedAt = new Date();
 
   const getField = (label) => {
@@ -358,8 +358,26 @@ function parseEmailBody(text, receivedAt) {
     // to whichever OTHER ticket type's label happened to appear next (or
     // to the end of the email), since none of this format's own labels
     // were previously recognized as a stopping point.
-    const m = text.match(new RegExp('(?<!Parent\\s)' + labelPattern + '\\s*:?\\s*(.*?)(?=\\s*(?:Work\\s+Order|Priority|Earliest\\s+Start|Due\\s+Date|Location:|Address:|Phone:|Line\\s+Item\\s+Number|Account\\s+Name|ATM\\s+ID|SST\\s+Name|PC\\s+Name|SST\\s+Type|Out\\s+of\\s+Service|Line\\s+Item\\s+Issue|Line\\s+Item\\s+Description|Device\\s+Errors|Consumable\\s+Counts|Restock\\s+SST|SST\\s+ID|Printer\\s+\\d|Journal\\s+Printer|Outbound\\s+Tracking|Inbound\\s+Tracking|Warehouse\\s+Name|Parent\\s+Case\\s+Number|Case\\s+Number|Transfer\\s+ID|Request\\s+Details|Service\\s+Call\\s+Date|Technician|Component|Location|Contact|Ticket\\s+Number|Issue|Call\\s+Type|Status|Resolution\\s+and\\s+Notes|Arrival\\s+Time|End\\s+Time|Travel\\s+Time|Mileage|PCI\\s+Requirements|Rogue\\s+Devices|Credit\\s+Card\\s+Reader|Thank\\s+you)|$)', 'is'));
-    return m ? m[1].trim() : '';
+    // 2026-07-24: two stop-list words are also legitimate free-text content,
+    // not just field labels -- "Journal Printer" is a real issue_category
+    // value (not only the Consumable Counts label), and "Technician" shows
+    // up constantly inside ordinary description text ("please dispatch a
+    // technician..."), not only as TechWeb's own "Technician:" label. Both
+    // were truncating real fields the instant that word appeared anywhere
+    // in the captured value, since the stop-list didn't require a following
+    // colon (unlike Location:/Address:/Phone: below, which already do).
+    // Anchored these two specifically to a trailing colon so they still stop
+    // a match at a REAL label but no longer collide with the same words
+    // appearing as ordinary content. Found via "Add Line Item to Work
+    // Order #NNNN" emails (GA1049, WO 00147776) -- issue_category came back
+    // empty and description got cut to "Please dispatch the" because the
+    // very next word was "technician".
+    const m = text.match(new RegExp('(?<!Parent\\s)' + labelPattern + '\\s*:?\\s*(.*?)(?=\\s*(?:Work\\s+Order|Priority|Earliest\\s+Start|Due\\s+Date|Address:|Phone:|Line\\s+Item\\s+Number|Account\\s+Name|ATM\\s+ID|SST\\s+Name|PC\\s+Name|SST\\s+Type|Out\\s+of\\s+Service|Line\\s+Item\\s+Issue|Line\\s+Item\\s+Description|Device\\s+Errors|Consumable\\s+Counts|Restock\\s+SST|SST\\s+ID|Printer\\s+\\d|Journal\\s+Printer\\s*:|Outbound\\s+Tracking|Inbound\\s+Tracking|Warehouse\\s+Name|Parent\\s+Case\\s+Number|Case\\s+Number|Transfer\\s+ID|Request\\s+Details|Service\\s+Call\\s+Date|Technician\\s*:|Component\\s*:|Location\\s*:|Contact\\s*:|Ticket\\s+Number|Issue\\s*:|Call\\s+Type\\s*:|Status\\s*:|Resolution\\s+and\\s+Notes|Arrival\\s+Time|End\\s+Time|Travel\\s+Time|Mileage|PCI\\s+Requirements|Rogue\\s+Devices|Credit\\s+Card\\s+Reader|Thank\\s+you)|$)', 'is'));
+    // Trailing colon left inside a captured value (not the label side, which
+    // \s*:? already handles) -- happens with "Work Order #NNNN:" phrasing,
+    // where the colon follows the VALUE rather than the label. Strip it the
+    // same way a trailing label-colon is already stripped going in.
+    return m ? m[1].trim().replace(/:\s*$/, '').trim() : '';
   };
 
   // 0. ITI/TechWeb closing email -- the legacy pre-Salesforce system, still
@@ -579,6 +597,17 @@ function parseEmailBody(text, receivedAt) {
     const slaStr = formatSlaDeadline(slaEnd);
     const siteTrunc = site.length > 40 ? site.substring(0, 38) + '…' : site;
 
+    // "Add Line Item to Work Order #NNNN" -- a follow-up adding a new line
+    // item to a ticket that (usually) already exists on the board, not a
+    // fresh dispatch. Found 2026-07-24 (GA1049, WO 00147776): the existing
+    // upsert below uses ignoreDuplicates on wo_number specifically to avoid
+    // clobbering a ticket a dispatcher's already actioned -- which also
+    // meant these follow-ups were silently dropped with no record at all.
+    // Agreed with Mark: append to the existing ticket's description instead
+    // (see isLineItemAddition handling near the tickets upsert).
+    const isLineItemAddition = /Add\s+Line\s+Item\s+to\s+Work\s+Order/i.test(subject || '')
+      || /add\s+the\s+following\s+line\s+item\s+to\s+the\s+existing\s+Work\s+Order/i.test(text);
+
     let alertBody = `🚨 WO: ${woNum}\nSite: ${siteTrunc}`;
     if (issue && issue !== 'See email for details') alertBody += `\nIssue: ${issue}`;
     alertBody += statedDueDate ? `\nDue: ${slaStr}` : `\nSLA ends: ${slaStr}`;
@@ -594,6 +623,7 @@ function parseEmailBody(text, receivedAt) {
       earliestStartRaw: earliestStartRaw || null,
       dueDateRaw: dueDateRaw || null,
       ticketKind: isSiteSurvey ? 'site_survey' : (isInstallCategory ? 'install' : 'trouble'),
+      isLineItemAddition,
     };
   }
 
@@ -727,7 +757,7 @@ exports.handler = async (event) => {
     // fail to match a template," genuinely skipped, so there's no path left
     // where quoted original content in the reply body could accidentally
     // satisfy the trouble-ticket template match either.
-    let parsed = isReplyOnly ? null : parseEmailBody(effectiveBody, receivedAt);
+    let parsed = isReplyOnly ? null : parseEmailBody(effectiveBody, receivedAt, subject);
     if (isReplyOnly) console.log(`[mailgun-inbound] Reply detected ("${subject}") -- skipping dispatch parsing, no SMS`);
 
     // Subject-line fallback: if body too short and body parse failed,
@@ -917,6 +947,36 @@ exports.handler = async (event) => {
           else if (siteRow) siteId = siteRow.id;
         }
 
+        // Add-Line-Item follow-up: check for an existing ticket on this WO
+        // first. If found, append the new line item to its description
+        // (visible on the board) rather than letting the normal
+        // ignoreDuplicates upsert below silently swallow it. If no existing
+        // ticket is found (the follow-up somehow arrived before/without the
+        // original), fall through to the normal insert path so the
+        // information isn't lost either way.
+        let appendedToExisting = false;
+        if (parsed.isLineItemAddition) {
+          const { data: existingTicket, error: existingErr } = await supabase
+            .from('tickets').select('id, description').eq('wo_number', parsed.woNum).maybeSingle();
+          if (existingErr) {
+            console.error('[mailgun-inbound] existing-ticket lookup for line item addition failed:', existingErr.message);
+          } else if (existingTicket) {
+            const stamp = receivedAt.toISOString().slice(0, 10);
+            const addedText = parsed.description || parsed.issue || 'See email for details';
+            const newDescription = (existingTicket.description ? existingTicket.description + '\n\n' : '')
+              + `[Line item added ${stamp}] ${addedText}`;
+            const { error: updateErr } = await supabase
+              .from('tickets').update({ description: newDescription }).eq('id', existingTicket.id);
+            if (updateErr) console.error('[mailgun-inbound] append line item failed:', updateErr.message);
+            else {
+              console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum}`);
+              appendedToExisting = true;
+            }
+          }
+        }
+
+        if (!appendedToExisting) {
+
         const earliestStartAt = parseLooseDate(parsed.earliestStartRaw);
         const dueAt = parseLooseDate(parsed.dueDateRaw);
 
@@ -1022,6 +1082,7 @@ exports.handler = async (event) => {
             console.error('[mailgun-inbound] Auto-add to board error (non-fatal):', boardEx.message);
           }
         }
+        } // end if (!appendedToExisting)
       }
 
       // RMA / Shipping Details -- persist to rma_shipments. Tries to link to
