@@ -703,12 +703,20 @@
                 data.results.forEach(function(r) {
                     var firstDate = r.first_seen ? new Date(r.first_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '?';
                     var lastDate = r.last_seen ? new Date(r.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
-                    var woList = r.wo_numbers.filter(Boolean).join(', ');
+                    var ticketsHtml = r.tickets.map(function(t) {
+                        var d = t.received_at ? new Date(t.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+                        var detailBadge = t.issue_detail ? ' · ' + esc(t.issue_detail) : '';
+                        var desc = t.description ? '<div style="color:#666;font-style:italic;margin-top:2px;">' + esc(t.description) + '</div>' : '';
+                        return '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #ddd;font-size:13px;">' +
+                            '<strong>' + d + '</strong>' + detailBadge + (t.wo_number ? ' · WO ' + esc(t.wo_number) : '') +
+                            desc +
+                            '</div>';
+                    }).join('');
                     html += '<div class="card" style="border-left-color:#dc3545;">' +
                         '<div class="card-title">' + esc(r.site_code) + ' — ' + esc(r.site_name) + '</div>' +
                         '<div class="card-detail"><strong>' + esc(r.issue_category) + '</strong> · ' + r.count + ' tickets · ' + esc(r.state) + '</div>' +
                         '<div class="card-detail">' + firstDate + ' → ' + lastDate + '</div>' +
-                        (woList ? '<div class="card-detail" style="font-size:12px;color:#999;">WO: ' + esc(woList) + '</div>' : '') +
+                        ticketsHtml +
                         '</div>';
                 });
                 resultsEl.innerHTML = html;
