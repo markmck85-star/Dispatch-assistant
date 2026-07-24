@@ -26,6 +26,13 @@
   }
   .nav-btn:active { background: #333; }
   .month-label { color: #eee; font-weight: 600; font-size: 15px; min-width: 132px; text-align: center; }
+  
+  .btn-primary {
+    background: #007bff; color: #fff; border: none; border-radius: 6px;
+    padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary:hover { background: #0056b3; }
+  
   .today-btn {
     background: transparent; color: #007bff; border: 1px solid #007bff; border-radius: 6px;
     padding: 7px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -53,13 +60,33 @@
   .chip.reason-comp_day { background: #1a3a5c; }
   .chip.reason-manual, .chip.reason-other { background: #3a3a3a; }
 
-  .empty-state { color: #666; font-size: 13.5px; text-align: center; padding: 30px 10px; }
-  .loading { color: #666; font-size: 13.5px; text-align: center; padding: 30px 10px; }
-  .error-state { color: #e57373; font-size: 13px; text-align: center; padding: 20px 10px; }
+  .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 30px 10px; color: #666; }
+  .error-state { color: #e57373; }
 
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #2a2a2a; }
   .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
   .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  /* Modal Styling */
+  .modal-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: #222; border: 1px solid #444; border-radius: 10px;
+    padding: 20px; width: 90%; max-width: 420px; color: #ddd;
+  }
+  .modal h2 { font-size: 18px; color: #f0a500; margin-bottom: 14px; }
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; background: #181818; border: 1px solid #444; border-radius: 6px;
+    padding: 8px; color: #fff; font-size: 14px;
+  }
+  .form-row { display: flex; gap: 10px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .btn-cancel { background: transparent; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -67,7 +94,7 @@
   <a href="index.html" class="back-link">&larr; Back to Dispatch</a>
   <div class="console">
     <h1>&#128197; Team Calendar</h1>
-    <div class="subtitle">Vacation, personal days, comp days &mdash; synced from BlueFolder</div>
+    <div class="subtitle">Vacation, personal days, comp days &mdash; synced & managed locally</div>
 
     <div class="toolbar">
       <div class="month-nav">
@@ -76,6 +103,7 @@
         <button class="nav-btn" id="nextBtn" aria-label="Next month">&rsaquo;</button>
       </div>
       <button class="today-btn" id="todayBtn">Today</button>
+      <button class="btn-primary" id="openAddModalBtn">+ Add Entry</button>
       <select id="stateFilter"><option value="">All states</option></select>
     </div>
 
@@ -86,15 +114,49 @@
       <div class="legend-item"><span class="legend-dot" style="background:#7a5200"></span>Personal</div>
       <div class="legend-item"><span class="legend-dot" style="background:#4a1a5c"></span>PTO</div>
       <div class="legend-item"><span class="legend-dot" style="background:#1a3a5c"></span>Comp day</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#3a3a3a"></span>Other</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#3a3a3a"></span>Other / Manual</div>
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <h2>Schedule Time Off / Exception</h2>
+    <form id="addAvailabilityForm">
+      <div class="form-group">
+        <label for="techSelect">Technician</label>
+        <select id="techSelect" required></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1;">
+          <label for="eventDate">Date</label>
+          <input type="date" id="eventDate" required>
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label for="eventReason">Type</label>
+          <select id="eventReason">
+            <option value="vacation">Vacation</option>
+            <option value="personal">Personal</option>
+            <option value="pto">PTO</option>
+            <option value="comp_day">Comp Day</option>
+            <option value="manual">Other / Appt</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="eventNote">Note / Details (Optional)</label>
+        <textarea id="eventNote" rows="2" placeholder="e.g. Dental Appt 9:00am - 11:30am"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="closeModalBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save Entry</button>
+      </div>
+    </form>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
-// Public-safe: the anon key only grants what RLS explicitly allows (read-only,
-// two tables, see the interim_anon_read_for_calendar migration).
 const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tZWhyZm9xaGxqenltYXplbWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzEzMjEsImV4cCI6MjA5OTEwNzMyMX0.rSMvkmpf9rTT4seMKSNf4xlgPkbxcOvia-sP2ZhvOmE';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -116,15 +178,28 @@ function fmtDay(dateStr) {
   return `${md} <span class="dow">${dow}</span>`;
 }
 
-async function loadStates() {
-  const { data, error } = await sb.from('technicians').select('home_state').not('home_state', 'is', null);
-  if (error || !data) return;
-  const states = [...new Set(data.map((r) => r.home_state))].sort();
-  const sel = document.getElementById('stateFilter');
+async function loadStatesAndTechs() {
+  const { data: techData, error } = await sb.from('technicians').select('id, name, home_state').order('name');
+  if (error || !techData) return;
+
+  // Populate States Dropdown
+  const states = [...new Set(techData.map((r) => r.home_state).filter(Boolean))].sort();
+  const selState = document.getElementById('stateFilter');
+  selState.innerHTML = '<option value="">All states</option>';
   for (const s of states) {
     const opt = document.createElement('option');
     opt.value = s; opt.textContent = s;
-    sel.appendChild(opt);
+    selState.appendChild(opt);
+  }
+
+  // Populate Tech Modal Dropdown
+  const selTech = document.getElementById('techSelect');
+  selTech.innerHTML = '';
+  for (const t of techData) {
+    const opt = document.createElement('option');
+    opt.value = t.id; 
+    opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+    selTech.appendChild(opt);
   }
 }
 
@@ -170,8 +245,9 @@ async function loadMonth() {
       const reason = row.reason || 'other';
       const icon = REASON_ICON[reason] || REASON_ICON.other;
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
+      const noteStr = row.note ? ` (${escapeHtml(row.note)})` : '';
       const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
-      html += `<span class="chip reason-${reason}"><span class="icon">${icon}</span>${escapeHtml(row.technicians.name)} &middot; ${label}${synced}</span>`;
+      html += `<span class="chip reason-${reason}"><span class="icon">${icon}</span>${escapeHtml(row.technicians.name)} &middot; ${label}${noteStr}${synced}</span>`;
     }
     html += `</div></div>`;
   }
@@ -184,21 +260,42 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-document.getElementById('prevBtn').addEventListener('click', () => {
-  viewDate.setMonth(viewDate.getMonth() - 1);
-  loadMonth();
-});
-document.getElementById('nextBtn').addEventListener('click', () => {
-  viewDate.setMonth(viewDate.getMonth() + 1);
-  loadMonth();
-});
-document.getElementById('todayBtn').addEventListener('click', () => {
-  viewDate = new Date(); viewDate.setDate(1);
-  loadMonth();
-});
+// Navigation Events
+document.getElementById('prevBtn').addEventListener('click', () => { viewDate.setMonth(viewDate.getMonth() - 1); loadMonth(); });
+document.getElementById('nextBtn').addEventListener('click', () => { viewDate.setMonth(viewDate.getMonth() + 1); loadMonth(); });
+document.getElementById('todayBtn').addEventListener('click', () => { viewDate = new Date(); viewDate.setDate(1); loadMonth(); });
 document.getElementById('stateFilter').addEventListener('change', loadMonth);
 
-loadStates().then(loadMonth);
+// Modal Controls
+const modal = document.getElementById('addModal');
+document.getElementById('openAddModalBtn').addEventListener('click', () => {
+  document.getElementById('eventDate').value = new Date().toISOString().slice(0, 10);
+  modal.classList.add('active');
+});
+document.getElementById('closeModalBtn').addEventListener('click', () => modal.classList.remove('active'));
+
+// Form Submission (Supabase Direct Insert)
+document.getElementById('addAvailabilityForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const techId = document.getElementById('techSelect').value;
+  const day = document.getElementById('eventDate').value;
+  const reason = document.getElementById('eventReason').value;
+  const note = document.getElementById('eventNote').value;
+
+  const { error } = await sb.from('technician_availability').insert([
+    { technician_id: techId, day: day, reason: reason, note: note, available: false }
+  ]);
+
+  if (error) {
+    alert('Error saving entry: ' + error.message);
+  } else {
+    modal.classList.remove('active');
+    document.getElementById('eventNote').value = '';
+    loadMonth();
+  }
+});
+
+loadStatesAndTechs().then(loadMonth);
 </script>
 </body>
 </html>
