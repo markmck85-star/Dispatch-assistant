@@ -105,6 +105,7 @@
             <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
             <button id="tabClosedtickets" onclick="switchTab('closedtickets')">✅ Closed Tickets</button>
             <button id="tabRepeatissues" onclick="switchTab('repeatissues')">⚠️ Repeat Issues</button>
+            <button id="tabUnmatchedsites" onclick="switchTab('unmatchedsites')">🔍 Unmatched Sites</button>
         </div>
 
         <!-- LOCATIONS TAB -->
@@ -528,6 +529,20 @@
             </div>
         </div>
 
+        <!-- UNMATCHED SITES TAB -->
+        <div id="sectionUnmatchedsites" class="section">
+            <div class="form-section">
+                <h2>🔍 Unmatched Sites</h2>
+                <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
+                    Closed-ticket import rows where the site name couldn't be matched confidently enough to auto-link.
+                    Grouped by raw name, since the same unmatched name usually covers many rows — fix it once here and
+                    every row sharing that name gets updated together.
+                </p>
+                <div id="usStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
+                <div id="usGroups"></div>
+            </div>
+        </div>
+
         <a href="/" style="text-decoration:none;">
             <button class="big-btn back-btn" type="button" style="margin-top:20px;" onclick="history.back()">Back to Dispatch Tool</button>
         </a>
@@ -663,7 +678,7 @@
 
         // --- TAB SWITCHING ---
         function switchTab(tab) {
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues'];
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -672,9 +687,104 @@
                 document.getElementById(tabId).className = (t === tab ? 'active' : '');
             }
             if (tab === 'repeatissues') loadRepeatIssues();
+            if (tab === 'unmatchedsites') loadUnmatchedSites();
         }
 
-        // --- REPEAT ISSUES ---
+        // --- UNMATCHED SITES ---
+        var usGroups = [];
+        var usAllSites = [];
+
+        async function loadUnmatchedSites() {
+            var statusEl = document.getElementById('usStatus');
+            var groupsEl = document.getElementById('usGroups');
+            statusEl.textContent = 'Loading…';
+            groupsEl.innerHTML = '';
+
+            try {
+                var [groupsRes, sitesRes] = await Promise.all([
+                    fetch('/.netlify/functions/get-unmatched-sites', { cache: 'no-store' }),
+                    usAllSites.length ? Promise.resolve(null) : fetch('/.netlify/functions/get-site-list', { cache: 'no-store' })
+                ]);
+                var groupsData = await groupsRes.json();
+                if (!groupsRes.ok || !groupsData.ok) throw new Error(groupsData.error || ('HTTP ' + groupsRes.status));
+                if (sitesRes) {
+                    var sitesData = await sitesRes.json();
+                    if (!sitesRes.ok || !sitesData.ok) throw new Error(sitesData.error || ('HTTP ' + sitesRes.status));
+                    usAllSites = sitesData.sites || [];
+                }
+
+                usGroups = groupsData.groups || [];
+                statusEl.textContent = usGroups.length + ' unmatched name' + (usGroups.length === 1 ? '' : 's') + ' · ' + groupsData.totalRows + ' row(s) total.';
+                renderUnmatchedGroups();
+            } catch (e) {
+                statusEl.textContent = 'Error loading unmatched sites: ' + e.message;
+            }
+        }
+
+        function renderUnmatchedGroups() {
+            var groupsEl = document.getElementById('usGroups');
+            if (!usGroups.length) {
+                groupsEl.innerHTML = '<div style="color:#8bc98b;padding:10px;">All caught up — no unmatched sites right now.</div>';
+                return;
+            }
+            var html = '';
+            usGroups.forEach(function(g, i) {
+                var sugg = g.suggested;
+                var suggHtml = sugg
+                    ? '<div style="margin-top:6px;font-size:13px;">Suggested: <strong>' + esc(sugg.site_code) + ' — ' + esc(sugg.name) + '</strong>' +
+                      ' <span style="color:#999;">(' + Math.round(sugg.score * 100) + '% match)</span> ' +
+                      '<button onclick="usApply(' + i + ', \'' + sugg.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>'
+                    : '<div style="margin-top:6px;font-size:13px;color:#999;">No suggested match.</div>';
+                html += '<div class="card" id="usCard' + i + '" style="border-left-color:#e0a030;">' +
+                    '<div class="card-title">' + esc(g.state) + ' — "' + esc(g.account_name_raw) + '"</div>' +
+                    '<div class="card-detail">' + g.row_count + ' row(s)</div>' +
+                    suggHtml +
+                    '<div style="margin-top:8px;">' +
+                    '<input type="text" id="usSearch' + i + '" placeholder="Search for the correct site…" oninput="usFilter(' + i + ')" style="width:100%;padding:6px 8px;font-size:13px;">' +
+                    '<div id="usResults' + i + '" style="max-height:160px;overflow-y:auto;margin-top:4px;"></div>' +
+                    '</div>' +
+                    '</div>';
+            });
+            groupsEl.innerHTML = html;
+        }
+
+        function usFilter(i) {
+            var q = document.getElementById('usSearch' + i).value.trim().toLowerCase();
+            var resultsEl = document.getElementById('usResults' + i);
+            if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+            var matches = usAllSites.filter(function(s) {
+                return (s.name + ' ' + s.site_code).toLowerCase().indexOf(q) !== -1;
+            }).slice(0, 15);
+            resultsEl.innerHTML = matches.map(function(s) {
+                return '<div onclick="usApply(' + i + ', \'' + s.id + '\')" style="padding:6px 8px;font-size:13px;border-bottom:1px solid #333;cursor:pointer;">' +
+                    '<span style="color:#6cb2ff;font-weight:600;">' + esc(s.site_code) + '</span> ' + esc(s.name) + ' <span style="color:#999;">(' + esc(s.state) + ')</span>' +
+                    '</div>';
+            }).join('') || '<div style="padding:6px 8px;font-size:12px;color:#999;">No matches</div>';
+        }
+
+        async function usApply(i, siteId) {
+            var g = usGroups[i];
+            var card = document.getElementById('usCard' + i);
+            card.style.opacity = '0.5';
+            try {
+                var res = await fetch('/.netlify/functions/apply-site-match', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: g.state, account_name_raw: g.account_name_raw, site_id: siteId })
+                });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                card.innerHTML = '<div style="color:#8bc98b;">✓ Applied — ' + data.updated + ' row(s) updated.</div>';
+                usGroups[i] = null; // keep array indices stable -- other cards' onclick handlers reference their original index
+                var remaining = usGroups.filter(Boolean).length;
+                document.getElementById('usStatus').textContent = remaining + ' unmatched name(s) remaining.';
+            } catch (e) {
+                card.style.opacity = '1';
+                alert('Error applying match: ' + e.message);
+            }
+        }
+
+
         async function loadRepeatIssues() {
             var statusEl = document.getElementById('riStatus');
             var resultsEl = document.getElementById('riResults');
