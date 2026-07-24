@@ -230,8 +230,13 @@ function upsLink(num) {
 function renderHistory() {
     const data = { site: historyState.siteInfo, visits: historyState.visits, shipments: historyState.shipments };
     let html = `<div class="card">
-        <h2>${escapeHtml(data.site.name)}</h2>
-        <div class="meta">${escapeHtml(data.site.state)} · ${escapeHtml(data.site.code)}</div>`;
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+                <h2 style="margin-bottom:0;">${escapeHtml(data.site.name)}</h2>
+                <div class="meta">${escapeHtml(data.site.state)} · ${escapeHtml(data.site.code)}</div>
+            </div>
+            <button onclick="printLocationHistory()" style="background:#3a3f4a;color:#e8e8e8;border:1px solid #555;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap;">🖨️ Save as PDF</button>
+        </div>`;
 
     html += `<h3 class="section-label">Visit History</h3>`;
     html += data.visits.map(v => {
@@ -273,6 +278,95 @@ function renderHistory() {
 
     html += `</div>`;
     output.innerHTML = html;
+}
+
+async function printLocationHistory() {
+    if (!historyState || !historyState.visits.length) {
+        alert('No visit history loaded to export yet.');
+        return;
+    }
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        while (historyState.hasMore) {
+            await loadMoreHistory();
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🖨️ Save as PDF'; }
+    }
+
+    const st = historyState;
+    const generatedOn = new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+    const titleText = `Visit History — ${st.siteInfo.name} (${st.siteInfo.code})`;
+
+    let content = `<div class="print-header">
+        <div class="print-title">${titleText}</div>
+        <div class="print-date">Exported ${generatedOn} · ${st.totalVisits || st.visits.length} visits</div>
+    </div>`;
+
+    content += st.visits.map(v => {
+        const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+        const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+        const kindColor = isRestockLike ? '#2e7d32' : '#c62828';
+        const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
+        const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
+        return `<div class="print-stop">
+            <div><strong>${date}</strong> — <span style="color:${kindColor};">${escapeHtml(kindLabel)}</span>${dur ? ' · ' + dur : ''}</div>
+            <div class="print-stop-addr">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}${reviewNote}</div>
+            ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${escapeHtml(v.appointment_number)}</div>` : ''}
+            ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${escapeHtml(v.wo_number)}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    if (st.shipments && st.shipments.length) {
+        content += `<h4 style="margin:16px 0 4px;">Related Shipments</h4>`;
+        content += st.shipments.map(s => {
+            const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+            const returnStatus = s.return_broken_part
+                ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
+                : '';
+            const trackingParts = [];
+            if (s.outbound_tracking) trackingParts.push('Out: ' + s.outbound_tracking);
+            if (s.inbound_tracking) trackingParts.push('In: ' + s.inbound_tracking);
+            return `<div class="print-stop">
+                <div><strong>${date}</strong> — WO ${escapeHtml(s.wo_number || '?')}${s.warehouse_name ? ' · ' + escapeHtml(s.warehouse_name) : ''}</div>
+                <div class="print-stop-addr">${trackingParts.join(' · ')}</div>
+                ${returnStatus ? `<div>${returnStatus}</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    const docTitle = titleText.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+    const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${docTitle}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 16px; font-size: 15px; color: #222; max-width: 700px; margin: 0 auto; }
+  .print-btn { display: block; width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-bottom: 16px; cursor: pointer; }
+  .print-header { margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  .print-title { font-size: 20px; font-weight: bold; }
+  .print-date { font-size: 14px; color: #555; margin-top: 2px; }
+  .print-stop { padding: 8px 0; border-bottom: 1px solid #eee; }
+  .print-stop:last-child { border-bottom: none; }
+  .print-stop-addr { font-size: 13px; color: #555; margin-top: 2px; }
+  @media print { .print-btn { display: none; } body { padding: 0; } }
+</style>
+</head><body>
+<button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
+${content}</body></html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWin = window.open(blobUrl, '_blank');
+    if (!printWin) {
+        alert('Please allow popups to export this, or long-press the Save as PDF button and choose "Open in new tab".');
+        URL.revokeObjectURL(blobUrl);
+        return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 }
 </script>
 </body>

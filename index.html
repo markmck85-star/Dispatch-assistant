@@ -4667,6 +4667,96 @@ ${content}</body></html>`;
             }
         }
 
+        async function printSiteHistory() {
+            if (!_siteHistoryState || !_siteHistoryState.visits.length) {
+                alert('No visit history loaded to export yet.');
+                return;
+            }
+            const btn = event && event.target;
+            if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+            try {
+                // Make sure the export is complete, not just whatever page happens to be loaded
+                while (_siteHistoryState.hasMore) {
+                    await loadMoreSiteHistory();
+                }
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '🖨️ Save as PDF'; }
+            }
+
+            const st = _siteHistoryState;
+            const titleText = document.getElementById('siteHistoryTitle').textContent;
+            const generatedOn = new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+
+            let content = `<div class="print-header">
+                <div class="print-title">${titleText}</div>
+                <div class="print-date">Exported ${generatedOn} · ${st.totalVisits || st.visits.length} visits</div>
+            </div>`;
+
+            content += st.visits.map(v => {
+                const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+                const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+                const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+                const kindColor = isRestockLike ? '#2e7d32' : '#c62828';
+                const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
+                const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
+                return `<div class="print-stop">
+                    <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
+                    <div class="print-stop-addr">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
+                    ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>` : ''}
+                    ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            if (st.shipments && st.shipments.length) {
+                content += `<h4 style="margin:16px 0 4px;">Related Shipments</h4>`;
+                content += st.shipments.map(s => {
+                    const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+                    const returnStatus = s.return_broken_part
+                        ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
+                        : '';
+                    const trackingParts = [];
+                    if (s.outbound_tracking) trackingParts.push('Out: ' + s.outbound_tracking);
+                    if (s.inbound_tracking) trackingParts.push('In: ' + s.inbound_tracking);
+                    return `<div class="print-stop">
+                        <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
+                        <div class="print-stop-addr">${trackingParts.join(' · ')}</div>
+                        ${returnStatus ? `<div>${returnStatus}</div>` : ''}
+                    </div>`;
+                }).join('');
+            }
+
+            const docTitle = titleText.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+            const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${docTitle}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 16px; font-size: 15px; color: #222; max-width: 700px; margin: 0 auto; }
+  .print-btn { display: block; width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-bottom: 16px; cursor: pointer; }
+  .print-header { margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  .print-title { font-size: 20px; font-weight: bold; }
+  .print-date { font-size: 14px; color: #555; margin-top: 2px; }
+  .print-stop { padding: 8px 0; border-bottom: 1px solid #eee; }
+  .print-stop:last-child { border-bottom: none; }
+  .print-stop-addr { font-size: 13px; color: #555; margin-top: 2px; }
+  @media print { .print-btn { display: none; } body { padding: 0; } }
+</style>
+</head><body>
+<button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
+${content}</body></html>`;
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const blobUrl = URL.createObjectURL(blob);
+            const printWin = window.open(blobUrl, '_blank');
+            if (!printWin) {
+                alert('Please allow popups to export this, or long-press the Save as PDF button and choose "Open in new tab".');
+                URL.revokeObjectURL(blobUrl);
+                return;
+            }
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+        }
+
         async function showSiteHistory(code) {
             const overlay = document.getElementById('siteHistoryOverlay');
             const title = document.getElementById('siteHistoryTitle');
@@ -4702,7 +4792,10 @@ ${content}</body></html>`;
         <div style="background:#fff;max-width:600px;margin:40px auto;padding:20px;border-radius:8px;max-height:80vh;overflow-y:auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h3 id="siteHistoryTitle" style="margin:0;">Visit History</h3>
-                <button onclick="closeSiteHistory()" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <button onclick="printSiteHistory()" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">🖨️ Save as PDF</button>
+                    <button onclick="closeSiteHistory()" style="background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+                </div>
             </div>
             <div id="siteHistoryBody" style="font-size:13px;color:#333;">Loading…</div>
         </div>
