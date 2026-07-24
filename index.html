@@ -450,7 +450,7 @@
             "Sean Reich": { phone: "(478) 365-5879", firstName: "Sean", state: "GA", startLocation: "317 Amanda Drive, Macon, GA" },
             "Mark McKelvey": { phone: "(678) 779-4352", firstName: "Mark", state: "GA", startLocation: "510 Sartain Court, Johns Creek, GA 30097" },
             "Gina Ownbey": { phone: "(404) 723-5867", firstName: "Gina", state: "GA", startLocation: "Apt A9 6500 Gaines Ferry Rd, Flowery Branch, GA 30542" },
-            "Robert Whitehead": { phone: "(972) 393-9330", firstName: "Robert", state: "GA", startLocation: "Savannah, GA" },
+            "Robert Whitehead": { phone: "(972) 393-9330", firstName: "Robert", state: "GA", startLocation: "Savannah, GA", active: false },
             "Evan Zent": { phone: "919-291-6903", firstName: "Evan", state: "NC", startLocation: "1225 Alston Ridge Court, Cary, NC 27519" },
             "Michael Newboult": { phone: "503-619-5542", firstName: "Michael", state: "SC", startLocation: "165 Ridgemont Dr, Columbia, SC 29212" }
         };
@@ -2029,10 +2029,14 @@ function distanceMatrixStatus(state) {
                 return;
             }
             panel.style.display = 'block';
-            // Default to today; switch to dispatch date when generating
-            const todayStr = new Date().toISOString().split('T')[0];
-            const dateStr = overrideDate || todayStr;
-            const isDispatchDate = overrideDate && overrideDate !== todayStr;
+            // Default to the selected dispatch date; today only if nothing is selected.
+            // Use local date components, not toISOString() (UTC) — near midnight
+            // Eastern, toISOString() already rolls to the next calendar day and
+            // breaks comp-day/on-call lookups keyed by local date.
+            const _now = new Date();
+            const todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
+            const dateStr = overrideDate || dateInput.value || todayStr;
+            const isDispatchDate = dateStr !== todayStr;
             // Update context label
             const ctxLabel = document.getElementById('availabilityContext');
             if (ctxLabel) {
@@ -2066,9 +2070,9 @@ function distanceMatrixStatus(state) {
             // BlueFolder-synced vacation/personal/comp-day entries for this date
             const bfDay = (window.bfUnavailable && window.bfUnavailable[dateStr]) || {};
 
-            // Show all techs for current state, excluding contractors
+            // Show all techs for current state, excluding contractors and inactive/departed techs
             const contractors = new Set(['TechSpot','Arcitechx']);
-            const techsToShow = Object.keys(TECHS).filter(t => !contractors.has(t));
+            const techsToShow = Object.keys(TECHS).filter(t => !contractors.has(t) && TECHS[t].active !== false);
             // Build display names — add last initial if first name is shared
             const firstNames = techsToShow.map(t => t.split(' ')[0]);
             const displayName = t => {
@@ -2133,7 +2137,8 @@ function distanceMatrixStatus(state) {
                 : !!window.manualUnavailable[tech];
             window.manualUnavailable[tech] = currentlyOut ? false : true;
             refreshAvailabilityPanel();
-            const today = new Date().toISOString().split('T')[0];
+            const _n = new Date();
+            const today = `${_n.getFullYear()}-${String(_n.getMonth()+1).padStart(2,'0')}-${String(_n.getDate()).padStart(2,'0')}`;
             try {
                 await fetch('/.netlify/functions/save-availability', {
                     method: 'POST',
@@ -2168,7 +2173,8 @@ function distanceMatrixStatus(state) {
                 const res = await fetch('/.netlify/functions/get-availability');
                 if (res.ok) {
                     const data = await res.json();
-                    const today = new Date().toISOString().split('T')[0];
+                    const _n2 = new Date();
+                    const today = `${_n2.getFullYear()}-${String(_n2.getMonth()+1).padStart(2,'0')}-${String(_n2.getDate()).padStart(2,'0')}`;
                     if (data.manualUnavailable && data.date === today) {
                         window.manualUnavailable = data.manualUnavailable;
                         refreshAvailabilityPanel();
