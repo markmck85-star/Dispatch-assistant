@@ -3213,7 +3213,7 @@ function distanceMatrixStatus(state) {
             function renderTechCard(tech, items) {
                 const techStart = TECHS[tech] ? (TECHS[tech].startLocation || '') : '';
                 const stops = items.map(i => encodeURIComponent(LOCATIONS[i.code].address)).join('/');
-                const mapLink = `https://www.google.com/maps/dir/${encodeURIComponent(techStart)}/${stops}/${encodeURIComponent(techStart)}`;
+                const mapLink = `https://www.google.com/maps/dir/${encodeURIComponent(techStart)}/${stops}`;
                 const techKey = tech.replace(/\s+/g, '-');
                 window.techRouteData[techKey] = { mapLink, codes: items.map(i => i.code) };
 
