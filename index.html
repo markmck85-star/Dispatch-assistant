@@ -1829,7 +1829,76 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return _DM_EARTH_RADIUS_MI * 2 * Math.asin(Math.sqrt(a));
 }
 
-// ─── MATRIX LOADER ───────────────────────────────────────────────────────────
+// ─── STOP ORDER (nearest-neighbor) ────────────────────────────────────────────
+/**
+ * Reorders one tech's stops into a nearest-neighbor route from their home
+ * location, using straight-line distance (haversineDistance) against the
+ * lat/lng already on LOCATIONS/TECHS from the geocoding pass -- ~90% of
+ * active sites have coordinates, so this covers the vast majority of stops.
+ *
+ * This is a starting-point ordering, not real driving-distance routing --
+ * straight-line distance can be a poor proxy in areas with heavy traffic or
+ * unusual road layouts (Atlanta specifically). The ▲▼ controls remain the
+ * correction tool for whatever this gets wrong; this just replaces "whatever
+ * order the dispatch list happened to list stops in" with something
+ * geographically sane by default.
+ *
+ * Stops without coordinates are left in their relative order at the end
+ * rather than dropped or guessed at.
+ *
+ * Mutates window.currentAssignments[tech] in place. Returns true if a sort
+ * was actually applied (false if there was nothing useful to sort).
+ */
+function sortStopsByDistance(tech) {
+  const items = window.currentAssignments && window.currentAssignments[tech];
+  if (!items || items.length <= 1) return false;
+
+  const techInfo = TECHS[tech] || {};
+  let current = (techInfo.lat != null && techInfo.lng != null)
+    ? { lat: techInfo.lat, lng: techInfo.lng }
+    : null;
+
+  const withCoords = [];
+  const withoutCoords = [];
+  for (const item of items) {
+    const loc = LOCATIONS[item.code];
+    if (loc && loc.lat != null && loc.lng != null) withCoords.push(item);
+    else withoutCoords.push(item);
+  }
+  if (withCoords.length <= 1) return false;
+
+  // If the tech's own home coordinates aren't available, start from
+  // whichever of their stops is currently first rather than guessing.
+  if (!current) {
+    const firstLoc = LOCATIONS[withCoords[0].code];
+    current = { lat: firstLoc.lat, lng: firstLoc.lng };
+  }
+
+  const remaining = withCoords.slice();
+  const ordered = [];
+  while (remaining.length) {
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const loc = LOCATIONS[remaining[i].code];
+      const d = haversineDistance(current.lat, current.lng, loc.lat, loc.lng);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    const next = remaining.splice(bestIdx, 1)[0];
+    ordered.push(next);
+    current = LOCATIONS[next.code];
+  }
+
+  window.currentAssignments[tech] = ordered.concat(withoutCoords);
+  return true;
+}
+
+/** Button handler: re-sort one tech's card (e.g. after a stop is reassigned to them) and re-render. */
+function resortTechStops(tech) {
+  sortStopsByDistance(tech);
+  renderReviewBoard(true);
+}
+
+
 /**
  * Load the pre-computed matrix for a state from Blobs.
  * Result is cached in _dmCache.  Returns null if not available.
@@ -2992,6 +3061,13 @@ function distanceMatrixStatus(state) {
 
             window.currentAssignments = assignments;
 
+            // Default each tech's stop order to a sane geographic sequence
+            // rather than leaving it in whatever order the dispatch list
+            // happened to list stops in -- see sortStopsByDistance for the
+            // approach/caveats. Best-effort: a tech or stop missing
+            // coordinates just keeps its original position.
+            Object.keys(assignments).forEach(tech => sortStopsByDistance(tech));
+
             // Phase 2 Stage 2: persist this dispatch generation as the initial
             // assignment record for each stop. Best-effort/non-blocking -- see
             // syncAssignmentToSupabase. Only attach the ticket when this run was
@@ -3146,6 +3222,7 @@ function distanceMatrixStatus(state) {
                         <strong>${tech} (${items.length})</strong>
                         <div>
                             <button class="control-btn" style="background:#17a2b8; color:white;" onclick="showRoutePopover(event,'${techKey}')">🗺️ Route</button>
+                            <button class="control-btn" style="background:#6c5ce7; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
                         </div>
                     </div>
                     <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0; margin-bottom:4px;"></div>`;
