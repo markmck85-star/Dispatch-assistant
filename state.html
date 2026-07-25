@@ -276,11 +276,16 @@ async function loadRestock(state) {
     </div>`;
     if (topUrgent.length) {
       html += topUrgent.map(l => {
-        const label = l.status === 'overdue' ? 'Overdue' : 'Due soon';
+        let label = l.status === 'overdue' ? 'Overdue' : 'Due soon';
+        if (l.visitedSinceRestock) label += ' (visited)';
         const cls = l.status === 'overdue' ? 'trouble' : 'maintenance';
+        const lastVisitLine = l.visitedSinceRestock
+          ? `<div class="meta">Last visit: ${fmtDateTime(l.lastVisit)}${l.lastVisitTech ? ' (' + escapeHtml(l.lastVisitTech) + ')' : ''}${l.lastVisitAppt ? ' · ' + escapeHtml(l.lastVisitAppt) : ''}</div>`
+          : '';
         return `<div class="ticket-card ${cls}">
           <div class="title">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
           <div class="meta">${label} · last restock ${l.daysSince != null ? l.daysSince + ' days ago' : '—'}</div>
+          ${lastVisitLine}
         </div>`;
       }).join('');
     }
