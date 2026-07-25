@@ -259,6 +259,7 @@
                 <a href="calendar.html" class="team-calendar-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🗓️ Team Calendar</a>
                 <a href="shipments.html" class="shipments-link" style="display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📦 RMA Shipments</a>
                 <a href="location-lookup.html" class="location-lookup-link" style="display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🔍 Location Lookup</a>
+                <a href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
@@ -3327,7 +3328,7 @@ function distanceMatrixStatus(state) {
                         <strong>${tech} (${items.length})</strong>
                         <div>
                             <button class="control-btn" style="background:#17a2b8; color:white;" onclick="showRoutePopover(event,'${techKey}')">🗺️ Route</button>
-                            <button class="control-btn" style="background:#6c5ce7; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
+                            <button class="control-btn" style="background:#d68910; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
                         </div>
                     </div>
                     ${routeSummary ? `<div style="font-size:12px;color:#888;margin-bottom:4px;">📏 ${routeSummary} total</div>` : ''}

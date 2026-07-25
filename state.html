@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State Console</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.5; font-size: 16px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  .back-link { display: inline-block; color: #007bff; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+
+  .console { background: #181818; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); padding: 16px; color: #ddd; }
+  .console h1 { color: #f0a500; font-size: 21px; margin-bottom: 2px; }
+  .console .subtitle { color: #888; font-size: 12px; margin-bottom: 14px; }
+
+  select#stateSel {
+    background: #2a2a2a; color: #ddd; border: 1px solid #444; border-radius: 6px;
+    padding: 8px 10px; font-size: 15px; margin-bottom: 16px; width: 100%;
+  }
+
+  h2.section-label {
+    font-size: 13px; color: #b8bcc2; margin: 20px 0 8px; text-transform: uppercase;
+    letter-spacing: 0.04em; border-top: 1px solid #2a2a2a; padding-top: 14px;
+  }
+  h2.section-label:first-of-type { border-top: none; padding-top: 0; }
+
+  .status-line { color: #888; font-size: 12px; padding: 6px 0; }
+
+  .tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .tech-chip { border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .tech-chip.avail { background: #16321f; border: 1px solid #2e5c3a; }
+  .tech-chip.out { background: #3a1c1c; border: 1px solid #6b2b2b; }
+  .tech-chip .name { font-weight: 600; color: #f0f0f0; }
+  .tech-chip .status { font-size: 11px; margin-top: 2px; }
+  .tech-chip.avail .status { color: #7bc796; }
+  .tech-chip.out .status { color: #e08a8a; }
+
+  .ticket-card { border-left: 3px solid #444; background: #1e1e1e; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
+  .ticket-card.trouble { border-left-color: #dc3545; }
+  .ticket-card.maintenance { border-left-color: #e0a030; }
+  .ticket-card .title { font-weight: 600; color: #f0f0f0; }
+  .ticket-card .meta { color: #999; font-size: 12px; margin-top: 2px; }
+
+  .restock-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .restock-pill { border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+  .restock-pill.overdue { background: #3a1c1c; color: #e08a8a; }
+  .restock-pill.soon { background: #3a2e10; color: #e0c080; }
+  .restock-pill.ok { background: #16321f; color: #7bc796; }
+  a.see-more { color: #6cb2ff; font-size: 13px; text-decoration: none; }
+
+  .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 16px 10px; color: #666; }
+  .error-state { color: #e57373; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back-link">← Back to Dispatch Tool</a>
+  <div class="console">
+    <h1>📍 State Console</h1>
+    <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
+
+    <select id="stateSel" onchange="loadAll()">
+      <option value="GA">Georgia</option>
+      <option value="FL">Florida</option>
+      <option value="MI">Michigan</option>
+      <option value="IN">Indiana</option>
+      <option value="CO">Colorado</option>
+      <option value="OH">Ohio</option>
+      <option value="NV">Nevada</option>
+      <option value="IL">Illinois</option>
+      <option value="MN">Minnesota</option>
+      <option value="WV">West Virginia</option>
+      <option value="OR">Oregon</option>
+      <option value="NC">North Carolina</option>
+      <option value="SC">South Carolina</option>
+    </select>
+
+    <h2 class="section-label">👥 Technician Availability — Today</h2>
+    <div id="techStatus" class="status-line">Loading…</div>
+    <div id="techGrid" class="tech-grid"></div>
+
+    <h2 class="section-label">🔄 Restock Status</h2>
+    <div id="restockStatus" class="status-line">Loading…</div>
+    <div id="restockSummary"></div>
+
+    <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
+    <div id="ticketStatus" class="status-line">Loading…</div>
+    <div id="ticketList"></div>
+  </div>
+</div>
+
+<script>
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+async function loadAll() {
+  const state = document.getElementById('stateSel').value;
+  loadConsole(state);
+  loadRestock(state);
+}
+
+async function loadConsole(state) {
+  const techStatus = document.getElementById('techStatus');
+  const techGrid = document.getElementById('techGrid');
+  const ticketStatus = document.getElementById('ticketStatus');
+  const ticketList = document.getElementById('ticketList');
+
+  techStatus.textContent = 'Loading…';
+  ticketStatus.textContent = 'Loading…';
+  techGrid.innerHTML = '';
+  ticketList.innerHTML = '';
+
+  try {
+    const res = await fetch('/.netlify/functions/get-state-console?state=' + encodeURIComponent(state), { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    const outCount = data.technicians.filter(t => !t.available).length;
+    techStatus.textContent = data.technicians.length + ' technician(s) · ' + outCount + ' out today';
+    if (!data.technicians.length) {
+      techGrid.innerHTML = '<div class="empty-state">No technicians on file for this state.</div>';
+    } else {
+      techGrid.innerHTML = data.technicians.map(t => {
+        const cls = t.available ? 'avail' : 'out';
+        const statusText = t.available ? 'Available' : (t.reason || 'Out') + (t.note ? ' — ' + escapeHtml(t.note) : '');
+        return `<div class="tech-chip ${cls}"><div class="name">${escapeHtml(t.name)}</div><div class="status">${statusText}</div></div>`;
+      }).join('');
+    }
+
+    ticketStatus.textContent = data.recentTickets.length + ' ticket(s) in the last 3 days';
+    if (!data.recentTickets.length) {
+      ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
+    } else {
+      ticketList.innerHTML = data.recentTickets.map(t => {
+        return `<div class="ticket-card ${t.ticketKind}">
+          <div class="title">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
+          <div class="meta">${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''} · ${fmtDateTime(t.receivedAt)}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    techStatus.textContent = '';
+    ticketStatus.textContent = '';
+    techGrid.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function loadRestock(state) {
+  const restockStatus = document.getElementById('restockStatus');
+  const restockSummary = document.getElementById('restockSummary');
+  restockStatus.textContent = 'Loading…';
+  restockSummary.innerHTML = '';
+
+  try {
+    const res = await fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(state), { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    const counts = { overdue: 0, soon: 0, ok: 0 };
+    (data.locations || []).forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
+    restockStatus.textContent = data.locations.length + ' site(s) tracked';
+
+    const topUrgent = (data.locations || []).filter(l => l.status === 'overdue' || l.status === 'soon').slice(0, 8);
+    let html = `<div class="restock-summary">
+      <span class="restock-pill overdue">${counts.overdue} overdue</span>
+      <span class="restock-pill soon">${counts.soon} due soon</span>
+      <span class="restock-pill ok">${counts.ok} on track</span>
+    </div>`;
+    if (topUrgent.length) {
+      html += topUrgent.map(l => {
+        const label = l.status === 'overdue' ? 'Overdue' : 'Due soon';
+        const cls = l.status === 'overdue' ? 'trouble' : 'maintenance';
+        return `<div class="ticket-card ${cls}">
+          <div class="title">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
+          <div class="meta">${label} · last restock ${l.daysSince != null ? l.daysSince + ' days ago' : '—'}</div>
+        </div>`;
+      }).join('');
+    }
+    restockSummary.innerHTML = html;
+  } catch (e) {
+    restockStatus.textContent = '';
+    restockSummary.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+loadAll();
+</script>
+</body>
+</html>
