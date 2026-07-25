@@ -1829,19 +1829,30 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return _DM_EARTH_RADIUS_MI * 2 * Math.asin(Math.sqrt(a));
 }
 
-// ─── STOP ORDER (nearest-neighbor) ────────────────────────────────────────────
+// ─── STOP ORDER (nearest-neighbor + 2-opt) ────────────────────────────────────
 /**
- * Reorders one tech's stops into a nearest-neighbor route from their home
- * location, using straight-line distance (haversineDistance) against the
- * lat/lng already on LOCATIONS/TECHS from the geocoding pass -- ~90% of
- * active sites have coordinates, so this covers the vast majority of stops.
+ * Reorders one tech's stops into a sensible route from their home location.
  *
- * This is a starting-point ordering, not real driving-distance routing --
- * straight-line distance can be a poor proxy in areas with heavy traffic or
- * unusual road layouts (Atlanta specifically). The ▲▼ controls remain the
- * correction tool for whatever this gets wrong; this just replaces "whatever
- * order the dispatch list happened to list stops in" with something
- * geographically sane by default.
+ * Distance sourcing, layered by what's actually available:
+ *   - home -> first stop: getTechDistance(), which already prefers the real
+ *     precomputed driving-distance matrix and falls back to straight-line
+ *     only when that's missing.
+ *   - stop -> stop: straight-line (haversineDistance) only. The precomputed
+ *     matrix is keyed exclusively by technician|location pairs -- it has no
+ *     location-to-location entries at all, so there's no real driving
+ *     distance to prefer here yet. (An earlier version of this function
+ *     implied otherwise; confirmed against compute-distance-matrix.js
+ *     2026-07-25 that this data doesn't exist.) Straight-line distance can
+ *     be a poor proxy in areas with heavy traffic or unusual road layouts
+ *     (Atlanta specifically) -- the ▲▼ controls remain the correction tool
+ *     for whatever this gets wrong.
+ *
+ * Two passes:
+ *   1. Nearest-neighbor for an initial route.
+ *   2. 2-opt: repeatedly try reversing each sub-segment of the route: keep
+ *      the reversal if it shortens the total straight-line distance. This
+ *      is what catches the crossing/backtracking a plain nearest-neighbor
+ *      pass can leave behind (Mark's raised-eyebrow routes).
  *
  * Stops without coordinates are left in their relative order at the end
  * rather than dropped or guessed at.
@@ -1853,11 +1864,6 @@ function sortStopsByDistance(tech) {
   const items = window.currentAssignments && window.currentAssignments[tech];
   if (!items || items.length <= 1) return false;
 
-  const techInfo = TECHS[tech] || {};
-  let current = (techInfo.lat != null && techInfo.lng != null)
-    ? { lat: techInfo.lat, lng: techInfo.lng }
-    : null;
-
   const withCoords = [];
   const withoutCoords = [];
   for (const item of items) {
@@ -1867,28 +1873,75 @@ function sortStopsByDistance(tech) {
   }
   if (withCoords.length <= 1) return false;
 
-  // If the tech's own home coordinates aren't available, start from
-  // whichever of their stops is currently first rather than guessing.
-  if (!current) {
-    const firstLoc = LOCATIONS[withCoords[0].code];
-    current = { lat: firstLoc.lat, lng: firstLoc.lng };
+  // Home leg: real driving distance where available, straight-line fallback
+  // baked into getTechDistance() itself.
+  const homeInfo = getTechDistance(tech, withCoords[0].code, CURRENT_STATE);
+  const techInfo = TECHS[tech] || {};
+  let homeCoords = (techInfo.lat != null && techInfo.lng != null)
+    ? { lat: techInfo.lat, lng: techInfo.lng }
+    : null;
+
+  function legDist(fromCode, toCode) {
+    // fromCode === null means "from home"
+    if (fromCode === null) {
+      const info = getTechDistance(tech, toCode, CURRENT_STATE);
+      if (info && info.distanceMi != null) return info.distanceMi;
+      // getTechDistance already falls back to haversine internally when it
+      // has tech coordinates; this only triggers if even that's missing.
+      if (homeCoords) {
+        const loc = LOCATIONS[toCode];
+        return haversineDistance(homeCoords.lat, homeCoords.lng, loc.lat, loc.lng);
+      }
+      return 0; // no home reference at all -- treat as free, order stays as nearest-neighbor found it
+    }
+    const a = LOCATIONS[fromCode], b = LOCATIONS[toCode];
+    return haversineDistance(a.lat, a.lng, b.lat, b.lng);
   }
 
+  function routeDist(route) {
+    let total = legDist(null, route[0].code);
+    for (let i = 0; i < route.length - 1; i++) total += legDist(route[i].code, route[i + 1].code);
+    return total;
+  }
+
+  // Pass 1: nearest-neighbor
   const remaining = withCoords.slice();
-  const ordered = [];
+  const nnRoute = [];
+  let prevCode = null;
   while (remaining.length) {
     let bestIdx = 0, bestDist = Infinity;
     for (let i = 0; i < remaining.length; i++) {
-      const loc = LOCATIONS[remaining[i].code];
-      const d = haversineDistance(current.lat, current.lng, loc.lat, loc.lng);
+      const d = legDist(prevCode, remaining[i].code);
       if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
     const next = remaining.splice(bestIdx, 1)[0];
-    ordered.push(next);
-    current = LOCATIONS[next.code];
+    nnRoute.push(next);
+    prevCode = next.code;
   }
 
-  window.currentAssignments[tech] = ordered.concat(withoutCoords);
+  // Pass 2: 2-opt refinement on top of the nearest-neighbor route
+  let route = nnRoute;
+  let bestDist = routeDist(route);
+  let improved = true;
+  let guard = 0;
+  while (improved && guard < 200) {
+    improved = false;
+    guard++;
+    for (let i = 0; i < route.length - 1 && !improved; i++) {
+      for (let k = i + 1; k < route.length; k++) {
+        const candidate = route.slice(0, i).concat(route.slice(i, k + 1).reverse()).concat(route.slice(k + 1));
+        const candidateDist = routeDist(candidate);
+        if (candidateDist < bestDist - 0.05) {
+          route = candidate;
+          bestDist = candidateDist;
+          improved = true;
+          break;
+        }
+      }
+    }
+  }
+
+  window.currentAssignments[tech] = route.concat(withoutCoords);
   return true;
 }
 
