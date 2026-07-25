@@ -787,7 +787,7 @@
                     '<div class="card-detail"><strong style="color:' + color + ';">' + esc(label) + '</strong>' +
                     (avgStr ? ' · ' + avgStr : '') + (daysStr ? ' · last restock ' + daysStr : '') + ' · ' + loc.count + ' restock(s)</div>' +
                     '<div class="card-detail" style="font-size:12px;color:#999;">Last restock: ' + rsFmtDate(loc.last) + (loc.lastRestockTech ? ' (' + esc(loc.lastRestockTech) + ')' : '') +
-                    ' · Last visit: ' + rsFmtDate(loc.lastVisit) + (loc.lastVisitTech ? ' (' + esc(loc.lastVisitTech) + ')' : '') + '</div>' +
+                    ' · Last visit: ' + rsFmtDate(loc.lastVisit) + (loc.lastVisitTech ? ' (' + esc(loc.lastVisitTech) + ')' : '') + (loc.lastVisitAppt ? ' · ' + esc(loc.lastVisitAppt) : '') + '</div>' +
                     '</div>';
             }).join('');
             resultsEl.innerHTML = html;
