@@ -1837,22 +1837,23 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
  *   - home -> first stop: getTechDistance(), which already prefers the real
  *     precomputed driving-distance matrix and falls back to straight-line
  *     only when that's missing.
- *   - stop -> stop: straight-line (haversineDistance) only. The precomputed
- *     matrix is keyed exclusively by technician|location pairs -- it has no
- *     location-to-location entries at all, so there's no real driving
- *     distance to prefer here yet. (An earlier version of this function
- *     implied otherwise; confirmed against compute-distance-matrix.js
- *     2026-07-25 that this data doesn't exist.) Straight-line distance can
- *     be a poor proxy in areas with heavy traffic or unusual road layouts
- *     (Atlanta specifically) -- the ▲▼ controls remain the correction tool
- *     for whatever this gets wrong.
+ *   - stop -> stop: real driving distance from the site-to-site matrix
+ *     (compute-site-distance-matrix.js) when it's been built for the
+ *     current state, straight-line (haversineDistance) otherwise. GA was
+ *     the first state built (2026-07-25); other states fall back to
+ *     straight-line until their own site-to-site matrix is built. Straight-
+ *     line distance can be a poor proxy in areas with heavy traffic or
+ *     unusual road layouts (Atlanta specifically) -- the ▲▼ controls
+ *     remain the correction tool for whatever this gets wrong on states
+ *     that don't have real data yet.
  *
  * Two passes:
  *   1. Nearest-neighbor for an initial route.
  *   2. 2-opt: repeatedly try reversing each sub-segment of the route: keep
- *      the reversal if it shortens the total straight-line distance. This
- *      is what catches the crossing/backtracking a plain nearest-neighbor
- *      pass can leave behind (Mark's raised-eyebrow routes).
+ *      the reversal if it shortens the total distance (real or straight-
+ *      line, whichever legDist resolved). This is what catches the
+ *      crossing/backtracking a plain nearest-neighbor pass can leave
+ *      behind (Mark's raised-eyebrow routes).
  *
  * Stops without coordinates are left in their relative order at the end
  * rather than dropped or guessed at.
@@ -1860,6 +1861,59 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
  * Mutates window.currentAssignments[tech] in place. Returns true if a sort
  * was actually applied (false if there was nothing useful to sort).
  */
+/**
+ * Resolves the distance (and duration, when real driving data is available)
+ * for one leg of a tech's route, in the same preference order everywhere
+ * this matters: real driving data first, straight-line fallback second.
+ *
+ * fromCode === null means "from the tech's home."
+ *
+ * Shared by sortStopsByDistance (which only needs .distanceMi for ordering)
+ * and the route/leg distance display on each tech card (which also wants
+ * .durationMin and .isReal, to show something like "12.3 mi (18 min)" for a
+ * leg backed by real data vs. just "12.3 mi" for a straight-line estimate).
+ *
+ * Returns { distanceMi, durationMin, durationText, isReal } -- durationMin/
+ * durationText are null when only straight-line distance is available.
+ */
+function getCachedLegInfo(tech, fromCode, toCode) {
+  if (fromCode === null) {
+    const info = getTechDistance(tech, toCode, CURRENT_STATE);
+    if (info && info.distanceMi != null) {
+      return {
+        distanceMi: info.distanceMi,
+        durationMin: info.durationMin != null ? info.durationMin : null,
+        durationText: info.durationText || null,
+        isReal: info.type === 'driving',
+      };
+    }
+    const techInfo = TECHS[tech] || {};
+    if (techInfo.lat != null && techInfo.lng != null) {
+      const loc = LOCATIONS[toCode];
+      const mi = haversineDistance(techInfo.lat, techInfo.lng, loc.lat, loc.lng);
+      return { distanceMi: mi, durationMin: null, durationText: null, isReal: false };
+    }
+    return { distanceMi: 0, durationMin: null, durationText: null, isReal: false };
+  }
+
+  const stateKey = CURRENT_STATE ? CURRENT_STATE.toUpperCase() : null;
+  const siteMatrix = (stateKey && _dmCache[stateKey] && _dmCache[stateKey].matrix) || null;
+  if (siteMatrix) {
+    const entry = siteMatrix[fromCode + "|" + toCode] || siteMatrix[toCode + "|" + fromCode];
+    if (entry && entry.distanceMi != null) {
+      return {
+        distanceMi: entry.distanceMi,
+        durationMin: entry.durationMin != null ? entry.durationMin : null,
+        durationText: entry.durationText || null,
+        isReal: entry.type === 'driving',
+      };
+    }
+  }
+  const a = LOCATIONS[fromCode], b = LOCATIONS[toCode];
+  const mi = haversineDistance(a.lat, a.lng, b.lat, b.lng);
+  return { distanceMi: mi, durationMin: null, durationText: null, isReal: false };
+}
+
 function sortStopsByDistance(tech) {
   const items = window.currentAssignments && window.currentAssignments[tech];
   if (!items || items.length <= 1) return false;
@@ -1873,29 +1927,8 @@ function sortStopsByDistance(tech) {
   }
   if (withCoords.length <= 1) return false;
 
-  // Home leg: real driving distance where available, straight-line fallback
-  // baked into getTechDistance() itself.
-  const homeInfo = getTechDistance(tech, withCoords[0].code, CURRENT_STATE);
-  const techInfo = TECHS[tech] || {};
-  let homeCoords = (techInfo.lat != null && techInfo.lng != null)
-    ? { lat: techInfo.lat, lng: techInfo.lng }
-    : null;
-
   function legDist(fromCode, toCode) {
-    // fromCode === null means "from home"
-    if (fromCode === null) {
-      const info = getTechDistance(tech, toCode, CURRENT_STATE);
-      if (info && info.distanceMi != null) return info.distanceMi;
-      // getTechDistance already falls back to haversine internally when it
-      // has tech coordinates; this only triggers if even that's missing.
-      if (homeCoords) {
-        const loc = LOCATIONS[toCode];
-        return haversineDistance(homeCoords.lat, homeCoords.lng, loc.lat, loc.lng);
-      }
-      return 0; // no home reference at all -- treat as free, order stays as nearest-neighbor found it
-    }
-    const a = LOCATIONS[fromCode], b = LOCATIONS[toCode];
-    return haversineDistance(a.lat, a.lng, b.lat, b.lng);
+    return getCachedLegInfo(tech, fromCode, toCode).distanceMi;
   }
 
   function routeDist(route) {
@@ -3270,6 +3303,25 @@ function distanceMatrixStatus(state) {
                 const techKey = tech.replace(/\s+/g, '-');
                 window.techRouteData[techKey] = { mapLink, codes: items.map(i => i.code) };
 
+                // Free route-distance summary from whatever's already cached
+                // (real driving data where the site-to-site matrix has been
+                // built for this state, straight-line estimate otherwise) --
+                // no live API call, since this is just reading numbers
+                // that are already sitting in _dmCache from page load.
+                let totalMi = 0, totalDurMin = 0, anyRealDuration = false, allLegsReal = true;
+                let prevCode = null;
+                for (const item of items) {
+                    const leg = getCachedLegInfo(tech, prevCode, item.code);
+                    totalMi += leg.distanceMi;
+                    if (leg.durationMin != null) { totalDurMin += leg.durationMin; anyRealDuration = true; }
+                    if (!leg.isReal) allLegsReal = false;
+                    prevCode = item.code;
+                }
+                const routeSummary = items.length
+                    ? `${Math.round(totalMi * 10) / 10} mi${anyRealDuration ? ' · ~' + Math.round(totalDurMin) + ' min drive' : ''}` +
+                      `${allLegsReal ? '' : ' <span title="Some legs are straight-line estimates -- real driving data not built for this state/pair yet" style="cursor:help;">(est.)</span>'}`
+                    : '';
+
                 let cardHtml = `<div class="tech-card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                         <strong>${tech} (${items.length})</strong>
@@ -3278,10 +3330,14 @@ function distanceMatrixStatus(state) {
                             <button class="control-btn" style="background:#6c5ce7; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
                         </div>
                     </div>
+                    ${routeSummary ? `<div style="font-size:12px;color:#888;margin-bottom:4px;">📏 ${routeSummary} total</div>` : ''}
                     <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0; margin-bottom:4px;"></div>`;
                 
                 items.forEach((item, index) => {
                     const loc = LOCATIONS[item.code];
+                    const prevItemCode = index > 0 ? items[index - 1].code : null;
+                    const leg = getCachedLegInfo(tech, prevItemCode, item.code);
+                    const legLabel = `${Math.round(leg.distanceMi * 10) / 10} mi${leg.durationMin != null ? ' · ' + leg.durationMin + ' min' : ''}${leg.isReal ? '' : ' (est.)'}`;
                     const urgentBadge = item.urgent ? '<span class="same-day-badge">⚡ SAME DAY</span>' : '';
                     const sameDayBadge = item.isSameDay && !item.urgent ? '<span class="same-day-badge" style="background:#8b1a1a;">🚨 TODAY</span>' : '';
                     const rightFormBadge = item.hasRightForms ? '<span style="background:#1a5c1a;color:#88dd88;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">📋 Right Forms</span>' : '';
@@ -3312,6 +3368,7 @@ function distanceMatrixStatus(state) {
                                 <div>
                                     <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
+                                    <div style="font-size:11px;color:#888;margin-top:1px;">📏 ${legLabel}${index === 0 ? ' from home' : ' from prev. stop'}</div>
                                     ${ticketInfoStr}
                                     ${window.driveTimeEnabled ? `<div id="dt-${techKey}-${index}" style="font-size:11px;color:#5bc8af;margin-top:2px;">🕐 —</div>` : ''}
                                 </div>
