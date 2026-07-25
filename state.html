@@ -4,11 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>State Console</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.5; font-size: 16px; }
   .container { max-width: 900px; margin: 0 auto; }
   .back-link { display: inline-block; color: #007bff; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .back-btn {
+    display: block; background: #6c757d; color: #fff; text-align: center; padding: 12px;
+    border-radius: 8px; font-weight: bold; font-size: 15px; text-decoration: none; margin-top: 16px;
+  }
+  .import-box { background: #1e1e1e; border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
+  .import-box a.sf-link {
+    display: inline-block; background: #0070d2; color: #fff; padding: 8px 16px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; text-decoration: none; margin-bottom: 8px;
+  }
+  .import-box input[type=file] { width: 100%; padding: 6px; font-size: 13px; margin-bottom: 8px; }
 
   .console { background: #181818; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); padding: 16px; color: #ddd; }
   .console h1 { color: #f0a500; font-size: 21px; margin-bottom: 2px; }
@@ -55,7 +66,7 @@
 </head>
 <body>
 <div class="container">
-  <a href="/" class="back-link">← Back to Dispatch Tool</a>
+  <a href="/" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
   <div class="console">
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
@@ -87,10 +98,100 @@
     <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
     <div id="ticketStatus" class="status-line">Loading…</div>
     <div id="ticketList"></div>
+
+    <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
+    <div class="import-box">
+      <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
+      <div style="font-size:12px;color:#999;margin-bottom:8px;">Log in, export as Excel (.xlsx), then select it below — it imports automatically, no extra button to press.</div>
+      <input type="file" id="importFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="autoImport(this.files[0])">
+      <div id="importStatus" class="status-line" style="padding:4px 0;">Ready.</div>
+    </div>
+
+    <a href="/" class="back-btn">← Back to Dispatch Tool</a>
   </div>
 </div>
 
 <script>
+let importParsedRows = null;
+
+async function autoImport(file) {
+  if (!file) return;
+  const statusEl = document.getElementById('importStatus');
+  statusEl.textContent = `Reading ${file.name}…`;
+
+  const reader = new FileReader();
+  reader.onerror = () => { statusEl.textContent = 'Could not read file.'; };
+  reader.onload = async (e) => {
+    let rows;
+    try {
+      statusEl.textContent = 'Parsing spreadsheet…';
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+      if (!rows.length) { statusEl.textContent = 'No data found in file.'; return; }
+      rows = rows.map(r => {
+        const out = {};
+        for (const k of Object.keys(r)) out[k.trim()] = r[k];
+        return out;
+      });
+      const required = ['Account Name', 'Jurisdiction', 'Appointment Number'];
+      for (const col of required) {
+        if (!(col in rows[0])) {
+          statusEl.textContent = 'Missing expected column: ' + col + '. Columns found: ' + Object.keys(rows[0]).join(', ');
+          return;
+        }
+      }
+    } catch (err) {
+      statusEl.textContent = 'Error parsing file: ' + err.message;
+      return;
+    }
+
+    // Parsed successfully -- import immediately, no separate button/click needed.
+    const mapped = rows.map(r => ({
+      accountName: String(r['Account Name'] || '').trim(),
+      state: String(r['Jurisdiction'] || '').trim(),
+      woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
+      appointmentNumber: String(r['Appointment Number'] || '').trim(),
+      actualStart: r['Actual Start'] || null,
+      actualEnd: r['Actual End'] || null,
+      durationMin: (r['Actual Duration (Minutes)'] != null && r['Actual Duration (Minutes)'] !== '') ? Number(r['Actual Duration (Minutes)']) : null,
+      techName: String(r['Service Resource: Name'] || '').trim(),
+      remediation: String(r['Remediation'] || '').trim(),
+      remediationDetail: String(r['Remediation Detail'] || '').trim(),
+    })).filter(r => r.appointmentNumber);
+
+    const BATCH_SIZE = 250;
+    let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0;
+    let errors = [];
+    for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
+      const batch = mapped.slice(i, i + BATCH_SIZE);
+      statusEl.textContent = `Importing rows ${i + 1}-${Math.min(i + BATCH_SIZE, mapped.length)} of ${mapped.length}…`;
+      try {
+        const res = await fetch('/.netlify/functions/import-service-appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: batch }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        totalInserted += data.inserted || 0;
+        totalSkipped += data.skippedExisting || 0;
+        totalNeedsReview += data.needsReview || 0;
+      } catch (err) {
+        errors.push('Batch starting row ' + (i + 1) + ': ' + err.message);
+      }
+    }
+
+    statusEl.textContent = `✅ Done — ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need site review.` +
+      (errors.length ? ` ${errors.length} batch error(s).` : '');
+
+    // Refresh the page's own data now that new history is in, so the
+    // restock schedule / recent tickets reflect it without a manual reload.
+    loadAll();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
