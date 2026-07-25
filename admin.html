@@ -368,8 +368,77 @@
     <button class="dm-btn orange" onclick="dmBuildMatrix('driving')">🚗 Build (Drive-Time, ~$6)</button>
   </div>
 
+  <!-- Step 3: Site-to-site matrix (for route ordering, not tech-to-site assignment) -->
+  <p style="color:#aaa;font-size:12px;margin:14px 0 6px 0;border-top:1px solid #333;padding-top:12px;">
+    <strong style="color:#f0f0f0;">Step 3 (optional)</strong> — Build real driving distances between every pair of
+    sites in this state, for stop-order routing (2-opt currently uses straight-line distance for this).
+    One-time per state — costs scale with site count squared, not tech count, so this is priced separately from
+    Step 2. Requires Step 1 (geocoding) already done. Adds to the same matrix Step 2 builds; doesn't overwrite it.
+  </p>
+  <div class="dm-row">
+    <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
+  </div>
+
   <div id="dm-status" class="dm-status">Ready.</div>
 </div>
+
+<script>
+(function () {
+  function dmState() {
+    return document.getElementById('dm-state').value;
+  }
+  function dmSetStatus(msg) {
+    document.getElementById('dm-status').textContent = msg;
+  }
+
+  // Rough per-state cost estimate shown in the confirm dialog, calibrated
+  // against the existing tech-to-site matrix's own quoted price (GA: 8
+  // techs x 121 sites = 968 elements ~ $3-6) rather than guessing at
+  // Google's pricing separately. See compute-site-distance-matrix.js's
+  // header comment for the full reasoning.
+  const DM_SITE_COUNT_HINTS = {
+    GA: 121, FL: 103, MI: 164, IN: 116, CO: 73, OH: 58, NV: 56,
+    IL: 20, MN: 19, WV: 12, OR: 10, NC: 5, SC: 3,
+  };
+
+  window.dmBuildSiteMatrix = async function () {
+    const state = dmState();
+    const n = DM_SITE_COUNT_HINTS[state];
+    const pairs = n ? Math.round((n * n) / 2) : null;
+    const costNote = pairs
+      ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
+      : 'Cost scales with site count squared.';
+    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
+
+    let offset = 0;
+    let done = false;
+    let lastResult = null;
+    try {
+      while (!done) {
+        dmSetStatus('Building site-to-site matrix for ' + state + '… (batch ' + offset + (lastResult && lastResult.totalBatches ? ' of ' + lastResult.totalBatches : '') + ')');
+        const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, offset }),
+        });
+        const data = await res.json();
+        if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
+        lastResult = data;
+        done = data.done;
+        if (!done) offset = data.nextOffset;
+      }
+      dmSetStatus(
+        '✅ Site-to-site matrix built for ' + state + '.\n' +
+        lastResult.siteCount + ' sites, ' + lastResult.newEntryCount + ' pairs computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
+        'Total matrix now has ' + lastResult.totalEntryCount + ' entries (tech-to-site + site-to-site combined).' +
+        (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '')
+      );
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
+    }
+  };
+})();
+</script>
 
 <script>
 (function () {
