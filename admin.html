@@ -106,6 +106,7 @@
             <button id="tabClosedtickets" onclick="switchTab('closedtickets')">✅ Closed Tickets</button>
             <button id="tabRepeatissues" onclick="switchTab('repeatissues')">⚠️ Repeat Issues</button>
             <button id="tabUnmatchedsites" onclick="switchTab('unmatchedsites')">🔍 Unmatched Sites</button>
+            <button id="tabRestockschedule" onclick="switchTab('restockschedule')">🔄 Restock Schedule</button>
         </div>
 
         <!-- LOCATIONS TAB -->
@@ -543,6 +544,31 @@
             </div>
         </div>
 
+        <!-- RESTOCK SCHEDULE TAB -->
+        <div id="sectionRestockschedule" class="section">
+            <div class="form-section">
+                <h2>🔄 Restock Schedule</h2>
+                <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
+                    Same cycle-detection logic as restock tracker, running live against Supabase instead of a manually
+                    re-uploaded report. Average cycle length filters out outlier gaps; a site is marked
+                    <strong style="color:#e0a030;">overdue (visited)</strong> instead of flat overdue if a trouble-ticket
+                    visit happened after its last real restock, since consumables may have been informally topped off then.
+                </p>
+                <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:flex-end;">
+                    <label style="flex:1; min-width:140px; margin:0;">
+                        <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Scope</span>
+                        <select id="rsScope" onchange="loadRestockSchedule()" style="margin:0;">
+                            <option value="state">Current state</option>
+                            <option value="all">All states</option>
+                        </select>
+                    </label>
+                    <input type="text" id="rsFilter" placeholder="Filter by name or code…" oninput="renderRestockSchedule()" style="flex:2; min-width:160px; padding:8px;">
+                </div>
+                <div id="rsStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
+                <div id="rsResults"></div>
+            </div>
+        </div>
+
         <a href="/" style="text-decoration:none;">
             <button class="big-btn back-btn" type="button" style="margin-top:20px;" onclick="history.back()">Back to Dispatch Tool</button>
         </a>
@@ -678,7 +704,7 @@
 
         // --- TAB SWITCHING ---
         function switchTab(tab) {
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites'];
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -688,6 +714,83 @@
             }
             if (tab === 'repeatissues') loadRepeatIssues();
             if (tab === 'unmatchedsites') loadUnmatchedSites();
+            if (tab === 'restockschedule') loadRestockSchedule();
+        }
+
+        // --- RESTOCK SCHEDULE ---
+        var rsLocations = [];
+        var rsGeneratedAt = null;
+
+        var RS_STATUS_LABEL = {
+            overdue: 'Overdue', soon: 'Due soon', anomalous: 'Irregular pattern',
+            ok: 'On track', single: 'Only 1 restock on record', nodata: 'No restock on record'
+        };
+        var RS_STATUS_COLOR = {
+            overdue: '#dc3545', soon: '#e0a030', anomalous: '#8a6dbf',
+            ok: '#28a745', single: '#6c757d', nodata: '#6c757d'
+        };
+
+        async function loadRestockSchedule() {
+            var statusEl = document.getElementById('rsStatus');
+            var scope = document.getElementById('rsScope').value;
+            statusEl.textContent = 'Loading…';
+            document.getElementById('rsResults').innerHTML = '';
+
+            var url = '/.netlify/functions/get-restock-schedule';
+            if (scope === 'state' && currentState) url += '?state=' + encodeURIComponent(currentState);
+
+            try {
+                var res = await fetch(url, { cache: 'no-store' });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                rsLocations = data.locations || [];
+                rsGeneratedAt = data.generatedAt;
+                renderRestockSchedule();
+            } catch (e) {
+                statusEl.textContent = 'Error loading restock schedule: ' + e.message;
+            }
+        }
+
+        function rsFmtDate(iso) {
+            if (!iso) return '—';
+            return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function renderRestockSchedule() {
+            var statusEl = document.getElementById('rsStatus');
+            var resultsEl = document.getElementById('rsResults');
+            var filterQ = document.getElementById('rsFilter').value.trim().toLowerCase();
+
+            var filtered = rsLocations.filter(function(loc) {
+                if (!filterQ) return true;
+                return (loc.name + ' ' + loc.site_code).toLowerCase().indexOf(filterQ) !== -1;
+            });
+
+            var counts = { overdue: 0, soon: 0, anomalous: 0 };
+            rsLocations.forEach(function(l) { if (counts[l.status] !== undefined) counts[l.status]++; });
+            var genLabel = rsGeneratedAt ? ' · updated ' + new Date(rsGeneratedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+            statusEl.textContent = rsLocations.length + ' site(s) · ' + counts.overdue + ' overdue · ' + counts.soon + ' due soon · ' + counts.anomalous + ' irregular' + genLabel;
+
+            if (!filtered.length) {
+                resultsEl.innerHTML = '<div style="color:#999;padding:10px;">No matching sites.</div>';
+                return;
+            }
+
+            var html = filtered.map(function(loc) {
+                var color = RS_STATUS_COLOR[loc.status] || '#6c757d';
+                var label = RS_STATUS_LABEL[loc.status] || loc.status;
+                if (loc.visitedSinceRestock && (loc.status === 'overdue' || loc.status === 'soon')) label += ' (visited)';
+                var avgStr = loc.avg != null ? Math.round(loc.avg) + 'd cycle' : '';
+                var daysStr = loc.daysSince != null ? loc.daysSince + ' days ago' : '';
+                return '<div class="card" style="border-left-color:' + color + ';">' +
+                    '<div class="card-title">' + esc(loc.site_code) + ' — ' + esc(loc.name) + '</div>' +
+                    '<div class="card-detail"><strong style="color:' + color + ';">' + esc(label) + '</strong>' +
+                    (avgStr ? ' · ' + avgStr : '') + (daysStr ? ' · last restock ' + daysStr : '') + ' · ' + loc.count + ' restock(s)</div>' +
+                    '<div class="card-detail" style="font-size:12px;color:#999;">Last restock: ' + rsFmtDate(loc.last) + (loc.lastRestockTech ? ' (' + esc(loc.lastRestockTech) + ')' : '') +
+                    ' · Last visit: ' + rsFmtDate(loc.lastVisit) + (loc.lastVisitTech ? ' (' + esc(loc.lastVisitTech) + ')' : '') + '</div>' +
+                    '</div>';
+            }).join('');
+            resultsEl.innerHTML = html;
         }
 
         // --- UNMATCHED SITES ---
