@@ -81,6 +81,28 @@ exports.handler = async (event) => {
 
   const TODAY = new Date();
   TODAY.setHours(0, 0, 0, 0);
+  const todayStr = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, '0')}-${String(TODAY.getDate()).padStart(2, '0')}`;
+
+  // Already-scheduled check: is this site already sitting on someone's board
+  // for today or a future date? Mark uses this to decide whether a stop
+  // needs catching early or can be left alone since it's already planned --
+  // separate question from the projected/predicted date (next1), which is
+  // just a cycle-based estimate with no awareness of what's actually been
+  // dispatched.
+  const { data: upcoming, error: upcomingErr } = await supabase
+    .from('assignments')
+    .select('site_id, dispatch_date, technician_id, technicians(name)')
+    .in('site_id', siteIds)
+    .eq('status', 'planned')
+    .gte('dispatch_date', todayStr)
+    .order('dispatch_date', { ascending: true });
+  if (upcomingErr) return json(500, { ok: false, error: 'assignments fetch failed: ' + upcomingErr.message });
+  const scheduledBySite = {};
+  for (const row of (upcoming || [])) {
+    if (!scheduledBySite[row.site_id]) {
+      scheduledBySite[row.site_id] = { date: row.dispatch_date, tech: row.technicians ? row.technicians.name : null };
+    }
+  }
 
   const locations = [];
   for (const [siteId, data] of Object.entries(bySite)) {
@@ -129,6 +151,8 @@ exports.handler = async (event) => {
 
     const lastRestockEntry = data.restocks.reduce((best, r) => (!best || r.date > best.date) ? r : best, null);
 
+    const scheduled = scheduledBySite[siteId] || null;
+
     locations.push({
       site_id: siteId,
       site_code: site.site_code,
@@ -149,6 +173,8 @@ exports.handler = async (event) => {
       lastVisitAppt: lastVisitEntry ? lastVisitEntry.appt : null,
       lastRestockTech: lastRestockEntry ? lastRestockEntry.tech : null,
       lastRestockAppt: lastRestockEntry ? lastRestockEntry.appt : null,
+      scheduledDate: scheduled ? scheduled.date : null,
+      scheduledTech: scheduled ? scheduled.tech : null,
     });
   }
 
