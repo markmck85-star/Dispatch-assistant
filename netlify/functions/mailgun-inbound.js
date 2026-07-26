@@ -134,21 +134,46 @@ function todayStrForSiteCode(siteCode) {
 // Saturday states (have on-call coverage): GA, IN, MI, NV
 const SAT_STATES = new Set(['GA','IN','MI','NV']);
 
+// Shared by calculateSlaDeadline and nextWorkDayStrForSiteCode -- a day is
+// covered if it's Mon-Fri, or Saturday in a state with on-call coverage.
+// Never Sunday, for any state.
+function isCoveredWorkDay(d, stateCode) {
+  const hasSatCoverage = stateCode ? SAT_STATES.has(stateCode) : true;
+  const day = d.getDay();
+  if (day === 0) return false; // never Sunday
+  if (day === 6) return hasSatCoverage; // Saturday only if covered
+  return true;
+}
+
+/**
+ * Same idea as todayStrForSiteCode, but rolls forward to the next actually-
+ * covered day if "today" isn't one (Sunday always, or Saturday in a state
+ * without on-call coverage) -- so a ticket that comes in on an uncovered
+ * day lands on the board for the day someone will actually be working,
+ * instead of a day nobody's covering. Fixes a real bug found 2026-07-26:
+ * a Sunday trouble ticket was landing on Sunday's board (todayStrForSiteCode
+ * has no day-of-week awareness at all) even though Mark's stated rule is
+ * "any Sunday call is a Monday ticket" -- calculateSlaDeadline already had
+ * this exact rollover logic for the SLA deadline text, it just was never
+ * reused for the board dispatch_date itself.
+ */
+function nextWorkDayStrForSiteCode(siteCode) {
+  const tz = getTimezoneForSiteCode(siteCode);
+  const stateCode = siteCode ? siteCode.substring(0, 2) : null;
+  const local = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+  while (!isCoveredWorkDay(local, stateCode)) local.setDate(local.getDate() + 1);
+  return `${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,'0')}-${String(local.getDate()).padStart(2,'0')}`;
+}
+
 function calculateSlaDeadline(receivedAt, timezone, stateCode) {
   let remaining = 240; // 4 hours in minutes
   const tz = timezone || 'America/New_York';
-  const hasSatCoverage = stateCode ? SAT_STATES.has(stateCode) : true;
 
   const now = new Date(receivedAt);
   const local = new Date(now.toLocaleString('en-US', { timeZone: tz }));
   let current = local;
 
-  const isWorkDay = (d) => {
-    const day = d.getDay();
-    if (day === 0) return false; // never Sunday
-    if (day === 6) return hasSatCoverage; // Saturday only if covered
-    return true;
-  };
+  const isWorkDay = (d) => isCoveredWorkDay(d, stateCode);
 
   const advanceToNextBizDay = (d) => {
     d.setDate(d.getDate() + 1);
@@ -1056,10 +1081,10 @@ exports.handler = async (event) => {
                   dispatchDateStr = cachedDate;
                   console.log(`[mailgun-inbound] Used cached dispatch-list date for ${rawSiteCode}: ${cachedDate}`);
                 } else {
-                  dispatchDateStr = todayStrForSiteCode(rawSiteCode);
+                  dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
                 }
               } else {
-                dispatchDateStr = todayStrForSiteCode(rawSiteCode);
+                dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
               }
 
               const { data: boardData, error: boardErr } = await supabase
