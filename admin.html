@@ -851,12 +851,18 @@
                 if (loc.visitedSinceRestock && (loc.status === 'overdue' || loc.status === 'soon')) label += ' (visited)';
                 var avgStr = loc.avg != null ? Math.round(loc.avg) + 'd cycle' : '';
                 var daysStr = loc.daysSince != null ? loc.daysSince + ' days ago' : '';
+                var projectedStr = loc.next1 ? rsFmtDate(loc.next1) : null;
+                var scheduledStr = loc.scheduledDate
+                    ? new Date(loc.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : null;
                 return '<div class="card" style="border-left-color:' + color + ';">' +
                     '<div class="card-title">' + esc(loc.site_code) + ' — ' + esc(loc.name) + '</div>' +
                     '<div class="card-detail"><strong style="color:' + color + ';">' + esc(label) + '</strong>' +
                     (avgStr ? ' · ' + avgStr : '') + (daysStr ? ' · last restock ' + daysStr : '') + ' · ' + loc.count + ' restock(s)</div>' +
                     '<div class="card-detail" style="font-size:12px;color:#999;">Last restock: ' + rsFmtDate(loc.last) + (loc.lastRestockTech ? ' (' + esc(loc.lastRestockTech) + ')' : '') +
                     ' · Last visit: ' + rsFmtDate(loc.lastVisit) + (loc.lastVisitTech ? ' (' + esc(loc.lastVisitTech) + ')' : '') + (loc.lastVisitAppt ? ' · ' + esc(loc.lastVisitAppt) : '') + '</div>' +
+                    (projectedStr ? '<div class="card-detail" style="font-size:12px;color:#999;">Projected next restock: ' + projectedStr + '</div>' : '') +
+                    (scheduledStr ? '<div class="card-detail" style="font-size:12px;color:#7bc796;">✓ Already scheduled: ' + scheduledStr + (loc.scheduledTech ? ' (' + esc(loc.scheduledTech) + ')' : '') + '</div>' : '') +
                     '</div>';
             }).join('');
             resultsEl.innerHTML = html;

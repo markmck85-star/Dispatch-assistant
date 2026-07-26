@@ -296,10 +296,21 @@ async function loadRestock(state) {
         const lastVisitLine = l.visitedSinceRestock
           ? `<div class="meta">Last visit: ${fmtDateTime(l.lastVisit)}${l.lastVisitTech ? ' (' + escapeHtml(l.lastVisitTech) + ')' : ''}${l.lastVisitAppt ? ' · ' + escapeHtml(l.lastVisitAppt) : ''}</div>`
           : '';
+        const projectedLine = l.next1
+          ? `<div class="meta">Projected next restock: ${new Date(l.next1).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>`
+          : '';
+        // l.scheduledDate is a plain YYYY-MM-DD from the board, not a
+        // timestamp -- anchor at noon local so it can't shift a day off
+        // when parsed, same pattern used elsewhere in the app for this.
+        const scheduledLine = l.scheduledDate
+          ? `<div class="meta" style="color:#7bc796;">✓ Already scheduled: ${new Date(l.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${l.scheduledTech ? ' (' + escapeHtml(l.scheduledTech) + ')' : ''}</div>`
+          : '';
         return `<div class="ticket-card ${cls}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${l.site_code}')" title="View recent visit history">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
           <div class="meta">${label} · last restock ${l.daysSince != null ? l.daysSince + ' days ago' : '—'}</div>
           ${lastVisitLine}
+          ${projectedLine}
+          ${scheduledLine}
         </div>`;
       }).join('');
     }
