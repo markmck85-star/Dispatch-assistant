@@ -4203,11 +4203,13 @@ function distanceMatrixStatus(state) {
                     const item = items[0];
                     const loc = LOCATIONS[item.code];
                     const reassignNote = ''; // covering-for note removed — dispatcher context only
-                    let issueStr = meta.issueDetail || 'Trouble ticket';
-                    const slaStr = meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : '');
+                    let issueStr = (item.fromTicket && item.ticketIssue) ? item.ticketIssue : (meta.issueDetail || 'Trouble ticket');
+                    const woNum = (item.fromTicket && item.ticketWo) ? item.ticketWo : meta.woNumber;
+                    const woStr = woNum ? `WO ${woNum} – ` : '';
+                    const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                     msg = `⚡ URGENT - Hey ${info.firstName}, a trouble ticket for ${loc.name} just came in:\n\n`;
-                    msg += `1. ${issueStr}${reassignNote}\n`;
+                    msg += `1. ${woStr}${issueStr}${reassignNote}\n`;
                     const warnings = checkConsumables(item.code);
                     if (warnings.length > 0) warnings.forEach(w => { msg += `   ${w}\n`; });
                 } else {
@@ -4219,9 +4221,12 @@ function distanceMatrixStatus(state) {
                         const prefix = '';
                         const reassignNote = ''; // covering-for note removed — dispatcher context only
                         let issueStr = '';
-                        if (item.urgent && meta.issueDetail) {
-                            issueStr = ` - ${meta.issueDetail}`;
-                            const slaStr = meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : '');
+                        if (item.urgent && (item.ticketIssue || meta.issueDetail)) {
+                            const woNum2 = (item.fromTicket && item.ticketWo) ? item.ticketWo : meta.woNumber;
+                            const woStr2 = woNum2 ? `WO ${woNum2} – ` : '';
+                            const issueTxt = (item.fromTicket && item.ticketIssue) ? item.ticketIssue : meta.issueDetail;
+                            issueStr = ` - ${woStr2}${issueTxt}`;
+                            const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                         }
                         const stopType = item.urgent ? issueStr : (item.isSameDay ? ' - Consumable Restock ⚡ COMPLETE TODAY' : ' - Consumable Restock');
