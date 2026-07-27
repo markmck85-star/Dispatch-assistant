@@ -4549,10 +4549,15 @@ function distanceMatrixStatus(state) {
                     const dtLegs = (window.driveTimeData[techKey2] || []);
                     const dtLeg = dtLegs[index];
                     const dtStr = dtLeg ? `<div style="font-size:11px;color:#2e7d32;margin-top:1px;">🕐 ${dtLeg.duration} (${dtLeg.distance})</div>` : '';
+                    const ticketInfoStr = stop.fromTicket
+                        ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${stop.ticketWo || '—'}${stop.ticketIssue ? ' – ' + stop.ticketIssue : ''}${stop.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(stop.ticketSlaEnd)}</strong>` : ''}</div>`
+                        : '';
+
                     return `<div class="print-stop">
                         <div class="print-stop-name">${index + 1}. ${code} – ${name}${urgentBadge}${todayBadge}${rfBadge}${reassignNote}${dateStr}</div>
                         <div class="print-stop-addr">${addr}</div>
                         ${dtStr}
+                        ${ticketInfoStr}
                         ${consumDetail}
                     </div>`;
                 }
