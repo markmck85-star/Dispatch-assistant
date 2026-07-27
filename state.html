@@ -177,10 +177,10 @@ async function autoImport(file) {
 
     const BATCH_SIZE = 250;
     let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0;
-    let errors = [];
-    for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
-      const batch = mapped.slice(i, i + BATCH_SIZE);
-      statusEl.textContent = `Importing rows ${i + 1}-${Math.min(i + BATCH_SIZE, mapped.length)} of ${mapped.length}…`;
+    let errors = []; // [{ startRow, endRow, batch, message }]
+
+    async function runBatch(batch, startRow, endRow) {
+      statusEl.textContent = `Importing rows ${startRow}-${endRow} of ${mapped.length}…`;
       try {
         const res = await fetch('/.netlify/functions/import-service-appointments', {
           method: 'POST',
@@ -192,17 +192,45 @@ async function autoImport(file) {
         totalInserted += data.inserted || 0;
         totalSkipped += data.skippedExisting || 0;
         totalNeedsReview += data.needsReview || 0;
+        return true;
       } catch (err) {
-        errors.push('Batch starting row ' + (i + 1) + ': ' + err.message);
+        errors.push({ startRow, endRow, batch, message: err.message });
+        return false;
       }
     }
 
-    statusEl.textContent = `✅ Done — ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need site review.` +
-      (errors.length ? ` ${errors.length} batch error(s).` : '');
+    for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
+      const batch = mapped.slice(i, i + BATCH_SIZE);
+      await runBatch(batch, i + 1, Math.min(i + BATCH_SIZE, mapped.length));
+    }
+
+    renderImportStatus();
 
     // Refresh the page's own data now that new history is in, so the
     // restock schedule / recent tickets reflect it without a manual reload.
     loadAll();
+
+    function renderImportStatus() {
+      let html = `✅ ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need site review.`;
+      if (errors.length) {
+        html += `<div style="color:#e08a8a;margin-top:6px;">${errors.length} batch(es) failed -- these rows are NOT in the database yet:</div>`;
+        html += errors.map(e => `<div style="font-size:12px;color:#e08a8a;margin-left:8px;">Rows ${e.startRow}-${e.endRow}: ${escapeHtml(e.message)}</div>`).join('');
+        html += `<button id="retryBatchesBtn" style="margin-top:8px;padding:6px 14px;background:#dc3545;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${errors.length} failed batch(es)</button>`;
+      }
+      statusEl.innerHTML = html;
+      const retryBtn = document.getElementById('retryBatchesBtn');
+      if (retryBtn) retryBtn.onclick = retryFailedBatches;
+    }
+
+    async function retryFailedBatches() {
+      const toRetry = errors;
+      errors = [];
+      for (const e of toRetry) {
+        await runBatch(e.batch, e.startRow, e.endRow);
+      }
+      renderImportStatus();
+      loadAll();
+    }
   };
   reader.readAsArrayBuffer(file);
 }
