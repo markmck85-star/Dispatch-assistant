@@ -220,34 +220,45 @@ exports.handler = async (event) => {
   }
 
   let inserted = 0;
+  let rowErrors = []; // [{ appointmentNumber, accountName, state, reason }]
   if (toInsert.length) {
     const { error: insertErr, count } = await supabase
       .from('site_visits')
       .insert(toInsert, { count: 'exact' });
-    if (insertErr) {
-      // Foreign-key violations on site_visits.state are the one case worth
-      // a friendlier message -- turns "violates foreign key constraint
-      // site_visits_state_fkey" into an actionable "these codes aren't in
-      // the states table" instead of making someone go hunt through
-      // Supabase's table editor by hand to find out which one.
-      let detail = insertErr.message;
-      if (/state_fkey|violates foreign key/i.test(insertErr.message)) {
-        const batchStates = [...new Set(toInsert.map(r => r.state).filter(Boolean))];
-        const { data: knownStates } = await supabase.from('states').select('code').in('code', batchStates);
-        const knownSet = new Set((knownStates || []).map(s => s.code));
-        const missing = batchStates.filter(s => !knownSet.has(s));
-        if (missing.length) {
-          detail = `state code(s) not found in the "states" table: ${missing.join(', ')} -- add ${missing.length === 1 ? 'a row for it' : 'rows for them'} there first.`;
+    if (!insertErr) {
+      inserted = count != null ? count : toInsert.length;
+    } else {
+      // Bulk insert is atomic -- one bad row fails the whole batch, which
+      // silently held back 249 good rows (including, once, a ticket-closing
+      // record) behind an unrelated bad one. Fall back to inserting rows
+      // one at a time so everything good still lands, and only the actual
+      // problem row(s) get reported -- by name, not just a batch number.
+      // Only reached on the rare error path, so the per-request overhead
+      // of individual inserts doesn't matter for the common case.
+      for (const row of toInsert) {
+        const { error: rowErr } = await supabase.from('site_visits').insert([row]);
+        if (rowErr) {
+          let reason = rowErr.message;
+          if (/state_fkey|violates foreign key/i.test(rowErr.message)) {
+            reason = `state code "${row.state}" not found in the "states" table -- add a row for it there first.`;
+          }
+          rowErrors.push({
+            appointmentNumber: row.appointment_number,
+            accountName: row.account_name_raw,
+            state: row.state,
+            reason,
+          });
+        } else {
+          inserted++;
         }
       }
-      return json(500, { ok: false, error: 'insert failed: ' + detail });
     }
-    inserted = count != null ? count : toInsert.length;
   }
 
   return json(200, {
     ok: true,
     inserted,
+    rowErrors,
     skippedExisting: rows.length - toInsert.length,
     siteMatched: siteMatchedCount,
     techMatched: techMatchedCount,
