@@ -8,6 +8,13 @@
 // source than re-downloading it per tool. Algorithm ported as closely to
 // the original as possible since it's already proven out in daily use:
 //
+// v2 (2026-07-27): added optional ?since=YYYY-MM-DD / ?until=YYYY-MM-DD to
+// bound the history window used for cycle/average calculations -- both
+// technician closing behavior and Neumo's actual restock trigger threshold
+// have drifted over time, so including old data skews the average. Also
+// added CORS headers since this is now called cross-origin from the
+// separate restock-tracker site, not just same-origin from the dispatch app.
+//
 //   - avg restock cycle = mean interval between a site's restocks, with
 //     outlier gaps (>2x the median interval) filtered out first so one
 //     missed report row or outage doesn't wreck the estimate
@@ -28,7 +35,16 @@
 const { createClient } = require('@supabase/supabase-js');
 
 function json(statusCode, obj) {
-  return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+    body: JSON.stringify(obj),
+  };
 }
 
 function addDays(date, days) {
@@ -38,8 +54,19 @@ function addDays(date, days) {
 }
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return json(200, {});
+
   const params = event.queryStringParameters || {};
   const state = params.state; // optional -- omit for all states
+
+  // Optional history-window bounds. Validated as plain YYYY-MM-DD so a
+  // malformed value fails fast with a clear error rather than silently
+  // producing a Supabase filter that matches nothing.
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const since = params.since && dateRe.test(params.since) ? params.since : null;
+  const until = params.until && dateRe.test(params.until) ? params.until : null;
+  if (params.since && !since) return json(400, { ok: false, error: 'since must be YYYY-MM-DD' });
+  if (params.until && !until) return json(400, { ok: false, error: 'until must be YYYY-MM-DD' });
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -57,13 +84,16 @@ exports.handler = async (event) => {
   let from = 0;
   const pageSize = 1000;
   while (true) {
-    const { data: page, error: visitsErr } = await supabase
+    let visitsQuery = supabase
       .from('site_visits')
       .select('site_id, started_at, is_restock, tech_name_raw, appointment_number')
       .in('site_id', siteIds)
       .not('started_at', 'is', null)
       .order('started_at', { ascending: true })
       .range(from, from + pageSize - 1);
+    if (since) visitsQuery = visitsQuery.gte('started_at', since + 'T00:00:00');
+    if (until) visitsQuery = visitsQuery.lte('started_at', until + 'T23:59:59');
+    const { data: page, error: visitsErr } = await visitsQuery;
     if (visitsErr) return json(500, { ok: false, error: 'site_visits fetch failed: ' + visitsErr.message });
     allVisits = allVisits.concat(page);
     if (page.length < pageSize) break;
@@ -186,5 +216,11 @@ exports.handler = async (event) => {
     return an1 - bn1;
   });
 
-  return json(200, { ok: true, locations, totalSites: locations.length, generatedAt: new Date().toISOString() });
+  return json(200, {
+    ok: true,
+    locations,
+    totalSites: locations.length,
+    generatedAt: new Date().toISOString(),
+    range: { since, until },
+  });
 };
