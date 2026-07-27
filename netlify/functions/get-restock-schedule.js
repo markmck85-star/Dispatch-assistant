@@ -86,7 +86,7 @@ exports.handler = async (event) => {
   while (true) {
     let visitsQuery = supabase
       .from('site_visits')
-      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number')
+      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number, imported_at')
       .in('site_id', siteIds)
       .not('started_at', 'is', null)
       .order('started_at', { ascending: true })
@@ -98,6 +98,14 @@ exports.handler = async (event) => {
     allVisits = allVisits.concat(page);
     if (page.length < pageSize) break;
     from += pageSize;
+  }
+
+  // True data-freshness signal: when the underlying Salesforce report was
+  // last imported into Supabase (via the closed-ticket import), not "now" --
+  // this is a shared, periodically-refreshed dataset, not a live feed.
+  let lastImportedAt = null;
+  for (const v of allVisits) {
+    if (v.imported_at && (!lastImportedAt || v.imported_at > lastImportedAt)) lastImportedAt = v.imported_at;
   }
 
   // Group per site
@@ -221,6 +229,7 @@ exports.handler = async (event) => {
     locations,
     totalSites: locations.length,
     generatedAt: new Date().toISOString(),
+    lastImportedAt,
     range: { since, until },
   });
 };
