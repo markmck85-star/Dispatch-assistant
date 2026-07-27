@@ -224,7 +224,24 @@ exports.handler = async (event) => {
     const { error: insertErr, count } = await supabase
       .from('site_visits')
       .insert(toInsert, { count: 'exact' });
-    if (insertErr) return json(500, { ok: false, error: 'insert failed: ' + insertErr.message });
+    if (insertErr) {
+      // Foreign-key violations on site_visits.state are the one case worth
+      // a friendlier message -- turns "violates foreign key constraint
+      // site_visits_state_fkey" into an actionable "these codes aren't in
+      // the states table" instead of making someone go hunt through
+      // Supabase's table editor by hand to find out which one.
+      let detail = insertErr.message;
+      if (/state_fkey|violates foreign key/i.test(insertErr.message)) {
+        const batchStates = [...new Set(toInsert.map(r => r.state).filter(Boolean))];
+        const { data: knownStates } = await supabase.from('states').select('code').in('code', batchStates);
+        const knownSet = new Set((knownStates || []).map(s => s.code));
+        const missing = batchStates.filter(s => !knownSet.has(s));
+        if (missing.length) {
+          detail = `state code(s) not found in the "states" table: ${missing.join(', ')} -- add ${missing.length === 1 ? 'a row for it' : 'rows for them'} there first.`;
+        }
+      }
+      return json(500, { ok: false, error: 'insert failed: ' + detail });
+    }
     inserted = count != null ? count : toInsert.length;
   }
 
