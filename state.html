@@ -177,7 +177,8 @@ async function autoImport(file) {
 
     const BATCH_SIZE = 250;
     let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0;
-    let errors = []; // [{ startRow, endRow, batch, message }]
+    let errors = []; // [{ startRow, endRow, batch, message }] -- whole request failed (network, auth, etc.)
+    let rowErrors = []; // [{ appointmentNumber, accountName, state, reason, originalRow }] -- request succeeded, specific row(s) didn't
 
     async function runBatch(batch, startRow, endRow) {
       statusEl.textContent = `Importing rows ${startRow}-${endRow} of ${mapped.length}…`;
@@ -192,6 +193,10 @@ async function autoImport(file) {
         totalInserted += data.inserted || 0;
         totalSkipped += data.skippedExisting || 0;
         totalNeedsReview += data.needsReview || 0;
+        for (const re of (data.rowErrors || [])) {
+          const originalRow = batch.find(r => r.appointmentNumber === re.appointmentNumber);
+          rowErrors.push({ ...re, originalRow });
+        }
         return true;
       } catch (err) {
         errors.push({ startRow, endRow, batch, message: err.message });
@@ -213,13 +218,20 @@ async function autoImport(file) {
     function renderImportStatus() {
       let html = `✅ ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need site review.`;
       if (errors.length) {
-        html += `<div style="color:#e08a8a;margin-top:6px;">${errors.length} batch(es) failed -- these rows are NOT in the database yet:</div>`;
+        html += `<div style="color:#e08a8a;margin-top:6px;">${errors.length} request(s) failed entirely -- these rows are NOT in the database yet:</div>`;
         html += errors.map(e => `<div style="font-size:12px;color:#e08a8a;margin-left:8px;">Rows ${e.startRow}-${e.endRow}: ${escapeHtml(e.message)}</div>`).join('');
-        html += `<button id="retryBatchesBtn" style="margin-top:8px;padding:6px 14px;background:#dc3545;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${errors.length} failed batch(es)</button>`;
+        html += `<button id="retryBatchesBtn" style="margin-top:8px;padding:6px 14px;background:#dc3545;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${errors.length} failed request(s)</button>`;
+      }
+      if (rowErrors.length) {
+        html += `<div style="color:#e0a030;margin-top:6px;">${rowErrors.length} row(s) failed individually -- everything else in their batch(es) still imported:</div>`;
+        html += rowErrors.map(e => `<div style="font-size:12px;color:#e0a030;margin-left:8px;">${escapeHtml(e.appointmentNumber || '(no appt #)')} -- ${escapeHtml(e.accountName || '')}: ${escapeHtml(e.reason)}</div>`).join('');
+        html += `<button id="retryRowsBtn" style="margin-top:8px;padding:6px 14px;background:#c98a1f;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${rowErrors.length} failed row(s)</button>`;
       }
       statusEl.innerHTML = html;
       const retryBtn = document.getElementById('retryBatchesBtn');
       if (retryBtn) retryBtn.onclick = retryFailedBatches;
+      const retryRowsBtn = document.getElementById('retryRowsBtn');
+      if (retryRowsBtn) retryRowsBtn.onclick = retryFailedRows;
     }
 
     async function retryFailedBatches() {
@@ -228,6 +240,14 @@ async function autoImport(file) {
       for (const e of toRetry) {
         await runBatch(e.batch, e.startRow, e.endRow);
       }
+      renderImportStatus();
+      loadAll();
+    }
+
+    async function retryFailedRows() {
+      const toRetry = rowErrors.map(e => e.originalRow).filter(Boolean);
+      rowErrors = [];
+      if (toRetry.length) await runBatch(toRetry, 1, toRetry.length);
       renderImportStatus();
       loadAll();
     }
