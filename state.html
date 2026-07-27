@@ -569,6 +569,23 @@ async function showSiteHistory(code) {
     }
 }
 
+// Direct-link support: /GA, /Georgia, etc. get rewritten by _redirects to
+// /state.html?state=:value -- match that against the dropdown by code or
+// full name (case-insensitive) so a homescreen shortcut can jump straight
+// to one state instead of always landing on whatever's first in the list.
+(function applyStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = (params.get('state') || '').trim().toLowerCase();
+  if (!requested) return;
+  const sel = document.getElementById('stateSel');
+  for (const opt of sel.options) {
+    if (opt.value.toLowerCase() === requested || opt.textContent.trim().toLowerCase() === requested) {
+      sel.value = opt.value;
+      break;
+    }
+  }
+})();
+
 loadAll();
 </script>
 </body>
