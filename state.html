@@ -102,8 +102,12 @@
 
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
     <div class="import-box">
+      <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
+      <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
+      <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
+
       <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
-      <div style="font-size:12px;color:#999;margin-bottom:8px;">Log in, export as Excel (.xlsx), then select it below — it imports automatically, no extra button to press.</div>
+      <div style="font-size:12px;color:#999;margin-bottom:8px;">Or log in and export manually, then select it below — falls back to this if the automated sync is ever down.</div>
       <input type="file" id="importFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="autoImport(this.files[0])">
       <div id="importStatus" class="status-line" style="padding:4px 0;">Ready.</div>
     </div>
@@ -585,6 +589,90 @@ async function showSiteHistory(code) {
     }
   }
 })();
+
+// ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
+// Fires salesforce-report-sync-background.js on demand instead of waiting
+// for the next scheduled run, then polls the lightweight status endpoint
+// every few seconds to show progress -- the actual sync can take anywhere
+// from 10 to 60+ seconds (browser launch, login, export, parse, import),
+// so this can't just wait on one fetch the way a normal button click would.
+let refreshPollTimer = null;
+
+async function triggerManualSync() {
+  const btn = document.getElementById('refreshNowBtn');
+  const statusEl = document.getElementById('refreshStatus');
+  btn.disabled = true;
+  statusEl.textContent = 'Starting sync…';
+  statusEl.style.color = 'var(--muted)';
+
+  try {
+    // Fire-and-forget -- the -background suffix means Netlify acknowledges
+    // this immediately and keeps the actual work running server-side even
+    // after this fetch resolves.
+    fetch('/.netlify/functions/salesforce-report-sync-background', { method: 'POST' }).catch(() => {});
+  } catch (err) {
+    // Even if the initial fetch itself fails to fire, still start polling --
+    // the scheduled run might pick it up, and polling will just show idle.
+  }
+
+  if (refreshPollTimer) clearInterval(refreshPollTimer);
+  refreshPollTimer = setInterval(pollSyncStatus, 3000);
+  pollSyncStatus();
+}
+
+async function pollSyncStatus() {
+  const btn = document.getElementById('refreshNowBtn');
+  const statusEl = document.getElementById('refreshStatus');
+  try {
+    const res = await fetch('/.netlify/functions/get-report-sync-status');
+    const data = await res.json();
+
+    if (data.inProgress) {
+      const startedAt = data.startedAt ? new Date(data.startedAt) : null;
+      const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
+      statusEl.textContent = `⏳ Sync running${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
+      statusEl.style.color = 'var(--muted)';
+      btn.disabled = true;
+      return;
+    }
+
+    clearInterval(refreshPollTimer);
+    refreshPollTimer = null;
+    btn.disabled = false;
+
+    if (data.lastSuccess) {
+      const s = data.lastSuccess;
+      const at = new Date(s.at);
+      const secondsAgo = (Date.now() - at.getTime()) / 1000;
+      if (secondsAgo < 120) {
+        statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
+        statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
+        loadAll();
+        return;
+      }
+    }
+
+    if (data.lastFailure) {
+      const f = data.lastFailure;
+      const at = new Date(f.at);
+      const secondsAgo = (Date.now() - at.getTime()) / 1000;
+      if (secondsAgo < 120) {
+        statusEl.textContent = `❌ Sync failed: ${f.reason}`;
+        statusEl.style.color = '#e08a8a';
+        return;
+      }
+    }
+
+    statusEl.textContent = 'Sync finished (no recent result found -- check the Netlify function log).';
+    statusEl.style.color = 'var(--muted)';
+  } catch (err) {
+    clearInterval(refreshPollTimer);
+    refreshPollTimer = null;
+    btn.disabled = false;
+    statusEl.textContent = 'Could not check sync status: ' + err.message;
+    statusEl.style.color = '#e08a8a';
+  }
+}
 
 loadAll();
 </script>
