@@ -1,4 +1,11 @@
 /restore.html    /restore.html    200
 /admin.html      /admin.html      200
 /calendar.html   /calendar.html   200
+
+# Direct-link shortcuts for the state console, e.g. mcrdispatch.net/Georgia
+# or mcrdispatch.net/GA -- added 2026-07-27 for phone-homescreen shortcuts.
+# Only ever reached for paths that don't match a real file on disk (Netlify
+# checks actual files first), so this can't shadow admin/calendar/state/etc.
+/:state          /state.html?state=:state    200
+
 /*               /index.html      200
