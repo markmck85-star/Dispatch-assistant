@@ -9,11 +9,24 @@
 // the two pieces that didn't already have a state-scoped endpoint:
 // today's technician availability, and a recent-tickets feed.
 //
+// v2 (2026-07-27): recentTickets now includes an open/closed status,
+// inferred from whether a site_visit (from the closed-ticket Salesforce
+// import) has already linked back to that ticket -- tickets.status itself
+// is set to 'open' at creation and never updated anywhere in the app, so
+// it isn't a usable signal on its own. "Closed" here means "confirmed
+// closed by the imported report," not "still genuinely open" -- a ticket
+// that's actually been resolved in the field will still show as open here
+// until the closed-ticket report is re-imported. That's exactly why
+// lastImportedAt (the real closed-ticket import freshness for this state,
+// same source as restock tracker's freshness banner) is now returned
+// alongside it -- state.html shows it so a dispatcher can judge whether an
+// "open" ticket is trustworthy or just pending the next import.
+//
 // Deliberately excludes anything related to restock-to-trouble ratios --
 // Mark wants that admin-only, not shown to the dispatcher/state it's about.
 //
 // GET /.netlify/functions/get-state-console?state=GA
-// -> { technicians: [{id,name,available,reason,note}], recentTickets: [...] }
+// -> { technicians: [...], recentTickets: [{..., status, closedOn}], lastImportedAt }
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -72,19 +85,52 @@ exports.handler = async (event) => {
   const siteIds = Object.keys(siteById);
 
   let recentTickets = [];
+  let lastImportedAt = null;
   if (siteIds.length) {
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
       .order('received_at', { ascending: false })
       .limit(20);
     if (ticketsErr) return json(500, { ok: false, error: 'tickets fetch failed: ' + ticketsErr.message });
+
+    // Closed = a site_visit from the closed-ticket import has already
+    // linked back to this ticket (import-service-appointments.js sets
+    // site_visits.ticket_id by matching WO number). Take the earliest
+    // matching visit if more than one somehow references the same ticket.
+    const ticketIds = (tickets || []).map(t => t.id);
+    let closedByTicketId = {};
+    if (ticketIds.length) {
+      const { data: closingVisits, error: closingErr } = await supabase
+        .from('site_visits')
+        .select('ticket_id, started_at')
+        .in('ticket_id', ticketIds)
+        .order('started_at', { ascending: true });
+      if (closingErr) return json(500, { ok: false, error: 'closing-visit fetch failed: ' + closingErr.message });
+      for (const v of (closingVisits || [])) {
+        if (!closedByTicketId[v.ticket_id]) closedByTicketId[v.ticket_id] = v.started_at;
+      }
+    }
+
+    // Overall closed-ticket import freshness for this state -- independent
+    // of whether any specific ticket above has matched yet, so "still open"
+    // can be judged against how current the import itself is.
+    const { data: freshRows, error: freshErr } = await supabase
+      .from('site_visits')
+      .select('imported_at')
+      .in('site_id', siteIds)
+      .order('imported_at', { ascending: false })
+      .limit(1);
+    if (freshErr) return json(500, { ok: false, error: 'import-freshness fetch failed: ' + freshErr.message });
+    lastImportedAt = (freshRows && freshRows[0]) ? freshRows[0].imported_at : null;
+
     recentTickets = (tickets || []).map(t => {
       const site = siteById[t.site_id];
+      const closedOn = closedByTicketId[t.id] || null;
       return {
         siteCode: site ? site.site_code : null,
         siteName: site ? site.name : '(unknown site)',
@@ -93,9 +139,11 @@ exports.handler = async (event) => {
         ticketKind: t.ticket_kind,
         woNumber: t.wo_number,
         receivedAt: t.received_at,
+        status: closedOn ? 'closed' : 'open',
+        closedOn,
       };
     });
   }
 
-  return json(200, { ok: true, state, technicians, recentTickets, generatedAt: new Date().toISOString() });
+  return json(200, { ok: true, state, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
 };
