@@ -1,0 +1,297 @@
+// salesforce-report-sync-background.mjs
+//
+// v2 (2026-07-27, second pass): rewritten as a proper Netlify v2 Background
+// Function after finding the real cause of every prior test run dying
+// around 10 seconds -- this was combining the "-background" filename
+// suffix with a `schedule` config in netlify.toml, but Netlify's own
+// current docs (pulled via the Netlify MCP tool mid-debugging) describe
+// Background Functions and Scheduled Functions as two DISTINCT primitives
+// with different limits: Scheduled Functions cap at 30 seconds, full stop,
+// regardless of filename -- only a function invoked directly via HTTP with
+// a "-background" suffix gets the real 15-minute background execution.
+// So this file no longer has any schedule attached to it at all. The
+// 20-minute cron trigger now lives in the separate, tiny
+// salesforce-report-sync-trigger.mjs, which just pings this function's URL
+// and returns well within the 30-second scheduled-function limit -- the
+// actual browser work happens here, in the background function it kicks
+// off. The "Refresh Now" button on state.html already calls this function
+// directly by name, so no changes needed there.
+//
+// Also switched from the older `exports.handler = async (event, context)`
+// (CommonJS) format to the current `export default async (req, context)`
+// (ESM, web-standard Request) format Netlify's docs now show as current --
+// this also incidentally simplifies the @sparticuz/chromium ESM-only
+// problem from the first debugging pass: since this whole file is ESM now,
+// chromium can be a normal static import instead of needing the dynamic
+// import() workaround.
+//
+// IMPORTANT -- READ BEFORE FIRST DEPLOY:
+// The login-page selectors (username/password/login button, and the
+// "Verify Your Identity" detection) are Salesforce's own standard hosted
+// login flow and have been stable across orgs for years -- reasonably
+// confident in those. The report-export selectors (the Export button, the
+// "Details Only" card, the modal's own Export button) are built from Mark's
+// actual screenshots of this report, but have NOT been confirmed working
+// end-to-end yet -- everything tested so far has died before reaching them
+// due to the timeout bug this version fixes. Expect the NEXT test to be
+// the first real look at whether those selectors work. Every failure point
+// captures a screenshot to Blobs and includes the current URL + a
+// page-text snippet in the alert email so a failure is diagnosable rather
+// than a bare stack trace.
+//
+// Required Netlify environment variables (Mark must set these):
+//   SALESFORCE_USERNAME, SALESFORCE_PASSWORD, MAILGUN_API_KEY (already
+//   set), ALERT_EMAIL, optional ALERT_SMS_ADDRESS. SALESFORCE_REPORT_URL
+//   optional, defaults to the report Mark linked.
+
+import { getStore } from '@netlify/blobs';
+import { createClient } from '@supabase/supabase-js';
+import { chromium as playwright } from 'playwright-core';
+import chromium from '@sparticuz/chromium';
+import * as XLSX from 'xlsx';
+import fs from 'fs';
+import perfImportPkg from './lib/perform-import.js';
+const { performImport } = perfImportPkg;
+
+const REPORT_URL = process.env.SALESFORCE_REPORT_URL
+  || 'https://iti4dmv.my.salesforce.com/lightning/r/Report/00OVN000003SjTV2A0/view';
+
+function getSyncStore() {
+  return getStore('report-sync');
+}
+
+async function sendAlert(subject, body) {
+  const apiKey = process.env.MAILGUN_API_KEY;
+  const domain = process.env.MAILGUN_DOMAIN || 'mcrdispatch.net';
+  const alertEmail = process.env.ALERT_EMAIL;
+  const alertSms = process.env.ALERT_SMS_ADDRESS;
+  if (!apiKey) {
+    console.error('[salesforce-report-sync] Cannot send alert -- MAILGUN_API_KEY not set:', subject);
+    return;
+  }
+  const to = [alertEmail, alertSms].filter(Boolean).join(',');
+  if (!to) {
+    console.error('[salesforce-report-sync] Cannot send alert -- no ALERT_EMAIL/ALERT_SMS_ADDRESS set:', subject);
+    return;
+  }
+  try {
+    const params = new URLSearchParams({
+      from: `MCR Dispatch <dispatch@${domain}>`,
+      to,
+      subject,
+      text: body,
+    });
+    await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic ' + Buffer.from(`api:${apiKey}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+  } catch (err) {
+    console.error('[salesforce-report-sync] Alert send itself failed:', err.message);
+  }
+}
+
+async function recordFailure(reason, page) {
+  const store = getSyncStore();
+  let screenshotNote = '(no screenshot captured)';
+  try {
+    if (page) {
+      const shot = await page.screenshot({ fullPage: true });
+      await store.set('last-failure-screenshot', shot);
+      screenshotNote = 'Screenshot saved to Blobs key report-sync/last-failure-screenshot';
+    }
+  } catch (shotErr) {
+    screenshotNote = 'Screenshot capture also failed: ' + shotErr.message;
+  }
+  let pageInfo = '';
+  try {
+    if (page) {
+      const url = page.url();
+      const text = (await page.innerText('body').catch(() => '')).slice(0, 500);
+      pageInfo = `\nURL at failure: ${url}\nPage text snippet: ${text}`;
+    }
+  } catch (e) { /* best effort only */ }
+
+  const failureRecord = { reason, at: new Date().toISOString(), pageInfo };
+  await store.set('last-failure', JSON.stringify(failureRecord));
+
+  await sendAlert(
+    '⚠️ Salesforce report sync failed',
+    `The automated closed-ticket report sync failed:\n\n${reason}${pageInfo}\n\n${screenshotNote}\n\nClosed-ticket data will keep getting stale until this is fixed or run manually. Check the Netlify function log for salesforce-report-sync-background for full detail.`
+  );
+}
+
+async function recordSuccess(summary) {
+  const store = getSyncStore();
+  await store.set('last-success', JSON.stringify({ at: new Date().toISOString(), ...summary }));
+  try { await store.delete('stale-alert-sent'); } catch (e) { /* fine if it didn't exist */ }
+}
+
+export default async (req, context) => {
+  const store = getSyncStore();
+  await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: req.method === 'POST' ? 'manual-or-cron' : 'unknown' }));
+
+  const username = process.env.SALESFORCE_USERNAME;
+  const password = process.env.SALESFORCE_PASSWORD;
+  if (!username || !password) {
+    await recordFailure('SALESFORCE_USERNAME/SALESFORCE_PASSWORD not set in Netlify environment variables.', null);
+    await store.delete('in-progress').catch(() => {});
+    return;
+  }
+
+  let browser;
+  let page;
+  try {
+    browser = await playwright.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
+    page = await browser.newPage();
+    page.setDefaultTimeout(30000);
+
+    // Navigating directly to the report while unauthenticated should bounce
+    // through Salesforce's standard login page and land back here on success.
+    await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
+
+    // Give Salesforce's login page a real chance to render before deciding
+    // whether we're on it -- an instant check right after domcontentloaded
+    // can fire before the login form has actually painted.
+    const onLoginPage = await page.waitForSelector('#username', { timeout: 8000 }).then(() => true).catch(() => false);
+    if (onLoginPage) {
+      await page.fill('#username', username);
+      await page.fill('#password', password);
+      await page.click('#Login');
+      await page.waitForLoadState('domcontentloaded');
+
+      const needsVerification = await page
+        .getByText(/verify your identity/i)
+        .isVisible()
+        .catch(() => false);
+      if (needsVerification) {
+        await recordFailure(
+          'Salesforce is asking for identity verification (a code sent to email/SMS) -- this needs a human to complete once. Automation cannot proceed past this on its own.',
+          page
+        );
+        return;
+      }
+
+      const loginError = await page
+        .locator('#error')
+        .isVisible()
+        .catch(() => false);
+      if (loginError) {
+        const errText = await page.locator('#error').innerText().catch(() => '(could not read error text)');
+        await recordFailure('Salesforce login rejected: ' + errText, page);
+        return;
+      }
+    }
+
+    // Confirm we actually landed on the report (in case of an unexpected
+    // redirect elsewhere).
+    if (!page.url().includes('/lightning/r/Report/')) {
+      await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForSelector('text=Export', { timeout: 45000 });
+
+    // Trigger the export flow: nav-bar Export button -> modal already
+    // defaults to "Details Only" / "Excel Format .xls" per Mark's
+    // screenshot, so this only needs to open the modal and confirm.
+    await page.getByRole('button', { name: 'Export', exact: true }).first().click();
+    const dialog = page.getByRole('dialog');
+    await dialog.waitFor({ state: 'visible', timeout: 15000 });
+
+    await dialog.getByText('Details Only', { exact: false }).click().catch(() => {});
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30000 }),
+      dialog.getByRole('button', { name: 'Export', exact: true }).click(),
+    ]);
+
+    const buffer = await (async () => {
+      const tmpPath = '/tmp/sf-export-' + Date.now() + '.xls';
+      await download.saveAs(tmpPath);
+      return fs.readFileSync(tmpPath);
+    })();
+
+    await browser.close();
+    browser = null;
+
+    const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    let rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+    if (!rows.length) {
+      await recordFailure('Downloaded report parsed to zero rows -- export may have failed silently or the report is genuinely empty.', null);
+      return;
+    }
+    rows = rows.map((r) => {
+      const out = {};
+      for (const k of Object.keys(r)) out[k.trim()] = r[k];
+      return out;
+    });
+    const required = ['Account Name', 'Jurisdiction', 'Appointment Number'];
+    for (const col of required) {
+      if (!(col in rows[0])) {
+        await recordFailure(`Downloaded file is missing expected column "${col}". Columns found: ${Object.keys(rows[0]).join(', ')}`, null);
+        return;
+      }
+    }
+
+    const mapped = rows
+      .map((r) => ({
+        accountName: String(r['Account Name'] || '').trim(),
+        state: String(r['Jurisdiction'] || '').trim(),
+        woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
+        appointmentNumber: String(r['Appointment Number'] || '').trim(),
+        actualStart: r['Actual Start'] || null,
+        actualEnd: r['Actual End'] || null,
+        durationMin: (r['Actual Duration (Minutes)'] != null && r['Actual Duration (Minutes)'] !== '') ? Number(r['Actual Duration (Minutes)']) : null,
+        techName: String(r['Service Resource: Name'] || '').trim(),
+        remediation: String(r['Remediation'] || '').trim(),
+        remediationDetail: String(r['Remediation Detail'] || '').trim(),
+      }))
+      .filter((r) => r.appointmentNumber);
+
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0, allRowErrors = [];
+    const BATCH_SIZE = 250;
+    for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
+      const batch = mapped.slice(i, i + BATCH_SIZE);
+      const result = await performImport(supabase, batch);
+      totalInserted += result.inserted;
+      totalSkipped += result.skippedExisting;
+      totalNeedsReview += result.needsReview;
+      allRowErrors = allRowErrors.concat(result.rowErrors);
+    }
+
+    await recordSuccess({
+      totalRows: mapped.length,
+      inserted: totalInserted,
+      skippedExisting: totalSkipped,
+      needsReview: totalNeedsReview,
+      rowErrorCount: allRowErrors.length,
+    });
+
+    if (allRowErrors.length) {
+      await sendAlert(
+        `Salesforce report sync: ${allRowErrors.length} row(s) failed`,
+        `Sync succeeded overall (${totalInserted} imported, ${totalSkipped} already on file), but ${allRowErrors.length} row(s) failed individually:\n\n` +
+          allRowErrors.slice(0, 20).map(e => `${e.appointmentNumber} -- ${e.accountName}: ${e.reason}`).join('\n')
+      );
+    }
+
+    console.log(`[salesforce-report-sync] Success: ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need review, ${allRowErrors.length} row errors.`);
+  } catch (err) {
+    console.error('[salesforce-report-sync] Unhandled error:', err);
+    await recordFailure('Unhandled error: ' + err.message, page);
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (e) { /* already closing */ }
+    }
+    try { await store.delete('in-progress'); } catch (e) { /* fine if already gone */ }
+  }
+};
