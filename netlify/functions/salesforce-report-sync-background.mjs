@@ -134,8 +134,14 @@ export default async (req, context) => {
   const store = getSyncStore();
   await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: req.method === 'POST' ? 'manual-or-cron' : 'unknown' }));
 
-  const username = process.env.SALESFORCE_USERNAME;
-  const password = process.env.SALESFORCE_PASSWORD;
+  const username = (process.env.SALESFORCE_USERNAME || '').trim();
+  const password = (process.env.SALESFORCE_PASSWORD || '').trim();
+  console.log(`[salesforce-report-sync] Credential check -- username length: ${username.length}, password length: ${password.length}. (Never logging actual values.)`);
+  const rawUsername = process.env.SALESFORCE_USERNAME || '';
+  const rawPassword = process.env.SALESFORCE_PASSWORD || '';
+  if (rawUsername !== username || rawPassword !== password) {
+    console.log('[salesforce-report-sync] NOTE: trimmed leading/trailing whitespace from one or both env vars before use -- the stored value had extra whitespace.');
+  }
   if (!username || !password) {
     await recordFailure('SALESFORCE_USERNAME/SALESFORCE_PASSWORD not set in Netlify environment variables.', null);
     await store.delete('in-progress').catch(() => {});
