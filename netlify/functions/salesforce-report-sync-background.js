@@ -150,6 +150,7 @@ exports.handler = async (event, context) => {
   }
 
   let browser;
+  let page;
   try {
     // @sparticuz/chromium ships as an ES Module (no CommonJS build), so it
     // can't be require()'d from this file -- has to be a dynamic import()
@@ -161,14 +162,20 @@ exports.handler = async (event, context) => {
       executablePath: await chromium.executablePath(),
       headless: true,
     });
-    const page = await browser.newPage();
+    page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
     // Navigating directly to the report while unauthenticated should bounce
     // through Salesforce's standard login page and land back here on success.
     await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
 
-    const onLoginPage = await page.locator('#username').isVisible().catch(() => false);
+    // Give Salesforce's login page a real chance to render before deciding
+    // whether we're on it -- an instant .isVisible() check right after
+    // domcontentloaded can fire before the login form has actually painted,
+    // which would silently skip typing in credentials entirely and explain
+    // a later "Export never appeared" timeout on what's actually still the
+    // login page.
+    const onLoginPage = await page.waitForSelector('#username', { timeout: 8000 }).then(() => true).catch(() => false);
     if (onLoginPage) {
       await page.fill('#username', username);
       await page.fill('#password', password);
@@ -204,7 +211,7 @@ exports.handler = async (event, context) => {
     if (!page.url().includes('/lightning/r/Report/')) {
       await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
     }
-    await page.waitForSelector('text=Export', { timeout: 30000 });
+    await page.waitForSelector('text=Export', { timeout: 45000 });
 
     // Trigger the export flow: nav-bar Export button -> modal already
     // defaults to "Details Only" / "Excel Format .xls" per Mark's
@@ -302,7 +309,7 @@ exports.handler = async (event, context) => {
     return { statusCode: 200, body: 'ok' };
   } catch (err) {
     console.error('[salesforce-report-sync] Unhandled error:', err);
-    await recordFailure('Unhandled error: ' + err.message, null);
+    await recordFailure('Unhandled error: ' + err.message, page);
     return { statusCode: 200, body: 'error handled' };
   } finally {
     if (browser) {
