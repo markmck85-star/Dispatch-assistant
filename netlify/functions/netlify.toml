@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[functions."bluefolder-sync"]
+  schedule = "0,30 * * * *"
+
+[functions."check-report-sync-health"]
+  schedule = "15,35,55 * * * *"
