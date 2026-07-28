@@ -20,11 +20,14 @@
  * { done: true } once every origin batch has been processed. admin.html
  * drives this loop client-side and shows progress between calls.
  *
- * Reads from locations/{STATE} in Blobs -- the exact same source
- * geocode-addresses.js populates and compute-distance-matrix.js already
- * reads for the tech-to-site matrix, so site codes and coordinates stay
- * consistent between the two matrices rather than risking a second,
- * possibly-diverged copy of site coordinates.
+ * Reads site coordinates from Supabase (sites table, lat/lng columns) --
+ * v2 (2026-07-28): migrated from the old Blobs "locations/{STATE}" store,
+ * which was left behind when get-locations.js/get-technicians.js moved to
+ * Supabase-primary reads earlier this week. geocode-addresses.js was
+ * migrated the same day so both stay consistent. Output (the computed
+ * distance matrix itself) is unchanged -- still cached in Blobs under
+ * distance-matrix/{STATE}, since that's what index.html and the
+ * tech-to-site matrix already read from there.
  *
  * Cost: scales with (site count)^2, not tech count -- calibrated 2026-07-25
  * against the existing tech-to-site matrix's own quoted "~$3-6/state" price
@@ -51,6 +54,7 @@
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
+const { createClient } = require("@supabase/supabase-js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const ORIGIN_BATCH = 8;   // origins per call
@@ -94,13 +98,18 @@ exports.handler = async (event) => {
   if (!apiKey) return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set" });
 
   const store = getStore("dispatch");
-  const [locationsData, existing] = await Promise.all([
-    store.get("locations/" + state, { type: "json" }),
-    store.get("distance-matrix/" + state, { type: "json" }),
-  ]);
+  const existing = await store.get("distance-matrix/" + state, { type: "json" });
 
-  const locations = locationsData || {};
-  const locEntries = Object.entries(locations).filter(([, l]) => l.lat && l.lng);
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const { data: sites, error: sitesErr } = await supabase
+    .from("sites")
+    .select("site_code, lat, lng")
+    .eq("state", state);
+  if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
+
+  const locEntries = (sites || [])
+    .filter((s) => s.lat != null && s.lng != null)
+    .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
 
   if (locEntries.length < 2) {
     return json(400, {

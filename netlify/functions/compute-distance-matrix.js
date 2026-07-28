@@ -1,8 +1,14 @@
 /**
  * compute-distance-matrix.js
- * Admin-triggered function.  Reads stored lat/lng from Blobs, then builds a
- * full technician↔location distance matrix for a state and writes it to
- * Blobs at distance-matrix/{STATE}.
+ * Admin-triggered function.  Reads stored lat/lng from Supabase (sites and
+ * technicians tables), then builds a full technician↔location distance
+ * matrix for a state and writes it to Blobs at distance-matrix/{STATE}.
+ *
+ * v2 (2026-07-28): migrated input from the old Blobs "locations/{STATE}"
+ * and "technicians/{STATE}" keys to Supabase, matching the same migration
+ * done to geocode-addresses.js and compute-site-distance-matrix.js the
+ * same day. Output (the computed matrix itself) is unchanged -- still
+ * cached in Blobs, since index.html already reads from there.
  *
  * Two modes:
  *   haversine (default, free) — straight-line distance using stored lat/lng.
@@ -24,6 +30,7 @@
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
+const { createClient } = require("@supabase/supabase-js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const DEST_BATCH = 10; // destinations per Distance Matrix API call (9 techs × 10 = 90 elements, under 100-element limit)
@@ -73,21 +80,22 @@ exports.handler = async (event) => {
     return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set (required for driving mode)" });
 
   const store = getStore("dispatch");
-  const [locationsData, techsData] = await Promise.all([
-    store.get("locations/" + state, { type: "json" }),
-    store.get("technicians/" + state, { type: "json" }),
-  ]);
 
-  const locations = locationsData || {};
-  const techs = techsData || {};
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
+    supabase.from("sites").select("site_code, lat, lng").eq("state", state),
+    supabase.from("technicians").select("slug, lat, lng, active").eq("home_state", state),
+  ]);
+  if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
+  if (techsErr) return json(500, { error: "technicians fetch failed: " + techsErr.message });
 
   // Filter to entries that have geocoded coords and are active
-  const techEntries = Object.entries(techs).filter(
-    ([, t]) => t.lat && t.lng && t.active !== false
-  );
-  const locEntries = Object.entries(locations).filter(
-    ([, l]) => l.lat && l.lng
-  );
+  const techEntries = (techs || [])
+    .filter((t) => t.lat != null && t.lng != null && t.active !== false)
+    .map((t) => [t.slug, { lat: t.lat, lng: t.lng }]);
+  const locEntries = (sites || [])
+    .filter((s) => s.lat != null && s.lng != null)
+    .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
 
   if (techEntries.length === 0)
     return json(400, {
