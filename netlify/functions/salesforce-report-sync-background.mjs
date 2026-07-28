@@ -152,7 +152,7 @@ export default async (req, context) => {
   let page;
   try {
     browser = await playwright.launch({
-      args: chromium.args,
+      args: [...chromium.args, '--disable-dev-shm-usage'],
       executablePath: await chromium.executablePath(),
       headless: true,
     });
