@@ -597,6 +597,9 @@ async function showSiteHistory(code) {
 // from 10 to 60+ seconds (browser launch, login, export, parse, import),
 // so this can't just wait on one fetch the way a normal button click would.
 let refreshPollTimer = null;
+let syncTriggeredAt = null;
+let hasSeenInProgress = false;
+const START_GRACE_PERIOD_MS = 20000; // background function can take a few seconds to actually start and write its in-progress flag -- don't call it "finished" before it's even begun
 
 async function triggerManualSync() {
   const btn = document.getElementById('refreshNowBtn');
@@ -604,6 +607,8 @@ async function triggerManualSync() {
   btn.disabled = true;
   statusEl.textContent = 'Starting sync…';
   statusEl.style.color = 'var(--muted)';
+  syncTriggeredAt = Date.now();
+  hasSeenInProgress = false;
 
   try {
     // Fire-and-forget -- the -background suffix means Netlify acknowledges
@@ -628,9 +633,22 @@ async function pollSyncStatus() {
     const data = await res.json();
 
     if (data.inProgress) {
+      hasSeenInProgress = true;
       const startedAt = data.startedAt ? new Date(data.startedAt) : null;
       const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
       statusEl.textContent = `⏳ Sync running${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
+      statusEl.style.color = 'var(--muted)';
+      btn.disabled = true;
+      return;
+    }
+
+    // Not in progress -- but if we triggered this ourselves and haven't
+    // actually SEEN it start yet, it may just not have written its
+    // in-progress flag yet (cold start, network latency). Keep waiting
+    // rather than immediately declaring "finished, nothing found."
+    const withinGracePeriod = syncTriggeredAt && (Date.now() - syncTriggeredAt) < START_GRACE_PERIOD_MS;
+    if (!hasSeenInProgress && withinGracePeriod) {
+      statusEl.textContent = '⏳ Starting sync…';
       statusEl.style.color = 'var(--muted)';
       btn.disabled = true;
       return;
