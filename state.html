@@ -104,7 +104,7 @@
     <div class="import-box">
       <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
       <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
-      <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
+      <div style="font-size:11px;color:#999;margin-bottom:12px;">Requests an out-of-cycle run from the sync script on Mark's PC (checks in every 1-2 min, so this can take a few minutes to pick up). Requires the PC to be on, logged in, and running local-sync-watchdog.js on schedule.</div>
 
       <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
       <div style="font-size:12px;color:#999;margin-bottom:8px;">Or log in and export manually, then select it below — falls back to this if the automated sync is ever down.</div>
@@ -590,38 +590,42 @@ async function showSiteHistory(code) {
   }
 })();
 
-// ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
-// Fires salesforce-report-sync-background.js on demand instead of waiting
-// for the next scheduled run, then polls the lightweight status endpoint
-// every few seconds to show progress -- the actual sync can take anywhere
-// from 10 to 60+ seconds (browser launch, login, export, parse, import),
-// so this can't just wait on one fetch the way a normal button click would.
+// ── Manual "Refresh Now" trigger for the local-PC Salesforce sync ─────────
+// The automated Netlify-side login was conclusively ruled out as workable
+// (see the salesforce-report-sync area notes) -- the actual sync now runs
+// on Mark's own PC via local-sync-watchdog.js, checking in with a shared
+// Supabase row every 1-2 minutes. This button can't reach into Mark's PC
+// directly (no webpage can trigger a program on someone's specific
+// computer), so instead it just sets a "please run now" flag in that same
+// row; the PC script picks it up on its next check-in. That means this can
+// take a couple of minutes just to START, on top of the run itself -- much
+// longer than the old server-side version, so the polling window and
+// messaging below are sized accordingly.
 let refreshPollTimer = null;
 let syncTriggeredAt = null;
 let hasSeenInProgress = false;
-const START_GRACE_PERIOD_MS = 20000; // background function can take a few seconds to actually start and write its in-progress flag -- don't call it "finished" before it's even begun
+const PICKUP_WAIT_MS = 3 * 60 * 1000; // PC script checks in every 1-2 min -- give it a few cycles before saying "hasn't started"
 
 async function triggerManualSync() {
   const btn = document.getElementById('refreshNowBtn');
   const statusEl = document.getElementById('refreshStatus');
   btn.disabled = true;
-  statusEl.textContent = 'Starting sync…';
+  statusEl.textContent = 'Requested -- waiting for the PC script to pick it up (checks in every 1-2 min)…';
   statusEl.style.color = 'var(--muted)';
   syncTriggeredAt = Date.now();
   hasSeenInProgress = false;
 
   try {
-    // Fire-and-forget -- the -background suffix means Netlify acknowledges
-    // this immediately and keeps the actual work running server-side even
-    // after this fetch resolves.
-    fetch('/.netlify/functions/salesforce-report-sync-background', { method: 'POST' }).catch(() => {});
+    await fetch('/.netlify/functions/request-local-sync', { method: 'POST' });
   } catch (err) {
-    // Even if the initial fetch itself fails to fire, still start polling --
-    // the scheduled run might pick it up, and polling will just show idle.
+    statusEl.textContent = 'Could not send the request: ' + err.message;
+    statusEl.style.color = '#e08a8a';
+    btn.disabled = false;
+    return;
   }
 
   if (refreshPollTimer) clearInterval(refreshPollTimer);
-  refreshPollTimer = setInterval(pollSyncStatus, 3000);
+  refreshPollTimer = setInterval(pollSyncStatus, 5000);
   pollSyncStatus();
 }
 
@@ -629,26 +633,28 @@ async function pollSyncStatus() {
   const btn = document.getElementById('refreshNowBtn');
   const statusEl = document.getElementById('refreshStatus');
   try {
-    const res = await fetch('/.netlify/functions/get-report-sync-status');
+    const res = await fetch('/.netlify/functions/get-local-sync-status');
     const data = await res.json();
+    const s = data.state || {};
 
-    if (data.inProgress) {
+    if (s.in_progress) {
       hasSeenInProgress = true;
-      const startedAt = data.startedAt ? new Date(data.startedAt) : null;
+      const startedAt = s.started_at ? new Date(s.started_at) : null;
       const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
-      statusEl.textContent = `⏳ Sync running${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
+      statusEl.textContent = `⏳ Running on the PC${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
       statusEl.style.color = 'var(--muted)';
       btn.disabled = true;
       return;
     }
 
-    // Not in progress -- but if we triggered this ourselves and haven't
-    // actually SEEN it start yet, it may just not have written its
-    // in-progress flag yet (cold start, network latency). Keep waiting
-    // rather than immediately declaring "finished, nothing found."
-    const withinGracePeriod = syncTriggeredAt && (Date.now() - syncTriggeredAt) < START_GRACE_PERIOD_MS;
-    if (!hasSeenInProgress && withinGracePeriod) {
-      statusEl.textContent = '⏳ Starting sync…';
+    // Not in progress -- if we requested this ourselves and haven't seen
+    // it start yet, the PC script may just not have checked in yet (it
+    // only looks every 1-2 minutes). Keep waiting rather than assuming
+    // it's done or failed.
+    const withinPickupWindow = syncTriggeredAt && (Date.now() - syncTriggeredAt) < PICKUP_WAIT_MS;
+    if (!hasSeenInProgress && withinPickupWindow) {
+      const secsWaiting = Math.round((Date.now() - syncTriggeredAt) / 1000);
+      statusEl.textContent = `⏳ Waiting for the PC to pick this up (${secsWaiting}s)…`;
       statusEl.style.color = 'var(--muted)';
       btn.disabled = true;
       return;
@@ -658,30 +664,29 @@ async function pollSyncStatus() {
     refreshPollTimer = null;
     btn.disabled = false;
 
-    if (data.lastSuccess) {
-      const s = data.lastSuccess;
-      const at = new Date(s.at);
+    if (s.last_success_at) {
+      const at = new Date(s.last_success_at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
-      if (secondsAgo < 120) {
-        statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
-        statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
+      if (secondsAgo < 300) {
+        const sum = s.last_success_summary || {};
+        statusEl.textContent = `✅ Done — ${sum.inserted ?? '?'} imported, ${sum.skippedExisting ?? '?'} already on file, ${sum.needsReview ?? '?'} need review${sum.rowErrorCount ? `, ${sum.rowErrorCount} row(s) failed` : ''}.`;
+        statusEl.style.color = sum.rowErrorCount ? '#e0a030' : '#7bc796';
         loadAll();
         return;
       }
     }
 
-    if (data.lastFailure) {
-      const f = data.lastFailure;
-      const at = new Date(f.at);
+    if (s.last_failure_at) {
+      const at = new Date(s.last_failure_at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
-      if (secondsAgo < 120) {
-        statusEl.textContent = `❌ Sync failed: ${f.reason}`;
+      if (secondsAgo < 300) {
+        statusEl.textContent = `❌ Sync failed: ${s.last_failure_reason || '(no reason given)'}`;
         statusEl.style.color = '#e08a8a';
         return;
       }
     }
 
-    statusEl.textContent = 'Sync finished (no recent result found -- check the Netlify function log).';
+    statusEl.textContent = 'No recent result yet -- make sure the PC is on, logged into Windows, and Task Scheduler is running local-sync-watchdog.js.';
     statusEl.style.color = 'var(--muted)';
   } catch (err) {
     clearInterval(refreshPollTimer);
