@@ -55,7 +55,6 @@
 const { getStore, connectLambda } = require('@netlify/blobs');
 const { createClient } = require('@supabase/supabase-js');
 const { chromium: playwright } = require('playwright-core');
-const chromium = require('@sparticuz/chromium');
 const XLSX = require('xlsx');
 const fs = require('fs');
 const { performImport } = require('./lib/perform-import');
@@ -152,6 +151,11 @@ exports.handler = async (event, context) => {
 
   let browser;
   try {
+    // @sparticuz/chromium ships as an ES Module (no CommonJS build), so it
+    // can't be require()'d from this file -- has to be a dynamic import()
+    // instead, same fix Node's own error message points to. Confirmed
+    // 2026-07-27 from a real Netlify log: ERR_REQUIRE_ESM on this exact line.
+    const { default: chromium } = await import('@sparticuz/chromium');
     browser = await playwright.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
