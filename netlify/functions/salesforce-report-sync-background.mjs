@@ -151,6 +151,14 @@ export default async (req, context) => {
   let browser;
   let page;
   try {
+    try {
+      const ipRes = await fetch('https://api.ipify.org?format=json');
+      const ipData = await ipRes.json();
+      console.log(`[salesforce-report-sync] Outbound IP for this run: ${ipData.ip}`);
+    } catch (ipErr) {
+      console.log('[salesforce-report-sync] Could not determine outbound IP:', ipErr.message);
+    }
+
     browser = await playwright.launch({
       args: [...chromium.args, '--disable-dev-shm-usage'],
       executablePath: await chromium.executablePath(),
@@ -170,6 +178,24 @@ export default async (req, context) => {
     if (onLoginPage) {
       await page.fill('#username', username);
       await page.fill('#password', password);
+
+      // Verify the fields actually hold what we just typed before
+      // submitting -- never logging the real values, only lengths, so a
+      // mismatch (e.g. fields cleared by page JS, or the fill racing
+      // against the form not being fully ready) is caught here instead of
+      // silently submitting an empty or wrong form and burning 45+ seconds
+      // waiting on a page we never actually reached.
+      const filledUsername = await page.inputValue('#username').catch(() => '');
+      const filledPassword = await page.inputValue('#password').catch(() => '');
+      console.log(`[salesforce-report-sync] Field check before submit -- username field length: ${filledUsername.length} (expected ${username.length}), password field length: ${filledPassword.length} (expected ${password.length})`);
+      if (filledUsername.length !== username.length || filledPassword.length !== password.length) {
+        await recordFailure(
+          `Login fields did not hold the expected values right before submit (username field had ${filledUsername.length} chars, expected ${username.length}; password field had ${filledPassword.length} chars, expected ${password.length}). The form may have been submitted empty or partially filled.`,
+          page
+        );
+        return;
+      }
+
       await page.click('#Login');
       await page.waitForLoadState('domcontentloaded');
 
