@@ -256,7 +256,14 @@ export default async (req, context) => {
     // 150s, so a generic text match may be getting held up by something
     // else on the page also containing that word, while the actual
     // toolbar button he clicks could genuinely be ready much sooner.
-    await page.getByRole('button', { name: 'Export', exact: true }).first().waitFor({ state: 'visible', timeout: 150000 });
+    // 2026-07-29: bumped to 4 min after several real runs consistently took
+    // 90-170s total, every time -- looks like genuine cold-start cost (a
+    // fresh, cache-free browser has to fully load Salesforce's whole
+    // Experience Cloud framework from scratch every single run, unlike
+    // Mark's own browser which has weeks of cached assets) rather than a
+    // broken selector. Plenty of budget to spare (15 min total), so give
+    // it real room instead of nudging the number up incrementally again.
+    await page.getByRole('button', { name: 'Export', exact: true }).first().waitFor({ state: 'visible', timeout: 4 * 60 * 1000 });
 
     // Narrow the date range to Last 7 Days before exporting -- Mark's ask
     // 2026-07-29: the report defaults to Current + Previous Month
