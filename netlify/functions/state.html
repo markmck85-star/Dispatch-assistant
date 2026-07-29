@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State Console</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.5; font-size: 16px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  .back-link { display: inline-block; color: #007bff; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .back-btn {
+    display: block; background: #6c757d; color: #fff; text-align: center; padding: 12px;
+    border-radius: 8px; font-weight: bold; font-size: 15px; text-decoration: none; margin-top: 16px;
+  }
+  .import-box { background: #1e1e1e; border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
+  .import-box a.sf-link {
+    display: inline-block; background: #0070d2; color: #fff; padding: 8px 16px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; text-decoration: none; margin-bottom: 8px;
+  }
+  .import-box input[type=file] { width: 100%; padding: 6px; font-size: 13px; margin-bottom: 8px; }
+
+  .console { background: #181818; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); padding: 16px; color: #ddd; }
+  .console h1 { color: #f0a500; font-size: 21px; margin-bottom: 2px; }
+  .console .subtitle { color: #888; font-size: 12px; margin-bottom: 14px; }
+
+  select#stateSel {
+    background: #2a2a2a; color: #ddd; border: 1px solid #444; border-radius: 6px;
+    padding: 8px 10px; font-size: 15px; margin-bottom: 16px; width: 100%;
+  }
+
+  h2.section-label {
+    font-size: 13px; color: #b8bcc2; margin: 20px 0 8px; text-transform: uppercase;
+    letter-spacing: 0.04em; border-top: 1px solid #2a2a2a; padding-top: 14px;
+  }
+  h2.section-label:first-of-type { border-top: none; padding-top: 0; }
+
+  .status-line { color: #888; font-size: 12px; padding: 6px 0; }
+
+  .tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .tech-chip { border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .tech-chip.avail { background: #16321f; border: 1px solid #2e5c3a; }
+  .tech-chip.out { background: #3a1c1c; border: 1px solid #6b2b2b; }
+  .tech-chip .name { font-weight: 600; color: #f0f0f0; }
+  .tech-chip .status { font-size: 11px; margin-top: 2px; }
+  .tech-chip.avail .status { color: #7bc796; }
+  .tech-chip.out .status { color: #e08a8a; }
+
+  .ticket-card { border-left: 3px solid #444; background: #1e1e1e; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
+  .ticket-card.trouble { border-left-color: #dc3545; }
+  .ticket-card.maintenance { border-left-color: #e0a030; }
+  .ticket-card .title { font-weight: 600; color: #f0f0f0; }
+  .ticket-card .meta { color: #999; font-size: 12px; margin-top: 2px; }
+
+  .restock-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .restock-pill { border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+  .restock-pill.overdue { background: #3a1c1c; color: #e08a8a; }
+  .restock-pill.soon { background: #3a2e10; color: #e0c080; }
+  .restock-pill.ok { background: #16321f; color: #7bc796; }
+  a.see-more { color: #6cb2ff; font-size: 13px; text-decoration: none; }
+
+  .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 16px 10px; color: #666; }
+  .error-state { color: #e57373; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
+  <div class="console">
+    <h1>📍 State Console</h1>
+    <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
+
+    <select id="stateSel" onchange="loadAll()">
+      <option value="GA">Georgia</option>
+      <option value="FL">Florida</option>
+      <option value="MI">Michigan</option>
+      <option value="IN">Indiana</option>
+      <option value="CO">Colorado</option>
+      <option value="OH">Ohio</option>
+      <option value="NV">Nevada</option>
+      <option value="IL">Illinois</option>
+      <option value="MN">Minnesota</option>
+      <option value="WV">West Virginia</option>
+      <option value="OR">Oregon</option>
+      <option value="NC">North Carolina</option>
+      <option value="SC">South Carolina</option>
+    </select>
+
+    <h2 class="section-label">👥 Technician Availability — Today</h2>
+    <div id="techStatus" class="status-line">Loading…</div>
+    <div id="techGrid" class="tech-grid"></div>
+
+    <h2 class="section-label">🔄 Restock Status</h2>
+    <div id="restockStatus" class="status-line">Loading…</div>
+    <div id="restockSummary"></div>
+
+    <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
+    <div id="ticketStatus" class="status-line">Loading…</div>
+    <div id="importFreshness" class="status-line" style="font-size:11px;"></div>
+    <div id="ticketList"></div>
+
+    <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
+    <div class="import-box">
+      <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
+      <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
+      <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
+
+      <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
+      <div style="font-size:12px;color:#999;margin-bottom:8px;">Or log in and export manually, then select it below — falls back to this if the automated sync is ever down.</div>
+      <input type="file" id="importFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="autoImport(this.files[0])">
+      <div id="importStatus" class="status-line" style="padding:4px 0;">Ready.</div>
+    </div>
+
+    <a href="/" class="back-btn">← Back to Dispatch Tool</a>
+  </div>
+</div>
+
+<!-- Site History Modal (same as the dispatch console's) -->
+<div id="siteHistoryOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;" onclick="if(event.target===this)closeSiteHistory()">
+    <div style="background:#fff;max-width:600px;margin:40px auto;padding:20px;border-radius:8px;max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 id="siteHistoryTitle" style="margin:0;color:#222;">Visit History</h3>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button onclick="printSiteHistory()" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">🖨️ Save as PDF</button>
+                <button onclick="closeSiteHistory()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#222;">&times;</button>
+            </div>
+        </div>
+        <div id="siteHistoryBody" style="font-size:13px;color:#333;">Loading…</div>
+    </div>
+</div>
+
+<script>
+let importParsedRows = null;
+
+async function autoImport(file) {
+  if (!file) return;
+  const statusEl = document.getElementById('importStatus');
+  statusEl.textContent = `Reading ${file.name}…`;
+
+  const reader = new FileReader();
+  reader.onerror = () => { statusEl.textContent = 'Could not read file.'; };
+  reader.onload = async (e) => {
+    let rows;
+    try {
+      statusEl.textContent = 'Parsing spreadsheet…';
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+      if (!rows.length) { statusEl.textContent = 'No data found in file.'; return; }
+      rows = rows.map(r => {
+        const out = {};
+        for (const k of Object.keys(r)) out[k.trim()] = r[k];
+        return out;
+      });
+      const required = ['Account Name', 'Jurisdiction', 'Appointment Number'];
+      for (const col of required) {
+        if (!(col in rows[0])) {
+          statusEl.textContent = 'Missing expected column: ' + col + '. Columns found: ' + Object.keys(rows[0]).join(', ');
+          return;
+        }
+      }
+    } catch (err) {
+      statusEl.textContent = 'Error parsing file: ' + err.message;
+      return;
+    }
+
+    // Parsed successfully -- import immediately, no separate button/click needed.
+    const mapped = rows.map(r => ({
+      accountName: String(r['Account Name'] || '').trim(),
+      state: String(r['Jurisdiction'] || '').trim(),
+      woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
+      appointmentNumber: String(r['Appointment Number'] || '').trim(),
+      actualStart: r['Actual Start'] || null,
+      actualEnd: r['Actual End'] || null,
+      durationMin: (r['Actual Duration (Minutes)'] != null && r['Actual Duration (Minutes)'] !== '') ? Number(r['Actual Duration (Minutes)']) : null,
+      techName: String(r['Service Resource: Name'] || '').trim(),
+      remediation: String(r['Remediation'] || '').trim(),
+      remediationDetail: String(r['Remediation Detail'] || '').trim(),
+    })).filter(r => r.appointmentNumber);
+
+    const BATCH_SIZE = 250;
+    let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0;
+    let errors = []; // [{ startRow, endRow, batch, message }] -- whole request failed (network, auth, etc.)
+    let rowErrors = []; // [{ appointmentNumber, accountName, state, reason, originalRow }] -- request succeeded, specific row(s) didn't
+
+    async function runBatch(batch, startRow, endRow) {
+      statusEl.textContent = `Importing rows ${startRow}-${endRow} of ${mapped.length}…`;
+      try {
+        const res = await fetch('/.netlify/functions/import-service-appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: batch }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        totalInserted += data.inserted || 0;
+        totalSkipped += data.skippedExisting || 0;
+        totalNeedsReview += data.needsReview || 0;
+        for (const re of (data.rowErrors || [])) {
+          const originalRow = batch.find(r => r.appointmentNumber === re.appointmentNumber);
+          rowErrors.push({ ...re, originalRow });
+        }
+        return true;
+      } catch (err) {
+        errors.push({ startRow, endRow, batch, message: err.message });
+        return false;
+      }
+    }
+
+    for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
+      const batch = mapped.slice(i, i + BATCH_SIZE);
+      await runBatch(batch, i + 1, Math.min(i + BATCH_SIZE, mapped.length));
+    }
+
+    renderImportStatus();
+
+    // Refresh the page's own data now that new history is in, so the
+    // restock schedule / recent tickets reflect it without a manual reload.
+    loadAll();
+
+    function renderImportStatus() {
+      let html = `✅ ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need site review.`;
+      if (errors.length) {
+        html += `<div style="color:#e08a8a;margin-top:6px;">${errors.length} request(s) failed entirely -- these rows are NOT in the database yet:</div>`;
+        html += errors.map(e => `<div style="font-size:12px;color:#e08a8a;margin-left:8px;">Rows ${e.startRow}-${e.endRow}: ${escapeHtml(e.message)}</div>`).join('');
+        html += `<button id="retryBatchesBtn" style="margin-top:8px;padding:6px 14px;background:#dc3545;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${errors.length} failed request(s)</button>`;
+      }
+      if (rowErrors.length) {
+        html += `<div style="color:#e0a030;margin-top:6px;">${rowErrors.length} row(s) failed individually -- everything else in their batch(es) still imported:</div>`;
+        html += rowErrors.map(e => `<div style="font-size:12px;color:#e0a030;margin-left:8px;">${escapeHtml(e.appointmentNumber || '(no appt #)')} -- ${escapeHtml(e.accountName || '')}: ${escapeHtml(e.reason)}</div>`).join('');
+        html += `<button id="retryRowsBtn" style="margin-top:8px;padding:6px 14px;background:#c98a1f;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${rowErrors.length} failed row(s)</button>`;
+      }
+      statusEl.innerHTML = html;
+      const retryBtn = document.getElementById('retryBatchesBtn');
+      if (retryBtn) retryBtn.onclick = retryFailedBatches;
+      const retryRowsBtn = document.getElementById('retryRowsBtn');
+      if (retryRowsBtn) retryRowsBtn.onclick = retryFailedRows;
+    }
+
+    async function retryFailedBatches() {
+      const toRetry = errors;
+      errors = [];
+      for (const e of toRetry) {
+        await runBatch(e.batch, e.startRow, e.endRow);
+      }
+      renderImportStatus();
+      loadAll();
+    }
+
+    async function retryFailedRows() {
+      const toRetry = rowErrors.map(e => e.originalRow).filter(Boolean);
+      rowErrors = [];
+      if (toRetry.length) await runBatch(toRetry, 1, toRetry.length);
+      renderImportStatus();
+      loadAll();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+async function loadAll() {
+  const state = document.getElementById('stateSel').value;
+  loadConsole(state);
+  loadRestock(state);
+}
+
+async function loadConsole(state) {
+  const techStatus = document.getElementById('techStatus');
+  const techGrid = document.getElementById('techGrid');
+  const ticketStatus = document.getElementById('ticketStatus');
+  const ticketList = document.getElementById('ticketList');
+
+  techStatus.textContent = 'Loading…';
+  ticketStatus.textContent = 'Loading…';
+  techGrid.innerHTML = '';
+  ticketList.innerHTML = '';
+
+  try {
+    const res = await fetch('/.netlify/functions/get-state-console?state=' + encodeURIComponent(state), { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    const outCount = data.technicians.filter(t => !t.available).length;
+    techStatus.textContent = data.technicians.length + ' technician(s) · ' + outCount + ' out today';
+    if (!data.technicians.length) {
+      techGrid.innerHTML = '<div class="empty-state">No technicians on file for this state.</div>';
+    } else {
+      techGrid.innerHTML = data.technicians.map(t => {
+        const cls = t.available ? 'avail' : 'out';
+        const statusText = t.available ? 'Available' : (t.reason || 'Out') + (t.note ? ' — ' + escapeHtml(t.note) : '');
+        return `<div class="tech-chip ${cls}"><div class="name">${escapeHtml(t.name)}</div><div class="status">${statusText}</div></div>`;
+      }).join('');
+    }
+
+    ticketStatus.textContent = data.recentTickets.length + ' ticket(s) in the last 3 days';
+    const importFreshness = document.getElementById('importFreshness');
+    if (importFreshness) {
+      importFreshness.textContent = data.lastImportedAt
+        ? 'Closed-ticket data last imported: ' + fmtDateTime(data.lastImportedAt)
+        : 'Closed-ticket data has never been imported for this state — "open" status below can\'t be trusted yet.';
+    }
+    if (!data.recentTickets.length) {
+      ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
+    } else {
+      ticketList.innerHTML = data.recentTickets.map(t => {
+        const statusBadge = t.status === 'closed'
+          ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
+          : `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
+        return `<div class="ticket-card ${t.ticketKind}">
+          <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
+          <div class="meta">${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''} · ${fmtDateTime(t.receivedAt)}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
+          <div class="meta">${statusBadge}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    techStatus.textContent = '';
+    ticketStatus.textContent = '';
+    techGrid.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function loadRestock(state) {
+  const restockStatus = document.getElementById('restockStatus');
+  const restockSummary = document.getElementById('restockSummary');
+  restockStatus.textContent = 'Loading…';
+  restockSummary.innerHTML = '';
+
+  try {
+    const res = await fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(state), { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    const counts = { overdue: 0, soon: 0, ok: 0 };
+    (data.locations || []).forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
+    restockStatus.textContent = data.locations.length + ' site(s) tracked';
+
+    const topUrgent = (data.locations || []).filter(l => l.status === 'overdue' || l.status === 'soon').slice(0, 8);
+    let html = `<div class="restock-summary">
+      <span class="restock-pill overdue">${counts.overdue} overdue</span>
+      <span class="restock-pill soon">${counts.soon} due soon</span>
+      <span class="restock-pill ok">${counts.ok} on track</span>
+    </div>`;
+    if (topUrgent.length) {
+      html += topUrgent.map(l => {
+        let label = l.status === 'overdue' ? 'Overdue' : 'Due soon';
+        if (l.visitedSinceRestock) label += ' (visited)';
+        const cls = l.status === 'overdue' ? 'trouble' : 'maintenance';
+        const lastVisitLine = l.visitedSinceRestock
+          ? `<div class="meta">Last visit: ${fmtDateTime(l.lastVisit)}${l.lastVisitTech ? ' (' + escapeHtml(l.lastVisitTech) + ')' : ''}${l.lastVisitAppt ? ' · ' + escapeHtml(l.lastVisitAppt) : ''}</div>`
+          : '';
+        const projectedLine = l.next1
+          ? `<div class="meta">Projected next restock: ${new Date(l.next1).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>`
+          : '';
+        // l.scheduledDate is a plain YYYY-MM-DD from the board, not a
+        // timestamp -- anchor at noon local so it can't shift a day off
+        // when parsed, same pattern used elsewhere in the app for this.
+        const scheduledLine = l.scheduledDate
+          ? `<div class="meta" style="color:#7bc796;">✓ Already scheduled: ${new Date(l.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${l.scheduledTech ? ' (' + escapeHtml(l.scheduledTech) + ')' : ''}</div>`
+          : '';
+        return `<div class="ticket-card ${cls}">
+          <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${l.site_code}')" title="View recent visit history">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
+          <div class="meta">${label} · last restock ${l.daysSince != null ? l.daysSince + ' days ago' : '—'}</div>
+          ${lastVisitLine}
+          ${projectedLine}
+          ${scheduledLine}
+        </div>`;
+      }).join('');
+    }
+    restockSummary.innerHTML = html;
+  } catch (e) {
+    restockStatus.textContent = '';
+    restockSummary.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function closeSiteHistory() {
+    document.getElementById('siteHistoryOverlay').style.display = 'none';
+}
+
+let _siteHistoryState = null; // { code, visits: [], hasMore, totalVisits, shipments: [] }
+
+function renderSiteHistoryBody() {
+    const body = document.getElementById('siteHistoryBody');
+    const st = _siteHistoryState;
+    let html = st.visits.map(v => {
+        const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+        const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+        const kindColor = isRestockLike ? '#2e7d32' : '#c62828';
+        const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
+        const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
+        return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+            <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
+            <div style="color:#555;">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
+            ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>` : ''}
+            ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    if (st.hasMore) {
+        html += `<button onclick="loadMoreSiteHistory()" id="siteHistoryLoadMoreBtn" style="width:100%;padding:10px;margin-top:8px;background:#eee;border:1px solid #ccc;border-radius:6px;cursor:pointer;">Load 15 more (${st.totalVisits - st.visits.length} remaining)</button>`;
+    }
+
+    if (st.shipments && st.shipments.length) {
+        const shipHtml = st.shipments.map(s => {
+            const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+            const returnStatus = s.return_broken_part
+                ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
+                : '';
+            const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#1565c0;">${num}</a>`;
+            const trackingParts = [];
+            if (s.outbound_tracking) trackingParts.push('Out: ' + upsLink(s.outbound_tracking));
+            if (s.inbound_tracking) trackingParts.push('In: ' + upsLink(s.inbound_tracking));
+            return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+                <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
+                <div style="color:#555;font-size:12px;">${trackingParts.join(' · ')}</div>
+                ${returnStatus ? `<div style="font-size:12px;">${returnStatus}</div>` : ''}
+            </div>`;
+        }).join('');
+        html += `<h4 style="margin:16px 0 4px;font-size:13px;color:#333;">Related Shipments</h4>` + shipHtml;
+    }
+    body.innerHTML = html;
+}
+
+async function loadMoreSiteHistory() {
+    const btn = document.getElementById('siteHistoryLoadMoreBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(_siteHistoryState.code) + '&offset=' + _siteHistoryState.visits.length);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        _siteHistoryState.visits = _siteHistoryState.visits.concat(data.visits);
+        _siteHistoryState.hasMore = data.hasMore;
+        _siteHistoryState.totalVisits = data.totalVisits;
+        const seen = new Set(_siteHistoryState.shipments.map(s => s.wo_number + '|' + s.outbound_tracking));
+        for (const s of (data.shipments || [])) {
+            const key = s.wo_number + '|' + s.outbound_tracking;
+            if (!seen.has(key)) { _siteHistoryState.shipments.push(s); seen.add(key); }
+        }
+        renderSiteHistoryBody();
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Error loading more -- tap to retry'; }
+    }
+}
+
+async function printSiteHistory() {
+    if (!_siteHistoryState || !_siteHistoryState.visits.length) {
+        alert('No visit history loaded to export yet.');
+        return;
+    }
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        while (_siteHistoryState.hasMore) {
+            await loadMoreSiteHistory();
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🖨️ Save as PDF'; }
+    }
+
+    const st = _siteHistoryState;
+    const titleText = document.getElementById('siteHistoryTitle').textContent;
+    const generatedOn = new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+
+    let content = `<div class="print-header">
+        <div class="print-title">${titleText}</div>
+        <div class="print-date">Exported ${generatedOn} · ${st.totalVisits || st.visits.length} visits</div>
+    </div>`;
+
+    content += st.visits.map(v => {
+        const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
+        const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+        const kindColor = isRestockLike ? '#2e7d32' : '#c62828';
+        const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
+        const reviewNote = v.needs_review ? ' <span style="color:#999;font-size:11px;">(site match unconfirmed)</span>' : '';
+        return `<div class="print-stop">
+            <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
+            <div class="print-stop-addr">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
+            ${v.appointment_number ? `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>` : ''}
+            ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    if (st.shipments && st.shipments.length) {
+        content += `<h4 style="margin:16px 0 4px;">Related Shipments</h4>`;
+        content += st.shipments.map(s => {
+            const date = s.received_at ? new Date(s.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+            const returnStatus = s.return_broken_part
+                ? (s.returned_at ? '<span style="color:#2e7d32;">Returned ' + new Date(s.returned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</span>' : '<span style="color:#c62828;">Return still needed</span>')
+                : '';
+            const trackingParts = [];
+            if (s.outbound_tracking) trackingParts.push('Out: ' + s.outbound_tracking);
+            if (s.inbound_tracking) trackingParts.push('In: ' + s.inbound_tracking);
+            return `<div class="print-stop">
+                <div><strong>${date}</strong> — WO ${s.wo_number || '?'}${s.warehouse_name ? ' · ' + s.warehouse_name : ''}</div>
+                <div class="print-stop-addr">${trackingParts.join(' · ')}</div>
+                ${returnStatus ? `<div>${returnStatus}</div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    const docTitle = titleText.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+    const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${docTitle}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 16px; font-size: 15px; color: #222; max-width: 700px; margin: 0 auto; }
+  .print-btn { display: block; width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-bottom: 16px; cursor: pointer; }
+  .print-header { margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  .print-title { font-size: 20px; font-weight: bold; }
+  .print-date { font-size: 14px; color: #555; margin-top: 2px; }
+  .print-stop { padding: 8px 0; border-bottom: 1px solid #eee; }
+  .print-stop:last-child { border-bottom: none; }
+  .print-stop-addr { font-size: 13px; color: #555; margin-top: 2px; }
+  @media print { .print-btn { display: none; } body { padding: 0; } }
+</style>
+</head><body>
+<button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
+${content}</body></html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWin = window.open(blobUrl, '_blank');
+    if (!printWin) {
+        alert('Please allow popups to export this, or long-press the Save as PDF button and choose "Open in new tab".');
+        URL.revokeObjectURL(blobUrl);
+        return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+}
+
+async function showSiteHistory(code) {
+    const overlay = document.getElementById('siteHistoryOverlay');
+    const title = document.getElementById('siteHistoryTitle');
+    const body = document.getElementById('siteHistoryBody');
+    title.textContent = 'Visit History — ' + code;
+    body.innerHTML = 'Loading…';
+    overlay.style.display = 'block';
+    try {
+        const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(code));
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        title.textContent = 'Visit History — ' + data.site.name + ' (' + data.site.code + ')';
+        if (!data.visits.length) {
+            body.innerHTML = '<em>No visit history found for this site yet.</em>';
+            _siteHistoryState = null;
+            return;
+        }
+        _siteHistoryState = {
+            code,
+            visits: data.visits,
+            hasMore: data.hasMore,
+            totalVisits: data.totalVisits,
+            shipments: data.shipments || [],
+        };
+        renderSiteHistoryBody();
+    } catch (err) {
+        body.innerHTML = '<span style="color:#c62828;">Error loading history: ' + err.message + '</span>';
+    }
+}
+
+// Direct-link support: /GA, /Georgia, etc. get rewritten by _redirects to
+// /state.html?state=:value -- match that against the dropdown by code or
+// full name (case-insensitive) so a homescreen shortcut can jump straight
+// to one state instead of always landing on whatever's first in the list.
+(function applyStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = (params.get('state') || '').trim().toLowerCase();
+  if (!requested) return;
+  const sel = document.getElementById('stateSel');
+  for (const opt of sel.options) {
+    if (opt.value.toLowerCase() === requested || opt.textContent.trim().toLowerCase() === requested) {
+      sel.value = opt.value;
+      break;
+    }
+  }
+})();
+
+// ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
+// v3 (2026-07-29): reverted back to calling the Netlify background
+// function directly. The PC-based flag/poll version (request-local-sync /
+// get-local-sync-status) was built 2026-07-28 as a workaround for what
+// looked like automation being fundamentally blocked -- turned out the
+// real issue the whole time was salesforce-report-sync-background.mjs
+// pointing at the wrong Salesforce URL (the direct org login instead of
+// the dispatchconsole portal login). Now that it's fixed and confirmed
+// working, there's no reason to route through the PC anymore. The
+// request-local-sync.js / get-local-sync-status.js functions and
+// local_sync_state Supabase table can stay in place unused as a fallback
+// if the cloud version ever breaks again, rather than ripping them out.
+let refreshPollTimer = null;
+let syncTriggeredAt = null;
+let hasSeenInProgress = false;
+const START_GRACE_PERIOD_MS = 20000; // background function can take a few seconds to actually start and write its in-progress flag -- don't call it "finished" before it's even begun
+
+async function triggerManualSync() {
+  const btn = document.getElementById('refreshNowBtn');
+  const statusEl = document.getElementById('refreshStatus');
+  btn.disabled = true;
+  statusEl.textContent = 'Starting sync…';
+  statusEl.style.color = 'var(--muted)';
+  syncTriggeredAt = Date.now();
+  hasSeenInProgress = false;
+
+  try {
+    // Fire-and-forget -- the -background suffix means Netlify acknowledges
+    // this immediately and keeps the actual work running server-side even
+    // after this fetch resolves.
+    fetch('/.netlify/functions/salesforce-report-sync-background', { method: 'POST' }).catch(() => {});
+  } catch (err) {
+    // Even if the initial fetch itself fails to fire, still start polling --
+    // the scheduled run might pick it up, and polling will just show idle.
+  }
+
+  if (refreshPollTimer) clearInterval(refreshPollTimer);
+  refreshPollTimer = setInterval(pollSyncStatus, 3000);
+  pollSyncStatus();
+}
+
+async function pollSyncStatus() {
+  const btn = document.getElementById('refreshNowBtn');
+  const statusEl = document.getElementById('refreshStatus');
+  try {
+    const res = await fetch('/.netlify/functions/get-report-sync-status');
+    const data = await res.json();
+
+    if (data.inProgress) {
+      hasSeenInProgress = true;
+      const startedAt = data.startedAt ? new Date(data.startedAt) : null;
+      const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
+      statusEl.textContent = `⏳ Sync running${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
+      statusEl.style.color = 'var(--muted)';
+      btn.disabled = true;
+      return;
+    }
+
+    // Not in progress -- but if we triggered this ourselves and haven't
+    // actually SEEN it start yet, it may just not have written its
+    // in-progress flag yet (cold start, network latency). Keep waiting
+    // rather than immediately declaring "finished, nothing found."
+    const withinGracePeriod = syncTriggeredAt && (Date.now() - syncTriggeredAt) < START_GRACE_PERIOD_MS;
+    if (!hasSeenInProgress && withinGracePeriod) {
+      statusEl.textContent = '⏳ Starting sync…';
+      statusEl.style.color = 'var(--muted)';
+      btn.disabled = true;
+      return;
+    }
+
+    clearInterval(refreshPollTimer);
+    refreshPollTimer = null;
+    btn.disabled = false;
+
+    if (data.lastSuccess) {
+      const s = data.lastSuccess;
+      const at = new Date(s.at);
+      const secondsAgo = (Date.now() - at.getTime()) / 1000;
+      if (secondsAgo < 360) {
+        statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
+        statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
+        loadAll();
+        return;
+      }
+    }
+
+    if (data.lastFailure) {
+      const f = data.lastFailure;
+      const at = new Date(f.at);
+      const secondsAgo = (Date.now() - at.getTime()) / 1000;
+      if (secondsAgo < 360) {
+        statusEl.textContent = `❌ Sync failed: ${f.reason}`;
+        statusEl.style.color = '#e08a8a';
+        return;
+      }
+    }
+
+    statusEl.textContent = 'Sync finished (no recent result found -- check the Netlify function log).';
+    statusEl.style.color = 'var(--muted)';
+  } catch (err) {
+    clearInterval(refreshPollTimer);
+    refreshPollTimer = null;
+    btn.disabled = false;
+    statusEl.textContent = 'Could not check sync status: ' + err.message;
+    statusEl.style.color = '#e08a8a';
+  }
+}
+
+loadAll();
+</script>
+</body>
+</html>
