@@ -177,17 +177,7 @@ export default async (req, context) => {
 
     // Navigating directly to the report while unauthenticated should bounce
     // through Salesforce's standard login page and land back here on success.
-    // 'commit' (not 'domcontentloaded') avoids a known Playwright race where
-    // a page that does its own internal client-side redirect right after
-    // loading can throw "interrupted by another navigation" even though the
-    // navigation actually succeeds -- caught defensively either way, since
-    // the browser is usually in a fine state to proceed regardless.
-    try {
-      await page.goto(REPORT_URL, { waitUntil: 'commit' });
-    } catch (navErr) {
-      console.log('Initial navigation threw (often benign -- Salesforce doing its own internal redirect):', navErr.message);
-    }
-    await page.waitForTimeout(2000);
+    await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
 
     // Give Salesforce's login page a real chance to render before deciding
     // whether we're on it -- an instant check right after domcontentloaded
@@ -243,12 +233,7 @@ export default async (req, context) => {
     // Confirm we actually landed on the report (in case of an unexpected
     // redirect elsewhere).
     if (!page.url().includes('/dispatchconsole/s/report/')) {
-      try {
-        await page.goto(REPORT_URL, { waitUntil: 'commit' });
-      } catch (navErr) {
-        console.log('Fallback navigation threw (often benign):', navErr.message);
-      }
-      await page.waitForTimeout(2000);
+      await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
     }
     await page.waitForSelector('text=Export', { timeout: 90000 });
 
