@@ -668,7 +668,7 @@ async function pollSyncStatus() {
       const s = data.lastSuccess;
       const at = new Date(s.at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
-      if (secondsAgo < 120) {
+      if (secondsAgo < 360) {
         statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
         statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
         loadAll();
@@ -680,7 +680,7 @@ async function pollSyncStatus() {
       const f = data.lastFailure;
       const at = new Date(f.at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
-      if (secondsAgo < 120) {
+      if (secondsAgo < 360) {
         statusEl.textContent = `❌ Sync failed: ${f.reason}`;
         statusEl.style.color = '#e08a8a';
         return;
