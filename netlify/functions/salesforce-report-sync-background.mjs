@@ -263,7 +263,19 @@ export default async (req, context) => {
     // Mark's own browser which has weeks of cached assets) rather than a
     // broken selector. Plenty of budget to spare (15 min total), so give
     // it real room instead of nudging the number up incrementally again.
-    await page.getByRole('button', { name: 'Export', exact: true }).first().waitFor({ state: 'visible', timeout: 4 * 60 * 1000 });
+    // 2026-07-29: reverted from the button-role locator back to the
+    // original generic text search. The button-specific version
+    // (getByRole('button', {name:'Export'}).first()) failed TWO real runs
+    // in a row -- once even after a full 4-minute wait -- while a
+    // subsequent screenshot showed the page fully loaded with a visible
+    // Export button. That pattern (worse results from a MORE specific
+    // locator) suggests .first() may be latching onto a different, hidden
+    // "Export"-labeled element elsewhere in the DOM (e.g. inside a dialog
+    // template that's present but never shown) rather than the real
+    // toolbar button. The plain text search has an actual track record of
+    // eventually resolving, in the 90-170s range across multiple runs, so
+    // reverting to it with generous headroom.
+    await page.waitForSelector('text=Export', { timeout: 4 * 60 * 1000 });
 
     // Narrow the date range to Last 7 Days before exporting -- Mark's ask
     // 2026-07-29: the report defaults to Current + Previous Month
