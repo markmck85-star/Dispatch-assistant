@@ -235,7 +235,31 @@ export default async (req, context) => {
     if (!page.url().includes('/dispatchconsole/s/report/')) {
       await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
     }
-    await page.waitForSelector('text=Export', { timeout: 45000 });
+    await page.waitForSelector('text=Export', { timeout: 90000 });
+
+    // Narrow the date range to Last 7 Days before exporting -- Mark's ask
+    // 2026-07-29: the report defaults to Current + Previous Month
+    // (3,300+ rows), but everything older than a few days is already in
+    // Supabase from prior runs, so a much lighter recent window is all
+    // that's actually needed each time. This also directly helps the
+    // report-render timeout, since a smaller report loads faster. Built
+    // from Mark's own screenshots of the manual filter flow (funnel icon
+    // -> Created Date -> Range dropdown -> Last 7 Days -> Apply), but
+    // unlike the Export button this hasn't been live-tested yet -- wrapped
+    // so a selector mismatch here just skips the narrowing (falls back to
+    // whatever range was already set) rather than failing the whole run.
+    try {
+      await page.getByRole('button', { name: /filter/i }).first().click({ timeout: 8000 });
+      await page.getByText(/Current and Previous Month|Last \d+ Days|Custom/i).first().click({ timeout: 8000 });
+      const rangeDropdown = page.getByRole('combobox', { name: /range/i }).first();
+      await rangeDropdown.click({ timeout: 8000 });
+      await page.getByText('Last 7 Days', { exact: true }).click({ timeout: 8000 });
+      await page.getByRole('button', { name: /^apply$/i }).click({ timeout: 8000 });
+      await page.waitForTimeout(1500); // let the report re-run with the new filter
+      console.log('Narrowed date range to Last 7 Days.');
+    } catch (rangeErr) {
+      console.log('Could not narrow the date range (selectors may not match this run) -- continuing with whatever range was already set:', rangeErr.message);
+    }
 
     // Trigger the export flow: nav-bar Export button -> modal already
     // defaults to "Details Only" / "Excel Format .xls" per Mark's
