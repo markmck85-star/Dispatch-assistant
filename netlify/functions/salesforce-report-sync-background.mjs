@@ -250,7 +250,13 @@ export default async (req, context) => {
       }
       await page.waitForTimeout(2000);
     }
-    await page.waitForSelector('text=Export', { timeout: 150000 });
+    // Wait for the specific Export BUTTON (same locator the click below
+    // uses), not just the literal text "Export" anywhere on the page --
+    // Mark's own manual experience is that Export is clickable well before
+    // 150s, so a generic text match may be getting held up by something
+    // else on the page also containing that word, while the actual
+    // toolbar button he clicks could genuinely be ready much sooner.
+    await page.getByRole('button', { name: 'Export', exact: true }).first().waitFor({ state: 'visible', timeout: 150000 });
 
     // Narrow the date range to Last 7 Days before exporting -- Mark's ask
     // 2026-07-29: the report defaults to Current + Previous Month
