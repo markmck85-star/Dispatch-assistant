@@ -26,23 +26,31 @@
 // import() workaround.
 //
 // IMPORTANT -- READ BEFORE FIRST DEPLOY:
-// The login-page selectors (username/password/login button, and the
-// "Verify Your Identity" detection) are Salesforce's own standard hosted
-// login flow and have been stable across orgs for years -- reasonably
-// confident in those. The report-export selectors (the Export button, the
-// "Details Only" card, the modal's own Export button) are built from Mark's
-// actual screenshots of this report, but have NOT been confirmed working
-// end-to-end yet -- everything tested so far has died before reaching them
-// due to the timeout bug this version fixes. Expect the NEXT test to be
-// the first real look at whether those selectors work. Every failure point
-// captures a screenshot to Blobs and includes the current URL + a
-// page-text snippet in the alert email so a failure is diagnosable rather
-// than a bare stack trace.
+// v3 (2026-07-29): the real, final blocker turned out to be the URL, not
+// the login-page selectors, resource limits, or anything else -- every
+// test all day (this Netlify version, the local PC version, page.type(),
+// navigator.webdriver spoofing, even a fully human-typed manual login)
+// went through iti4dmv.my.salesforce.com/lightning, the direct org login,
+// and got rejected identically every time. The actual working path was
+// iti4dmv.my.site.com/dispatchconsole/... -- an Experience Cloud portal
+// login, which is what restock tracker's own report link and state.html's
+// link had been pointing to the whole time. REPORT_URL below is now
+// corrected and confirmed working live (via local-sync-watchdog.js, the
+// PC version, same fix). This Netlify version has NOT itself been
+// re-tested since the URL fix -- the login-page selectors should carry
+// over fine (this portal's login page visually matches Salesforce's
+// standard hosted form), and the report-export selectors (Export button,
+// "Details Only" card, modal's own Export button) were built from Mark's
+// real screenshots -- but this specific file's first live run since the
+// fix is still the next thing to confirm. Every failure point captures a
+// screenshot to Blobs and includes the current URL + a page-text snippet
+// in the alert email so a failure is diagnosable rather than a bare
+// stack trace.
 //
 // Required Netlify environment variables (Mark must set these):
 //   SALESFORCE_USERNAME, SALESFORCE_PASSWORD, MAILGUN_API_KEY (already
 //   set), ALERT_EMAIL, optional ALERT_SMS_ADDRESS. SALESFORCE_REPORT_URL
-//   optional, defaults to the report Mark linked.
+//   optional, defaults to the dispatchconsole portal report URL now.
 
 import { getStore } from '@netlify/blobs';
 import { createClient } from '@supabase/supabase-js';
@@ -54,7 +62,7 @@ import perfImportPkg from './lib/perform-import.js';
 const { performImport } = perfImportPkg;
 
 const REPORT_URL = process.env.SALESFORCE_REPORT_URL
-  || 'https://iti4dmv.my.salesforce.com/lightning/r/Report/00OVN000003SjTV2A0/view';
+  || 'https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru';
 
 function getSyncStore() {
   return getStore('report-sync');
@@ -224,7 +232,7 @@ export default async (req, context) => {
 
     // Confirm we actually landed on the report (in case of an unexpected
     // redirect elsewhere).
-    if (!page.url().includes('/lightning/r/Report/')) {
+    if (!page.url().includes('/dispatchconsole/s/report/')) {
       await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
     }
     await page.waitForSelector('text=Export', { timeout: 45000 });
