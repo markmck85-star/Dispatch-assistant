@@ -279,14 +279,59 @@ export default async (req, context) => {
     // (log: waitForSelector Timeout 240000ms exceeded), even though a
     // screenshot again showed the real button visible on screen. Ruled out
     // iframes (document.querySelectorAll('iframe').length === 0 on this
-    // page, confirmed via Mark's devtools). Both the role-based AND the
-    // plain-text approach have now failed at different times, which fits
-    // "multiple Export-labeled elements on the page, wrong one gets
-    // matched" rather than a load-timing issue. This time using the real
-    // CSS class pulled directly from Mark's devtools inspection of the
-    // actual toolbar button -- specific to the report action bar, unlike
-    // the generic text/accessible-name matches tried before.
-    await page.waitForSelector('button.action-bar-action-ReportExportAction', { timeout: 4 * 60 * 1000 });
+    // page, confirmed via Mark's devtools). Then tried the real CSS class
+    // pulled from devtools inspection of the actual toolbar button
+    // (button.action-bar-action-ReportExportAction) -- THAT also timed out
+    // identically at the 4-minute cap, even though the automation's own
+    // failure screenshot (captured at the moment of timeout) shows the
+    // Export button clearly rendered in the toolbar. Three different
+    // selector strategies (role, text, class) all failing identically,
+    // combined with the screenshot showing the button visually present,
+    // means guessing a fourth selector is unlikely to help -- something
+    // deeper is going on (possibly CPU-starved JS execution in this
+    // resource-constrained environment never letting the page "settle"
+    // enough for Playwright's own visibility check to resolve, even though
+    // the compositor/paint layer looks done in a screenshot). Rather than
+    // guess again, poll every 20s for up to 4 minutes and log the actual
+    // DOM/CSS state (bounding box, display, visibility, opacity) of every
+    // matching element, so the next failure's log tells us definitively
+    // what Playwright itself sees over time instead of just "timed out".
+    const exportSelector = 'button.action-bar-action-ReportExportAction';
+    const diagStart = Date.now();
+    let exportButtonVisible = false;
+    while (Date.now() - diagStart < 4 * 60 * 1000) {
+      const diag = await page
+        .evaluate((sel) => {
+          return Array.from(document.querySelectorAll(sel)).map((el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return {
+              rect: { width: rect.width, height: rect.height, top: rect.top, left: rect.left },
+              display: style.display,
+              visibility: style.visibility,
+              opacity: style.opacity,
+              disabled: el.disabled || null,
+            };
+          });
+        }, exportSelector)
+        .catch((e) => 'evaluate failed: ' + e.message);
+      console.log(
+        `[salesforce-report-sync] Export button diagnostic @ ${Math.round((Date.now() - diagStart) / 1000)}s -- matches: ${JSON.stringify(diag)}`
+      );
+      if (
+        Array.isArray(diag) &&
+        diag.some((d) => d.rect.width > 0 && d.rect.height > 0 && d.display !== 'none' && d.visibility !== 'hidden' && d.opacity !== '0')
+      ) {
+        exportButtonVisible = true;
+        break;
+      }
+      await page.waitForTimeout(20000);
+    }
+    if (!exportButtonVisible) {
+      throw new Error(
+        'Export button never reported visible per diagnostic polling over 4 minutes -- see per-interval "Export button diagnostic" log lines above for the exact DOM/CSS state Playwright saw throughout the wait.'
+      );
+    }
 
     // Narrow the date range to Last 7 Days before exporting -- Mark's ask
     // 2026-07-29: the report defaults to Current + Previous Month
