@@ -140,6 +140,32 @@ async function recordSuccess(summary) {
 
 export default async (req, context) => {
   const store = getSyncStore();
+
+  // Concurrency guard added 2026-07-31: discovered up to 5-6 overlapping
+  // invocations firing within about a minute of each other during
+  // troubleshooting (likely from repeated Run Now/Refresh Now clicks),
+  // all logging into the same Salesforce account at nearly the same
+  // moment. Concurrent logins to one account can invalidate each other's
+  // sessions, which could itself explain pages that never load correctly.
+  // Skip starting a new run if a previous one is still marked in-progress
+  // and started recently; a flag older than 6 minutes is treated as
+  // orphaned (from a crashed run that never reached the `finally` cleanup)
+  // and allowed to proceed rather than blocking forever.
+  const existingRaw = await store.get('in-progress').catch(() => null);
+  if (existingRaw) {
+    try {
+      const existing = JSON.parse(existingRaw);
+      const ageMs = Date.now() - new Date(existing.startedAt).getTime();
+      if (ageMs < 6 * 60 * 1000) {
+        console.log(`[salesforce-report-sync] Skipping this run -- another run is already in progress (started ${Math.round(ageMs / 1000)}s ago).`);
+        return;
+      }
+      console.log(`[salesforce-report-sync] Found a stale in-progress flag (${Math.round(ageMs / 1000)}s old, likely orphaned from a crashed run) -- proceeding anyway.`);
+    } catch (e) {
+      console.log('[salesforce-report-sync] Could not parse existing in-progress flag -- proceeding anyway.');
+    }
+  }
+
   await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: req.method === 'POST' ? 'manual-or-cron' : 'unknown' }));
 
   const username = (process.env.SALESFORCE_USERNAME || '').trim();
