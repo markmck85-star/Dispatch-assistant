@@ -275,7 +275,18 @@ export default async (req, context) => {
     // toolbar button. The plain text search has an actual track record of
     // eventually resolving, in the 90-170s range across multiple runs, so
     // reverting to it with generous headroom.
-    await page.waitForSelector('text=Export', { timeout: 4 * 60 * 1000 });
+    // 2026-07-31: text=Export now ALSO timed out at the full 4-minute cap
+    // (log: waitForSelector Timeout 240000ms exceeded), even though a
+    // screenshot again showed the real button visible on screen. Ruled out
+    // iframes (document.querySelectorAll('iframe').length === 0 on this
+    // page, confirmed via Mark's devtools). Both the role-based AND the
+    // plain-text approach have now failed at different times, which fits
+    // "multiple Export-labeled elements on the page, wrong one gets
+    // matched" rather than a load-timing issue. This time using the real
+    // CSS class pulled directly from Mark's devtools inspection of the
+    // actual toolbar button -- specific to the report action bar, unlike
+    // the generic text/accessible-name matches tried before.
+    await page.waitForSelector('button.action-bar-action-ReportExportAction', { timeout: 4 * 60 * 1000 });
 
     // Narrow the date range to Last 7 Days before exporting -- Mark's ask
     // 2026-07-29: the report defaults to Current + Previous Month
@@ -304,7 +315,7 @@ export default async (req, context) => {
     // Trigger the export flow: nav-bar Export button -> modal already
     // defaults to "Details Only" / "Excel Format .xls" per Mark's
     // screenshot, so this only needs to open the modal and confirm.
-    await page.getByRole('button', { name: 'Export', exact: true }).first().click();
+    await page.locator('button.action-bar-action-ReportExportAction').click();
     const dialog = page.getByRole('dialog');
     await dialog.waitFor({ state: 'visible', timeout: 15000 });
 
