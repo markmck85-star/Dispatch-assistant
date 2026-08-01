@@ -220,6 +220,25 @@ export default async (req, context) => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
+    // 2026-08-01: added after finding that the stuck state is completely
+    // deterministic -- two separate runs at 8:25 PM and 8:48 PM produced
+    // byte-for-byte identical screenshots (same page shell rendered, same
+    // report component never appearing). That rules out a flaky timing
+    // race and points at something concrete blocking the report
+    // component's own async init every time. Capturing browser console
+    // messages, uncaught page errors, and failed network requests so the
+    // next failure's log shows the actual JS error (if any) instead of
+    // just "nothing happened".
+    page.on('console', (msg) => {
+      console.log(`[salesforce-report-sync] Page console [${msg.type()}]: ${msg.text()}`);
+    });
+    page.on('pageerror', (err) => {
+      console.log(`[salesforce-report-sync] Page error: ${err.message}`);
+    });
+    page.on('requestfailed', (request) => {
+      console.log(`[salesforce-report-sync] Request failed: ${request.url()} -- ${request.failure()?.errorText}`);
+    });
+
     // Navigating directly to the report while unauthenticated should bounce
     // through Salesforce's standard login page and land back here on success.
     // 'commit' (not 'domcontentloaded') avoids a known Playwright race where
