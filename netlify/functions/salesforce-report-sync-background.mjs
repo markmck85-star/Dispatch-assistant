@@ -341,31 +341,50 @@ export default async (req, context) => {
     // DOM/CSS state (bounding box, display, visibility, opacity) of every
     // matching element, so the next failure's log tells us definitively
     // what Playwright itself sees over time instead of just "timed out".
+    // 2026-08-01: after adding navigator.webdriver spoofing, the page shell
+    // now genuinely renders (real nav/breadcrumb content, ~175KB
+    // screenshot with real colors -- a big change from the totally blank,
+    // 4.2KB, single-color screenshot every prior run had). But the actual
+    // report component/toolbar still isn't appearing within 4 minutes --
+    // "Export" no longer even appears in the captured page-text snippet,
+    // meaning the report body genuinely hasn't finished loading, not that
+    // it's hidden. Extended the window to 8 minutes (still well within
+    // the 15-min background function budget) and added a spinner check
+    // alongside the Export button check, to tell "still genuinely
+    // loading" apart from "stuck/blocked" in the next failure's log.
     const exportSelector = 'button.action-bar-action-ReportExportAction';
+    const spinnerSelector = '.slds-spinner, lightning-spinner, [role="status"]';
     const diagStart = Date.now();
     let exportButtonVisible = false;
-    while (Date.now() - diagStart < 4 * 60 * 1000) {
+    while (Date.now() - diagStart < 8 * 60 * 1000) {
       const diag = await page
-        .evaluate((sel) => {
-          return Array.from(document.querySelectorAll(sel)).map((el) => {
-            const rect = el.getBoundingClientRect();
-            const style = window.getComputedStyle(el);
-            return {
-              rect: { width: rect.width, height: rect.height, top: rect.top, left: rect.left },
-              display: style.display,
-              visibility: style.visibility,
-              opacity: style.opacity,
-              disabled: el.disabled || null,
+        .evaluate(
+          ({ sel, spinnerSel }) => {
+            const describe = (el) => {
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              return {
+                rect: { width: rect.width, height: rect.height, top: rect.top, left: rect.left },
+                display: style.display,
+                visibility: style.visibility,
+                opacity: style.opacity,
+                disabled: el.disabled || null,
+              };
             };
-          });
-        }, exportSelector)
-        .catch((e) => 'evaluate failed: ' + e.message);
+            return {
+              exportMatches: Array.from(document.querySelectorAll(sel)).map(describe),
+              spinnerCount: document.querySelectorAll(spinnerSel).length,
+            };
+          },
+          { sel: exportSelector, spinnerSel: spinnerSelector }
+        )
+        .catch((e) => ({ error: 'evaluate failed: ' + e.message }));
       console.log(
-        `[salesforce-report-sync] Export button diagnostic @ ${Math.round((Date.now() - diagStart) / 1000)}s -- matches: ${JSON.stringify(diag)}`
+        `[salesforce-report-sync] Export button diagnostic @ ${Math.round((Date.now() - diagStart) / 1000)}s -- exportMatches: ${JSON.stringify(diag.exportMatches)}, spinnerCount: ${diag.spinnerCount}`
       );
       if (
-        Array.isArray(diag) &&
-        diag.some((d) => d.rect.width > 0 && d.rect.height > 0 && d.display !== 'none' && d.visibility !== 'hidden' && d.opacity !== '0')
+        Array.isArray(diag.exportMatches) &&
+        diag.exportMatches.some((d) => d.rect.width > 0 && d.rect.height > 0 && d.display !== 'none' && d.visibility !== 'hidden' && d.opacity !== '0')
       ) {
         exportButtonVisible = true;
         break;
@@ -374,7 +393,7 @@ export default async (req, context) => {
     }
     if (!exportButtonVisible) {
       throw new Error(
-        'Export button never reported visible per diagnostic polling over 4 minutes -- see per-interval "Export button diagnostic" log lines above for the exact DOM/CSS state Playwright saw throughout the wait.'
+        'Export button never reported visible per diagnostic polling over 8 minutes -- see per-interval "Export button diagnostic" log lines above for the exact DOM/CSS state and spinner count Playwright saw throughout the wait.'
       );
     }
 
