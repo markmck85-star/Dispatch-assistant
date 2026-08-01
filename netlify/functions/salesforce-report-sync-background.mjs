@@ -194,11 +194,27 @@ export default async (req, context) => {
     }
 
     browser = await playwright.launch({
-      args: [...chromium.args, '--disable-dev-shm-usage'],
+      args: [...chromium.args, '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
       executablePath: await chromium.executablePath(),
       headless: true,
     });
-    page = await browser.newPage();
+    // 2026-08-01: added after confirming navigator.webdriver spoofing alone
+    // wasn't enough -- three separate runs showed the reload-retry doing
+    // nothing, with the SAME lightningReportApp.app request getting
+    // re-aborted identically every single time, even right after a fresh
+    // reload. That consistency suggests deliberate, repeatable detection
+    // rather than a random network hiccup a retry could fix. Two more
+    // standard stealth measures: the AutomationControlled launch flag
+    // (hides several other Chrome automation signals beyond just
+    // navigator.webdriver), and an explicit, ordinary-looking desktop
+    // Chrome user agent -- headless Chrome's default UA self-identifies
+    // with "HeadlessChrome", which some detection systems check directly
+    // regardless of navigator.webdriver.
+    page = await browser.newPage({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport: { width: 1920, height: 1080 },
+    });
     page.setDefaultTimeout(30000);
 
     // 2026-07-31: added after discovering the REAL failure screenshot
