@@ -201,6 +201,25 @@ export default async (req, context) => {
     page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
+    // 2026-07-31: added after discovering the REAL failure screenshot
+    // (Mark's browser had been showing a stale cached copy of an old
+    // screenshot via view-sync-screenshot.js the whole time -- the actual
+    // current Blobs content, confirmed by downloading it directly, is a
+    // completely blank white page with zero rendered content, matching
+    // the empty page-text snippet also captured on failure) -- this fits
+    // Salesforce silently serving nothing to automated browsers rather
+    // than blocking outright. Playwright (like Selenium/Puppeteer) sets
+    // navigator.webdriver = true on any page it controls, which some
+    // bot-detection systems check directly. This mitigation was built
+    // and added to local-sync.js on 2026-07-28 during an earlier pass at
+    // this same theory, but never actually ported into this cloud script
+    // -- that investigation got overtaken by the URL-fix discovery before
+    // it was ever live-tested here. Overrides navigator.webdriver to
+    // report undefined before any page script runs.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
     // Navigating directly to the report while unauthenticated should bounce
     // through Salesforce's standard login page and land back here on success.
     // 'commit' (not 'domcontentloaded') avoids a known Playwright race where
