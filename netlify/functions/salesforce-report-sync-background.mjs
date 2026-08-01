@@ -229,6 +229,7 @@ export default async (req, context) => {
     // messages, uncaught page errors, and failed network requests so the
     // next failure's log shows the actual JS error (if any) instead of
     // just "nothing happened".
+    let reportAppRequestFailed = false;
     page.on('console', (msg) => {
       console.log(`[salesforce-report-sync] Page console [${msg.type()}]: ${msg.text()}`);
     });
@@ -237,6 +238,9 @@ export default async (req, context) => {
     });
     page.on('requestfailed', (request) => {
       console.log(`[salesforce-report-sync] Request failed: ${request.url()} -- ${request.failure()?.errorText}`);
+      if (request.url().includes('lightningReportApp')) {
+        reportAppRequestFailed = true;
+      }
     });
 
     // Navigating directly to the report while unauthenticated should bounce
@@ -375,6 +379,7 @@ export default async (req, context) => {
     const spinnerSelector = '.slds-spinner, lightning-spinner, [role="status"]';
     const diagStart = Date.now();
     let exportButtonVisible = false;
+    let reloadAttempted = false;
     while (Date.now() - diagStart < 8 * 60 * 1000) {
       const diag = await page
         .evaluate(
@@ -407,6 +412,22 @@ export default async (req, context) => {
       ) {
         exportButtonVisible = true;
         break;
+      }
+      // 2026-08-01: two separate live runs (8:25 PM, 8:48 PM) confirmed a
+      // deterministic root cause -- a request to lightningReportApp.app
+      // (the actual report application resource) gets cancelled with
+      // net::ERR_ABORTED about 6s after the page loads, every single
+      // time, leaving a loading spinner stuck indefinitely since nothing
+      // ever retries it. If we've seen that specific failure and haven't
+      // already tried recovering from it, attempt one page reload --
+      // mirroring what a human would instinctively do if a page seemed
+      // stuck loading -- then keep polling normally afterward.
+      if (reportAppRequestFailed && !reloadAttempted && Date.now() - diagStart > 30000) {
+        reloadAttempted = true;
+        console.log('[salesforce-report-sync] lightningReportApp request was aborted earlier -- attempting one page reload to recover.');
+        await page.reload({ waitUntil: 'commit' }).catch((e) => {
+          console.log('[salesforce-report-sync] Reload attempt threw (often benign):', e.message);
+        });
       }
       await page.waitForTimeout(20000);
     }
