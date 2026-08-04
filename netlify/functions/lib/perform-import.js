@@ -44,7 +44,14 @@ function overlapScore(tokensA, tokensB) {
   return smaller > 0 ? intersection / smaller : 0;
 }
 
-function matchSite(accountName, state, sitesForState) {
+function matchSite(accountName, state, sitesForState, aliasMap) {
+  // Exact alias match first (built from confirmed corrections -- see
+  // site_aliases table) -- these are known-correct mappings for account
+  // names that fuzzy matching gets wrong (e.g. Neumo's internal label for
+  // a site not matching that site's real current display name).
+  const aliasSiteId = aliasMap[String(accountName || '').trim()];
+  if (aliasSiteId) return { siteId: aliasSiteId, matched: true, matchSource: 'alias' };
+
   const nameOnly = stripStatePrefix(accountName);
   const targetTokens = tokenize(nameOnly);
   let best = null;
@@ -56,8 +63,8 @@ function matchSite(accountName, state, sitesForState) {
       best = site;
     }
   }
-  if (best && bestScore >= 0.65) return { siteId: best.id, matched: true };
-  return { siteId: null, matched: false };
+  if (best && bestScore >= 0.65) return { siteId: best.id, matched: true, matchSource: 'text' };
+  return { siteId: null, matched: false, matchSource: null };
 }
 
 function parseSalesforceDate(val) {
@@ -75,12 +82,17 @@ function parseSalesforceDate(val) {
  *   techMatched:number, needsReview:number, reviewSamples:Array, rowErrors:Array}>}
  */
 async function performImport(supabase, rows) {
-  const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
+  const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }, { data: aliases, error: aliasesErr }] = await Promise.all([
     supabase.from('sites').select('id, name, state'),
     supabase.from('technicians').select('id, name'),
+    supabase.from('site_aliases').select('alias, site_id'),
   ]);
   if (sitesErr) throw new Error('sites fetch failed: ' + sitesErr.message);
   if (techsErr) throw new Error('technicians fetch failed: ' + techsErr.message);
+  if (aliasesErr) throw new Error('site_aliases fetch failed: ' + aliasesErr.message);
+
+  const aliasMap = {};
+  for (const a of aliases || []) aliasMap[a.alias] = a.site_id;
 
   const sitesByState = {};
   for (const s of sites) {
@@ -112,9 +124,9 @@ async function performImport(supabase, rows) {
     if (!chunk.length) continue;
     const { data: matchedTickets } = await supabase
       .from('tickets')
-      .select('id, wo_number')
+      .select('id, wo_number, site_id')
       .in('wo_number', chunk);
-    for (const t of matchedTickets || []) ticketByWo[t.wo_number] = t.id;
+    for (const t of matchedTickets || []) ticketByWo[t.wo_number] = t;
   }
 
   const toInsert = [];
@@ -126,8 +138,26 @@ async function performImport(supabase, rows) {
   for (const r of rows) {
     if (!r.appointmentNumber || existingSet.has(r.appointmentNumber)) continue;
 
-    const sitesForState = sitesByState[r.state] || [];
-    const { siteId, matched } = matchSite(r.accountName, r.state, sitesForState);
+    const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
+
+    // 2026-08-04: prefer a WO-number-matched ticket's already-resolved
+    // site_id over fuzzy text matching whenever available. This is the
+    // most authoritative source there is -- Salesforce itself already
+    // resolved that specific ticket to a specific site, which sidesteps
+    // the one real known gap in text-based matching: locations with 2+
+    // co-located machines (e.g. "Arapahoe County Aurora 2"), where the
+    // closed-ticket report's free-text description doesn't say which
+    // specific unit was serviced, so name-only matching can lump a
+    // busy site's later machines onto whichever one matches first.
+    let siteId, matched, matchSource;
+    if (linkedTicket && linkedTicket.site_id) {
+      siteId = linkedTicket.site_id;
+      matched = true;
+      matchSource = 'wo_number';
+    } else {
+      const sitesForState = sitesByState[r.state] || [];
+      ({ siteId, matched, matchSource } = matchSite(r.accountName, r.state, sitesForState, aliasMap));
+    }
     if (matched) siteMatchedCount++;
     else {
       needsReviewCount++;
@@ -137,7 +167,7 @@ async function performImport(supabase, rows) {
     const technicianId = r.techName ? techByLowerName[r.techName.trim().toLowerCase()] || null : null;
     if (technicianId) techMatchedCount++;
 
-    const ticketId = r.woNumber ? ticketByWo[r.woNumber] || null : null;
+    const ticketId = linkedTicket ? linkedTicket.id : null;
 
     toInsert.push({
       appointment_number: r.appointmentNumber,
