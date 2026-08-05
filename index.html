@@ -2973,34 +2973,6 @@ function distanceMatrixStatus(state) {
                 ? `<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;"><strong>⚠️ Unrecognized Locations:</strong> ${unknownCodes.join(', ')} — not included in dispatch</div>`
                 : '';
 
-            if (relevant.length === 0) {
-                resultsDiv.innerHTML = '<div class="error" style="color:red; padding:10px; border:1px solid red; border-radius:5px;">No valid codes found for this region.</div>';
-                resultsDiv.classList.remove('hidden');
-                if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 400);
-                return;
-            }
-
-            // Trigger add-location prompts for unknown codes alongside valid dispatch
-            if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 600);
-
-            // Attach restockBy date and right form flag from parsed form counts
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            relevant.forEach(item => {
-                const fc = window.parsedFormCounts[item.code];
-                if (fc && fc.restockBy) {
-                    item.restockBy = fc.restockBy;
-                    // Parse M/D/YYYY into a date for comparison
-                    const parts = fc.restockBy.split('/');
-                    if (parts.length === 3) {
-                        const d = new Date(parseInt(parts[2]), parseInt(parts[0])-1, parseInt(parts[1]));
-                        d.setHours(0,0,0,0);
-                        item.isSameDay = (d.getTime() === today.getTime());
-                    }
-                }
-                if (fc && fc.hasRightForms && isGARightFormsEligible(item.code)) item.hasRightForms = true;
-            });
-
             // Build unavailability set from comp days + manual flags
             const dateInput = document.getElementById('dispatchDate');
             const dateStr = dateInput && dateInput.value ? dateInput.value : '';
@@ -3037,6 +3009,16 @@ function distanceMatrixStatus(state) {
             // qualify (plain manual assignment-board entries with no ticket
             // aren't auto-surfaced), and only if not already covered by a pasted
             // code, so this can't create a duplicate stop.
+            //
+            // 2026-08-05: moved this block to run BEFORE the empty-codes early
+            // return below. Root cause of Florida's board showing completely
+            // blank despite 3 real trouble tickets confirmed correct in the
+            // database (site match, board assignment row, everything): on a day
+            // with no restock dispatch list and a stale/empty Location Codes
+            // box, `relevant.length === 0` would hit the early return and the
+            // function bailed out before this auto-surface step ever ran at
+            // all -- so real ticket-linked assignments were never getting a
+            // chance to appear, no matter how correct the underlying data was.
             const pastedCodes = new Set(relevant.map(i => i.code));
             Object.entries(existingByCode).forEach(([code, existing]) => {
                 if (existing.status === 'planned' && existing.ticket && !pastedCodes.has(code)) {
@@ -3053,6 +3035,38 @@ function distanceMatrixStatus(state) {
                         ticketSlaEnd: existing.ticket.slaEndsAt,
                     });
                 }
+            });
+
+            // Now that real DB-backed tickets have had a chance to auto-surface
+            // above, this is the real "genuinely nothing to show" check --
+            // previously this ran before the auto-surface step and could bail
+            // out a whole region's board incorrectly (see comment above).
+            if (relevant.length === 0) {
+                resultsDiv.innerHTML = '<div class="error" style="color:red; padding:10px; border:1px solid red; border-radius:5px;">No valid codes found for this region.</div>';
+                resultsDiv.classList.remove('hidden');
+                if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 400);
+                return;
+            }
+
+            // Trigger add-location prompts for unknown codes alongside valid dispatch
+            if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 600);
+
+            // Attach restockBy date and right form flag from parsed form counts
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            relevant.forEach(item => {
+                const fc = window.parsedFormCounts[item.code];
+                if (fc && fc.restockBy) {
+                    item.restockBy = fc.restockBy;
+                    // Parse M/D/YYYY into a date for comparison
+                    const parts = fc.restockBy.split('/');
+                    if (parts.length === 3) {
+                        const d = new Date(parseInt(parts[2]), parseInt(parts[0])-1, parseInt(parts[1]));
+                        d.setHours(0,0,0,0);
+                        item.isSameDay = (d.getTime() === today.getTime());
+                    }
+                }
+                if (fc && fc.hasRightForms && isGARightFormsEligible(item.code)) item.hasRightForms = true;
             });
 
             const unavailable = dateStr ? getUnavailableTechsForDate(dateStr) : new Set(
