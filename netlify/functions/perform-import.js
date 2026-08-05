@@ -1,0 +1,284 @@
+// lib/perform-import.js
+//
+// Core "rows -> site_visits" logic, extracted 2026-07-27 from
+// import-service-appointments.js so it can be called two ways:
+//   1. The existing HTTP handler (manual xlsx upload from state.html)
+//   2. salesforce-report-sync.js (the new automated scraper)
+// without duplicating the site/tech matching or the per-row insert
+// fallback. See import-service-appointments.js for the full history/
+// reasoning comments on the matching strategy -- kept there since that's
+// still the primary human-facing entry point.
+
+const TOKEN_ALIASES = {
+  'co': 'county',
+  'cnty': 'county',
+  'ave': 'avenue',
+  'blvd': 'boulevard',
+  'dr': 'drive',
+  'rd': 'road',
+  'st': 'street',
+  'mt': 'mount',
+  'hwy': 'highway',
+  'pkwy': 'parkway',
+};
+
+function tokenize(s) {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => TOKEN_ALIASES[t] || t);
+}
+
+function stripStatePrefix(accountName) {
+  const m = String(accountName || '').trim().match(/^([A-Za-z]{2})\s*-\s*(.+)$/);
+  return m ? m[2] : String(accountName || '').trim();
+}
+
+function overlapScore(tokensA, tokensB) {
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  const intersection = [...setA].filter((t) => setB.has(t)).length;
+  const smaller = Math.min(setA.size, setB.size);
+  return smaller > 0 ? intersection / smaller : 0;
+}
+
+function matchSite(accountName, state, sitesForState, aliasMap) {
+  // Exact alias match first (built from confirmed corrections -- see
+  // site_aliases table) -- these are known-correct mappings for account
+  // names that fuzzy matching gets wrong (e.g. Neumo's internal label for
+  // a site not matching that site's real current display name).
+  const aliasSiteId = aliasMap[String(accountName || '').trim()];
+  if (aliasSiteId) return { siteId: aliasSiteId, matched: true, matchSource: 'alias' };
+
+  const nameOnly = stripStatePrefix(accountName);
+  const targetTokens = tokenize(nameOnly);
+  let best = null;
+  let bestScore = 0;
+  for (const site of sitesForState) {
+    const score = overlapScore(targetTokens, tokenize(site.name));
+    if (score > bestScore) {
+      bestScore = score;
+      best = site;
+    }
+  }
+  if (best && bestScore >= 0.65) return { siteId: best.id, matched: true, matchSource: 'text' };
+  return { siteId: null, matched: false, matchSource: null };
+}
+
+function parseSalesforceDate(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {Array<object>} rows - already mapped to {accountName, state, woNumber,
+ *   appointmentNumber, actualStart, actualEnd, durationMin, techName,
+ *   remediation, remediationDetail} -- same shape state.html's autoImport builds.
+ * @returns {Promise<{inserted:number, skippedExisting:number, siteMatched:number,
+ *   techMatched:number, needsReview:number, reviewSamples:Array, rowErrors:Array}>}
+ */
+async function performImport(supabase, rows) {
+  const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }, { data: aliases, error: aliasesErr }] = await Promise.all([
+    supabase.from('sites').select('id, name, state'),
+    supabase.from('technicians').select('id, name'),
+    supabase.from('site_aliases').select('alias, site_id'),
+  ]);
+  if (sitesErr) throw new Error('sites fetch failed: ' + sitesErr.message);
+  if (techsErr) throw new Error('technicians fetch failed: ' + techsErr.message);
+  if (aliasesErr) throw new Error('site_aliases fetch failed: ' + aliasesErr.message);
+
+  const aliasMap = {};
+  for (const a of aliases || []) aliasMap[a.alias] = a.site_id;
+
+  const sitesByState = {};
+  for (const s of sites) {
+    if (!sitesByState[s.state]) sitesByState[s.state] = [];
+    sitesByState[s.state].push(s);
+  }
+  const techByLowerName = {};
+  for (const t of techs) techByLowerName[t.name.trim().toLowerCase()] = t.id;
+
+  const incomingApptNumbers = rows.map((r) => r.appointmentNumber).filter(Boolean);
+  const existingSet = new Set();
+  // Chunk the "already imported?" lookup -- a full scraped report can be
+  // ~3,000 appointment numbers in one go (state.html only ever sends 250 at
+  // a time), and a single .in() filter that large risks an oversized query.
+  for (let i = 0; i < incomingApptNumbers.length; i += 500) {
+    const chunk = incomingApptNumbers.slice(i, i + 500);
+    const { data: existing, error: existingErr } = await supabase
+      .from('site_visits')
+      .select('appointment_number')
+      .in('appointment_number', chunk);
+    if (existingErr) throw new Error('existing lookup failed: ' + existingErr.message);
+    for (const r of existing || []) existingSet.add(r.appointment_number);
+  }
+
+  const incomingWoNumbers = rows.map((r) => r.woNumber).filter(Boolean);
+  let ticketByWo = {};
+  for (let i = 0; i < incomingWoNumbers.length; i += 500) {
+    const chunk = incomingWoNumbers.slice(i, i + 500);
+    if (!chunk.length) continue;
+    const { data: matchedTickets } = await supabase
+      .from('tickets')
+      .select('id, wo_number, site_id')
+      .in('wo_number', chunk);
+    for (const t of matchedTickets || []) ticketByWo[t.wo_number] = t;
+  }
+
+  const toInsert = [];
+  const reviewSamples = [];
+  let siteMatchedCount = 0;
+  let techMatchedCount = 0;
+  let needsReviewCount = 0;
+  // 2026-08-06: WO-matched tickets get auto-closed and their board
+  // assignment auto-completed below, once the closed-ticket report
+  // confirms the work actually happened -- see the update block after the
+  // site_visits insert for why.
+  const ticketIdsToClose = new Set();
+
+  for (const r of rows) {
+    if (!r.appointmentNumber || existingSet.has(r.appointmentNumber)) continue;
+
+    const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
+
+    // 2026-08-04: prefer a WO-number-matched ticket's already-resolved
+    // site_id over fuzzy text matching whenever available. This is the
+    // most authoritative source there is -- Salesforce itself already
+    // resolved that specific ticket to a specific site, which sidesteps
+    // the one real known gap in text-based matching: locations with 2+
+    // co-located machines (e.g. "Arapahoe County Aurora 2"), where the
+    // closed-ticket report's free-text description doesn't say which
+    // specific unit was serviced, so name-only matching can lump a
+    // busy site's later machines onto whichever one matches first.
+    let siteId, matched, matchSource;
+    if (linkedTicket && linkedTicket.site_id) {
+      siteId = linkedTicket.site_id;
+      matched = true;
+      matchSource = 'wo_number';
+    } else {
+      const sitesForState = sitesByState[r.state] || [];
+      ({ siteId, matched, matchSource } = matchSite(r.accountName, r.state, sitesForState, aliasMap));
+    }
+    if (matched) siteMatchedCount++;
+    else {
+      needsReviewCount++;
+      if (reviewSamples.length < 25) reviewSamples.push({ state: r.state, accountName: r.accountName });
+    }
+
+    const technicianId = r.techName ? techByLowerName[r.techName.trim().toLowerCase()] || null : null;
+    if (technicianId) techMatchedCount++;
+
+    const ticketId = linkedTicket ? linkedTicket.id : null;
+    if (ticketId) ticketIdsToClose.add(ticketId);
+
+    toInsert.push({
+      appointment_number: r.appointmentNumber,
+      site_id: siteId,
+      account_name_raw: r.accountName,
+      state: r.state || null,
+      wo_number: r.woNumber || null,
+      ticket_id: ticketId,
+      started_at: parseSalesforceDate(r.actualStart),
+      ended_at: parseSalesforceDate(r.actualEnd),
+      duration_min: r.durationMin != null ? r.durationMin : null,
+      tech_name_raw: r.techName || null,
+      technician_id: technicianId,
+      remediation: r.remediation || null,
+      remediation_detail: r.remediationDetail || null,
+      included_restock: null,
+      included_restock_source: null,
+      source: 'salesforce_report',
+      needs_review: !matched,
+      imported_at: new Date().toISOString(),
+    });
+  }
+
+  let inserted = 0;
+  let rowErrors = [];
+  if (toInsert.length) {
+    const { error: insertErr, count } = await supabase
+      .from('site_visits')
+      .insert(toInsert, { count: 'exact' });
+    if (!insertErr) {
+      inserted = count != null ? count : toInsert.length;
+    } else {
+      for (const row of toInsert) {
+        const { error: rowErr } = await supabase.from('site_visits').insert([row]);
+        if (rowErr) {
+          let reason = rowErr.message;
+          if (/state_fkey|violates foreign key/i.test(rowErr.message)) {
+            reason = `state code "${row.state}" not found in the "states" table -- add a row for it there first.`;
+          }
+          rowErrors.push({
+            appointmentNumber: row.appointment_number,
+            accountName: row.account_name_raw,
+            state: row.state,
+            reason,
+          });
+        } else {
+          inserted++;
+        }
+      }
+    }
+  }
+
+  let ticketsClosed = 0;
+  let assignmentsCompleted = 0;
+  if (ticketIdsToClose.size) {
+    // 2026-08-06: Mark asked for this after noticing that updating the
+    // closed-ticket report correctly refreshed ticket STATUS everywhere
+    // it's displayed (state console, the site-history popup) but never
+    // touched the actual board STOP -- so a completed ticket kept sitting
+    // on the active board with its urgency badge still drawing attention,
+    // and had to be manually clicked "Done" to move to the completed
+    // list at the bottom, even though the closed-ticket report already
+    // proved the work was done. This closes that gap: any ticket whose
+    // WO number matched a closed-ticket report row this import gets
+    // marked closed, and its board assignment (if still 'planned', i.e.
+    // not already completed/removed/reassigned some other way) gets
+    // flipped to 'completed' the same way clicking "Done" would --
+    // without needing anyone to notice and click through it by hand.
+    const ticketIdList = [...ticketIdsToClose];
+    const { error: ticketCloseErr, count: ticketCloseCount } = await supabase
+      .from('tickets')
+      .update({ status: 'closed' })
+      .in('id', ticketIdList)
+      .neq('status', 'closed')
+      .select('id', { count: 'exact', head: true });
+    if (ticketCloseErr) {
+      console.error('[perform-import] auto-close tickets failed:', ticketCloseErr.message);
+    } else {
+      ticketsClosed = ticketCloseCount || 0;
+    }
+
+    const { error: assignmentErr, count: assignmentCount } = await supabase
+      .from('assignments')
+      .update({ status: 'completed' })
+      .in('ticket_id', ticketIdList)
+      .eq('status', 'planned')
+      .select('id', { count: 'exact', head: true });
+    if (assignmentErr) {
+      console.error('[perform-import] auto-complete assignments failed:', assignmentErr.message);
+    } else {
+      assignmentsCompleted = assignmentCount || 0;
+    }
+  }
+
+  return {
+    inserted,
+    skippedExisting: rows.length - toInsert.length,
+    siteMatched: siteMatchedCount,
+    techMatched: techMatchedCount,
+    needsReview: needsReviewCount,
+    reviewSamples,
+    rowErrors,
+    ticketsClosed,
+    assignmentsCompleted,
+  };
+}
+
+module.exports = { performImport, matchSite, tokenize, stripStatePrefix, parseSalesforceDate };
