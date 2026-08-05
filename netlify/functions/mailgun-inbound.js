@@ -486,23 +486,21 @@ function parseEmailBody(text, receivedAt, subject) {
   }
 
 
-  if (/Dispatch List/i.test(text) || /Restock Report/i.test(text) || /Restock By/i.test(text)) {
-    // Count site codes like GA1007, IN1061 etc as proxy for item count
-    const siteCodes = (text.match(/\b[A-Z]{2}\d{3,5}\b/g) || []);
-    const uniqueSites = new Set(siteCodes);
-    const count = uniqueSites.size || (text.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || []).length;
-    const states = detectStates(text);
-    const stateStr = states.length > 0 ? ` (${states.join(', ')})` : '';
-    return {
-      type: 'restock',
-      alertBody: `📋 MCR DISPATCH LIST${stateStr}: ${count} sites across ${states.length} state${states.length !== 1 ? 's' : ''}.`,
-      woNum: null,
-      site: null,
-      issue: null,
-      slaEnd: null,
-    };
-  }
-
+  // 2026-08-05: Maintenance/Consumable Restock ticket detection moved
+  // ABOVE the bulk dispatch-list check below. Individual restock tickets
+  // very likely contain their own "Restock By:" field (a standard field
+  // name for this ticket type), which was tripping the dispatch-list
+  // check's bare /Restock By/i test FIRST -- silently misclassifying
+  // every individual restock ticket as the bulk daily digest instead of
+  // creating a real ticket. Confirmed live: zero maintenance-kind tickets
+  // existed in the database despite real restock tickets being received
+  // (per a live ticket Mark found with an explicit "PC Name:" field).
+  // "Maintenance"/"Consumable Restock" text is a much more specific,
+  // reliable signal for an individual ticket than the generic "Restock
+  // By" substring, so checking it first should resolve this without
+  // affecting real dispatch-list detection (which also has its own more
+  // specific "Dispatch List"/"Restock Report" phrase checks).
+  //
   // 2. Maintenance / Consumable Restock -- board-eligible for any requested
   // date, not just same-day. These never get an SMS (routine/Low priority,
   // would be a flood of texts for something that isn't urgent) -- they're
@@ -540,6 +538,23 @@ function parseEmailBody(text, receivedAt, subject) {
       issue: [issueCategory, issueDetail].filter(Boolean).join(' – ') || 'See email for details',
       description,
       dueDateRaw: dueDate ? dueDate.toISOString() : null,
+      slaEnd: null,
+    };
+  }
+
+  if (/Dispatch List/i.test(text) || /Restock Report/i.test(text) || /Restock By/i.test(text)) {
+    // Count site codes like GA1007, IN1061 etc as proxy for item count
+    const siteCodes = (text.match(/\b[A-Z]{2}\d{3,5}\b/g) || []);
+    const uniqueSites = new Set(siteCodes);
+    const count = uniqueSites.size || (text.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || []).length;
+    const states = detectStates(text);
+    const stateStr = states.length > 0 ? ` (${states.join(', ')})` : '';
+    return {
+      type: 'restock',
+      alertBody: `📋 MCR DISPATCH LIST${stateStr}: ${count} sites across ${states.length} state${states.length !== 1 ? 's' : ''}.`,
+      woNum: null,
+      site: null,
+      issue: null,
       slaEnd: null,
     };
   }
