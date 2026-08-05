@@ -994,10 +994,26 @@ exports.handler = async (event) => {
         // ticket is found (the follow-up somehow arrived before/without the
         // original), fall through to the normal insert path so the
         // information isn't lost either way.
+        //
+        // 2026-08-05: also escalate the ORIGINAL ticket when it's currently
+        // a 'maintenance' (routine restock) kind -- Mark confirmed this
+        // pattern happens for real: a kiosk can run out of forms before its
+        // scheduled restock, and rather than treating that as a routine
+        // follow-up, Neumo effectively needs a technician on-site within
+        // the normal 4-hour trouble SLA. Without this, the original ticket
+        // kept showing its old routine restock deadline even after an
+        // urgent fault got added underneath it, which a dispatcher
+        // scanning by SLA/due-date would have no way to notice. This
+        // line-item-addition parse already runs through the same
+        // trouble-ticket-style field extraction (issue category, SLA calc)
+        // as a standalone trouble ticket, so parsed.slaEnd is already
+        // computed and ready to use here. Only escalates maintenance->
+        // trouble; a line item added to an already-trouble ticket is left
+        // alone (already has the right urgency).
         let appendedToExisting = false;
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
-            .from('tickets').select('id, description').eq('wo_number', parsed.woNum).maybeSingle();
+            .from('tickets').select('id, description, ticket_kind').eq('wo_number', parsed.woNum).maybeSingle();
           if (existingErr) {
             console.error('[mailgun-inbound] existing-ticket lookup for line item addition failed:', existingErr.message);
           } else if (existingTicket) {
@@ -1005,8 +1021,17 @@ exports.handler = async (event) => {
             const addedText = parsed.description || parsed.issue || 'See email for details';
             const newDescription = (existingTicket.description ? existingTicket.description + '\n\n' : '')
               + `[Line item added ${stamp}] ${addedText}`;
+
+            const updateFields = { description: newDescription };
+            if (existingTicket.ticket_kind === 'maintenance') {
+              updateFields.ticket_kind = 'trouble';
+              updateFields.deadline_source = 'sla_4h';
+              updateFields.sla_ends_at = parsed.slaEnd;
+              console.log(`[mailgun-inbound] Escalating ticket ${parsed.woNum} from maintenance to trouble (line item added, new 4hr SLA: ${parsed.slaEnd})`);
+            }
+
             const { error: updateErr } = await supabase
-              .from('tickets').update({ description: newDescription }).eq('id', existingTicket.id);
+              .from('tickets').update(updateFields).eq('id', existingTicket.id);
             if (updateErr) console.error('[mailgun-inbound] append line item failed:', updateErr.message);
             else {
               console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum}`);
