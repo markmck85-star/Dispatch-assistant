@@ -995,21 +995,24 @@ exports.handler = async (event) => {
         // original), fall through to the normal insert path so the
         // information isn't lost either way.
         //
-        // 2026-08-05: also escalate the ORIGINAL ticket when it's currently
-        // a 'maintenance' (routine restock) kind -- Mark confirmed this
-        // pattern happens for real: a kiosk can run out of forms before its
-        // scheduled restock, and rather than treating that as a routine
-        // follow-up, Neumo effectively needs a technician on-site within
-        // the normal 4-hour trouble SLA. Without this, the original ticket
-        // kept showing its old routine restock deadline even after an
-        // urgent fault got added underneath it, which a dispatcher
-        // scanning by SLA/due-date would have no way to notice. This
-        // line-item-addition parse already runs through the same
-        // trouble-ticket-style field extraction (issue category, SLA calc)
-        // as a standalone trouble ticket, so parsed.slaEnd is already
-        // computed and ready to use here. Only escalates maintenance->
-        // trouble; a line item added to an already-trouble ticket is left
-        // alone (already has the right urgency).
+        // 2026-08-05: considered auto-escalating the ORIGINAL ticket to
+        // trouble/4hr-SLA whenever it's currently 'maintenance' -- Mark
+        // confirmed a real case where this SHOULD happen (a kiosk running
+        // out of forms before its scheduled restock) but also found a real
+        // counterexample proving auto-escalation is unsafe: a line item
+        // requesting new signage/marketing graphics while a tech is
+        // already on-site for a restock, which is explicitly NOT
+        // service-affecting and should NOT get a 4hr SLA. Both cases use
+        // the same structured fields (Line Item Issue Category/Detail)
+        // with no reliable way to distinguish them -- category values like
+        // "Hardware" or free text like "fault"/"offline" can appear in
+        // either a genuine emergency or a routine while-you're-there task,
+        // and Neumo's own Priority field is not trustworthy either (Mark
+        // has seen it left Low even for actually-offline machines). Rather
+        // than risk auto-escalating a benign line item (or worse, failing
+        // to escalate a real one), this now just FLAGS the ticket for a
+        // dispatcher to make the actual call -- surfacing what the SLA
+        // would be if this were genuinely urgent, without asserting it.
         let appendedToExisting = false;
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
@@ -1019,15 +1022,17 @@ exports.handler = async (event) => {
           } else if (existingTicket) {
             const stamp = receivedAt.toISOString().slice(0, 10);
             const addedText = parsed.description || parsed.issue || 'See email for details';
-            const newDescription = (existingTicket.description ? existingTicket.description + '\n\n' : '')
-              + `[Line item added ${stamp}] ${addedText}`;
+            let noteLine = `[Line item added ${stamp}] ${addedText}`;
+            if (existingTicket.ticket_kind === 'maintenance') {
+              const slaStr = formatSlaDeadline(new Date(parsed.slaEnd));
+              noteLine = `⚠️ REVIEW NEEDED -- possible SLA impact (would be ${slaStr} if urgent): ${noteLine}`;
+            }
+            const newDescription = (existingTicket.description ? existingTicket.description + '\n\n' : '') + noteLine;
 
             const updateFields = { description: newDescription };
             if (existingTicket.ticket_kind === 'maintenance') {
-              updateFields.ticket_kind = 'trouble';
-              updateFields.deadline_source = 'sla_4h';
-              updateFields.sla_ends_at = parsed.slaEnd;
-              console.log(`[mailgun-inbound] Escalating ticket ${parsed.woNum} from maintenance to trouble (line item added, new 4hr SLA: ${parsed.slaEnd})`);
+              updateFields.needs_review = true;
+              console.log(`[mailgun-inbound] Flagged ticket ${parsed.woNum} for dispatcher review (line item added to existing restock, possible SLA impact)`);
             }
 
             const { error: updateErr } = await supabase
