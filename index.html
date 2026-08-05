@@ -3036,13 +3036,27 @@ function distanceMatrixStatus(state) {
             relevant.forEach(item => { pastedByCode[item.code] = item; });
             Object.entries(existingByCode).forEach(([code, existing]) => {
                 if (existing.status === 'planned' && existing.ticket) {
+                    // 2026-08-06: `urgent` was being set to true unconditionally
+                    // for ANY ticket-linked stop, including routine "Maintenance
+                    // / Consumable Restock" tickets -- causing the ⚡ SAME DAY
+                    // badge (which is driven purely by item.urgent) to show on
+                    // ordinary restocks with nothing actually urgent about them.
+                    // Found live on the CO board: every stop showed SAME DAY
+                    // even though they were all just routine restock tickets
+                    // dated for the next day. Genuine trouble tickets never use
+                    // "Maintenance" as their issueCategory (that value is
+                    // specific to the restock/maintenance ticket type -- see
+                    // mailgun-inbound.js), so this is a reliable, already-
+                    // available signal to tell them apart without needing
+                    // another file/field exposed from get-assignments.js.
+                    const isGenuineTrouble = existing.ticket.issueCategory !== 'Maintenance';
                     const pastedItem = pastedByCode[code];
                     if (pastedItem) {
                         // Site already has a stop (from the pasted/loaded
                         // dispatch list) -- enrich it with the ticket's info
                         // rather than leaving it as a bare restock with no
                         // urgency/WO shown.
-                        pastedItem.urgent = true;
+                        pastedItem.urgent = isGenuineTrouble;
                         pastedItem.fromTicket = true;
                         pastedItem.ticketWo = existing.ticket.woNumber;
                         pastedItem.ticketIssue = [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – ');
@@ -3055,7 +3069,7 @@ function distanceMatrixStatus(state) {
                     }
                     relevant.push({
                         code,
-                        urgent: true,
+                        urgent: isGenuineTrouble,
                         fromTicket: true,
                         ticketWo: existing.ticket.woNumber,
                         ticketIssue: [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – '),
