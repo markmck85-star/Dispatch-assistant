@@ -3007,8 +3007,7 @@ function distanceMatrixStatus(state) {
             // box -- without this, the board write alone is invisible until
             // someone manually adds the code. Only ticket-linked 'planned' rows
             // qualify (plain manual assignment-board entries with no ticket
-            // aren't auto-surfaced), and only if not already covered by a pasted
-            // code, so this can't create a duplicate stop.
+            // aren't auto-surfaced).
             //
             // 2026-08-05: moved this block to run BEFORE the empty-codes early
             // return below. Root cause of Florida's board showing completely
@@ -3019,9 +3018,37 @@ function distanceMatrixStatus(state) {
             // function bailed out before this auto-surface step ever ran at
             // all -- so real ticket-linked assignments were never getting a
             // chance to appear, no matter how correct the underlying data was.
-            const pastedCodes = new Set(relevant.map(i => i.code));
+            //
+            // 2026-08-05 (same day, second pass): a code already covered by a
+            // pasted stop used to be skipped entirely here, on the assumption
+            // that meant "already showing, nothing to add." That's wrong when a
+            // site has BOTH a scheduled restock (in the pasted dispatch list)
+            // AND a separate open trouble ticket -- the pasted restock stop was
+            // winning silently, with the real ticket's WO/issue/SLA never
+            // attached anywhere. Found live: FL1024 and FL1011 both had real
+            // open trouble tickets (confirmed on the state console) but showed
+            // on the board as bare restock stops with no ticket info at all.
+            // Now an already-pasted stop for the same code gets ENRICHED with
+            // the ticket's fields instead of being skipped, so both pieces of
+            // info -- the scheduled restock and the open ticket -- show up
+            // together on the one stop rather than the ticket vanishing.
+            const pastedByCode = {};
+            relevant.forEach(item => { pastedByCode[item.code] = item; });
             Object.entries(existingByCode).forEach(([code, existing]) => {
-                if (existing.status === 'planned' && existing.ticket && !pastedCodes.has(code)) {
+                if (existing.status === 'planned' && existing.ticket) {
+                    const pastedItem = pastedByCode[code];
+                    if (pastedItem) {
+                        // Site already has a stop (from the pasted/loaded
+                        // dispatch list) -- enrich it with the ticket's info
+                        // rather than leaving it as a bare restock with no
+                        // urgency/WO shown.
+                        pastedItem.urgent = true;
+                        pastedItem.fromTicket = true;
+                        pastedItem.ticketWo = existing.ticket.woNumber;
+                        pastedItem.ticketIssue = [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – ');
+                        pastedItem.ticketSlaEnd = existing.ticket.slaEndsAt;
+                        return;
+                    }
                     if (!LOCATIONS[code]) {
                         console.warn(`[dispatch] Auto-added ticket for ${code} skipped: not in LOCATIONS`);
                         return;
