@@ -3923,6 +3923,19 @@ function distanceMatrixStatus(state) {
                 const insertAt = Math.min(entry.originalIndex, assignments[entry.tech].length);
                 assignments[entry.tech].splice(insertAt, 0, JSON.parse(JSON.stringify(entry.snapshot)));
             }
+            // 2026-08-06: this function previously only updated the in-memory
+            // browser view (window.currentAssignments/removedStops) and never
+            // told Supabase anything changed -- so the underlying
+            // assignments.status row stayed 'completed'/'removed' regardless
+            // of clicking Undo. The moment the dispatcher reprocessed, fresh
+            // data came straight from the still-unchanged database and the
+            // stop reappeared as completed again, making Undo look broken
+            // (confirmed live: Mark saw exactly this on Florida tonight).
+            // removeStop()'s own snapshot is the full item object (not the
+            // stripped-down {code} version used elsewhere), so it's already
+            // everything syncAssignmentToSupabase needs to properly restore
+            // the persisted status back to 'planned'.
+            syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual');
             window.removedStops.splice(removedIndex, 1);
             renderReviewBoard(true);
         }
