@@ -3092,6 +3092,21 @@ function distanceMatrixStatus(state) {
             // Trigger add-location prompts for unknown codes alongside valid dispatch
             if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 600);
 
+            // 2026-08-06: also check for open trouble/maintenance tickets that
+            // never matched any site at all (site_id IS NULL) -- these have
+            // no code to even be "unknown" above, they're just sitting
+            // invisible with nowhere to show up. Fire-and-forget: never lets
+            // a fetch failure here block the actual dispatch generation this
+            // function exists to do.
+            fetch('/.netlify/functions/get-unmatched-tickets?state=' + CURRENT_STATE, { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && data.unmatched && data.unmatched.length > 0) {
+                        setTimeout(() => showAddLocationPromptQueueForTickets(data.unmatched), 900);
+                    }
+                })
+                .catch(e => console.warn('[dispatch] get-unmatched-tickets check failed (non-fatal):', e.message));
+
             // Attach restockBy date and right form flag from parsed form counts
             const today = new Date();
             today.setHours(0,0,0,0);
@@ -4222,6 +4237,108 @@ function distanceMatrixStatus(state) {
                     } else {
                         status.textContent = 'Save failed: ' + (data.error || 'unknown error');
                     }
+                })
+                .catch(e => { status.textContent = 'Network error: ' + e.message; });
+            };
+        }
+
+        // 2026-08-06: ticket-driven variant of the Add Location toast above.
+        // Mark asked whether a trouble/maintenance ticket for a location the
+        // app doesn't recognize could automatically trigger this toast,
+        // instead of him having to notice it's missing and manually paste a
+        // code into Location Codes first -- confirmed live there was
+        // already a real backlog of these sitting invisible with no site
+        // match at all. Deliberately scoped to trouble/maintenance tickets
+        // only (see get-unmatched-tickets.js) -- site_survey tickets are
+        // excluded, since Mark's plan for those (a temporary category,
+        // promoted to a real site once the install actually happens) is a
+        // separate, not-yet-designed concept.
+        //
+        // Differs from showAddLocationPrompt in one key way: that flow
+        // starts from a CODE the dispatcher already typed (just unrecognized),
+        // so it only needs name/address. Here there's no code at all yet --
+        // the ticket is just a raw text description -- so this asks the
+        // dispatcher to choose/confirm the new site's code themselves,
+        // deliberately NOT auto-generating one. Given tonight's whole
+        // session was largely about site codes silently colliding with
+        // existing ones, auto-picking a "next available" number here would
+        // risk creating the exact same class of bug -- a human choosing the
+        // code, informed by the ticket's own text, is safer.
+        function showAddLocationPromptQueueForTickets(ticketList) {
+            if (!ticketList || ticketList.length === 0) return;
+            const [first, ...rest] = ticketList;
+            showAddLocationPromptForTicket(first, () => {
+                if (rest.length > 0) setTimeout(() => showAddLocationPromptQueueForTickets(rest), 300);
+            });
+        }
+
+        function showAddLocationPromptForTicket(ticket, onComplete) {
+            var existing = document.getElementById('add-location-prompt');
+            if (existing) existing.remove();
+
+            var state = CURRENT_STATE;
+            var techOptions = buildTechOptions(Object.keys(TECHS), state + '0000', state);
+
+            var div = document.createElement('div');
+            div.id = 'add-location-prompt';
+            div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #ffa500;border-radius:8px;padding:16px 18px;z-index:9999;width:min(92vw,400px);box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
+            div.innerHTML = `
+                <div style="font-weight:bold;color:#ffa500;margin-bottom:4px;">&#43; New location from ticket</div>
+                <div style="font-size:12px;color:#aaa;margin-bottom:12px;">WO ${ticket.woNumber || '?'} -- ${[ticket.issueCategory, ticket.issueDetail].filter(Boolean).join(' – ') || 'see ticket for details'}</div>
+                <input id="alp-code" placeholder="Site code (e.g. ${state}1150)" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;text-transform:uppercase;">
+                <input id="alp-name" value="${(ticket.suggestedName || '').replace(/"/g, '&quot;')}" placeholder="Location name" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <input id="alp-address" placeholder="Full address" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <select id="alp-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                    <option value="">-- Primary tech (optional) --</option>
+                    ${techOptions}
+                </select>
+                <select id="alp-machinetype" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:12px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                    <option value="SK">SK — Small Kahuna (default)</option>
+                    <option value="SB">SB — Surfboard</option>
+                    <option value="BK">BK — Big Kahuna (cash)</option>
+                </select>
+                <div style="display:flex;gap:10px;">
+                    <button id="alp-save" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Save &amp; reprocess</button>
+                    <button id="alp-skip" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Skip for now</button>
+                </div>
+                <div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
+            document.body.appendChild(div);
+
+            document.getElementById('alp-skip').onclick = function() { div.remove(); if (onComplete) onComplete(); };
+            document.getElementById('alp-save').onclick = function() {
+                var code = document.getElementById('alp-code').value.trim().toUpperCase();
+                var name = document.getElementById('alp-name').value.trim();
+                var address = document.getElementById('alp-address').value.trim();
+                var tech = document.getElementById('alp-tech').value;
+                var machineType = document.getElementById('alp-machinetype').value;
+                var status = document.getElementById('alp-status');
+                if (!code) { status.textContent = 'Site code is required.'; return; }
+                if (LOCATIONS[code]) { status.textContent = code + ' already exists -- pick a different code.'; return; }
+                if (!name) { status.textContent = 'Location name is required.'; return; }
+                if (!address) { status.textContent = 'Address is required.'; return; }
+                status.textContent = 'Saving…';
+                fetch('/.netlify/functions/save-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, state, name, address, primaryTech: tech, fallbackTech: '', contractorOverride: false, contractorName: '', machineType })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) { status.textContent = 'Save failed: ' + (data.error || 'unknown error'); return null; }
+                    LOCATIONS[code] = { code, state, name, address, primaryTech: tech, defaultTech: tech, fallbackTech: '', machineType };
+                    status.textContent = 'Linking ticket…';
+                    return fetch('/.netlify/functions/link-ticket-to-site', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ticketId: ticket.ticketId, siteCode: code })
+                    }).then(r => r.json());
+                })
+                .then(linkData => {
+                    if (!linkData) return; // save-location itself already failed above
+                    if (!linkData.ok) { status.textContent = 'Site saved, but linking the ticket failed: ' + (linkData.error || 'unknown error'); return; }
+                    div.remove();
+                    processDispatch(); // re-run -- the now-linked ticket auto-surfaces same as any other
+                    if (onComplete) onComplete();
                 })
                 .catch(e => { status.textContent = 'Network error: ' + e.message; });
             };
