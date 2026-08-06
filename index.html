@@ -4316,6 +4316,44 @@ function distanceMatrixStatus(state) {
                 if (LOCATIONS[code]) { status.textContent = code + ' already exists -- pick a different code.'; return; }
                 if (!name) { status.textContent = 'Location name is required.'; return; }
                 if (!address) { status.textContent = 'Address is required.'; return; }
+
+                // 2026-08-06: added after a live near-miss -- a ticket for
+                // "GA - Clayton County Jonesboro Kroger" auto-triggered this
+                // toast even though that exact site already existed as
+                // GA1057 (same address, just word-order-swapped in the
+                // ticket's raw text with no embedded code, which is likely
+                // why it never auto-matched during ingestion). Since this
+                // toast fires automatically rather than from something the
+                // dispatcher deliberately typed, there's less natural
+                // opportunity to notice a duplicate before saving -- so
+                // check here instead. Compares street number + first
+                // street-name word (the same lightweight signature used
+                // throughout tonight's site-matching cleanup) against every
+                // existing site already loaded for this state; a match
+                // doesn't block saving outright (a genuinely different site
+                // can share a similar-looking address -- different suite,
+                // shopping center, etc.) but does require the dispatcher to
+                // explicitly confirm before proceeding.
+                var addrMatch = address.match(/^\s*(\d{2,6})\s+([A-Za-z][A-Za-z.']*)/);
+                if (addrMatch) {
+                    var typedNum = addrMatch[1];
+                    var typedStreetWord = addrMatch[2].toLowerCase();
+                    var possibleDup = Object.values(LOCATIONS).find(function(loc) {
+                        if (!loc.address || loc.state !== state) return false;
+                        var m = loc.address.match(/^\s*(\d{2,6})\s+([A-Za-z][A-Za-z.']*)/);
+                        return m && m[1] === typedNum && m[2].toLowerCase() === typedStreetWord;
+                    });
+                    if (possibleDup) {
+                        var proceed = confirm(
+                            'A site with a similar address already exists:\n\n' +
+                            possibleDup.code + ' — ' + possibleDup.name + '\n' + possibleDup.address +
+                            '\n\nSave ' + code + ' as a NEW, separate site anyway?\n\n' +
+                            '(Cancel this, then use "Skip for now" and link the ticket to ' + possibleDup.code + ' manually instead if this is the same location.)'
+                        );
+                        if (!proceed) { status.textContent = 'Cancelled -- consider linking to ' + possibleDup.code + ' instead.'; return; }
+                    }
+                }
+
                 status.textContent = 'Saving…';
                 fetch('/.netlify/functions/save-location', {
                     method: 'POST',
