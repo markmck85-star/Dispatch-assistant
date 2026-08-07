@@ -4280,8 +4280,16 @@ function distanceMatrixStatus(state) {
         function showAddLocationPromptQueueForTickets(ticketList) {
             if (!ticketList || ticketList.length === 0) return;
             const [first, ...rest] = ticketList;
-            showAddLocationPromptForTicket(first, () => {
-                if (rest.length > 0) setTimeout(() => showAddLocationPromptQueueForTickets(rest), 300);
+            showAddLocationPromptForTicket(first, (resolvedCode) => {
+                // 2026-08-07: if the just-saved toast's backend sweep (see
+                // link-ticket-to-site.js) resolved OTHER tickets sharing the
+                // same site code too, drop any of those still sitting in
+                // this already-fetched queue -- otherwise a second ticket
+                // for the same brand-new site (that arrived before the
+                // first toast got filled out) would still pop its own
+                // redundant toast even though it's already been linked.
+                const remaining = resolvedCode ? rest.filter(t => t.suggestedCode !== resolvedCode) : rest;
+                if (remaining.length > 0) setTimeout(() => showAddLocationPromptQueueForTickets(remaining), 300);
             });
         }
 
@@ -4298,9 +4306,10 @@ function distanceMatrixStatus(state) {
             div.innerHTML = `
                 <div style="font-weight:bold;color:#ffa500;margin-bottom:4px;">&#43; New location from ticket</div>
                 <div style="font-size:12px;color:#aaa;margin-bottom:12px;">WO ${ticket.woNumber || '?'} -- ${[ticket.issueCategory, ticket.issueDetail].filter(Boolean).join(' – ') || 'see ticket for details'}</div>
-                <input id="alp-code" placeholder="Site code (e.g. ${state}1150)" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;text-transform:uppercase;">
+                <input id="alp-code" value="${(ticket.suggestedCode || '').replace(/"/g, '&quot;')}" placeholder="Site code (e.g. ${state}1150)" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;text-transform:uppercase;">
                 <input id="alp-name" value="${(ticket.suggestedName || '').replace(/"/g, '&quot;')}" placeholder="Location name" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
-                <input id="alp-address" placeholder="Full address" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <input id="alp-address" value="${(ticket.suggestedAddress || '').replace(/"/g, '&quot;')}" placeholder="Full address" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                ${(ticket.suggestedCode || ticket.suggestedAddress) ? '<div style="font-size:11px;color:#8ab;margin:-4px 0 8px;">Pre-filled from the ticket — please verify before saving.</div>' : ''}
                 <select id="alp-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                     <option value="">-- Primary tech (optional) --</option>
                     ${techOptions}
@@ -4389,7 +4398,7 @@ function distanceMatrixStatus(state) {
                     if (!linkData.ok) { status.textContent = 'Site saved, but linking the ticket failed: ' + (linkData.error || 'unknown error'); return; }
                     div.remove();
                     processDispatch(); // re-run -- the now-linked ticket auto-surfaces same as any other
-                    if (onComplete) onComplete();
+                    if (onComplete) onComplete(code);
                 })
                 .catch(e => { status.textContent = 'Network error: ' + e.message; });
             };
