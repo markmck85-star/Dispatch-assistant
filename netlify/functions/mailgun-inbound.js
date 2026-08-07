@@ -511,6 +511,7 @@ function parseEmailBody(text, receivedAt, subject) {
     const sstName = getField('SST Name');
     const pcName = getField('PC Name');
     const oos = getField('Out of Service\\?') || getField('Out of Service');
+    const address = getField('Address');
     const issueCategory = getField('Line Item Issue Category');
     const issueDetail = getField('Line Item Issue Detail');
     const description = getField('Line Item Description');
@@ -533,7 +534,7 @@ function parseEmailBody(text, receivedAt, subject) {
       type: 'maintenance',
       ticketKind: 'maintenance',
       alertBody: null, // board-only, no SMS
-      woNum, site: siteStr, siteCode,
+      woNum, site: siteStr, siteCode, address,
       issueCategory, issueDetail,
       issue: [issueCategory, issueDetail].filter(Boolean).join(' – ') || 'See email for details',
       description,
@@ -615,6 +616,7 @@ function parseEmailBody(text, receivedAt, subject) {
     const earliestStartRaw = getField('Earliest Start Permitted');
     const dueDateRaw = getField('Due Date');
     const locationField = getField('Location');
+    const address = getField('Address');
     // Fallback state source for SMS recipient matching: every Location field
     // we've seen starts "XX - ..." (state abbreviation). Used when there's no
     // site code to derive state from (e.g. a site-survey ticket for a
@@ -657,6 +659,7 @@ function parseEmailBody(text, receivedAt, subject) {
       alertBody,
       woNum, site, siteCode, issue, slaEnd: slaEnd.toISOString(),
       state: locationState,
+      address,
       issueCategory: issueCategory || null,
       issueDetail: issueDetail || null,
       description: lineItemDescription || null,
@@ -1061,6 +1064,7 @@ exports.handler = async (event) => {
           issue_category: parsed.issueCategory || null,
           issue_detail: parsed.issueDetail || null,
           description: parsed.description || null,
+          address: parsed.address || null,
           received_at: receivedAt.toISOString(),
           earliest_start_at: earliestStartAt ? earliestStartAt.toISOString() : null,
           due_at: dueAt ? dueAt.toISOString() : null,

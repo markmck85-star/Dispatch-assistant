@@ -1,5 +1,5 @@
 /**
- * get-unmatched-tickets.js — v1 — added 2026-08-06
+ * get-unmatched-tickets.js — v2 — updated 2026-08-07
  *
  * Netlify Function — surfaces open trouble/maintenance tickets that never
  * matched an existing site (site_id IS NULL), so the dispatch board can
@@ -10,6 +10,18 @@
  * several MI SOS offices, OH - Salem BMV, etc.) with nowhere in the app
  * surfacing them.
  *
+ * v2: Mark pointed out the toast only pre-filled the location NAME, even
+ * though every real trouble/maintenance ticket also includes the site's
+ * PC Name/code and street address -- he'd been manually re-opening the
+ * same ticket email to find both and retype them. Checked and confirmed:
+ * the code was already being captured into attributes.rawSiteCode this
+ * whole time (site_id is null because that code doesn't match an EXISTING
+ * site yet -- a genuinely new location -- not because no code was found),
+ * it just was never exposed here. Address genuinely wasn't captured
+ * anywhere before this -- added to mailgun-inbound.js's parser and a new
+ * tickets.address column same day. Now exposes both, so the toast can be
+ * close to fully pre-filled rather than just the name.
+ *
  * Scoped to ticket_kind IN ('trouble','maintenance') only -- site_survey
  * tickets are deliberately excluded. Mark's plan for those is a separate,
  * not-yet-built "temporary category, promoted to a real site once the
@@ -19,7 +31,8 @@
  *
  * GET /.netlify/functions/get-unmatched-tickets?state=CO
  * -> { unmatched: [ { ticketId, woNumber, siteText, suggestedName,
- *                      issueCategory, issueDetail, receivedAt } ] }
+ *                      suggestedCode, suggestedAddress, issueCategory,
+ *                      issueDetail, receivedAt } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
 
@@ -54,7 +67,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("tickets")
-      .select("id, wo_number, site_text, ticket_kind, issue_category, issue_detail, received_at")
+      .select("id, wo_number, site_text, ticket_kind, issue_category, issue_detail, address, attributes, received_at")
       .is("site_id", null)
       .in("ticket_kind", ["trouble", "maintenance"])
       .eq("status", "open")
@@ -74,11 +87,19 @@ exports.handler = async (event) => {
           .replace(/^[A-Z]{2}\d{3,5}\s*[-\u2013]\s*/, "")
           .replace(/^[A-Z]{2}\s*[-\u2013]\s*/, "")
           .trim();
+        // rawSiteCode is Neumo's own PC Name/code for this ticket -- present
+        // for nearly every real trouble/maintenance ticket. site_id is null
+        // not because no code was found, but because that code doesn't
+        // match any EXISTING site yet (a genuinely new location Neumo has
+        // already assigned a number to, that MCR just hasn't onboarded).
+        const suggestedCode = (t.attributes && t.attributes.rawSiteCode) || "";
         return {
           ticketId: t.id,
           woNumber: t.wo_number,
           siteText: t.site_text,
           suggestedName,
+          suggestedCode,
+          suggestedAddress: t.address || "",
           issueCategory: t.issue_category,
           issueDetail: t.issue_detail,
           receivedAt: t.received_at,
