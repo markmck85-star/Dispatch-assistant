@@ -30,6 +30,72 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+// 2026-08-08: ported directly from index.html -- this GA on-call/comp-day
+// schedule lives ONLY as hardcoded client-side JS there, not in any
+// database table, which is why the state console could never show comp
+// days correctly no matter how the date/timezone handling was fixed.
+// Known tradeoff: this is now duplicated in two places rather than one
+// shared source -- if Mark extends the schedule in index.html, this copy
+// needs the same update or the two pages will disagree again. Worth
+// eventually moving into a real table both pages read from instead.
+const ONCALL_SCHEDULE_GA = {
+  '2026-05-02': ['Omari Williams',  'Robert Medley'],
+  '2026-05-09': ['Nyzier Moore',    'Sean Reich'],
+  '2026-05-16': ['Omari Williams',  'Robert Medley'],
+  '2026-05-23': ['Nyzier Moore',    'Sean Reich'],
+  '2026-05-30': ['Omari Williams',  'Robert Medley'],
+  '2026-06-06': ['Nyzier Moore',    'Sean Reich'],
+  '2026-06-13': ['Omari Williams',  'Robert Medley'],
+  '2026-06-20': ['Nyzier Moore',    'Sean Reich'],
+  '2026-06-27': ['Omari Williams',  'Robert Medley'],
+  '2026-07-04': ['Nyzier Moore',    'Sean Reich'],
+  '2026-07-11': ['Omari Williams',  'Robert Medley'],
+  '2026-07-18': ['Nyzier Moore',    'Sean Reich'],
+  '2026-07-25': ['Omari Williams',  'Robert Medley'],
+  '2026-08-01': ['Nyzier Moore',    'Sean Reich'],
+  '2026-08-08': ['Omari Williams',  'Robert Medley'],
+  '2026-08-15': ['Nyzier Moore',    'Sean Reich'],
+  '2026-08-22': ['Omari Williams',  'Robert Medley'],
+  '2026-08-29': ['Nyzier Moore',    'Sean Reich'],
+  '2026-09-05': ['Omari Williams',  'Robert Medley'],
+  '2026-09-12': ['Nyzier Moore',    'Sean Reich'],
+  '2026-09-19': ['Omari Williams',  'Robert Medley'],
+  '2026-09-26': ['Nyzier Moore',    'Sean Reich'],
+  '2026-10-03': ['Omari Williams',  'Robert Medley'],
+  '2026-10-10': ['Nyzier Moore',    'Sean Reich'],
+  '2026-10-17': ['Omari Williams',  'Robert Medley'],
+  '2026-10-24': ['Nyzier Moore',    'Sean Reich'],
+  '2026-10-31': ['Omari Williams',  'Robert Medley'],
+  '2026-11-07': ['Nyzier Moore',    'Sean Reich'],
+  '2026-11-14': ['Omari Williams',  'Robert Medley'],
+  '2026-11-21': ['Nyzier Moore',    'Sean Reich'],
+  '2026-11-28': ['Omari Williams',  'Robert Medley'],
+  '2026-12-05': ['Nyzier Moore',    'Sean Reich'],
+  '2026-12-12': ['Omari Williams',  'Robert Medley'],
+  '2026-12-19': ['Nyzier Moore',    'Sean Reich'],
+  '2026-12-26': ['Omari Williams',  'Robert Medley'],
+  '2027-01-02': ['Nyzier Moore',    'Sean Reich'],
+};
+const THURSDAY_COMP_TECHS = ['Robert Medley']; // takes Thu comp day before his on-call Sat; all other on-call techs take Mon.
+
+function getCompDaysForDate(dateStr) {
+  const results = [];
+  Object.entries(ONCALL_SCHEDULE_GA).forEach(([satStr, techs]) => {
+    const satDate = new Date(satStr + 'T12:00:00Z');
+    techs.forEach(tech => {
+      const offset = THURSDAY_COMP_TECHS.includes(tech) ? -2 : -5; // Thu=Sat-2, Mon=Sat-5
+      const compDate = new Date(satDate);
+      compDate.setUTCDate(satDate.getUTCDate() + offset);
+      const compStr = compDate.toISOString().split('T')[0];
+      if (compStr === dateStr) {
+        const dayName = THURSDAY_COMP_TECHS.includes(tech) ? 'Thursday' : 'Monday';
+        results.push({ tech, saturdayDateStr: satStr, dayName, reason: `Comp day — on call Sat ${satStr}` });
+      }
+    });
+  });
+  return results;
+}
+
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
 }
@@ -76,6 +142,19 @@ exports.handler = async (event) => {
       .eq('available', false);
     if (availErr) return json(500, { ok: false, error: 'availability fetch failed: ' + availErr.message });
     for (const row of (avail || [])) unavailableToday[row.technician_id] = { reason: row.reason, note: row.note };
+  }
+
+  // GA-only comp-day schedule (see ONCALL_SCHEDULE_GA above) -- only
+  // applied where a BlueFolder-synced reason isn't already present, same
+  // priority index.html itself uses.
+  if (state === 'GA') {
+    const compDays = getCompDaysForDate(todayStr);
+    const nameToId = {};
+    (techs || []).forEach(t => { nameToId[t.name] = t.id; });
+    compDays.forEach(c => {
+      const id = nameToId[c.tech];
+      if (id && !unavailableToday[id]) unavailableToday[id] = { reason: 'comp_day', note: c.reason };
+    });
   }
 
   const technicians = (techs || []).map(t => ({

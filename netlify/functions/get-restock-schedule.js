@@ -79,6 +79,22 @@ exports.handler = async (event) => {
   const siteIds = sites.map(s => s.id);
   if (!siteIds.length) return json(200, { ok: true, locations: [] });
 
+  // 2026-08-08: manual confirmations let a dispatcher say "this was
+  // actually restocked during another visit" (e.g. a trouble ticket)
+  // without touching the automated overdue calculation below at all --
+  // see mark-site-restocked.js for the reasoning. Only the most recent
+  // confirmation per site matters for display.
+  const { data: manualConfirmations, error: confirmErr } = await supabase
+    .from('site_manual_restock_confirmations')
+    .select('site_id, confirmed_at, note')
+    .in('site_id', siteIds)
+    .order('confirmed_at', { ascending: false });
+  if (confirmErr) return json(500, { ok: false, error: 'manual confirmations fetch failed: ' + confirmErr.message });
+  const latestConfirmationBySite = {};
+  for (const c of (manualConfirmations || [])) {
+    if (!latestConfirmationBySite[c.site_id]) latestConfirmationBySite[c.site_id] = c;
+  }
+
   // Paginate -- a full state's visit history can run into the thousands of rows.
   let allVisits = [];
   let from = 0;
@@ -213,6 +229,8 @@ exports.handler = async (event) => {
       lastRestockAppt: lastRestockEntry ? lastRestockEntry.appt : null,
       scheduledDate: scheduled ? scheduled.date : null,
       scheduledTech: scheduled ? scheduled.tech : null,
+      manuallyConfirmedAt: latestConfirmationBySite[siteId] ? latestConfirmationBySite[siteId].confirmed_at : null,
+      manuallyConfirmedNote: latestConfirmationBySite[siteId] ? latestConfirmationBySite[siteId].note : null,
     });
   }
 
