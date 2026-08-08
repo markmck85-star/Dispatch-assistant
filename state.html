@@ -47,11 +47,14 @@
   .tech-chip.avail .status { color: #7bc796; }
   .tech-chip.out .status { color: #e08a8a; }
 
-  .ticket-card { border-left: 3px solid #444; background: #1e1e1e; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
-  .ticket-card.trouble { border-left-color: #dc3545; }
-  .ticket-card.maintenance { border-left-color: #e0a030; }
+  .ticket-card { border-left: 5px solid #444; background: #1e1e1e; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
+  .ticket-card.trouble { border-left-color: #dc3545; background: linear-gradient(90deg, rgba(220,53,69,0.12), #1e1e1e 18px); }
+  .ticket-card.maintenance { border-left-color: #4a9eda; background: linear-gradient(90deg, rgba(74,158,218,0.12), #1e1e1e 18px); }
   .ticket-card .title { font-weight: 600; color: #f0f0f0; }
   .ticket-card .meta { color: #999; font-size: 12px; margin-top: 2px; }
+  @keyframes importPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+  #importProgressBar.active { animation: importPulse 1.2s ease-in-out infinite; }
+  #importStatus.importing { font-size: 15px; font-weight: 600; color: #4fa87b; }
 
   .restock-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
   .restock-pill { border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
@@ -109,6 +112,11 @@
       <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
       <div style="font-size:12px;color:#999;margin-bottom:8px;">Or log in and export manually, then select it below — falls back to this if the automated sync is ever down.</div>
       <input type="file" id="importFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="autoImport(this.files[0])">
+      <div id="importProgressWrap" style="display:none;margin-top:10px;">
+        <div style="background:#333;border-radius:6px;height:14px;overflow:hidden;">
+          <div id="importProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#4fa87b);height:100%;width:0%;transition:width 0.3s ease;"></div>
+        </div>
+      </div>
       <div id="importStatus" class="status-line" style="padding:4px 0;">Ready.</div>
     </div>
 
@@ -136,10 +144,21 @@ let importParsedRows = null;
 async function autoImport(file) {
   if (!file) return;
   const statusEl = document.getElementById('importStatus');
+  const progressWrap = document.getElementById('importProgressWrap');
+  const progressBar = document.getElementById('importProgressBar');
+  statusEl.classList.add('importing');
+  progressWrap.style.display = 'block';
+  progressBar.classList.add('active');
+  progressBar.style.width = '3%'; // small immediate jump so it's visibly not stuck at 0 while reading/parsing
   statusEl.textContent = `Reading ${file.name}…`;
 
   const reader = new FileReader();
-  reader.onerror = () => { statusEl.textContent = 'Could not read file.'; };
+  function abortImportUI(message) {
+    statusEl.textContent = message;
+    statusEl.classList.remove('importing');
+    document.getElementById('importProgressWrap').style.display = 'none';
+  }
+  reader.onerror = () => abortImportUI('Could not read file.');
   reader.onload = async (e) => {
     let rows;
     try {
@@ -147,7 +166,7 @@ async function autoImport(file) {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
       rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
-      if (!rows.length) { statusEl.textContent = 'No data found in file.'; return; }
+      if (!rows.length) { abortImportUI('No data found in file.'); return; }
       rows = rows.map(r => {
         const out = {};
         for (const k of Object.keys(r)) out[k.trim()] = r[k];
@@ -156,12 +175,12 @@ async function autoImport(file) {
       const required = ['Account Name', 'Jurisdiction', 'Appointment Number'];
       for (const col of required) {
         if (!(col in rows[0])) {
-          statusEl.textContent = 'Missing expected column: ' + col + '. Columns found: ' + Object.keys(rows[0]).join(', ');
+          abortImportUI('Missing expected column: ' + col + '. Columns found: ' + Object.keys(rows[0]).join(', '));
           return;
         }
       }
     } catch (err) {
-      statusEl.textContent = 'Error parsing file: ' + err.message;
+      abortImportUI('Error parsing file: ' + err.message);
       return;
     }
 
@@ -186,6 +205,8 @@ async function autoImport(file) {
 
     async function runBatch(batch, startRow, endRow) {
       statusEl.textContent = `Importing rows ${startRow}-${endRow} of ${mapped.length}…`;
+      const pct = Math.min(100, Math.round((endRow / mapped.length) * 100));
+      document.getElementById('importProgressBar').style.width = pct + '%';
       try {
         const res = await fetch('/.netlify/functions/import-service-appointments', {
           method: 'POST',
@@ -214,6 +235,17 @@ async function autoImport(file) {
     }
 
     renderImportStatus();
+
+    // Import done -- stop the pulse, snap the bar to full, then fade it out
+    // after a moment so it doesn't linger once there's nothing left to show.
+    statusEl.classList.remove('importing');
+    const doneProgressBar = document.getElementById('importProgressBar');
+    doneProgressBar.classList.remove('active');
+    doneProgressBar.style.width = '100%';
+    setTimeout(() => {
+      document.getElementById('importProgressWrap').style.display = 'none';
+      doneProgressBar.style.width = '0%';
+    }, 1500);
 
     // Refresh the page's own data now that new history is in, so the
     // restock schedule / recent tickets reflect it without a manual reload.
@@ -316,9 +348,12 @@ async function loadConsole(state) {
         const statusBadge = t.status === 'closed'
           ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
           : `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
+        const kindTag = t.ticketKind === 'maintenance'
+          ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
+          : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
         return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
-          <div class="meta">${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''} · ${fmtDateTime(t.receivedAt)}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
+          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''} · ${fmtDateTime(t.receivedAt)}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
           <div class="meta">${statusBadge}</div>
         </div>`;
       }).join('');
@@ -643,10 +678,18 @@ async function pollSyncStatus() {
       const startedAt = data.startedAt ? new Date(data.startedAt) : null;
       const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
       statusEl.textContent = `⏳ Sync running${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
-      statusEl.style.color = 'var(--muted)';
+      statusEl.style.color = '#4fa87b';
+      statusEl.style.fontWeight = '600';
+      statusEl.style.fontSize = '15px';
       btn.disabled = true;
       return;
     }
+
+    // Sync no longer in progress -- reset the bold/oversized styling from
+    // the in-progress state before any of the completion branches below
+    // set their own (normal-weight) color.
+    statusEl.style.fontWeight = '';
+    statusEl.style.fontSize = '';
 
     // Not in progress -- but if we triggered this ourselves and haven't
     // actually SEEN it start yet, it may just not have written its
