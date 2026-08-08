@@ -188,7 +188,24 @@ async function autoImport(file) {
     const mapped = rows.map(r => ({
       accountName: String(r['Account Name'] || '').trim(),
       state: String(r['Jurisdiction'] || '').trim(),
-      woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
+      woNumber: (() => {
+        const raw = r['Work Order Number'];
+        if (raw == null || raw === '') return null;
+        let s = String(raw).split('.')[0];
+        // 2026-08-08: when this column is read as a JS number (the cell's
+        // Excel format is General/Number rather than Text), any leading
+        // zeros are silently lost -- "00149139" becomes 149139, then just
+        // "149139" as a string. Confirmed live: this broke WO-number
+        // matching against `tickets` for 165 existing rows, including one
+        // Mark could independently prove was really closed in Salesforce
+        // hours earlier. Every real WO number seen so far is 8 digits, so
+        // pad back up to 8 whenever it's shorter and purely numeric --
+        // safe even if the true, un-stripped number happened to be
+        // shorter for some reason, since matching tickets.wo_number would
+        // have the same original (un-padded) value in that case too.
+        if (/^[0-9]+$/.test(s) && s.length < 8) s = s.padStart(8, '0');
+        return s;
+      })(),
       appointmentNumber: String(r['Appointment Number'] || '').trim(),
       actualStart: r['Actual Start'] || null,
       actualEnd: r['Actual End'] || null,
