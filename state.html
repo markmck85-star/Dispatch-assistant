@@ -300,6 +300,45 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// 2026-08-08: lets a dispatcher mark a ticket resolved locally when it's
+// genuinely done but will never show as "closed" through the normal
+// Salesforce-import path -- e.g. Neumo cancelling a now-redundant SA
+// (no closing notes on a cancellation, so it never appears in the closed-
+// ticket report) or a dispatcher confirming completion by phone. Keeps
+// this fully separate from the Salesforce-confirmed status rather than
+// faking a "closed" state -- see mark-ticket-resolved.js for the reasoning.
+async function resolveTicket(woNumber) {
+  const note = prompt('Optional note (e.g. "SA cancelled by Gina, already restocked during trouble visit"):', '');
+  if (note === null) return; // cancelled the prompt
+  try {
+    const res = await fetch('/.netlify/functions/mark-ticket-resolved', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wo_number: woNumber, note: note || null }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    loadAll();
+  } catch (e) {
+    alert('Could not mark resolved: ' + e.message);
+  }
+}
+
+async function undoResolveTicket(woNumber) {
+  try {
+    const res = await fetch('/.netlify/functions/mark-ticket-resolved', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wo_number: woNumber, undo: true }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    loadAll();
+  } catch (e) {
+    alert('Could not undo: ' + e.message);
+  }
+}
+
 async function loadAll() {
   const state = document.getElementById('stateSel').value;
   loadConsole(state);
@@ -346,26 +385,38 @@ async function loadConsole(state) {
     } else {
       const sortedTickets = [...data.recentTickets].sort((a, b) => {
         // Trouble tickets first as a group (they "burn brighter" -- Mark's
-        // words), then maintenance/restock. Within each group, most recent
-        // first. An open restock that's lingered past its expected window
+        // words), then maintenance/restock. Within each group, soonest due
+        // first -- consistent with dueAt now being the primary displayed
+        // date. An open restock that's lingered past its expected window
         // is itself worth noticing, not something to bury among trouble
         // tickets by pure chronological interleaving.
         if (a.ticketKind !== b.ticketKind) {
           return a.ticketKind === 'maintenance' ? 1 : -1;
         }
-        return new Date(b.receivedAt) - new Date(a.receivedAt);
+        return new Date(a.dueAt) - new Date(b.dueAt);
       });
       ticketList.innerHTML = sortedTickets.map(t => {
-        const statusBadge = t.status === 'closed'
-          ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
-          : `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
+        let statusBadge, resolveAction;
+        if (t.status === 'closed') {
+          statusBadge = `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`;
+          resolveAction = '';
+        } else if (t.status === 'resolved_local') {
+          statusBadge = `<span style="color:#9b7bd6;font-weight:600;">✓ Marked resolved ${fmtDateTime(t.manuallyResolvedAt)}${t.manuallyResolvedNote ? ' — ' + escapeHtml(t.manuallyResolvedNote) : ''}</span>`;
+          resolveAction = `<button onclick="undoResolveTicket('${t.woNumber}')" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#3a3a3a;color:#ccc;border:1px solid #666;border-radius:4px;cursor:pointer;">Undo</button>`;
+        } else {
+          statusBadge = `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
+          resolveAction = t.woNumber
+            ? `<button onclick="resolveTicket('${t.woNumber}')" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#2e7d5b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Mark Resolved</button>`
+            : '';
+        }
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
         return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
-          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''} · ${fmtDateTime(t.receivedAt)}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
-          <div class="meta">${statusBadge}</div>
+          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
+          <div class="meta">Due: <strong>${fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
+          <div class="meta">${statusBadge}${resolveAction}</div>
         </div>`;
       }).join('');
     }
