@@ -154,6 +154,36 @@ async function recordSuccess(summary) {
 export default async (req, context) => {
   const store = getSyncStore();
 
+  // ── Auto-sync enable/disable check (2026-08-08) ──────────────────────────
+  // Settings live in the "dispatch" Blobs store under settings/global.
+  // When salesforceReportSyncEnabled is explicitly false, scheduled/automatic
+  // runs exit immediately so we don't keep hammering Salesforce with a
+  // known-broken Playwright flow. Manual "Refresh Now" from the State Console
+  // always proceeds (the UI sends ?force=1).
+  let forceRun = false;
+  try {
+    const url = new URL(req.url || '', 'http://localhost');
+    forceRun = url.searchParams.get('force') === '1';
+  } catch (_) { /* ignore */ }
+
+  if (!forceRun) {
+    try {
+      const settingsStore = getStore('dispatch');
+      const settings = (await settingsStore.get('settings/global', { type: 'json' })) || {};
+      if (settings.salesforceReportSyncEnabled === false) {
+        console.log('[salesforce-report-sync] Auto-sync is disabled in settings (salesforceReportSyncEnabled=false). Exiting without running. Use Refresh Now (force=1) to override.');
+        return new Response(JSON.stringify({ skipped: true, reason: 'auto-sync-disabled' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    } catch (settingsErr) {
+      console.log('[salesforce-report-sync] Could not read settings for enable flag — proceeding anyway:', settingsErr.message);
+    }
+  } else {
+    console.log('[salesforce-report-sync] Force/manual run requested — ignoring auto-sync disable flag.');
+  }
+
   // Concurrency guard added 2026-07-31: discovered up to 5-6 overlapping
   // invocations firing within about a minute of each other during
   // troubleshooting (likely from repeated Run Now/Refresh Now clicks),
@@ -179,7 +209,7 @@ export default async (req, context) => {
     }
   }
 
-  await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: req.method === 'POST' ? 'manual-or-cron' : 'unknown' }));
+  await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: forceRun ? 'manual' : (req.method === 'POST' ? 'manual-or-cron' : 'scheduled') }));
 
   const username = (process.env.SALESFORCE_USERNAME || '').trim();
   const password = (process.env.SALESFORCE_PASSWORD || '').trim();
