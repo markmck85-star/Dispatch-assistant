@@ -302,7 +302,13 @@ function parseMaintenanceDueDate(description, receivedAt) {
   if (m) {
     const mo = parseInt(m[1], 10) - 1, dy = parseInt(m[2], 10);
     const yr = m[3] ? (m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10)) : year;
-    const d = new Date(yr, mo, dy);
+    // 2026-08-08: anchor to noon UTC, not new Date(yr,mo,dy) (server-local
+    // midnight -- UTC midnight on Netlify -- which shifts back into the
+    // previous evening once displayed in Eastern time; noon UTC stays on
+    // the correct calendar day across every US timezone). Confirmed live:
+    // "by 8/10" was showing as "Aug 9, 8:00 PM" -- a real due date landing
+    // on a Sunday, which should never happen under the service-window rules.
+    const d = new Date(Date.UTC(yr, mo, dy, 12, 0, 0));
     if (!isNaN(d.getTime())) return m[3] ? d : rollForward(d);
   }
 
@@ -312,7 +318,7 @@ function parseMaintenanceDueDate(description, receivedAt) {
     if (Object.prototype.hasOwnProperty.call(MONTHS, moKey)) {
       const mo = MONTHS[moKey], dy = parseInt(m[2], 10);
       const yr = m[3] ? parseInt(m[3], 10) : year;
-      const d = new Date(yr, mo, dy);
+      const d = new Date(Date.UTC(yr, mo, dy, 12, 0, 0));
       if (!isNaN(d.getTime())) return m[3] ? d : rollForward(d);
     }
   }
@@ -324,7 +330,7 @@ function parseMaintenanceDueDate(description, receivedAt) {
     const mo = parseInt(m[1], 10) - 1, dy = parseInt(m[2], 10);
     if (mo >= 0 && mo <= 11 && dy >= 1 && dy <= 31) {
       const yr = m[3] ? (m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10)) : year;
-      const d = new Date(yr, mo, dy);
+      const d = new Date(Date.UTC(yr, mo, dy, 12, 0, 0));
       if (!isNaN(d.getTime())) return m[3] ? d : rollForward(d);
     }
   }
