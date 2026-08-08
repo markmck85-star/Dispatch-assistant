@@ -41,10 +41,23 @@ exports.handler = async (event) => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // 2026-08-08: was `new Date()` + local getFullYear/getMonth/getDate,
+  // which builds the date string using the SERVER's own timezone --
+  // Netlify runs in UTC, not Eastern, so for several hours a day this
+  // would silently compute "today" as tomorrow relative to any US state.
+  // Also had no way to check a different day at all, which Mark ran into
+  // directly trying to verify whether "everyone available" was real or a
+  // date bug. Now explicitly anchors to Eastern time as a reasonable
+  // single reference across all US states (this is calendar-day-level
+  // info, not an exact-time calculation, so the few hours of difference
+  // between Eastern and Pacific near midnight is an acceptable edge case
+  // here), and accepts an optional ?date=YYYY-MM-DD override.
+  const requestedDate = (event.queryStringParameters || {}).date;
+  const todayStr = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate || '')
+    ? requestedDate
+    : new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // en-CA locale formats as YYYY-MM-DD
 
-  // Technicians in this state + today's availability
+  // Technicians in this state + availability for the requested/today's date
   const { data: techs, error: techErr } = await supabase
     .from('technicians')
     .select('id, name')
@@ -159,5 +172,5 @@ exports.handler = async (event) => {
     });
   }
 
-  return json(200, { ok: true, state, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
+  return json(200, { ok: true, state, date: todayStr, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
 };
