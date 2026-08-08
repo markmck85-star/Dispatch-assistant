@@ -98,14 +98,14 @@
     <div id="techStatus" class="status-line">Loading…</div>
     <div id="techGrid" class="tech-grid"></div>
 
-    <h2 class="section-label">🔄 Restock Status</h2>
-    <div id="restockStatus" class="status-line">Loading…</div>
-    <div id="restockSummary"></div>
-
     <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
     <div id="ticketStatus" class="status-line">Loading…</div>
     <div id="importFreshness" class="status-line" style="font-size:11px;"></div>
     <div id="ticketList"></div>
+
+    <h2 class="section-label">🔄 Restock Status</h2>
+    <div id="restockStatus" class="status-line">Loading…</div>
+    <div id="restockSummary"></div>
 
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
     <div class="import-box">
@@ -378,6 +378,38 @@ async function undoResolveTicket(woNumber) {
   }
 }
 
+async function confirmRestocked(siteCode) {
+  const note = prompt('Optional note (e.g. "Restocked during trouble-ticket visit"):', '');
+  if (note === null) return;
+  try {
+    const res = await fetch('/.netlify/functions/mark-site-restocked', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_code: siteCode, note: note || null }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    loadAll();
+  } catch (e) {
+    alert('Could not mark restocked: ' + e.message);
+  }
+}
+
+async function undoRestockConfirm(siteCode) {
+  try {
+    const res = await fetch('/.netlify/functions/mark-site-restocked', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_code: siteCode, undo: true }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    loadAll();
+  } catch (e) {
+    alert('Could not undo: ' + e.message);
+  }
+}
+
 async function loadAll() {
   const state = document.getElementById('stateSel').value;
   loadConsole(state);
@@ -489,7 +521,14 @@ async function loadRestock(state) {
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
 
     const counts = { overdue: 0, soon: 0, ok: 0 };
-    (data.locations || []).forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
+    (data.locations || []).forEach(l => {
+      // A manually-confirmed site no longer counts as needing attention,
+      // regardless of what the automated calculation still shows -- same
+      // philosophy as ticket resolution: the confirmation is a visible
+      // override, not a silent rewrite of the underlying computed status.
+      if (l.manuallyConfirmedAt) return;
+      if (counts[l.status] !== undefined) counts[l.status]++;
+    });
     restockStatus.textContent = data.locations.length + ' site(s) tracked';
 
     const topUrgent = (data.locations || []).filter(l => l.status === 'overdue' || l.status === 'soon').slice(0, 8);
@@ -515,12 +554,24 @@ async function loadRestock(state) {
         const scheduledLine = l.scheduledDate
           ? `<div class="meta" style="color:#7bc796;">✓ Already scheduled: ${new Date(l.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${l.scheduledTech ? ' (' + escapeHtml(l.scheduledTech) + ')' : ''}</div>`
           : '';
+        // 2026-08-08: lets a dispatcher say "this was actually restocked
+        // during that other visit" (e.g. a trouble ticket) without
+        // touching the automated calculation -- see mark-site-restocked.js.
+        // Only offered when visitedSinceRestock is true, since that's
+        // specifically the "(visited)" case this is meant to resolve.
+        let confirmLine = '';
+        if (l.manuallyConfirmedAt) {
+          confirmLine = `<div class="meta" style="color:#9b7bd6;">✓ Marked restocked ${fmtDateTime(l.manuallyConfirmedAt)}${l.manuallyConfirmedNote ? ' — ' + escapeHtml(l.manuallyConfirmedNote) : ''} <button onclick="undoRestockConfirm('${l.site_code}')" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#3a3a3a;color:#ccc;border:1px solid #666;border-radius:4px;cursor:pointer;">Undo</button></div>`;
+        } else if (l.visitedSinceRestock) {
+          confirmLine = `<div class="meta"><button onclick="confirmRestocked('${l.site_code}')" style="font-size:11px;padding:2px 8px;background:#2e7d5b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Mark Restocked</button></div>`;
+        }
         return `<div class="ticket-card ${cls}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${l.site_code}')" title="View recent visit history">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
           <div class="meta">${label} · last restock ${l.daysSince != null ? l.daysSince + ' days ago' : '—'}</div>
           ${lastVisitLine}
           ${projectedLine}
           ${scheduledLine}
+          ${confirmLine}
         </div>`;
       }).join('');
     }
@@ -778,50 +829,6 @@ async function triggerManualSync() {
   pollSyncStatus();
 }
 
-// ── Auto-sync on/off toggle ────────────────────────────────────────────────
-async function loadAutoSyncSetting() {
-  const toggle = document.getElementById('autoSyncToggle');
-  const statusEl = document.getElementById('autoSyncStatus');
-  if (!toggle) return;
-  try {
-    const res = await fetch('/.netlify/functions/get-settings?state=global');
-    const data = await res.json();
-    const enabled = data.settings?.salesforceReportSyncEnabled !== false; // default ON if never set
-    toggle.checked = enabled;
-    statusEl.textContent = enabled ? 'On' : 'Off';
-    statusEl.style.color = enabled ? '#4fa87b' : '#c97878';
-  } catch (err) {
-    statusEl.textContent = 'Could not load';
-    statusEl.style.color = '#999';
-  }
-}
-
-async function toggleAutoSync(enabled) {
-  const statusEl = document.getElementById('autoSyncStatus');
-  statusEl.textContent = 'Saving…';
-  statusEl.style.color = '#999';
-  try {
-    const res = await fetch('/.netlify/functions/save-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state: 'global', salesforceReportSyncEnabled: enabled }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      statusEl.textContent = enabled ? 'On' : 'Off';
-      statusEl.style.color = enabled ? '#4fa87b' : '#c97878';
-    } else {
-      statusEl.textContent = 'Save failed';
-      statusEl.style.color = '#c97878';
-      document.getElementById('autoSyncToggle').checked = !enabled;
-    }
-  } catch (err) {
-    statusEl.textContent = 'Save failed';
-    statusEl.style.color = '#c97878';
-    document.getElementById('autoSyncToggle').checked = !enabled;
-  }
-}
-
 async function pollSyncStatus() {
   const btn = document.getElementById('refreshNowBtn');
   const statusEl = document.getElementById('refreshStatus');
@@ -894,6 +901,50 @@ async function pollSyncStatus() {
     btn.disabled = false;
     statusEl.textContent = 'Could not check sync status: ' + err.message;
     statusEl.style.color = '#e08a8a';
+  }
+}
+
+// ── Auto-sync on/off toggle ────────────────────────────────────────────────
+async function loadAutoSyncSetting() {
+  const toggle = document.getElementById('autoSyncToggle');
+  const statusEl = document.getElementById('autoSyncStatus');
+  if (!toggle) return;
+  try {
+    const res = await fetch('/.netlify/functions/get-settings?state=global');
+    const data = await res.json();
+    const enabled = data.settings?.salesforceReportSyncEnabled !== false; // default ON if never set
+    toggle.checked = enabled;
+    statusEl.textContent = enabled ? 'On' : 'Off';
+    statusEl.style.color = enabled ? '#4fa87b' : '#c97878';
+  } catch (err) {
+    statusEl.textContent = 'Could not load';
+    statusEl.style.color = '#999';
+  }
+}
+
+async function toggleAutoSync(enabled) {
+  const statusEl = document.getElementById('autoSyncStatus');
+  statusEl.textContent = 'Saving…';
+  statusEl.style.color = '#999';
+  try {
+    const res = await fetch('/.netlify/functions/save-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: 'global', salesforceReportSyncEnabled: enabled }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      statusEl.textContent = enabled ? 'On' : 'Off';
+      statusEl.style.color = enabled ? '#4fa87b' : '#c97878';
+    } else {
+      statusEl.textContent = 'Save failed';
+      statusEl.style.color = '#c97878';
+      document.getElementById('autoSyncToggle').checked = !enabled;
+    }
+  } catch (err) {
+    statusEl.textContent = 'Save failed';
+    statusEl.style.color = '#c97878';
+    document.getElementById('autoSyncToggle').checked = !enabled;
   }
 }
 
