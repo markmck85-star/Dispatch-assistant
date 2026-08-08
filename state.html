@@ -90,7 +90,11 @@
       <option value="SC">South Carolina</option>
     </select>
 
-    <h2 class="section-label">👥 Technician Availability — Today</h2>
+    <h2 class="section-label">👥 Technician Availability</h2>
+    <div style="margin-bottom:8px;">
+      <label for="techDate" style="font-size:12px;color:#999;margin-right:6px;">Date:</label>
+      <input type="date" id="techDate" onchange="loadAll()" style="background:#2a2a3e;color:#f0f0f0;border:1px solid #555;border-radius:5px;padding:4px 8px;font-size:13px;">
+    </div>
     <div id="techStatus" class="status-line">Loading…</div>
     <div id="techGrid" class="tech-grid"></div>
 
@@ -317,6 +321,17 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// Formats a plain YYYY-MM-DD date string (not a full timestamp) -- parsing
+// this as new Date('YYYY-MM-DD') treats it as UTC midnight, which can
+// shift a day backward once displayed in a US timezone (the exact bug
+// fixed elsewhere today), so this builds the Date from explicit numeric
+// parts instead, which JS always treats as local time.
+function fmtDateOnly(dateStr) {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
 // 2026-08-08: lets a dispatcher mark a ticket resolved locally when it's
 // genuinely done but will never show as "closed" through the normal
 // Salesforce-import path -- e.g. Neumo cancelling a now-redundant SA
@@ -374,12 +389,20 @@ async function loadConsole(state) {
   ticketList.innerHTML = '';
 
   try {
-    const res = await fetch('/.netlify/functions/get-state-console?state=' + encodeURIComponent(state), { cache: 'no-store' });
+    const techDateInput = document.getElementById('techDate');
+    const dateParam = techDateInput && techDateInput.value ? '&date=' + encodeURIComponent(techDateInput.value) : '';
+    const res = await fetch('/.netlify/functions/get-state-console?state=' + encodeURIComponent(state) + dateParam, { cache: 'no-store' });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
 
+    // Reflect whatever date the server actually resolved (defaults to
+    // today in Eastern time if the picker was left blank) -- keeps the
+    // picker and the displayed data honest about which day is shown,
+    // rather than always saying "today" regardless of what's selected.
+    if (techDateInput && !techDateInput.value && data.date) techDateInput.value = data.date;
+    const dateLabel = data.date ? fmtDateOnly(data.date) : 'today';
     const outCount = data.technicians.filter(t => !t.available).length;
-    techStatus.textContent = data.technicians.length + ' technician(s) · ' + outCount + ' out today';
+    techStatus.textContent = data.technicians.length + ' technician(s) for ' + dateLabel + ' · ' + outCount + ' out';
     if (!data.technicians.length) {
       techGrid.innerHTML = '<div class="empty-state">No technicians on file for this state.</div>';
     } else {
@@ -402,14 +425,17 @@ async function loadConsole(state) {
     } else {
       const sortedTickets = [...data.recentTickets].sort((a, b) => {
         // Trouble tickets first as a group (they "burn brighter" -- Mark's
-        // words), then maintenance/restock. Within each group, soonest due
-        // first -- consistent with dueAt now being the primary displayed
-        // date. An open restock that's lingered past its expected window
-        // is itself worth noticing, not something to bury among trouble
-        // tickets by pure chronological interleaving.
+        // words), then maintenance/restock. Within each group, genuinely
+        // unresolved ones ('open') come first -- that's what actually
+        // needs a dispatcher's eye on this page -- ahead of anything
+        // already closed or marked resolved, regardless of due date.
+        // Soonest due first as the final tiebreaker within each status.
         if (a.ticketKind !== b.ticketKind) {
           return a.ticketKind === 'maintenance' ? 1 : -1;
         }
+        const aOpen = a.status === 'open' ? 0 : 1;
+        const bOpen = b.status === 'open' ? 0 : 1;
+        if (aOpen !== bOpen) return aOpen - bOpen;
         return new Date(a.dueAt) - new Date(b.dueAt);
       });
       ticketList.innerHTML = sortedTickets.map(t => {
