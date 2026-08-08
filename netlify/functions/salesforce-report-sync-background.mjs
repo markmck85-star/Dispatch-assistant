@@ -1,5 +1,18 @@
 // salesforce-report-sync-background.mjs
 //
+// v4 (2026-08-08): reliability pass focused on the Export button never
+// appearing. Changes:
+//   - Removed the pre-export "Last 7 Days" filter narrowing. Mark confirmed
+//     the default Current+Previous Month range is fine and that changing the
+//     filter actually adds delay; the previous filter code also ran after
+//     the Export button was already expected to be ready.
+//   - Stronger recovery: up to 3 page reloads when lightningReportApp aborts
+//     (or after 45 s with no button), instead of a single reload.
+//   - Richer request/response logging around lightningReportApp and report
+//     resources so the next failure log is more actionable.
+//   - More robust Export click (scrollIntoView → normal click → force → JS
+//     click) and slightly longer download timeout.
+//
 // v2 (2026-07-27, second pass): rewritten as a proper Netlify v2 Background
 // Function after finding the real cause of every prior test run dying
 // around 10 seconds -- this was combining the "-background" filename
@@ -246,6 +259,7 @@ export default async (req, context) => {
     // next failure's log shows the actual JS error (if any) instead of
     // just "nothing happened".
     let reportAppRequestFailed = false;
+    let reportAppFailureDetail = '';
     page.on('console', (msg) => {
       console.log(`[salesforce-report-sync] Page console [${msg.type()}]: ${msg.text()}`);
     });
@@ -253,9 +267,19 @@ export default async (req, context) => {
       console.log(`[salesforce-report-sync] Page error: ${err.message}`);
     });
     page.on('requestfailed', (request) => {
-      console.log(`[salesforce-report-sync] Request failed: ${request.url()} -- ${request.failure()?.errorText}`);
+      const failText = request.failure()?.errorText || 'unknown';
+      console.log(`[salesforce-report-sync] Request failed: ${request.url()} -- ${failText}`);
       if (request.url().includes('lightningReportApp')) {
         reportAppRequestFailed = true;
+        reportAppFailureDetail = `${request.url()} → ${failText}`;
+      }
+    });
+    // Also log successful responses that look report-related so we can see
+    // whether the app resource ever actually completes.
+    page.on('response', (response) => {
+      const u = response.url();
+      if (u.includes('lightningReportApp') || u.includes('/report/') || u.includes('ReportExport')) {
+        console.log(`[salesforce-report-sync] Response: ${response.status()} ${u.slice(0, 160)}`);
       }
     });
 
@@ -391,11 +415,19 @@ export default async (req, context) => {
     // the 15-min background function budget) and added a spinner check
     // alongside the Export button check, to tell "still genuinely
     // loading" apart from "stuck/blocked" in the next failure's log.
+    // 2026-08-08: Mark confirmed that when doing the export manually the
+    // default "Current and Previous Month" range is fine -- he can hit
+    // Export immediately without waiting for any extra filter change to
+    // settle. Changing the date range actually *adds* a delay. We therefore
+    // no longer attempt to narrow the range; the larger file is acceptable
+    // and the previous filter code was running at the wrong time anyway
+    // (after the Export button was already supposed to be ready).
     const exportSelector = 'button.action-bar-action-ReportExportAction';
     const spinnerSelector = '.slds-spinner, lightning-spinner, [role="status"]';
     const diagStart = Date.now();
     let exportButtonVisible = false;
-    let reloadAttempted = false;
+    let reloadCount = 0;
+    const MAX_RELOADS = 3;
     while (Date.now() - diagStart < 8 * 60 * 1000) {
       const diag = await page
         .evaluate(
@@ -414,13 +446,14 @@ export default async (req, context) => {
             return {
               exportMatches: Array.from(document.querySelectorAll(sel)).map(describe),
               spinnerCount: document.querySelectorAll(spinnerSel).length,
+              bodyTextSnippet: (document.body?.innerText || '').slice(0, 200),
             };
           },
           { sel: exportSelector, spinnerSel: spinnerSelector }
         )
         .catch((e) => ({ error: 'evaluate failed: ' + e.message }));
       console.log(
-        `[salesforce-report-sync] Export button diagnostic @ ${Math.round((Date.now() - diagStart) / 1000)}s -- exportMatches: ${JSON.stringify(diag.exportMatches)}, spinnerCount: ${diag.spinnerCount}`
+        `[salesforce-report-sync] Export button diagnostic @ ${Math.round((Date.now() - diagStart) / 1000)}s -- exportMatches: ${JSON.stringify(diag.exportMatches)}, spinnerCount: ${diag.spinnerCount}, reportAppFailed: ${reportAppRequestFailed}`
       );
       if (
         Array.isArray(diag.exportMatches) &&
@@ -429,65 +462,72 @@ export default async (req, context) => {
         exportButtonVisible = true;
         break;
       }
-      // 2026-08-01: two separate live runs (8:25 PM, 8:48 PM) confirmed a
-      // deterministic root cause -- a request to lightningReportApp.app
-      // (the actual report application resource) gets cancelled with
-      // net::ERR_ABORTED about 6s after the page loads, every single
-      // time, leaving a loading spinner stuck indefinitely since nothing
-      // ever retries it. If we've seen that specific failure and haven't
-      // already tried recovering from it, attempt one page reload --
-      // mirroring what a human would instinctively do if a page seemed
-      // stuck loading -- then keep polling normally afterward.
-      if (reportAppRequestFailed && !reloadAttempted && Date.now() - diagStart > 30000) {
-        reloadAttempted = true;
-        console.log('[salesforce-report-sync] lightningReportApp request was aborted earlier -- attempting one page reload to recover.');
-        await page.reload({ waitUntil: 'commit' }).catch((e) => {
-          console.log('[salesforce-report-sync] Reload attempt threw (often benign):', e.message);
-        });
+      // Stronger recovery: up to 3 reloads when we see the lightningReportApp
+      // abort (or after the first 45 s even without it). Humans instinctively
+      // refresh a stuck Salesforce page; we now do the same more aggressively.
+      const elapsed = Date.now() - diagStart;
+      if (reloadCount < MAX_RELOADS && (reportAppRequestFailed || elapsed > 45000)) {
+        reloadCount++;
+        console.log(
+          `[salesforce-report-sync] Attempting recovery reload #${reloadCount}/${MAX_RELOADS}` +
+            (reportAppRequestFailed ? ` (lightningReportApp aborted: ${reportAppFailureDetail})` : ' (timeout without button)')
+        );
+        reportAppRequestFailed = false; // reset so we can detect a new abort
+        try {
+          await page.reload({ waitUntil: 'commit', timeout: 60000 });
+          await page.waitForTimeout(3000);
+        } catch (e) {
+          console.log('[salesforce-report-sync] Reload threw (often benign):', e.message);
+        }
       }
-      await page.waitForTimeout(20000);
+      await page.waitForTimeout(15000);
     }
     if (!exportButtonVisible) {
       throw new Error(
-        'Export button never reported visible per diagnostic polling over 8 minutes -- see per-interval "Export button diagnostic" log lines above for the exact DOM/CSS state and spinner count Playwright saw throughout the wait.'
+        `Export button never reported visible after ${Math.round((Date.now() - diagStart) / 1000)}s and ${reloadCount} reload(s).` +
+          (reportAppFailureDetail ? ` Last lightningReportApp failure: ${reportAppFailureDetail}.` : '') +
+          ' See per-interval "Export button diagnostic" log lines above for the exact DOM/CSS state Playwright saw.'
       );
     }
 
-    // Narrow the date range to Last 7 Days before exporting -- Mark's ask
-    // 2026-07-29: the report defaults to Current + Previous Month
-    // (3,300+ rows), but everything older than a few days is already in
-    // Supabase from prior runs, so a much lighter recent window is all
-    // that's actually needed each time. This also directly helps the
-    // report-render timeout, since a smaller report loads faster. Built
-    // from Mark's own screenshots of the manual filter flow (funnel icon
-    // -> Created Date -> Range dropdown -> Last 7 Days -> Apply), but
-    // unlike the Export button this hasn't been live-tested yet -- wrapped
-    // so a selector mismatch here just skips the narrowing (falls back to
-    // whatever range was already set) rather than failing the whole run.
+    // Trigger the export flow. Prefer a robust click sequence because the
+    // button can be present but still not fully interactive for a short time.
+    const exportBtn = page.locator(exportSelector).first();
+    await exportBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(500);
+
+    let clicked = false;
     try {
-      await page.getByRole('button', { name: /filter/i }).first().click({ timeout: 8000 });
-      await page.getByText(/Current and Previous Month|Last \d+ Days|Custom/i).first().click({ timeout: 8000 });
-      const rangeDropdown = page.getByRole('combobox', { name: /range/i }).first();
-      await rangeDropdown.click({ timeout: 8000 });
-      await page.getByText('Last 7 Days', { exact: true }).click({ timeout: 8000 });
-      await page.getByRole('button', { name: /^apply$/i }).click({ timeout: 8000 });
-      await page.waitForTimeout(1500); // let the report re-run with the new filter
-      console.log('Narrowed date range to Last 7 Days.');
-    } catch (rangeErr) {
-      console.log('Could not narrow the date range (selectors may not match this run) -- continuing with whatever range was already set:', rangeErr.message);
+      await exportBtn.click({ timeout: 10000 });
+      clicked = true;
+    } catch (clickErr) {
+      console.log('[salesforce-report-sync] Normal click on Export failed, trying force/JS click:', clickErr.message);
+      try {
+        await exportBtn.click({ force: true, timeout: 5000 });
+        clicked = true;
+      } catch (forceErr) {
+        // Last resort: pure JS click in the page context
+        await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (el) el.click();
+          else throw new Error('Export button not found for JS click');
+        }, exportSelector);
+        clicked = true;
+      }
+    }
+    if (!clicked) {
+      throw new Error('Could not click the Export button after it became visible.');
     }
 
-    // Trigger the export flow: nav-bar Export button -> modal already
-    // defaults to "Details Only" / "Excel Format .xls" per Mark's
-    // screenshot, so this only needs to open the modal and confirm.
-    await page.locator('button.action-bar-action-ReportExportAction').click();
     const dialog = page.getByRole('dialog');
     await dialog.waitFor({ state: 'visible', timeout: 15000 });
 
+    // Prefer "Details Only" if the option is present; ignore if the modal
+    // already defaults to it or the wording has changed.
     await dialog.getByText('Details Only', { exact: false }).click().catch(() => {});
 
     const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 30000 }),
+      page.waitForEvent('download', { timeout: 45000 }),
       dialog.getByRole('button', { name: 'Export', exact: true }).click(),
     ]);
 
