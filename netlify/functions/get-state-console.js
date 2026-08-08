@@ -90,7 +90,7 @@ exports.handler = async (event) => {
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -131,15 +131,14 @@ exports.handler = async (event) => {
     recentTickets = (tickets || []).map(t => {
       const site = siteById[t.site_id];
       const closedOn = closedByTicketId[t.id] || null;
-      // 2026-08-08: Mark pointed out receivedAt alone can be misleading for
-      // display -- e.g. a restock received Friday for a Monday restock
-      // showed Friday's date, which can look overdue when it isn't yet.
-      // Prefer the ticket's actual due date instead: sla_ends_at for
-      // trouble tickets (calculateSlaDeadline already correctly accounts
-      // for per-state Saturday coverage and pushes to the next real
-      // covered work day -- see mailgun-inbound.js), due_at for
-      // maintenance/restock tickets (parsed from the ticket's own stated
-      // date). Falls back to receivedAt only if neither due date parsed.
+      // 2026-08-08: status now recognizes a local manual resolution too,
+      // not just Salesforce's own closed-ticket confirmation -- a ticket
+      // resolved through some other path (a cancelled SA with no closing
+      // notes, a dispatcher confirming completion by phone) previously had
+      // no way to ever stop showing as "open" here. Both signals stay
+      // distinct: 'closed' means Salesforce confirmed it; 'resolved_local'
+      // means a dispatcher marked it done without that confirmation.
+      const status = closedOn ? 'closed' : (t.manually_resolved_at ? 'resolved_local' : 'open');
       const dueAt = t.ticket_kind === 'trouble'
         ? (t.sla_ends_at || t.due_at || t.received_at)
         : (t.due_at || t.received_at);
@@ -152,8 +151,10 @@ exports.handler = async (event) => {
         woNumber: t.wo_number,
         receivedAt: t.received_at,
         dueAt,
-        status: closedOn ? 'closed' : 'open',
+        status,
         closedOn,
+        manuallyResolvedAt: t.manually_resolved_at,
+        manuallyResolvedNote: t.manually_resolved_note,
       };
     });
   }
