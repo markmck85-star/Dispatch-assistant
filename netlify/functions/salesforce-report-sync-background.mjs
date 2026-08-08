@@ -1,6 +1,6 @@
 // salesforce-report-sync-background.mjs
 //
-// v4 (2026-08-08): reliability pass focused on the Export button never
+// v5 (2026-08-08): iframe-aware Export search (confirmed by local watchdog success). Previous v4
 // appearing. Changes:
 //   - Removed the pre-export "Last 7 Days" filter narrowing. Mark confirmed
 //     the default Current+Previous Month range is fine and that changing the
@@ -388,113 +388,72 @@ export default async (req, context) => {
       }
       await page.waitForTimeout(2000);
     }
-    // Wait for the specific Export BUTTON (same locator the click below
-    // uses), not just the literal text "Export" anywhere on the page --
-    // Mark's own manual experience is that Export is clickable well before
-    // 150s, so a generic text match may be getting held up by something
-    // else on the page also containing that word, while the actual
-    // toolbar button he clicks could genuinely be ready much sooner.
-    // 2026-07-29: bumped to 4 min after several real runs consistently took
-    // 90-170s total, every time -- looks like genuine cold-start cost (a
-    // fresh, cache-free browser has to fully load Salesforce's whole
-    // Experience Cloud framework from scratch every single run, unlike
-    // Mark's own browser which has weeks of cached assets) rather than a
-    // broken selector. Plenty of budget to spare (15 min total), so give
-    // it real room instead of nudging the number up incrementally again.
-    // 2026-07-29: reverted from the button-role locator back to the
-    // original generic text search. The button-specific version
-    // (getByRole('button', {name:'Export'}).first()) failed TWO real runs
-    // in a row -- once even after a full 4-minute wait -- while a
-    // subsequent screenshot showed the page fully loaded with a visible
-    // Export button. That pattern (worse results from a MORE specific
-    // locator) suggests .first() may be latching onto a different, hidden
-    // "Export"-labeled element elsewhere in the DOM (e.g. inside a dialog
-    // template that's present but never shown) rather than the real
-    // toolbar button. The plain text search has an actual track record of
-    // eventually resolving, in the 90-170s range across multiple runs, so
-    // reverting to it with generous headroom.
-    // 2026-07-31: text=Export now ALSO timed out at the full 4-minute cap
-    // (log: waitForSelector Timeout 240000ms exceeded), even though a
-    // screenshot again showed the real button visible on screen. Ruled out
-    // iframes (document.querySelectorAll('iframe').length === 0 on this
-    // page, confirmed via Mark's devtools). Then tried the real CSS class
-    // pulled from devtools inspection of the actual toolbar button
-    // (button.action-bar-action-ReportExportAction) -- THAT also timed out
-    // identically at the 4-minute cap, even though the automation's own
-    // failure screenshot (captured at the moment of timeout) shows the
-    // Export button clearly rendered in the toolbar. Three different
-    // selector strategies (role, text, class) all failing identically,
-    // combined with the screenshot showing the button visually present,
-    // means guessing a fourth selector is unlikely to help -- something
-    // deeper is going on (possibly CPU-starved JS execution in this
-    // resource-constrained environment never letting the page "settle"
-    // enough for Playwright's own visibility check to resolve, even though
-    // the compositor/paint layer looks done in a screenshot). Rather than
-    // guess again, poll every 20s for up to 4 minutes and log the actual
-    // DOM/CSS state (bounding box, display, visibility, opacity) of every
-    // matching element, so the next failure's log tells us definitively
-    // what Playwright itself sees over time instead of just "timed out".
-    // 2026-08-01: after adding navigator.webdriver spoofing, the page shell
-    // now genuinely renders (real nav/breadcrumb content, ~175KB
-    // screenshot with real colors -- a big change from the totally blank,
-    // 4.2KB, single-color screenshot every prior run had). But the actual
-    // report component/toolbar still isn't appearing within 4 minutes --
-    // "Export" no longer even appears in the captured page-text snippet,
-    // meaning the report body genuinely hasn't finished loading, not that
-    // it's hidden. Extended the window to 8 minutes (still well within
-    // the 15-min background function budget) and added a spinner check
-    // alongside the Export button check, to tell "still genuinely
-    // loading" apart from "stuck/blocked" in the next failure's log.
-    // 2026-08-08: Mark confirmed that when doing the export manually the
-    // default "Current and Previous Month" range is fine -- he can hit
-    // Export immediately without waiting for any extra filter change to
-    // settle. Changing the date range actually *adds* a delay. We therefore
-    // no longer attempt to narrow the range; the larger file is acceptable
-    // and the previous filter code was running at the wrong time anyway
-    // (after the Export button was already supposed to be ready).
-    const exportSelector = 'button.action-bar-action-ReportExportAction';
-    const spinnerSelector = '.slds-spinner, lightning-spinner, [role="status"]';
+    // 2026-08-08 v5: Export button lives INSIDE an iframe on the Experience
+    // Cloud report page. Confirmed by the successful local-sync-watchdog run
+    // which found it via frame(...)-role-Export. Previous cloud attempts only
+    // searched the main document, so they never saw it. We now search all
+    // frames with multiple locator strategies, keep the recovery reloads,
+    // and log richer diagnostics.
     const diagStart = Date.now();
-    let exportButtonVisible = false;
+    let exportLocator = null;
+    let exportStrategy = null;
     let reloadCount = 0;
     const MAX_RELOADS = 3;
+
+    async function findExportInAllFrames() {
+      const candidates = [];
+
+      // Main page strategies
+      candidates.push({ name: 'main-role-Export', loc: page.getByRole('button', { name: 'Export', exact: true }).first() });
+      candidates.push({ name: 'main-role-Export-i', loc: page.getByRole('button', { name: /export/i }).first() });
+      candidates.push({ name: 'main-css-ReportExportAction', loc: page.locator('button.action-bar-action-ReportExportAction').first() });
+      candidates.push({ name: 'main-text-Export', loc: page.getByText('Export', { exact: true }).first() });
+      candidates.push({ name: 'main-css-title', loc: page.locator('[title="Export"], [aria-label="Export"], [aria-label*="Export" i]').first() });
+
+      // Every frame (this is what fixed the local watchdog)
+      for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        const short = (frame.url() || 'about:blank').slice(0, 50);
+        candidates.push({ name: `frame(${short})-role-Export`, loc: frame.getByRole('button', { name: 'Export', exact: true }).first() });
+        candidates.push({ name: `frame(${short})-role-Export-i`, loc: frame.getByRole('button', { name: /export/i }).first() });
+        candidates.push({ name: `frame(${short})-css-ReportExportAction`, loc: frame.locator('button.action-bar-action-ReportExportAction').first() });
+        candidates.push({ name: `frame(${short})-text-Export`, loc: frame.getByText('Export', { exact: true }).first() });
+      }
+
+      for (const c of candidates) {
+        try {
+          const count = await c.loc.count().catch(() => 0);
+          if (count === 0) continue;
+          // Prefer visible, but accept present (Salesforce sometimes reports not-visible)
+          const visible = await c.loc.isVisible().catch(() => false);
+          console.log(`[salesforce-report-sync] findExport candidate ${c.name}: count=${count}, visible=${visible}`);
+          if (visible || count > 0) {
+            return { locator: c.loc, strategy: c.name + (visible ? '' : ' (not-visible)') };
+          }
+        } catch (_) { /* try next */ }
+      }
+      return null;
+    }
+
     while (Date.now() - diagStart < 8 * 60 * 1000) {
-      const diag = await page
-        .evaluate(
-          ({ sel, spinnerSel }) => {
-            const describe = (el) => {
-              const rect = el.getBoundingClientRect();
-              const style = window.getComputedStyle(el);
-              return {
-                rect: { width: rect.width, height: rect.height, top: rect.top, left: rect.left },
-                display: style.display,
-                visibility: style.visibility,
-                opacity: style.opacity,
-                disabled: el.disabled || null,
-              };
-            };
-            return {
-              exportMatches: Array.from(document.querySelectorAll(sel)).map(describe),
-              spinnerCount: document.querySelectorAll(spinnerSel).length,
-              bodyTextSnippet: (document.body?.innerText || '').slice(0, 200),
-            };
-          },
-          { sel: exportSelector, spinnerSel: spinnerSelector }
-        )
-        .catch((e) => ({ error: 'evaluate failed: ' + e.message }));
-      console.log(
-        `[salesforce-report-sync] Export button diagnostic @ ${Math.round((Date.now() - diagStart) / 1000)}s -- exportMatches: ${JSON.stringify(diag.exportMatches)}, spinnerCount: ${diag.spinnerCount}, reportAppFailed: ${reportAppRequestFailed}`
-      );
-      if (
-        Array.isArray(diag.exportMatches) &&
-        diag.exportMatches.some((d) => d.rect.width > 0 && d.rect.height > 0 && d.display !== 'none' && d.visibility !== 'hidden' && d.opacity !== '0')
-      ) {
-        exportButtonVisible = true;
+      const found = await findExportInAllFrames();
+      if (found) {
+        exportLocator = found.locator;
+        exportStrategy = found.strategy;
+        console.log(`[salesforce-report-sync] Export found via ${exportStrategy} @ ${Math.round((Date.now() - diagStart) / 1000)}s`);
         break;
       }
-      // Stronger recovery: up to 3 reloads when we see the lightningReportApp
-      // abort (or after the first 45 s even without it). Humans instinctively
-      // refresh a stuck Salesforce page; we now do the same more aggressively.
+
+      // Diagnostic snapshot
+      const frameCount = page.frames().length;
+      let spinnerCount = 0;
+      try {
+        spinnerCount = await page.locator('.slds-spinner, lightning-spinner, [role="status"]').count();
+      } catch (_) {}
+      console.log(
+        `[salesforce-report-sync] Export still not found @ ${Math.round((Date.now() - diagStart) / 1000)}s -- frames=${frameCount}, spinnerCount=${spinnerCount}, reportAppFailed=${reportAppRequestFailed}`
+      );
+
       const elapsed = Date.now() - diagStart;
       if (reloadCount < MAX_RELOADS && (reportAppRequestFailed || elapsed > 45000)) {
         reloadCount++;
@@ -502,7 +461,7 @@ export default async (req, context) => {
           `[salesforce-report-sync] Attempting recovery reload #${reloadCount}/${MAX_RELOADS}` +
             (reportAppRequestFailed ? ` (lightningReportApp aborted: ${reportAppFailureDetail})` : ' (timeout without button)')
         );
-        reportAppRequestFailed = false; // reset so we can detect a new abort
+        reportAppRequestFailed = false;
         try {
           await page.reload({ waitUntil: 'commit', timeout: 60000 });
           await page.waitForTimeout(3000);
@@ -510,55 +469,59 @@ export default async (req, context) => {
           console.log('[salesforce-report-sync] Reload threw (often benign):', e.message);
         }
       }
-      await page.waitForTimeout(15000);
+      await page.waitForTimeout(12000);
     }
-    if (!exportButtonVisible) {
+
+    if (!exportLocator) {
       throw new Error(
-        `Export button never reported visible after ${Math.round((Date.now() - diagStart) / 1000)}s and ${reloadCount} reload(s).` +
-          (reportAppFailureDetail ? ` Last lightningReportApp failure: ${reportAppFailureDetail}.` : '') +
-          ' See per-interval "Export button diagnostic" log lines above for the exact DOM/CSS state Playwright saw.'
+        `Export button never found after ${Math.round((Date.now() - diagStart) / 1000)}s and ${reloadCount} reload(s) (searched main page + all iframes).` +
+          (reportAppFailureDetail ? ` Last lightningReportApp failure: ${reportAppFailureDetail}.` : '')
       );
     }
 
-    // Trigger the export flow. Prefer a robust click sequence because the
-    // button can be present but still not fully interactive for a short time.
-    const exportBtn = page.locator(exportSelector).first();
-    await exportBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(500);
+    // Robust click sequence
+    await exportLocator.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(400);
 
     let clicked = false;
     try {
-      await exportBtn.click({ timeout: 10000 });
+      await exportLocator.click({ timeout: 10000 });
       clicked = true;
+      console.log('[salesforce-report-sync] Export clicked (normal)');
     } catch (clickErr) {
-      console.log('[salesforce-report-sync] Normal click on Export failed, trying force/JS click:', clickErr.message);
+      console.log('[salesforce-report-sync] Normal click failed, trying force/JS:', clickErr.message);
       try {
-        await exportBtn.click({ force: true, timeout: 5000 });
+        await exportLocator.click({ force: true, timeout: 5000 });
         clicked = true;
+        console.log('[salesforce-report-sync] Export clicked (force)');
       } catch (forceErr) {
-        // Last resort: pure JS click in the page context
-        await page.evaluate((sel) => {
-          const el = document.querySelector(sel);
-          if (el) el.click();
-          else throw new Error('Export button not found for JS click');
-        }, exportSelector);
-        clicked = true;
+        try {
+          await exportLocator.evaluate((el) => el.click());
+          clicked = true;
+          console.log('[salesforce-report-sync] Export clicked (JS)');
+        } catch (jsErr) {
+          throw new Error('Could not click Export after finding it: ' + jsErr.message);
+        }
       }
     }
-    if (!clicked) {
-      throw new Error('Could not click the Export button after it became visible.');
-    }
+    if (!clicked) throw new Error('Could not click the Export button after it was found.');
 
     const dialog = page.getByRole('dialog');
-    await dialog.waitFor({ state: 'visible', timeout: 15000 });
+    await dialog.waitFor({ state: 'visible', timeout: 20000 }).catch(() => null);
 
-    // Prefer "Details Only" if the option is present; ignore if the modal
-    // already defaults to it or the wording has changed.
+    // Prefer "Details Only" if present
     await dialog.getByText('Details Only', { exact: false }).click().catch(() => {});
+    await page.getByText('Details Only', { exact: false }).first().click().catch(() => {});
 
     const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 45000 }),
-      dialog.getByRole('button', { name: 'Export', exact: true }).click(),
+      page.waitForEvent('download', { timeout: 60000 }),
+      (async () => {
+        try {
+          await dialog.getByRole('button', { name: /export/i }).click({ timeout: 8000 });
+        } catch {
+          await page.getByRole('button', { name: /export/i }).last().click({ timeout: 5000 }).catch(() => {});
+        }
+      })(),
     ]);
 
     const buffer = await (async () => {
