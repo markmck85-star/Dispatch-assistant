@@ -90,7 +90,7 @@ exports.handler = async (event) => {
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -131,6 +131,18 @@ exports.handler = async (event) => {
     recentTickets = (tickets || []).map(t => {
       const site = siteById[t.site_id];
       const closedOn = closedByTicketId[t.id] || null;
+      // 2026-08-08: Mark pointed out receivedAt alone can be misleading for
+      // display -- e.g. a restock received Friday for a Monday restock
+      // showed Friday's date, which can look overdue when it isn't yet.
+      // Prefer the ticket's actual due date instead: sla_ends_at for
+      // trouble tickets (calculateSlaDeadline already correctly accounts
+      // for per-state Saturday coverage and pushes to the next real
+      // covered work day -- see mailgun-inbound.js), due_at for
+      // maintenance/restock tickets (parsed from the ticket's own stated
+      // date). Falls back to receivedAt only if neither due date parsed.
+      const dueAt = t.ticket_kind === 'trouble'
+        ? (t.sla_ends_at || t.due_at || t.received_at)
+        : (t.due_at || t.received_at);
       return {
         siteCode: site ? site.site_code : null,
         siteName: site ? site.name : '(unknown site)',
@@ -139,6 +151,7 @@ exports.handler = async (event) => {
         ticketKind: t.ticket_kind,
         woNumber: t.wo_number,
         receivedAt: t.received_at,
+        dueAt,
         status: closedOn ? 'closed' : 'open',
         closedOn,
       };
