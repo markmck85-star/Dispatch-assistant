@@ -344,7 +344,18 @@ async function loadConsole(state) {
     if (!data.recentTickets.length) {
       ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
     } else {
-      ticketList.innerHTML = data.recentTickets.map(t => {
+      const sortedTickets = [...data.recentTickets].sort((a, b) => {
+        // Trouble tickets first as a group (they "burn brighter" -- Mark's
+        // words), then maintenance/restock. Within each group, most recent
+        // first. An open restock that's lingered past its expected window
+        // is itself worth noticing, not something to bury among trouble
+        // tickets by pure chronological interleaving.
+        if (a.ticketKind !== b.ticketKind) {
+          return a.ticketKind === 'maintenance' ? 1 : -1;
+        }
+        return new Date(b.receivedAt) - new Date(a.receivedAt);
+      });
+      ticketList.innerHTML = sortedTickets.map(t => {
         const statusBadge = t.status === 'closed'
           ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
           : `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
