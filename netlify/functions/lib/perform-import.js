@@ -271,27 +271,36 @@ async function performImport(supabase, rows) {
 
   // 2026-08-12: backfill site_visits.ticket_id for rows that already
   // existed from an earlier import but whose ticket didn't exist yet at
-  // that time -- see the comment inside the main loop above. Chunked the
-  // same way the existingSet/ticketByWo lookups above are, since this can
-  // be a large batch. Uses upsert with onConflict on appointment_number so
-  // it only ever updates ticket_id on the matching existing row (Postgres
-  // ON CONFLICT DO UPDATE only touches the columns present in the payload
-  // -- appointment_number and ticket_id here -- leaving every other
-  // column, e.g. site_id/remediation/imported_at, untouched). Safe to
-  // run on rows that were also just freshly inserted above -- setting
-  // ticket_id to the same value it was just inserted with is a no-op.
+  // that time -- see the comment inside the main loop above.
+  //
+  // v2, same session: the first version of this used .upsert(chunk,
+  // { onConflict: 'appointment_number' }), which requires a matching
+  // UNIQUE constraint on that column to work at all. site_visits almost
+  // certainly doesn't have one -- the insert-dedup above relies on a
+  // separate SELECT + JS-side existingSet check instead of a DB-level
+  // onConflict the way mailgun-inbound.js does for tickets.wo_number,
+  // which is a strong tell there's no such constraint here. That upsert
+  // was silently failing every call (error caught and logged server-side
+  // only, invisible to Mark), backfilling nothing while the import still
+  // reported success -- confirmed live: a full redeploy + reimport + wait
+  // produced zero change on the state console. Switched to plain
+  // row-by-row .update().eq('appointment_number', ...) instead -- needs
+  // no constraint, and is safer besides: update can only ever touch a
+  // row that already exists, where upsert risks silently inserting a
+  // malformed new row (missing every other required column) if a match
+  // ever unexpectedly fails.
   let ticketIdsBackfilled = 0;
-  if (appointmentToTicketId.length) {
-    for (let i = 0; i < appointmentToTicketId.length; i += 500) {
-      const chunk = appointmentToTicketId.slice(i, i + 500);
-      const { error: backfillErr, count: backfillCount } = await supabase
-        .from('site_visits')
-        .upsert(chunk, { onConflict: 'appointment_number', count: 'exact' });
-      if (backfillErr) {
-        console.error('[perform-import] site_visits.ticket_id backfill failed:', backfillErr.message);
-      } else {
-        ticketIdsBackfilled += backfillCount || 0;
-      }
+  for (const { appointment_number, ticket_id } of appointmentToTicketId) {
+    const { error: backfillErr, count: backfillCount } = await supabase
+      .from('site_visits')
+      .update({ ticket_id })
+      .eq('appointment_number', appointment_number)
+      .is('ticket_id', null)
+      .select('id', { count: 'exact', head: true });
+    if (backfillErr) {
+      console.error(`[perform-import] site_visits.ticket_id backfill failed for ${appointment_number}:`, backfillErr.message);
+    } else {
+      ticketIdsBackfilled += backfillCount || 0;
     }
   }
 
