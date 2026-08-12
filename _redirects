@@ -8,4 +8,9 @@
 # checks actual files first), so this can't shadow admin/calendar/state/etc.
 /:state          /state.html?state=:state    200
 
+# Same shortcut pattern for the watchdog log, added 2026-08-12 --
+# mcrdispatch.net/watchdog/GA -> watchdog-log.html?state=GA. Two-segment
+# path so it doesn't collide with the single-segment /:state rule above.
+/watchdog/:state /watchdog-log.html?state=:state    200
+
 /*               /index.html      200
