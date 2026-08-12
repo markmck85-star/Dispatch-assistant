@@ -139,6 +139,10 @@ async function performImport(supabase, rows) {
   // confirms the work actually happened -- see the update block after the
   // site_visits insert for why.
   const ticketIdsToClose = new Set();
+  // 2026-08-12: paired with the site_visits.ticket_id backfill below --
+  // see the comment inside the loop for why this is needed alongside
+  // ticketIdsToClose.
+  const appointmentToTicketId = [];
 
   for (const r of rows) {
     if (!r.appointmentNumber) continue;
@@ -163,6 +167,25 @@ async function performImport(supabase, rows) {
     // imported.
     const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
     if (linkedTicket) ticketIdsToClose.add(linkedTicket.id);
+
+    // 2026-08-12, same session as the fix above: get-state-console.js's
+    // Open/Closed label does NOT read tickets.status at all -- it
+    // independently checks whether a site_visits row's ticket_id is
+    // populated (see that file's own comments: closedOn is derived purely
+    // from site_visits, deliberately not tickets.status). So the fix above
+    // makes the WATCHDOG log correct (it reads tickets.status), but the
+    // STATE CONSOLE stayed blind to the exact same class of ticket: a
+    // site_visits row inserted on an earlier import, before its matching
+    // ticket existed yet, has ticket_id permanently NULL -- nothing ever
+    // went back and linked it after the fact, even once the ticket showed
+    // up and even after today's tickets.status fix. Track every
+    // appointment-number -> ticket-id pair with a real WO match here
+    // (regardless of whether the row is new or already-imported), then
+    // batch-backfill site_visits.ticket_id for the already-imported ones
+    // after the main insert below.
+    if (linkedTicket && r.appointmentNumber) {
+      appointmentToTicketId.push({ appointment_number: r.appointmentNumber, ticket_id: linkedTicket.id });
+    }
 
     if (existingSet.has(r.appointmentNumber)) continue;
 
@@ -246,6 +269,32 @@ async function performImport(supabase, rows) {
     }
   }
 
+  // 2026-08-12: backfill site_visits.ticket_id for rows that already
+  // existed from an earlier import but whose ticket didn't exist yet at
+  // that time -- see the comment inside the main loop above. Chunked the
+  // same way the existingSet/ticketByWo lookups above are, since this can
+  // be a large batch. Uses upsert with onConflict on appointment_number so
+  // it only ever updates ticket_id on the matching existing row (Postgres
+  // ON CONFLICT DO UPDATE only touches the columns present in the payload
+  // -- appointment_number and ticket_id here -- leaving every other
+  // column, e.g. site_id/remediation/imported_at, untouched). Safe to
+  // run on rows that were also just freshly inserted above -- setting
+  // ticket_id to the same value it was just inserted with is a no-op.
+  let ticketIdsBackfilled = 0;
+  if (appointmentToTicketId.length) {
+    for (let i = 0; i < appointmentToTicketId.length; i += 500) {
+      const chunk = appointmentToTicketId.slice(i, i + 500);
+      const { error: backfillErr, count: backfillCount } = await supabase
+        .from('site_visits')
+        .upsert(chunk, { onConflict: 'appointment_number', count: 'exact' });
+      if (backfillErr) {
+        console.error('[perform-import] site_visits.ticket_id backfill failed:', backfillErr.message);
+      } else {
+        ticketIdsBackfilled += backfillCount || 0;
+      }
+    }
+  }
+
   let ticketsClosed = 0;
   let assignmentsCompleted = 0;
   if (ticketIdsToClose.size) {
@@ -298,6 +347,7 @@ async function performImport(supabase, rows) {
     rowErrors,
     ticketsClosed,
     assignmentsCompleted,
+    ticketIdsBackfilled,
   };
 }
 
