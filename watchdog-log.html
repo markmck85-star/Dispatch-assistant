@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watchdog Log — MCR Dispatch</title>
+<style>
+  body { background:#111; color:#eee; font-family: -apple-system, Arial, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:1.3rem; margin:0 0 12px; }
+  select, button {
+    font-size:1rem; padding:8px 12px; border-radius:6px; border:1px solid #555;
+    background:#222; color:#eee; margin-bottom:14px;
+  }
+  button { background:#2563eb; border-color:#2563eb; cursor:pointer; }
+  #status { color:#aaa; margin-bottom:12px; }
+  .entry {
+    background:#1c1c1c; border-left:4px solid #888; border-radius:6px;
+    padding:12px 14px; margin-bottom:10px;
+  }
+  .entry.trouble { border-left-color:#ef4444; }
+  .entry.maintenance { border-left-color:#3b82f6; }
+  .entry.site_survey { border-left-color:#f59e0b; }
+  .entry.install { border-left-color:#f59e0b; }
+  .entry .wo { font-weight:bold; }
+  .entry .kind {
+    display:inline-block; font-size:0.75rem; text-transform:uppercase;
+    letter-spacing:0.03em; padding:2px 6px; border-radius:4px; background:#333; margin-left:8px;
+  }
+  .entry .site { font-size:1.05rem; margin:4px 0; }
+  .entry .meta { color:#aaa; font-size:0.9rem; }
+  .entry .desc { color:#ccc; font-size:0.9rem; margin-top:6px; white-space:pre-wrap; }
+  #empty { color:#888; padding:20px 0; }
+</style>
+</head>
+<body>
+
+<h1>Watchdog Log</h1>
+<div>
+  <select id="stateSelect">
+    <option value="CO">Colorado</option>
+    <option value="GA">Georgia / NC / SC</option>
+    <option value="FL">Florida</option>
+    <option value="MI">Michigan</option>
+    <option value="IN">Indiana</option>
+    <option value="OH">Ohio</option>
+    <option value="NV">Nevada</option>
+    <option value="IL">Illinois</option>
+    <option value="MN">Minnesota</option>
+    <option value="WV">West Virginia</option>
+    <option value="OR">Oregon</option>
+  </select>
+  <button id="refreshBtn">Refresh</button>
+</div>
+<div id="status"></div>
+<div id="list"></div>
+
+<script>
+const stateSelect = document.getElementById('stateSelect');
+const refreshBtn = document.getElementById('refreshBtn');
+const statusEl = document.getElementById('status');
+const listEl = document.getElementById('list');
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+}
+
+// Pre-select the state from ?state=XX in the URL (e.g. mcrdispatch.net/watchdog/CO
+// redirects here as watchdog-log.html?state=CO, same pattern as the state console
+// shortcuts). Falls back to the dropdown's default if the param is missing or
+// doesn't match one of the listed states.
+(function preselectFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const urlState = (params.get('state') || '').trim().toUpperCase();
+  if (urlState && [...stateSelect.options].some(o => o.value === urlState)) {
+    stateSelect.value = urlState;
+  }
+})();
+
+async function loadLog() {
+  const state = stateSelect.value;
+  statusEl.textContent = 'Loading…';
+  listEl.innerHTML = '';
+  try {
+    const resp = await fetch(`/.netlify/functions/get-watchdog-log?state=${state}`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      statusEl.textContent = 'Error: ' + (data.error || resp.status);
+      return;
+    }
+    const entries = data.entries || [];
+    statusEl.textContent = `${entries.length} unmatched ticket${entries.length === 1 ? '' : 's'} for ${state}`;
+    if (entries.length === 0) {
+      listEl.innerHTML = '<div id="empty">Nothing outstanding.</div>';
+      return;
+    }
+    listEl.innerHTML = entries.map(e => {
+      const kindClass = (e.ticketKind || 'trouble').toLowerCase();
+      const deadline = e.slaEndsAt
+        ? `SLA: ${fmtDate(e.slaEndsAt)}`
+        : (e.dueAt ? `Due: ${fmtDate(e.dueAt)}` : '');
+      return `
+        <div class="entry ${kindClass}">
+          <span class="wo">WO ${e.woNumber || '—'}</span>
+          <span class="kind">${(e.ticketKind || 'trouble').replace('_',' ')}</span>
+          <div class="site">${e.siteText || '(no site text)'}</div>
+          <div class="meta">
+            ${[e.issueCategory, e.issueDetail].filter(Boolean).join(' – ') || 'No issue category'}
+            ${deadline ? ' · ' + deadline : ''}
+            · Received ${fmtDate(e.receivedAt)}
+          </div>
+          ${e.address ? `<div class="meta">${e.address}</div>` : ''}
+          ${e.description ? `<div class="desc">${e.description}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+refreshBtn.addEventListener('click', loadLog);
+stateSelect.addEventListener('change', loadLog);
+loadLog();
+</script>
+
+</body>
+</html>
