@@ -141,9 +141,30 @@ async function performImport(supabase, rows) {
   const ticketIdsToClose = new Set();
 
   for (const r of rows) {
-    if (!r.appointmentNumber || existingSet.has(r.appointmentNumber)) continue;
+    if (!r.appointmentNumber) continue;
 
+    // 2026-08-12 fix: this WO-number ticket-close check now runs for EVERY
+    // row with an appointment number, BEFORE the already-imported skip
+    // below -- not just newly-inserted rows. Root cause found the same day:
+    // a completion row can land in Salesforce's export before the matching
+    // trouble-ticket EMAIL has created its own `tickets` row (email/report
+    // timing isn't guaranteed to be in order). On that first import,
+    // ticketByWo[r.woNumber] finds nothing, so the ticket never closes --
+    // and because the row is now in existingSet, every subsequent
+    // re-import (even a fully up-to-date one) skipped straight past it via
+    // the old `continue` before ever getting a second chance to check
+    // whether a matching ticket now exists. Confirmed live: WO 00149242
+    // (FL1067, Palm Beach County Southern Publix) sat correctly in the
+    // report ("22953 already on file") through multiple re-imports while
+    // its ticket stayed open the whole time. Moving this check ahead of
+    // the skip means every re-import re-attempts the WO match for every
+    // row, closing tickets whose completion arrived out of order relative
+    // to their own creation, however long ago that completion was first
+    // imported.
     const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
+    if (linkedTicket) ticketIdsToClose.add(linkedTicket.id);
+
+    if (existingSet.has(r.appointmentNumber)) continue;
 
     // 2026-08-04: prefer a WO-number-matched ticket's already-resolved
     // site_id over fuzzy text matching whenever available. This is the
@@ -173,7 +194,6 @@ async function performImport(supabase, rows) {
     if (technicianId) techMatchedCount++;
 
     const ticketId = linkedTicket ? linkedTicket.id : null;
-    if (ticketId) ticketIdsToClose.add(ticketId);
 
     toInsert.push({
       appointment_number: r.appointmentNumber,

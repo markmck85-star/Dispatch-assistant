@@ -557,7 +557,28 @@ export default async (req, context) => {
       .map((r) => ({
         accountName: String(r['Account Name'] || '').trim(),
         state: String(r['Jurisdiction'] || '').trim(),
-        woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
+        woNumber: (() => {
+          const raw = r['Work Order Number'];
+          if (raw == null || raw === '') return null;
+          let s = String(raw).split('.')[0];
+          // 2026-08-12: mirrors the same fix already applied to state.html's
+          // manual-upload parser on 2026-08-08 -- when this column is read as
+          // a JS number (cell format General/Number rather than Text), any
+          // leading zeros are silently lost ("00149242" becomes "149242").
+          // That fix only ever landed in the manual-upload path; this
+          // automated background sync (runs every 20 min per netlify.toml)
+          // had its own separate, unfixed WO-number extraction, so trouble
+          // tickets synced through this path could silently fail to
+          // auto-close in perform-import.js's WO-number match against
+          // `tickets.wo_number` even when genuinely completed. Every real WO
+          // number seen so far is 8 digits -- pad back up whenever shorter
+          // and purely numeric, safe even if the true un-stripped number
+          // happened to be shorter for some reason, since matching
+          // tickets.wo_number would have the same original value in that case
+          // too.
+          if (/^[0-9]+$/.test(s) && s.length < 8) s = s.padStart(8, '0');
+          return s;
+        })(),
         appointmentNumber: String(r['Appointment Number'] || '').trim(),
         actualStart: r['Actual Start'] || null,
         actualEnd: r['Actual End'] || null,
