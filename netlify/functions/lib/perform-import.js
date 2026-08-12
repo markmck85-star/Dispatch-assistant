@@ -134,11 +134,37 @@ async function performImport(supabase, rows) {
   let siteMatchedCount = 0;
   let techMatchedCount = 0;
   let needsReviewCount = 0;
+  // 2026-08-06: WO-matched tickets get auto-closed and their board
+  // assignment auto-completed below, once the closed-ticket report
+  // confirms the work actually happened -- see the update block after the
+  // site_visits insert for why.
+  const ticketIdsToClose = new Set();
 
   for (const r of rows) {
-    if (!r.appointmentNumber || existingSet.has(r.appointmentNumber)) continue;
+    if (!r.appointmentNumber) continue;
 
+    // 2026-08-12 fix: this WO-number ticket-close check now runs for EVERY
+    // row with an appointment number, BEFORE the already-imported skip
+    // below -- not just newly-inserted rows. Root cause found the same day:
+    // a completion row can land in Salesforce's export before the matching
+    // trouble-ticket EMAIL has created its own `tickets` row (email/report
+    // timing isn't guaranteed to be in order). On that first import,
+    // ticketByWo[r.woNumber] finds nothing, so the ticket never closes --
+    // and because the row is now in existingSet, every subsequent
+    // re-import (even a fully up-to-date one) skipped straight past it via
+    // the old `continue` before ever getting a second chance to check
+    // whether a matching ticket now exists. Confirmed live: WO 00149242
+    // (FL1067, Palm Beach County Southern Publix) sat correctly in the
+    // report ("22953 already on file") through multiple re-imports while
+    // its ticket stayed open the whole time. Moving this check ahead of
+    // the skip means every re-import re-attempts the WO match for every
+    // row, closing tickets whose completion arrived out of order relative
+    // to their own creation, however long ago that completion was first
+    // imported.
     const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
+    if (linkedTicket) ticketIdsToClose.add(linkedTicket.id);
+
+    if (existingSet.has(r.appointmentNumber)) continue;
 
     // 2026-08-04: prefer a WO-number-matched ticket's already-resolved
     // site_id over fuzzy text matching whenever available. This is the
@@ -220,6 +246,48 @@ async function performImport(supabase, rows) {
     }
   }
 
+  let ticketsClosed = 0;
+  let assignmentsCompleted = 0;
+  if (ticketIdsToClose.size) {
+    // 2026-08-06: Mark asked for this after noticing that updating the
+    // closed-ticket report correctly refreshed ticket STATUS everywhere
+    // it's displayed (state console, the site-history popup) but never
+    // touched the actual board STOP -- so a completed ticket kept sitting
+    // on the active board with its urgency badge still drawing attention,
+    // and had to be manually clicked "Done" to move to the completed
+    // list at the bottom, even though the closed-ticket report already
+    // proved the work was done. This closes that gap: any ticket whose
+    // WO number matched a closed-ticket report row this import gets
+    // marked closed, and its board assignment (if still 'planned', i.e.
+    // not already completed/removed/reassigned some other way) gets
+    // flipped to 'completed' the same way clicking "Done" would --
+    // without needing anyone to notice and click through it by hand.
+    const ticketIdList = [...ticketIdsToClose];
+    const { error: ticketCloseErr, count: ticketCloseCount } = await supabase
+      .from('tickets')
+      .update({ status: 'closed' })
+      .in('id', ticketIdList)
+      .neq('status', 'closed')
+      .select('id', { count: 'exact', head: true });
+    if (ticketCloseErr) {
+      console.error('[perform-import] auto-close tickets failed:', ticketCloseErr.message);
+    } else {
+      ticketsClosed = ticketCloseCount || 0;
+    }
+
+    const { error: assignmentErr, count: assignmentCount } = await supabase
+      .from('assignments')
+      .update({ status: 'completed' })
+      .in('ticket_id', ticketIdList)
+      .eq('status', 'planned')
+      .select('id', { count: 'exact', head: true });
+    if (assignmentErr) {
+      console.error('[perform-import] auto-complete assignments failed:', assignmentErr.message);
+    } else {
+      assignmentsCompleted = assignmentCount || 0;
+    }
+  }
+
   return {
     inserted,
     skippedExisting: rows.length - toInsert.length,
@@ -228,6 +296,8 @@ async function performImport(supabase, rows) {
     needsReview: needsReviewCount,
     reviewSamples,
     rowErrors,
+    ticketsClosed,
+    assignmentsCompleted,
   };
 }
 
