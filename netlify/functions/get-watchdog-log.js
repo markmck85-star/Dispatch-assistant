@@ -1,5 +1,5 @@
 /**
- * get-watchdog-log.js — v2, corrected 2026-08-12
+ * get-watchdog-log.js — v3, scope-limited 2026-08-12
  *
  * Netlify Function — surfaces every open ticket the SMS watchdog already
  * alerts dispatchers about, for a given state, so the same tickets are
@@ -19,12 +19,29 @@
  * subset that also happens to be unmatched. Maintenance/restock tickets
  * never trigger an SMS at all and are correctly excluded here too.
  *
+ * v3: a real 4-hour-SLA trouble ticket essentially never survives days
+ * unaddressed in practice -- confirmed 2026-08-12 when a WO number
+ * collision with a Neumo Salesforce sandbox/test ticket left a permanent,
+ * never-closing phantom entry (SLA 8+ days past) sitting on this page,
+ * which briefly looked like a real critical miss. Rather than chase every
+ * individual bad-data case, cap the window: any ticket more than 4
+ * calendar days PAST its own deadline (sla_ends_at for trouble, due_at
+ * for install/site_survey) is dropped. Deliberately deadline-based, not
+ * received-based -- a site_survey/install scheduled several days out is
+ * still legitimately upcoming and must stay visible until ITS OWN date
+ * passes, even if it was received a while ago. No Saturday-coverage/
+ * business-day logic needed -- flat calendar days, same cutoff in every
+ * state, per Mark's call.
+ *
  * GET /.netlify/functions/get-watchdog-log?state=CO
  * -> { entries: [ { ticketId, woNumber, siteText, ticketKind, matched,
  *                    issueCategory, issueDetail, description, address,
  *                    dueAt, slaEndsAt, receivedAt } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
+
+const STALE_GRACE_DAYS = 4;
+const STALE_GRACE_MS = STALE_GRACE_DAYS * 24 * 60 * 60 * 1000;
 
 function json(statusCode, obj) {
   return {
@@ -69,12 +86,28 @@ exports.handler = async (event) => {
 
     if (error) return json(500, { error: error.message });
 
+    const now = Date.now();
+
     // site_text always starts with the site code (which starts with the
     // state abbreviation) when a code was found, or the raw "XX - ..."
     // account/location text when it wasn't -- same convention relied on
     // by get-unmatched-tickets.js, and true regardless of match status.
     const entries = (data || [])
       .filter((t) => t.site_text && t.site_text.slice(0, 2).toUpperCase() === state)
+      .filter((t) => {
+        // Deadline-based staleness cutoff -- see v3 note above. sla_ends_at
+        // (trouble) takes priority over due_at (install/site_survey) since
+        // a ticket could technically have both; falls back to due_at when
+        // sla_ends_at is absent. A ticket with NEITHER field set (shouldn't
+        // happen in practice -- both are populated by mailgun-inbound.js's
+        // parser for every ticket kind included here) is kept rather than
+        // silently dropped.
+        const deadline = t.sla_ends_at || t.due_at;
+        if (!deadline) return true;
+        const deadlineMs = new Date(deadline).getTime();
+        if (Number.isNaN(deadlineMs)) return true;
+        return (now - deadlineMs) <= STALE_GRACE_MS;
+      })
       .map((t) => ({
         ticketId: t.id,
         woNumber: t.wo_number,
