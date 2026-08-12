@@ -105,6 +105,7 @@ async function loadLog() {
         <div class="entry ${kindClass}">
           <span class="wo">WO ${e.woNumber || '—'}</span>
           <span class="kind">${(e.ticketKind || 'trouble').replace('_',' ')}</span>
+          ${!e.matched ? '<span class="kind" style="background:#7c2d12;">unmatched site</span>' : ''}
           <div class="site">${e.siteText || '(no site text)'}</div>
           <div class="meta">
             ${[e.issueCategory, e.issueDetail].filter(Boolean).join(' – ') || 'No issue category'}
