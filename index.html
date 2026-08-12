@@ -195,7 +195,7 @@
                 <div class="top-row">
                     <div>
                         <label>Region:</label>
-                        <select id="stateSelector" onchange="updateContext()">
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink();">
                             <option value="GA">Georgia / NC / SC</option>
                             <option value="FL">Florida</option>
                             <option value="MI">Michigan</option>
@@ -209,6 +209,7 @@
                             <option value="WV">West Virginia</option>
                             <option value="OR">Oregon</option>
                         </select>
+                        <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:6px;padding:4px 10px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;">🐕 Watchdog</a>
                     </div>
                     <div>
                         <label>Dispatch Date:</label>
@@ -2321,9 +2322,19 @@ function distanceMatrixStatus(state) {
             if (collapsed) toggleControls();
         }
 
+        // Keeps the "Watchdog" link pointed at whichever region is currently
+        // selected, using the /watchdog/:state shortcut added to _redirects
+        // 2026-08-12. Called on region change and once on page load.
+        function updateWatchdogLink() {
+            const sel = document.getElementById('stateSelector');
+            const link = document.getElementById('watchdogLink');
+            if (sel && link) link.href = '/watchdog/' + sel.value;
+        }
+
         window.onload = async function() {
             restoreJournalThreshold();
             restoreControlsState();
+            updateWatchdogLink();
             // Restore manual availability overrides from Blobs — auto-clears if date doesn't match today
             try {
                 const res = await fetch('/.netlify/functions/get-availability');

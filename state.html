@@ -74,7 +74,7 @@
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
-    <select id="stateSel" onchange="loadAll()">
+    <select id="stateSel" onchange="loadAll(); updateWatchdogLink();">
       <option value="GA">Georgia</option>
       <option value="FL">Florida</option>
       <option value="MI">Michigan</option>
@@ -89,6 +89,7 @@
       <option value="NC">North Carolina</option>
       <option value="SC">South Carolina</option>
     </select>
+    <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:8px;padding:8px 14px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:13px;text-decoration:none;vertical-align:middle;">🐕 Watchdog Log</a>
 
     <h2 class="section-label">👥 Technician Availability</h2>
     <div style="margin-bottom:8px;">
@@ -787,6 +788,16 @@ async function showSiteHistory(code) {
     }
   }
 })();
+
+// Keeps the "Watchdog Log" link pointed at whichever state the console is
+// currently showing, using the same /watchdog/:state shortcut added to
+// _redirects 2026-08-12. Called on dropdown change and once on page load.
+function updateWatchdogLink() {
+  const sel = document.getElementById('stateSel');
+  const link = document.getElementById('watchdogLink');
+  if (sel && link) link.href = '/watchdog/' + sel.value;
+}
+updateWatchdogLink();
 
 // ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
 // v3 (2026-07-29): reverted back to calling the Netlify background
