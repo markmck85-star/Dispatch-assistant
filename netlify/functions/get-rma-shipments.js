@@ -17,7 +17,10 @@
  * -> { shipments: [ { id, caseNumber, parentCaseNumber, woNumber, ticketId,
  *        siteId, siteCode, accountName, state, warehouseName, technicianId,
  *        technicianName, outboundTracking, inboundTracking, transferId,
- *        requestDetails, returnBrokenPart, returnedAt, receivedAt } ] }
+ *        requestDetails, returnBrokenPart, returnedAt, receivedAt } ],
+ *      technicians: [ { id, name } ] }  -- full active roster, independent
+ *        of which techs already have a shipment row; use this (not the
+ *        shipments themselves) to populate a technician filter/picker.
  */
 const { createClient } = require("@supabase/supabase-js");
 
@@ -84,7 +87,21 @@ exports.handler = async (event) => {
       receivedAt: row.received_at,
     }));
 
-    return json(200, { shipments });
+    // Full active-technician roster, independent of which techs happen to
+    // already have a shipment row. Without this, the tech filter dropdown
+    // on shipments.html could only ever show techs who'd already been
+    // assigned at least one RMA -- so anyone who'd never had one (Nyzier,
+    // and potentially others) was invisible in the dropdown even though
+    // they're a real active tech. Confirmed 2026-08-15.
+    const { data: techRows, error: techErr } = await supabase
+      .from('technicians')
+      .select('id, name')
+      .eq('active', true)
+      .order('name');
+    if (techErr) console.error('[get-rma-shipments] technician roster fetch failed (non-fatal):', techErr.message);
+    const technicians = (techRows || []).map(t => ({ id: t.id, name: t.name }));
+
+    return json(200, { shipments, technicians });
   } catch (err) {
     return json(500, { error: "Unexpected error: " + err.message });
   }
