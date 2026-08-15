@@ -124,10 +124,45 @@ function getTimezoneForSiteCode(siteCode) {
   return STATE_TIMEZONES[state] || 'America/New_York';
 }
 
+// ── Correct timezone conversion helpers ──────────────────────────────────
+// 2026-08-15: replaces the old `new Date(date.toLocaleString('en-US',
+// {timeZone: tz}))` pattern used throughout this file. That pattern formats
+// a date into a plain string with NO timezone info attached, then reparses
+// it -- and re-parsing applies the *server's* default timezone (UTC on
+// Netlify), not `tz`. The result silently mislabels the site's local
+// wall-clock reading as if it were UTC. For same-day Y/M/D lookups
+// (todayStrForSiteCode) this rarely bites, but calculateSlaDeadline stores
+// the resulting instant via .toISOString() -- meaning every trouble-ticket
+// SLA deadline was baked into the database shifted by that site's UTC
+// offset (6hrs for CO/Denver, 4-5hrs for GA/Eastern, etc), always making
+// deadlines look earlier than they actually are. Confirmed live 2026-08-14
+// against CO1051/CO1061/CO1007 -- see mark's dispatch-platform notes.
+//
+// getZonedParts: what wall-clock date/time does `date` read as in `tz`?
+function getZonedParts(date, tz) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = {};
+  for (const p of dtf.formatToParts(date)) { if (p.type !== 'literal') parts[p.type] = parseInt(p.value, 10); }
+  return { year: parts.year, month: parts.month, day: parts.day, hour: parts.hour, minute: parts.minute, second: parts.second };
+}
+
+// zonedTimeToUtc: given a wall-clock date/time meant to represent local time
+// in `tz`, what real UTC instant is that? (inverse of getZonedParts)
+function zonedTimeToUtc(year, month, day, hour, minute, second, tz) {
+  const guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second || 0));
+  const offsetMs = getZonedParts(guess, tz);
+  const asIfUtc = Date.UTC(offsetMs.year, offsetMs.month - 1, offsetMs.day, offsetMs.hour, offsetMs.minute, offsetMs.second);
+  return new Date(guess.getTime() - (asIfUtc - guess.getTime()));
+}
+
 function todayStrForSiteCode(siteCode) {
   const tz = getTimezoneForSiteCode(siteCode);
-  const local = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
-  return `${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,'0')}-${String(local.getDate()).padStart(2,'0')}`;
+  const p = getZonedParts(new Date(), tz);
+  return `${p.year}-${String(p.month).padStart(2,'0')}-${String(p.day).padStart(2,'0')}`;
 }
 
 // ── SLA calculator (Mon-Sat 8AM-5PM business hours) ─────────────────────────
@@ -137,9 +172,13 @@ const SAT_STATES = new Set(['GA','IN','MI','NV']);
 // Shared by calculateSlaDeadline and nextWorkDayStrForSiteCode -- a day is
 // covered if it's Mon-Fri, or Saturday in a state with on-call coverage.
 // Never Sunday, for any state.
+// Takes a Date whose UTC-getters hold the wall-clock calendar we care about
+// (either a genuine UTC-anchored scratchpad, or -- pre-fix legacy callers --
+// a date built via new Date(y,mo,dy) in server-local time; on Netlify the
+// server-local tz is UTC, so getUTCDay() and getDay() agree there too).
 function isCoveredWorkDay(d, stateCode) {
   const hasSatCoverage = stateCode ? SAT_STATES.has(stateCode) : true;
-  const day = d.getDay();
+  const day = d.getUTCDay();
   if (day === 0) return false; // never Sunday
   if (day === 6) return hasSatCoverage; // Saturday only if covered
   return true;
@@ -160,34 +199,44 @@ function isCoveredWorkDay(d, stateCode) {
 function nextWorkDayStrForSiteCode(siteCode) {
   const tz = getTimezoneForSiteCode(siteCode);
   const stateCode = siteCode ? siteCode.substring(0, 2) : null;
-  const local = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
-  while (!isCoveredWorkDay(local, stateCode)) local.setDate(local.getDate() + 1);
-  return `${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,'0')}-${String(local.getDate()).padStart(2,'0')}`;
+  const p = getZonedParts(new Date(), tz);
+  // Scratchpad Date used purely for Y/M/D calendar arithmetic (day-of-week,
+  // date rollover) -- never converted back to an instant, so the UTC-vs-tz
+  // hour mislabeling that bit calculateSlaDeadline doesn't apply here.
+  const scratch = new Date(Date.UTC(p.year, p.month - 1, p.day));
+  while (!isCoveredWorkDay(scratch, stateCode)) scratch.setUTCDate(scratch.getUTCDate() + 1);
+  return `${scratch.getUTCFullYear()}-${String(scratch.getUTCMonth()+1).padStart(2,'0')}-${String(scratch.getUTCDate()).padStart(2,'0')}`;
 }
 
 function calculateSlaDeadline(receivedAt, timezone, stateCode) {
   let remaining = 240; // 4 hours in minutes
   const tz = timezone || 'America/New_York';
 
-  const now = new Date(receivedAt);
-  const local = new Date(now.toLocaleString('en-US', { timeZone: tz }));
-  let current = local;
+  // Scratchpad: a UTC-anchored Date whose UTC-getters hold the site's local
+  // wall-clock reading of receivedAt. All arithmetic below stays inside
+  // this wall-clock frame (never mixed with a genuine UTC instant) --
+  // that's what keeps the business-hour math itself correct. The one thing
+  // that changed vs. the old version: we convert this scratchpad back to a
+  // real UTC instant with zonedTimeToUtc() at the very end, instead of
+  // handing the mislabeled scratchpad straight to the caller.
+  const startParts = getZonedParts(receivedAt, tz);
+  let current = new Date(Date.UTC(startParts.year, startParts.month - 1, startParts.day, startParts.hour, startParts.minute, startParts.second));
 
   const isWorkDay = (d) => isCoveredWorkDay(d, stateCode);
 
   const advanceToNextBizDay = (d) => {
-    d.setDate(d.getDate() + 1);
-    while (!isWorkDay(d)) d.setDate(d.getDate() + 1);
-    d.setHours(8, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() + 1);
+    while (!isWorkDay(d)) d.setUTCDate(d.getUTCDate() + 1);
+    d.setUTCHours(8, 0, 0, 0);
     return d;
   };
 
-  if (current.getHours() < 8) current.setHours(8, 0, 0, 0);
-  if (current.getHours() >= 17 || !isWorkDay(current)) advanceToNextBizDay(current);
+  if (current.getUTCHours() < 8) current.setUTCHours(8, 0, 0, 0);
+  if (current.getUTCHours() >= 17 || !isWorkDay(current)) advanceToNextBizDay(current);
 
   while (remaining > 0) {
     const endOfDay = new Date(current);
-    endOfDay.setHours(17, 0, 0, 0);
+    endOfDay.setUTCHours(17, 0, 0, 0);
     const minsToday = Math.max(0, (endOfDay - current) / 60000);
     if (remaining <= minsToday) {
       current = new Date(current.getTime() + remaining * 60000);
@@ -197,7 +246,13 @@ function calculateSlaDeadline(receivedAt, timezone, stateCode) {
       advanceToNextBizDay(current);
     }
   }
-  return current;
+
+  // Convert the wall-clock scratchpad reading back to a genuine UTC instant.
+  return zonedTimeToUtc(
+    current.getUTCFullYear(), current.getUTCMonth() + 1, current.getUTCDate(),
+    current.getUTCHours(), current.getUTCMinutes(), current.getUTCSeconds(),
+    tz
+  );
 }
 
 // Parses a loosely-formatted date string (e.g. "07/18/2026 2:30 PM") pulled
@@ -338,14 +393,18 @@ function parseMaintenanceDueDate(description, receivedAt) {
   return null;
 }
 
-function formatSlaDeadline(d) {
+// `d` is now always a genuine UTC instant (post-2026-08-15 fix), so this
+// must explicitly project it into the site's own timezone for display --
+// it can no longer rely on the server's default tz matching.
+function formatSlaDeadline(d, timezone) {
+  const tz = timezone || 'America/New_York';
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  const mm = String(m).padStart(2, '0');
-  return `${days[d.getDay()]} ${h12}:${mm} ${ampm}`;
+  const p = getZonedParts(d, tz);
+  const dow = days[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()];
+  const ampm = p.hour >= 12 ? 'PM' : 'AM';
+  const h12 = p.hour % 12 || 12;
+  const mm = String(p.minute).padStart(2, '0');
+  return `${dow} ${h12}:${mm} ${ampm}`;
 }
 
 // ── Email classifier & parser (ported from watchdog.py) ──────────────────────
@@ -641,8 +700,9 @@ function parseEmailBody(text, receivedAt, subject) {
     const isInstallCategory = /^install$/i.test(issueCategory || '');
     const isSiteSurvey = isInstallCategory && /site survey/i.test(issueDetail || '');
     const statedDueDate = isInstallCategory ? parseLooseDate(dueDateRaw) : null;
-    const slaEnd = statedDueDate || calculateSlaDeadline(receivedAt, getTimezoneForSiteCode(siteCode), siteCode.substring(0,2));
-    const slaStr = formatSlaDeadline(slaEnd);
+    const ticketTz = getTimezoneForSiteCode(siteCode);
+    const slaEnd = statedDueDate || calculateSlaDeadline(receivedAt, ticketTz, siteCode.substring(0,2));
+    const slaStr = formatSlaDeadline(slaEnd, ticketTz);
     const siteTrunc = site.length > 40 ? site.substring(0, 38) + '…' : site;
 
     // "Add Line Item to Work Order #NNNN" -- a follow-up adding a new line
@@ -829,8 +889,9 @@ exports.handler = async (event) => {
 
       if (/Tech Dispatch/i.test(subj) || /Work Order/i.test(subj) || (stateCode && woNum)) {
         const siteStr = [stateCode, siteName].filter(Boolean).join(' – ') || subj.substring(0, 60);
-        const slaEnd = calculateSlaDeadline(receivedAt, STATE_TIMEZONES[stateCode] || 'America/New_York', stateCode);
-        const slaStr = formatSlaDeadline(slaEnd);
+        const fallbackTz = STATE_TIMEZONES[stateCode] || 'America/New_York';
+        const slaEnd = calculateSlaDeadline(receivedAt, fallbackTz, stateCode);
+        const slaStr = formatSlaDeadline(slaEnd, fallbackTz);
         parsed = {
           type: 'trouble',
           alertBody: `🚨 WO: ${woNum || 'See email'}\nSite: ${siteStr}\nIssue: ${issue}\nSLA: ${slaStr}`,
@@ -1033,7 +1094,7 @@ exports.handler = async (event) => {
             const addedText = parsed.description || parsed.issue || 'See email for details';
             let noteLine = `[Line item added ${stamp}] ${addedText}`;
             if (existingTicket.ticket_kind === 'maintenance') {
-              const slaStr = formatSlaDeadline(new Date(parsed.slaEnd));
+              const slaStr = formatSlaDeadline(new Date(parsed.slaEnd), getTimezoneForSiteCode(rawSiteCode));
               noteLine = `⚠️ REVIEW NEEDED -- possible SLA impact (would be ${slaStr} if urgent): ${noteLine}`;
             }
             const newDescription = (existingTicket.description ? existingTicket.description + '\n\n' : '') + noteLine;
