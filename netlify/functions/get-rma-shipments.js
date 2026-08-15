@@ -18,8 +18,10 @@
  *        siteId, siteCode, accountName, state, warehouseName, technicianId,
  *        technicianName, outboundTracking, inboundTracking, transferId,
  *        requestDetails, returnBrokenPart, returnedAt, receivedAt } ],
- *      technicians: [ { id, name } ] }  -- full active roster, independent
- *        of which techs already have a shipment row; use this (not the
+ *      technicians: [ { id, name, state } ] }  -- full active roster,
+ *        independent of which techs already have a shipment row; `state`
+ *        is the tech's home state, so a consumer can narrow the roster to
+ *        whatever state is currently selected. Use this (not the
  *        shipments themselves) to populate a technician filter/picker.
  */
 const { createClient } = require("@supabase/supabase-js");
@@ -95,11 +97,11 @@ exports.handler = async (event) => {
     // they're a real active tech. Confirmed 2026-08-15.
     const { data: techRows, error: techErr } = await supabase
       .from('technicians')
-      .select('id, name')
+      .select('id, name, home_state')
       .eq('active', true)
       .order('name');
     if (techErr) console.error('[get-rma-shipments] technician roster fetch failed (non-fatal):', techErr.message);
-    const technicians = (techRows || []).map(t => ({ id: t.id, name: t.name }));
+    const technicians = (techRows || []).map(t => ({ id: t.id, name: t.name, state: t.home_state }));
 
     return json(200, { shipments, technicians });
   } catch (err) {
