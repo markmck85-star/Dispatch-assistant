@@ -103,19 +103,42 @@ function populateFilters() {
     const prevState = stateSel.value, prevTech = techSel.value;
 
     const states = [...new Set(allShipments.map(s => s.state).filter(Boolean))].sort();
-    // Full active roster first (so a tech with zero shipments still shows
-    // up -- this was the actual bug), then fold in any technicianId from
-    // the shipment data itself that isn't in the roster (e.g. a tech who's
-    // since gone inactive but still has RMA history worth filtering to).
-    const techMap = new Map(allTechnicians.map(t => [t.id, t.name]));
+    stateSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
+    stateSel.value = prevState;
+
+    populateTechFilter(prevTech);
+}
+
+// Narrows the technician dropdown to whoever's actually relevant to the
+// currently-selected state -- previously this list was global regardless
+// of the state filter, so picking "CO" still showed every technician in
+// every state. Full active roster (filtered to home state) first, then
+// folded in with any technicianId from shipment history matching the
+// selected state (covers a cross-state assignment or a tech who's since
+// gone inactive but still has RMA history in that state). Re-run this
+// whenever the state selection changes, not just on initial load.
+function populateTechFilter(keepSelection) {
+    const stateVal = document.getElementById('stateFilter').value;
+    const techSel = document.getElementById('techFilter');
+    const prevTech = keepSelection !== undefined ? keepSelection : techSel.value;
+
+    const techMap = new Map(
+        allTechnicians
+            .filter(t => !stateVal || t.state === stateVal)
+            .map(t => [t.id, t.name])
+    );
     for (const s of allShipments) {
-        if (s.technicianId && !techMap.has(s.technicianId)) techMap.set(s.technicianId, s.technicianName);
+        if (s.technicianId && (!stateVal || s.state === stateVal) && !techMap.has(s.technicianId)) {
+            techMap.set(s.technicianId, s.technicianName);
+        }
     }
     const techs = [...techMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
 
-    stateSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
     techSel.innerHTML = '<option value="">All technicians</option>' + techs.map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
-    stateSel.value = prevState; techSel.value = prevTech;
+    // If the previously-selected tech isn't relevant to the new state, fall
+    // back to "All technicians" instead of silently keeping an invisible
+    // filter applied.
+    techSel.value = techMap.has(prevTech) ? prevTech : '';
 }
 
 function toggleNeedsReturn() {
@@ -198,7 +221,7 @@ async function markReturned(id, returned) {
     }
 }
 
-document.getElementById('stateFilter').addEventListener('change', render);
+document.getElementById('stateFilter').addEventListener('change', () => { populateTechFilter(); render(); });
 document.getElementById('techFilter').addEventListener('change', render);
 
 loadShipments();
