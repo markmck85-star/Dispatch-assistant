@@ -37,6 +37,8 @@
 <h1>Watchdog Log</h1>
 <div>
   <select id="stateSelect">
+    <option value="ALL">All States</option>
+    <option value="SAT_ONCALL">Saturday On-Call (GA/IN/MI/NV)</option>
     <option value="CO">Colorado</option>
     <option value="GA">Georgia / NC / SC</option>
     <option value="FL">Florida</option>
@@ -61,6 +63,14 @@ const refreshBtn = document.getElementById('refreshBtn');
 const statusEl = document.getElementById('status');
 const listEl = document.getElementById('list');
 
+// Individual, real 2-letter states the backend actually knows about --
+// used to expand the SAT_ONCALL/ALL group selections into a set of real
+// fetches, since get-watchdog-log.js only accepts one state at a time.
+const REAL_STATES = [...stateSelect.options].map(o => o.value).filter(v => v !== 'ALL' && v !== 'SAT_ONCALL');
+// Mirrors SAT_COVERAGE_STATES in admin.html / index.html -- states with
+// Saturday on-call coverage. Keep in sync if a state is added there.
+const SAT_ONCALL_STATES = ['GA', 'IN', 'MI', 'NV'];
+
 function fmtDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -79,20 +89,28 @@ function fmtDate(iso) {
   }
 })();
 
+async function fetchStateEntries(state) {
+  const resp = await fetch(`/.netlify/functions/get-watchdog-log?state=${state}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || String(resp.status));
+  return data.entries || [];
+}
+
 async function loadLog() {
-  const state = stateSelect.value;
+  const selection = stateSelect.value;
+  const statesToFetch = selection === 'ALL' ? REAL_STATES
+    : selection === 'SAT_ONCALL' ? SAT_ONCALL_STATES
+    : [selection];
+  const label = selection === 'ALL' ? 'all states'
+    : selection === 'SAT_ONCALL' ? 'Saturday On-Call states'
+    : selection;
   statusEl.textContent = 'Loading…';
   listEl.innerHTML = '';
   try {
-    const resp = await fetch(`/.netlify/functions/get-watchdog-log?state=${state}`);
-    const data = await resp.json();
-    if (!resp.ok) {
-      statusEl.textContent = 'Error: ' + (data.error || resp.status);
-      return;
-    }
-    const entries = data.entries || [];
+    const results = await Promise.all(statesToFetch.map(s => fetchStateEntries(s)));
+    const entries = results.flat().sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
     const unmatchedCount = entries.filter(e => !e.matched).length;
-    statusEl.textContent = `${entries.length} open ticket${entries.length === 1 ? '' : 's'} for ${state}${unmatchedCount ? ` (${unmatchedCount} unmatched)` : ''}`;
+    statusEl.textContent = `${entries.length} open ticket${entries.length === 1 ? '' : 's'} for ${label}${unmatchedCount ? ` (${unmatchedCount} unmatched)` : ''}`;
     if (entries.length === 0) {
       listEl.innerHTML = '<div id="empty">Nothing outstanding.</div>';
       return;
