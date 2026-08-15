@@ -74,7 +74,7 @@
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
-    <select id="stateSel" onchange="loadAll(); updateWatchdogLink();">
+    <select id="stateSel" onchange="loadAll()">
       <option value="GA">Georgia</option>
       <option value="FL">Florida</option>
       <option value="MI">Michigan</option>
@@ -89,37 +89,25 @@
       <option value="NC">North Carolina</option>
       <option value="SC">South Carolina</option>
     </select>
-    <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:8px;padding:8px 14px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:13px;text-decoration:none;vertical-align:middle;">🐕 Watchdog Log</a>
 
-    <h2 class="section-label">👥 Technician Availability</h2>
-    <div style="margin-bottom:8px;">
-      <label for="techDate" style="font-size:12px;color:#999;margin-right:6px;">Date:</label>
-      <input type="date" id="techDate" onchange="loadAll()" style="background:#2a2a3e;color:#f0f0f0;border:1px solid #555;border-radius:5px;padding:4px 8px;font-size:13px;">
-    </div>
+    <h2 class="section-label">👥 Technician Availability — Today</h2>
     <div id="techStatus" class="status-line">Loading…</div>
     <div id="techGrid" class="tech-grid"></div>
+
+    <h2 class="section-label">🔄 Restock Status</h2>
+    <div id="restockStatus" class="status-line">Loading…</div>
+    <div id="restockSummary"></div>
 
     <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
     <div id="ticketStatus" class="status-line">Loading…</div>
     <div id="importFreshness" class="status-line" style="font-size:11px;"></div>
     <div id="ticketList"></div>
 
-    <h2 class="section-label">🔄 Restock Status</h2>
-    <div id="restockStatus" class="status-line">Loading…</div>
-    <div id="restockSummary"></div>
-
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
     <div class="import-box">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 12px;background:#1e1e1e;border-radius:6px;border:1px solid #333;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;user-select:none;">
-          <input type="checkbox" id="autoSyncToggle" onchange="toggleAutoSync(this.checked)" style="width:18px;height:18px;cursor:pointer;">
-          <span>Automatic Salesforce sync (every 20 min)</span>
-        </label>
-        <span id="autoSyncStatus" style="font-size:12px;color:#999;margin-left:auto;"></span>
-      </div>
       <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
       <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
-      <div style="font-size:11px;color:#999;margin-bottom:12px;">Manual refresh always works, even when automatic sync is turned off. Use it when you need current data right now.</div>
+      <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
 
       <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
       <div style="font-size:12px;color:#999;margin-bottom:8px;">Or log in and export manually, then select it below — falls back to this if the automated sync is ever down.</div>
@@ -200,24 +188,7 @@ async function autoImport(file) {
     const mapped = rows.map(r => ({
       accountName: String(r['Account Name'] || '').trim(),
       state: String(r['Jurisdiction'] || '').trim(),
-      woNumber: (() => {
-        const raw = r['Work Order Number'];
-        if (raw == null || raw === '') return null;
-        let s = String(raw).split('.')[0];
-        // 2026-08-08: when this column is read as a JS number (the cell's
-        // Excel format is General/Number rather than Text), any leading
-        // zeros are silently lost -- "00149139" becomes 149139, then just
-        // "149139" as a string. Confirmed live: this broke WO-number
-        // matching against `tickets` for 165 existing rows, including one
-        // Mark could independently prove was really closed in Salesforce
-        // hours earlier. Every real WO number seen so far is 8 digits, so
-        // pad back up to 8 whenever it's shorter and purely numeric --
-        // safe even if the true, un-stripped number happened to be
-        // shorter for some reason, since matching tickets.wo_number would
-        // have the same original (un-padded) value in that case too.
-        if (/^[0-9]+$/.test(s) && s.length < 8) s = s.padStart(8, '0');
-        return s;
-      })(),
+      woNumber: (r['Work Order Number'] != null && r['Work Order Number'] !== '') ? String(r['Work Order Number']).split('.')[0] : null,
       appointmentNumber: String(r['Appointment Number'] || '').trim(),
       actualStart: r['Actual Start'] || null,
       actualEnd: r['Actual End'] || null,
@@ -329,86 +300,15 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-// Formats a plain YYYY-MM-DD date string (not a full timestamp) -- parsing
-// this as new Date('YYYY-MM-DD') treats it as UTC midnight, which can
-// shift a day backward once displayed in a US timezone (the exact bug
-// fixed elsewhere today), so this builds the Date from explicit numeric
-// parts instead, which JS always treats as local time.
-function fmtDateOnly(dateStr) {
-  if (!dateStr) return '—';
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-// 2026-08-08: lets a dispatcher mark a ticket resolved locally when it's
-// genuinely done but will never show as "closed" through the normal
-// Salesforce-import path -- e.g. Neumo cancelling a now-redundant SA
-// (no closing notes on a cancellation, so it never appears in the closed-
-// ticket report) or a dispatcher confirming completion by phone. Keeps
-// this fully separate from the Salesforce-confirmed status rather than
-// faking a "closed" state -- see mark-ticket-resolved.js for the reasoning.
-async function resolveTicket(woNumber) {
-  const note = prompt('Optional note (e.g. "SA cancelled by Gina, already restocked during trouble visit"):', '');
-  if (note === null) return; // cancelled the prompt
-  try {
-    const res = await fetch('/.netlify/functions/mark-ticket-resolved', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wo_number: woNumber, note: note || null }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    loadAll();
-  } catch (e) {
-    alert('Could not mark resolved: ' + e.message);
-  }
-}
-
-async function undoResolveTicket(woNumber) {
-  try {
-    const res = await fetch('/.netlify/functions/mark-ticket-resolved', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wo_number: woNumber, undo: true }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    loadAll();
-  } catch (e) {
-    alert('Could not undo: ' + e.message);
-  }
-}
-
-async function confirmRestocked(siteCode) {
-  const note = prompt('Optional note (e.g. "Restocked during trouble-ticket visit"):', '');
-  if (note === null) return;
-  try {
-    const res = await fetch('/.netlify/functions/mark-site-restocked', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ site_code: siteCode, note: note || null }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    loadAll();
-  } catch (e) {
-    alert('Could not mark restocked: ' + e.message);
-  }
-}
-
-async function undoRestockConfirm(siteCode) {
-  try {
-    const res = await fetch('/.netlify/functions/mark-site-restocked', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ site_code: siteCode, undo: true }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    loadAll();
-  } catch (e) {
-    alert('Could not undo: ' + e.message);
-  }
+// Restock/maintenance due dates are date-only by nature (parsed from free
+// text like "by 8/17", anchored to a fixed noon-UTC placeholder time purely
+// to keep the calendar day stable across timezones -- see
+// parseMaintenanceDueDate in mailgun-inbound.js). Showing that placeholder
+// as if it were a real deadline time ("8:00 AM") implies a precision that
+// was never there, so restock due dates render date-only here.
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric' });
 }
 
 async function loadAll() {
@@ -429,20 +329,12 @@ async function loadConsole(state) {
   ticketList.innerHTML = '';
 
   try {
-    const techDateInput = document.getElementById('techDate');
-    const dateParam = techDateInput && techDateInput.value ? '&date=' + encodeURIComponent(techDateInput.value) : '';
-    const res = await fetch('/.netlify/functions/get-state-console?state=' + encodeURIComponent(state) + dateParam, { cache: 'no-store' });
+    const res = await fetch('/.netlify/functions/get-state-console?state=' + encodeURIComponent(state), { cache: 'no-store' });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
 
-    // Reflect whatever date the server actually resolved (defaults to
-    // today in Eastern time if the picker was left blank) -- keeps the
-    // picker and the displayed data honest about which day is shown,
-    // rather than always saying "today" regardless of what's selected.
-    if (techDateInput && !techDateInput.value && data.date) techDateInput.value = data.date;
-    const dateLabel = data.date ? fmtDateOnly(data.date) : 'today';
     const outCount = data.technicians.filter(t => !t.available).length;
-    techStatus.textContent = data.technicians.length + ' technician(s) for ' + dateLabel + ' · ' + outCount + ' out';
+    techStatus.textContent = data.technicians.length + ' technician(s) · ' + outCount + ' out today';
     if (!data.technicians.length) {
       techGrid.innerHTML = '<div class="empty-state">No technicians on file for this state.</div>';
     } else {
@@ -465,41 +357,28 @@ async function loadConsole(state) {
     } else {
       const sortedTickets = [...data.recentTickets].sort((a, b) => {
         // Trouble tickets first as a group (they "burn brighter" -- Mark's
-        // words), then maintenance/restock. Within each group, genuinely
-        // unresolved ones ('open') come first -- that's what actually
-        // needs a dispatcher's eye on this page -- ahead of anything
-        // already closed or marked resolved, regardless of due date.
-        // Soonest due first as the final tiebreaker within each status.
+        // words), then maintenance/restock. Within each group, soonest due
+        // first -- consistent with dueAt now being the primary displayed
+        // date. An open restock that's lingered past its expected window
+        // is itself worth noticing, not something to bury among trouble
+        // tickets by pure chronological interleaving.
         if (a.ticketKind !== b.ticketKind) {
           return a.ticketKind === 'maintenance' ? 1 : -1;
         }
-        const aOpen = a.status === 'open' ? 0 : 1;
-        const bOpen = b.status === 'open' ? 0 : 1;
-        if (aOpen !== bOpen) return aOpen - bOpen;
         return new Date(a.dueAt) - new Date(b.dueAt);
       });
       ticketList.innerHTML = sortedTickets.map(t => {
-        let statusBadge, resolveAction;
-        if (t.status === 'closed') {
-          statusBadge = `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`;
-          resolveAction = '';
-        } else if (t.status === 'resolved_local') {
-          statusBadge = `<span style="color:#9b7bd6;font-weight:600;">✓ Marked resolved ${fmtDateTime(t.manuallyResolvedAt)}${t.manuallyResolvedNote ? ' — ' + escapeHtml(t.manuallyResolvedNote) : ''}</span>`;
-          resolveAction = `<button onclick="undoResolveTicket('${t.woNumber}')" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#3a3a3a;color:#ccc;border:1px solid #666;border-radius:4px;cursor:pointer;">Undo</button>`;
-        } else {
-          statusBadge = `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
-          resolveAction = t.woNumber
-            ? `<button onclick="resolveTicket('${t.woNumber}')" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#2e7d5b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Mark Resolved</button>`
-            : '';
-        }
+        const statusBadge = t.status === 'closed'
+          ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
+          : `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
         return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
-          <div class="meta">Due: <strong>${fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
-          <div class="meta">${statusBadge}${resolveAction}</div>
+          <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
+          <div class="meta">${statusBadge}</div>
         </div>`;
       }).join('');
     }
@@ -522,14 +401,7 @@ async function loadRestock(state) {
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
 
     const counts = { overdue: 0, soon: 0, ok: 0 };
-    (data.locations || []).forEach(l => {
-      // A manually-confirmed site no longer counts as needing attention,
-      // regardless of what the automated calculation still shows -- same
-      // philosophy as ticket resolution: the confirmation is a visible
-      // override, not a silent rewrite of the underlying computed status.
-      if (l.manuallyConfirmedAt) return;
-      if (counts[l.status] !== undefined) counts[l.status]++;
-    });
+    (data.locations || []).forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
     restockStatus.textContent = data.locations.length + ' site(s) tracked';
 
     const topUrgent = (data.locations || []).filter(l => l.status === 'overdue' || l.status === 'soon').slice(0, 8);
@@ -555,24 +427,12 @@ async function loadRestock(state) {
         const scheduledLine = l.scheduledDate
           ? `<div class="meta" style="color:#7bc796;">✓ Already scheduled: ${new Date(l.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${l.scheduledTech ? ' (' + escapeHtml(l.scheduledTech) + ')' : ''}</div>`
           : '';
-        // 2026-08-08: lets a dispatcher say "this was actually restocked
-        // during that other visit" (e.g. a trouble ticket) without
-        // touching the automated calculation -- see mark-site-restocked.js.
-        // Only offered when visitedSinceRestock is true, since that's
-        // specifically the "(visited)" case this is meant to resolve.
-        let confirmLine = '';
-        if (l.manuallyConfirmedAt) {
-          confirmLine = `<div class="meta" style="color:#9b7bd6;">✓ Marked restocked ${fmtDateTime(l.manuallyConfirmedAt)}${l.manuallyConfirmedNote ? ' — ' + escapeHtml(l.manuallyConfirmedNote) : ''} <button onclick="undoRestockConfirm('${l.site_code}')" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#3a3a3a;color:#ccc;border:1px solid #666;border-radius:4px;cursor:pointer;">Undo</button></div>`;
-        } else if (l.visitedSinceRestock) {
-          confirmLine = `<div class="meta"><button onclick="confirmRestocked('${l.site_code}')" style="font-size:11px;padding:2px 8px;background:#2e7d5b;color:#fff;border:none;border-radius:4px;cursor:pointer;">Mark Restocked</button></div>`;
-        }
         return `<div class="ticket-card ${cls}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${l.site_code}')" title="View recent visit history">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
           <div class="meta">${label} · last restock ${l.daysSince != null ? l.daysSince + ' days ago' : '—'}</div>
           ${lastVisitLine}
           ${projectedLine}
           ${scheduledLine}
-          ${confirmLine}
         </div>`;
       }).join('');
     }
@@ -789,16 +649,6 @@ async function showSiteHistory(code) {
   }
 })();
 
-// Keeps the "Watchdog Log" link pointed at whichever state the console is
-// currently showing, using the same /watchdog/:state shortcut added to
-// _redirects 2026-08-12. Called on dropdown change and once on page load.
-function updateWatchdogLink() {
-  const sel = document.getElementById('stateSel');
-  const link = document.getElementById('watchdogLink');
-  if (sel && link) link.href = '/watchdog/' + sel.value;
-}
-updateWatchdogLink();
-
 // ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
 // v3 (2026-07-29): reverted back to calling the Netlify background
 // function directly. The PC-based flag/poll version (request-local-sync /
@@ -828,8 +678,8 @@ async function triggerManualSync() {
   try {
     // Fire-and-forget -- the -background suffix means Netlify acknowledges
     // this immediately and keeps the actual work running server-side even
-    // after this fetch resolves. force=1 lets it run even when auto-sync is off.
-    fetch('/.netlify/functions/salesforce-report-sync-background?force=1', { method: 'POST' }).catch(() => {});
+    // after this fetch resolves.
+    fetch('/.netlify/functions/salesforce-report-sync-background', { method: 'POST' }).catch(() => {});
   } catch (err) {
     // Even if the initial fetch itself fails to fire, still start polling --
     // the scheduled run might pick it up, and polling will just show idle.
@@ -915,52 +765,7 @@ async function pollSyncStatus() {
   }
 }
 
-// ── Auto-sync on/off toggle ────────────────────────────────────────────────
-async function loadAutoSyncSetting() {
-  const toggle = document.getElementById('autoSyncToggle');
-  const statusEl = document.getElementById('autoSyncStatus');
-  if (!toggle) return;
-  try {
-    const res = await fetch('/.netlify/functions/get-settings?state=global');
-    const data = await res.json();
-    const enabled = data.settings?.salesforceReportSyncEnabled !== false; // default ON if never set
-    toggle.checked = enabled;
-    statusEl.textContent = enabled ? 'On' : 'Off';
-    statusEl.style.color = enabled ? '#4fa87b' : '#c97878';
-  } catch (err) {
-    statusEl.textContent = 'Could not load';
-    statusEl.style.color = '#999';
-  }
-}
-
-async function toggleAutoSync(enabled) {
-  const statusEl = document.getElementById('autoSyncStatus');
-  statusEl.textContent = 'Saving…';
-  statusEl.style.color = '#999';
-  try {
-    const res = await fetch('/.netlify/functions/save-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state: 'global', salesforceReportSyncEnabled: enabled }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      statusEl.textContent = enabled ? 'On' : 'Off';
-      statusEl.style.color = enabled ? '#4fa87b' : '#c97878';
-    } else {
-      statusEl.textContent = 'Save failed';
-      statusEl.style.color = '#c97878';
-      document.getElementById('autoSyncToggle').checked = !enabled;
-    }
-  } catch (err) {
-    statusEl.textContent = 'Save failed';
-    statusEl.style.color = '#c97878';
-    document.getElementById('autoSyncToggle').checked = !enabled;
-  }
-}
-
 loadAll();
-loadAutoSyncSetting();
 </script>
 </body>
 </html>
