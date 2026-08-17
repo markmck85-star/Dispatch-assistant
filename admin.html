@@ -609,6 +609,7 @@
                     every row sharing that name gets updated together.
                 </p>
                 <div id="usStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
+                <button onclick="usLocateAll()" id="usLocateAllBtn" style="margin-bottom:12px;background:#6f42c1;color:#fff;border:none;border-radius:5px;padding:7px 14px;font-size:13px;cursor:pointer;">🌐 Locate All via Maps</button>
                 <div id="usGroups"></div>
             </div>
         </div>
@@ -913,10 +914,19 @@
                       ' <span style="color:#999;">(' + Math.round(sugg.score * 100) + '% match)</span> ' +
                       '<button onclick="usApply(' + i + ', \'' + sugg.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>'
                     : '<div style="margin-top:6px;font-size:13px;color:#999;">No suggested match.</div>';
+                var saHtml = (g.saNumbers && g.saNumbers.length)
+                    ? '<div style="margin-top:6px;font-size:12px;color:#999;">SA#: ' +
+                      g.saNumbers.map(function(sa) { return '<span style="color:#6cb2ff;">' + esc(sa) + '</span>'; }).join(', ') +
+                      ' <span style="color:#666;">(search Salesforce)</span></div>'
+                    : '';
                 html += '<div class="card" id="usCard' + i + '" style="border-left-color:#e0a030;">' +
                     '<div class="card-title">' + esc(g.state) + ' — "' + esc(g.account_name_raw) + '"</div>' +
                     '<div class="card-detail">' + g.row_count + ' row(s)</div>' +
+                    saHtml +
                     suggHtml +
+                    '<div id="usGeo' + i + '">' +
+                    '<button onclick="usLocate(' + i + ')" style="margin-top:6px;background:#6f42c1;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">📍 Locate via Maps</button>' +
+                    '</div>' +
                     '<div style="margin-top:8px;">' +
                     '<input type="text" id="usSearch' + i + '" placeholder="Search for the correct site…" oninput="usFilter(' + i + ')" style="width:100%;padding:6px 8px;font-size:13px;">' +
                     '<div id="usResults' + i + '" style="max-height:160px;overflow-y:auto;margin-top:4px;"></div>' +
@@ -960,6 +970,66 @@
                 card.style.opacity = '1';
                 alert('Error applying match: ' + e.message);
             }
+        }
+
+        // Grounds a group's raw name in a real Google Places lookup, then finds
+        // the nearest EXISTING site in that state by real-world distance --
+        // a much stronger signal than the name-token "suggested" score above,
+        // since it doesn't care how similarly two site names are worded.
+        async function usLocate(i) {
+            var g = usGroups[i];
+            if (!g) return;
+            var geoEl = document.getElementById('usGeo' + i);
+            if (!geoEl) return;
+            geoEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:#999;">📍 Looking up on Maps…</div>';
+            try {
+                var res = await fetch('/.netlify/functions/geocode-unmatched-name', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: g.state, accountNameRaw: g.account_name_raw })
+                });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                if (!data.found) {
+                    geoEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:#999;">📍 No Maps match found for "' + esc(g.account_name_raw) + '" — try the manual search below.</div>';
+                    return;
+                }
+                var ns = data.nearestSite;
+                if (!ns) {
+                    geoEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:#999;">📍 Found on Maps (' + esc(data.geocoded.address) +
+                        ') but no geocoded sites exist yet for ' + esc(g.state) + ' to compare against.</div>';
+                    return;
+                }
+                // Color-code by distance -- close = trustworthy, far = treat as a hint only
+                var color = ns.distanceMi <= 0.3 ? '#8bc98b' : (ns.distanceMi <= 1 ? '#e0a030' : '#e05050');
+                var confidenceNote = ns.distanceMi <= 0.3 ? 'very likely the same site' :
+                    (ns.distanceMi <= 1 ? 'probably the same site — worth a quick check' : 'far apart — likely NOT a match, or this is a genuinely new site');
+                geoEl.innerHTML =
+                    '<div style="margin-top:6px;font-size:12px;color:#ccc;">📍 Maps: <strong>' + esc(data.geocoded.address) + '</strong></div>' +
+                    '<div style="margin-top:2px;font-size:13px;color:' + color + ';">Nearest known site: <strong>' + esc(ns.site_code) + ' — ' + esc(ns.name) + '</strong> (' + ns.distanceMi + ' mi away — ' + confidenceNote + ')' +
+                    ' <button onclick="usApply(' + i + ', \'' + ns.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>';
+            } catch (e) {
+                geoEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:#e05050;">📍 Maps lookup failed: ' + esc(e.message) + '</div>';
+            }
+        }
+
+        // Runs usLocate across every still-open group, a few at a time so we
+        // don't hammer the Places API or risk a Netlify function pile-up.
+        async function usLocateAll() {
+            var btn = document.getElementById('usLocateAllBtn');
+            var indices = usGroups.map(function(g, i) { return g ? i : null; }).filter(function(i) { return i !== null; });
+            if (!indices.length) return;
+            btn.disabled = true;
+            var CONCURRENCY = 3;
+            var done = 0;
+            for (var start = 0; start < indices.length; start += CONCURRENCY) {
+                var batch = indices.slice(start, start + CONCURRENCY);
+                await Promise.all(batch.map(function(i) { return usLocate(i); }));
+                done += batch.length;
+                btn.textContent = '🌐 Locating… (' + done + '/' + indices.length + ')';
+            }
+            btn.textContent = '🌐 Locate All via Maps';
+            btn.disabled = false;
         }
 
 
