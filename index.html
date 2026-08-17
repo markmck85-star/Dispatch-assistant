@@ -2460,6 +2460,13 @@ function distanceMatrixStatus(state) {
                 if (ta) {
                     ta.value = savedText;
                     autoDetectDispatchDate(savedText);
+                    // Auto-rebuild the board on load/refresh so it reflects what's
+                    // actually persisted in Supabase, instead of requiring a manual
+                    // "Generate Dispatches" click first. Previously a refresh or
+                    // logout/login left the page showing stale/empty state until
+                    // that click re-ran the derivation logic that honors
+                    // assignedBy==='manual' overrides.
+                    await processDispatch();
                 }
             }
             // Save textarea content on input and auto-detect date
@@ -4023,6 +4030,9 @@ function distanceMatrixStatus(state) {
             if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
             window.currentAssignments[newTech].unshift(item);
             syncAssignmentToSupabase(newTech, item, 'planned', 'manual');
+            // Auto-sort the receiving tech's card so the reassigned stop slots
+            // into route order instead of just sitting at the top of the list.
+            sortStopsByDistance(newTech);
             renderReviewBoard(true);
             // Recalc travel time for receiving tech so "To 1st Stop" reflects the reassigned stop
             if (window.google && window.google.maps && window.currentAssignments[newTech].length > 0) {
@@ -4162,6 +4172,9 @@ function distanceMatrixStatus(state) {
                     // logout+login when primary+fallback are both unavailable, since
                     // the reprocess logic only skips re-deriving when assignedBy==='manual'.
                     syncAssignmentToSupabase(newTech, movedStop, 'planned', 'manual');
+                    // Auto-sort the receiving tech's card so the newly added stop
+                    // slots into route order instead of just sitting at the top.
+                    sortStopsByDistance(newTech);
                 }
                 renderReviewBoard(true);
                 div.remove();
