@@ -2652,7 +2652,7 @@ function distanceMatrixStatus(state) {
             const stopCheckboxes = data.codes.map(code => {
                 const loc = LOCATIONS[code];
                 const label = loc && loc.name ? `${code} - ${loc.name}` : code;
-                return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px;">
+                return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px;color:#f0f0f0;font-weight:normal;">
                     <input type="checkbox" class="cluster-stop-cb" value="${code}" checked>
                     <span>${label}</span>
                 </label>`;
