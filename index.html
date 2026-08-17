@@ -2620,7 +2620,16 @@ function distanceMatrixStatus(state) {
             JOURNAL_LOW_THRESHOLD = parseInt(saved);
         }
 
-        function showRoutePopover(event, techKey) {
+        // Route button now opens Google Maps directly -- no intermediate popover.
+        // Cluster assignment (rarely used) moved to its own small entry point;
+        // see showClusterPopover below.
+        function openTechRoute(techKey) {
+            const data = window.techRouteData && window.techRouteData[techKey];
+            if (!data || !data.mapLink) return;
+            window.open(data.mapLink, '_blank');
+        }
+
+        function showClusterPopover(event, techKey) {
             // Remove any existing popover
             const existing = document.getElementById('routePopover');
             if (existing) { existing.remove(); return; }
@@ -2650,36 +2659,28 @@ function distanceMatrixStatus(state) {
             `;
 
             popover.innerHTML = `
-                <div style="font-weight:bold;margin-bottom:10px;color:#f0a500;">🗺️ Route Options</div>
-                <a href="${data.mapLink}" target="_blank"
-                    style="display:block;background:#17a2b8;color:#fff;text-align:center;
-                    padding:8px;border-radius:6px;text-decoration:none;margin-bottom:10px;"
-                    onclick="document.getElementById('routePopover').remove()">
-                    🗺️ Show Route
-                </a>
-                <div style="border-top:1px solid #444;padding-top:10px;">
-                    <div style="margin-bottom:6px;color:#ccc;font-size:13px;">📍 Set Cluster for these stops:</div>
-                    <select id="clusterSelect" style="width:100%;padding:6px;border-radius:6px;
-                        background:#1e1e1e;color:#f0f0f0;border:1px solid #555;margin-bottom:6px;">
-                        <option value="">— Select or type new —</option>
-                        ${clusterOptions}
-                        <option value="__new__">✏️ New cluster...</option>
-                    </select>
-                    <input id="clusterNewInput" type="text" placeholder="New cluster name..."
-                        style="display:none;width:100%;padding:6px;border-radius:6px;box-sizing:border-box;
-                        background:#1e1e1e;color:#f0f0f0;border:1px solid #f0a500;margin-bottom:6px;">
-                    <div style="display:flex;gap:8px;">
-                        <button onclick="applyClusterAssignment('${techKey}')"
-                            style="flex:1;background:#28a745;color:#fff;border:none;
-                            border-radius:6px;padding:7px;cursor:pointer;font-weight:bold;">
-                            Save Cluster
-                        </button>
-                        <button onclick="document.getElementById('routePopover').remove()"
-                            style="background:#555;color:#fff;border:none;
-                            border-radius:6px;padding:7px 12px;cursor:pointer;">
-                            Cancel
-                        </button>
-                    </div>
+                <div style="font-weight:bold;margin-bottom:10px;color:#f0a500;">📍 Set Cluster</div>
+                <div style="margin-bottom:6px;color:#ccc;font-size:13px;">Set cluster for these stops:</div>
+                <select id="clusterSelect" style="width:100%;padding:6px;border-radius:6px;
+                    background:#1e1e1e;color:#f0f0f0;border:1px solid #555;margin-bottom:6px;">
+                    <option value="">— Select or type new —</option>
+                    ${clusterOptions}
+                    <option value="__new__">✏️ New cluster...</option>
+                </select>
+                <input id="clusterNewInput" type="text" placeholder="New cluster name..."
+                    style="display:none;width:100%;padding:6px;border-radius:6px;box-sizing:border-box;
+                    background:#1e1e1e;color:#f0f0f0;border:1px solid #f0a500;margin-bottom:6px;">
+                <div style="display:flex;gap:8px;">
+                    <button onclick="applyClusterAssignment('${techKey}')"
+                        style="flex:1;background:#28a745;color:#fff;border:none;
+                        border-radius:6px;padding:7px;cursor:pointer;font-weight:bold;">
+                        Save Cluster
+                    </button>
+                    <button onclick="document.getElementById('routePopover').remove()"
+                        style="background:#555;color:#fff;border:none;
+                        border-radius:6px;padding:7px 12px;cursor:pointer;">
+                        Cancel
+                    </button>
                 </div>
             `;
 
@@ -3442,8 +3443,9 @@ function distanceMatrixStatus(state) {
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                         <strong>${tech} (${items.length})</strong>
                         <div>
-                            <button class="control-btn" style="background:#17a2b8; color:white;" onclick="showRoutePopover(event,'${techKey}')">🗺️ Route</button>
+                            <button class="control-btn" style="background:#17a2b8; color:white;" onclick="openTechRoute('${techKey}')">🗺️ Route</button>
                             <button class="control-btn" style="background:#d68910; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
+                            <button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍</button>
                         </div>
                     </div>
                     ${routeSummary ? `<div style="font-size:12px;color:#888;margin-bottom:4px;">📏 ${routeSummary} total</div>` : ''}
