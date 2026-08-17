@@ -4157,6 +4157,11 @@ function distanceMatrixStatus(state) {
                     movedStop.needsFallbackAssignment = false;
                     if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
                     window.currentAssignments[newTech].unshift(movedStop);
+                    // Persist THIS assignment as a manual override so it's honored on
+                    // reprocess/reload -- without this, neither modal button survives
+                    // logout+login when primary+fallback are both unavailable, since
+                    // the reprocess logic only skips re-deriving when assignedBy==='manual'.
+                    syncAssignmentToSupabase(newTech, movedStop, 'planned', 'manual');
                 }
                 renderReviewBoard(true);
                 div.remove();
