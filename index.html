@@ -2649,18 +2649,30 @@ function distanceMatrixStatus(state) {
                 `<option value="${c}">${c}</option>`
             ).join('');
 
+            const stopCheckboxes = data.codes.map(code => {
+                const loc = LOCATIONS[code];
+                const label = loc && loc.name ? `${code} - ${loc.name}` : code;
+                return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px;">
+                    <input type="checkbox" class="cluster-stop-cb" value="${code}" checked>
+                    <span>${label}</span>
+                </label>`;
+            }).join('');
+
             const popover = document.createElement('div');
             popover.id = 'routePopover';
             popover.style.cssText = `
                 position:fixed; z-index:9999;
                 background:#2c2c2c; border:1px solid #555; border-radius:10px;
                 padding:14px; box-shadow:0 6px 20px rgba(0,0,0,0.6);
-                min-width:260px; font-size:14px; color:#f0f0f0;
+                min-width:260px; max-width:320px; font-size:14px; color:#f0f0f0;
             `;
 
             popover.innerHTML = `
                 <div style="font-weight:bold;margin-bottom:10px;color:#f0a500;">📍 Set Cluster</div>
-                <div style="margin-bottom:6px;color:#ccc;font-size:13px;">Set cluster for these stops:</div>
+                <div style="margin-bottom:6px;color:#ccc;font-size:13px;">Include these stops:</div>
+                <div style="max-height:160px;overflow-y:auto;border:1px solid #444;border-radius:6px;padding:6px 8px;margin-bottom:10px;">
+                    ${stopCheckboxes}
+                </div>
                 <select id="clusterSelect" style="width:100%;padding:6px;border-radius:6px;
                     background:#1e1e1e;color:#f0f0f0;border:1px solid #555;margin-bottom:6px;">
                     <option value="">— Select or type new —</option>
@@ -2735,11 +2747,17 @@ function distanceMatrixStatus(state) {
             const data = window.techRouteData && window.techRouteData[techKey];
             if (!data || !data.codes.length) return;
 
+            const checkedCodes = Array.from(document.querySelectorAll('.cluster-stop-cb:checked')).map(cb => cb.value);
+            if (checkedCodes.length === 0) {
+                showToast('⚠️ Select at least one stop to include.');
+                return;
+            }
+
             document.getElementById('routePopover').remove();
-            showToast(`Saving cluster "${clusterName}" for ${data.codes.length} location(s)...`, 8000);
+            showToast(`Saving cluster "${clusterName}" for ${checkedCodes.length} location(s)...`, 8000);
 
             let saved = 0, failed = 0;
-            for (const code of data.codes) {
+            for (const code of checkedCodes) {
                 const loc = LOCATIONS[code];
                 if (!loc) continue;
                 try {
