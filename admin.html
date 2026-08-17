@@ -991,7 +991,8 @@
                 var data = await res.json();
                 if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
                 if (!data.found) {
-                    geoEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:#999;">📍 No Maps match found for "' + esc(g.account_name_raw) + '" — try the manual search below.</div>';
+                    geoEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:#999;">📍 No Maps match found for "' + esc(g.account_name_raw) + '" — ' +
+                        '<span style="color:#e05050;">' + esc(data.reason || 'unknown reason') + '</span> — try the manual search below.</div>';
                     return;
                 }
                 var ns = data.nearestSite;
