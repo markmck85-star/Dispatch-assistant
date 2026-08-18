@@ -106,6 +106,11 @@
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
     <div class="import-box">
       <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" id="autoSyncToggle" onchange="toggleAutoSync()" checked>
+        Automatic sync every 20 minutes
+      </label>
+      <div id="autoSyncToggleStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
       <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
       <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
 
@@ -666,6 +671,54 @@ let syncTriggeredAt = null;
 let hasSeenInProgress = false;
 const START_GRACE_PERIOD_MS = 20000; // background function can take a few seconds to actually start and write its in-progress flag -- don't call it "finished" before it's even begun
 
+// ── Auto-sync on/off toggle (rebuilt 2026-08-18 -- the checkbox existed
+// once per earlier notes but was missing from the live file, likely lost in
+// a later upload that reverted to an older base version). Reads/writes the
+// exact same Blobs key (dispatch store, "settings/global",
+// salesforceReportSyncEnabled) the background function itself checks --
+// no new backend endpoint needed, get-settings/save-settings already
+// support it generically.
+async function loadAutoSyncToggle() {
+  const cb = document.getElementById('autoSyncToggle');
+  const statusEl = document.getElementById('autoSyncToggleStatus');
+  try {
+    const res = await fetch('/.netlify/functions/get-settings');
+    const data = await res.json();
+    // Absence of the field (never explicitly set) means enabled -- matches
+    // the background function's own check, which only skips on a literal
+    // `=== false`.
+    cb.checked = data.settings?.salesforceReportSyncEnabled !== false;
+  } catch (err) {
+    statusEl.textContent = 'Could not load setting -- assuming enabled.';
+  }
+}
+
+async function toggleAutoSync() {
+  const cb = document.getElementById('autoSyncToggle');
+  const statusEl = document.getElementById('autoSyncToggleStatus');
+  const enabled = cb.checked;
+  cb.disabled = true;
+  statusEl.textContent = 'Saving…';
+  try {
+    const res = await fetch('/.netlify/functions/save-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: 'global', salesforceReportSyncEnabled: enabled })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    statusEl.textContent = enabled
+      ? 'Automatic sync is ON -- runs every 20 minutes.'
+      : 'Automatic sync is OFF -- scheduled runs will exit immediately. Refresh Now still works.';
+  } catch (err) {
+    statusEl.textContent = 'Failed to save: ' + err.message;
+    cb.checked = !enabled; // revert the checkbox to match what's actually saved
+  } finally {
+    cb.disabled = false;
+  }
+}
+document.addEventListener('DOMContentLoaded', loadAutoSyncToggle);
+
 async function triggerManualSync() {
   const btn = document.getElementById('refreshNowBtn');
   const statusEl = document.getElementById('refreshStatus');
@@ -678,8 +731,12 @@ async function triggerManualSync() {
   try {
     // Fire-and-forget -- the -background suffix means Netlify acknowledges
     // this immediately and keeps the actual work running server-side even
-    // after this fetch resolves.
-    fetch('/.netlify/functions/salesforce-report-sync-background', { method: 'POST' }).catch(() => {});
+    // after this fetch resolves. force=1 tells the background function to
+    // ignore the auto-sync-disabled setting -- WITHOUT this, Refresh Now
+    // silently ran the exact same "check toggle, exit if disabled" logic as
+    // the scheduled run, which is why it looked broken whenever the toggle
+    // was off (found 2026-08-18).
+    fetch('/.netlify/functions/salesforce-report-sync-background?force=1', { method: 'POST' }).catch(() => {});
   } catch (err) {
     // Even if the initial fetch itself fails to fire, still start polling --
     // the scheduled run might pick it up, and polling will just show idle.
