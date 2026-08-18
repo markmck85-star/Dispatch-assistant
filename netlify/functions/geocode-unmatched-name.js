@@ -95,8 +95,7 @@ exports.handler = async (event) => {
     if (!res.ok) return json(502, { ok: false, error: 'Places HTTP ' + res.status });
     const data = await res.json();
     if (data.status !== 'OK' || !data.candidates?.length) {
-      const reason = data.status + (data.error_message ? ': ' + data.error_message : '');
-      return json(200, { ok: true, found: false, reason, query });
+      return json(200, { ok: true, found: false, reason: data.status || 'ZERO_RESULTS', query });
     }
     place = data.candidates[0];
   } catch (e) {
