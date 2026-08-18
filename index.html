@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>MCR Dispatch Hub v9.78 (blobs-149)</title>
+
+    <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
+         command bar. Loaded from unpkg as a plain (non-async) script so `L` is
+         defined by the time the inline script's DOMContentLoaded handler calls
+         renderDispatchMap(). Subresource integrity hashes are the ones Leaflet
+         publishes for this exact version. Basemap tiles are OpenStreetMap
+         raster tiles -- free, keyless, and the only network calls the map makes. -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.6; font-size: 16px; }
@@ -100,6 +111,37 @@
         .tech-cards-grid { columns: 280px; column-gap: 14px; }
         .tech-cards-grid .tech-card { break-inside: avoid; margin-bottom: 14px; }
 
+        /* ── ROUTE MAP VISUALIZER ──────────────────────────────────────
+           The panel deliberately lives outside #results: renderReviewBoard()
+           replaces that node's entire innerHTML on every board change, so a
+           map mounted inside it would be destroyed and rebuilt (losing pan,
+           zoom and re-requesting every tile) on each reorder. Keeping the
+           node stable lets one Leaflet instance live for the whole session.
+           position/z-index keep Leaflet's internal panes (z-index up to 800)
+           underneath the report overlay and floating controls pill. */
+        .map-panel { display: none; position: relative; z-index: 0; background: #1e1e1e; border: 1px solid #444; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+        .map-panel.visible { display: block; }
+        .map-panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .map-panel-title { font-weight: bold; color: #7ec8e3; font-size: 14px; }
+        .map-panel-meta { font-size: 11px; color: #888; margin-left: auto; text-align: right; }
+        #mapToggleBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        #mapToggleBtn:hover { background: #33334a; }
+        .map-panel-body { margin-top: 10px; }
+        .map-panel.collapsed .map-panel-body { display: none; }
+        #dispatchMap { height: 320px; border-radius: 6px; background: #2a2a2a; }
+        #dispatchMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
+        .map-legend-chip:hover { border-color: #7ec8e3; }
+        .map-legend-chip.off { opacity: 0.45; text-decoration: line-through; }
+        .map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
+        /* Stop pins are divIcons rather than images, so each tech's route colour
+           can be applied inline -- one shared shape instead of a PNG per colour. */
+        .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
+        .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+        .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
+
         /* ── Desktop responsive layout ── */
         @media (min-width: 960px) {
             body { padding: 24px 40px; font-size: 18px; background: #e8e8e8; }
@@ -165,6 +207,7 @@
             .desktop-layout { display: flex; align-items: flex-start; gap: 28px; }
             .input-panel { flex: 0 0 380px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; transition: flex-basis 0.25s ease, opacity 0.2s ease; }
             .results-panel { flex: 1 1 auto; min-width: 0; }
+            #dispatchMap { height: 480px; }
             .desktop-layout.controls-collapsed .input-panel {
                 flex: 0 0 0;
                 width: 0;
@@ -318,6 +361,25 @@
             </div>
 
             <div class="results-panel">
+                <!-- ROUTE MAP VISUALIZER -->
+                <!-- Sits above the technician cards and outside #results on
+                     purpose (see .map-panel CSS). Stays hidden until a board
+                     with plottable coordinates exists; the collapse state is
+                     remembered in localStorage the same way the controls panel
+                     does it. -->
+                <div id="dispatchMapPanel" class="map-panel">
+                    <div class="map-panel-head">
+                        <span class="map-panel-title">&#x1F5FA;&#xFE0F; Map View</span>
+                        <button type="button" id="mapToggleBtn" onclick="toggleDispatchMap()"
+                            aria-expanded="true" aria-controls="dispatchMapBody">Hide Map</button>
+                        <span id="dispatchMapMeta" class="map-panel-meta"></span>
+                    </div>
+                    <div id="dispatchMapBody" class="map-panel-body">
+                        <div id="dispatchMap"></div>
+                        <div id="dispatchMapLegend"></div>
+                        <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
+                    </div>
+                </div>
                 <div id="results" class="results hidden"></div>
             </div>
         </div>
@@ -2858,6 +2920,11 @@ function distanceMatrixStatus(state) {
             if (codesInput && codesInput.value.trim()) {
                 processDispatch();
             }
+            // Region switch swapped LOCATIONS/TECHS out from under the map, so
+            // re-fit to the stops that belong to the state now being viewed.
+            // processDispatch() above is async and will repaint again when it
+            // finishes; this handles the case where it never runs.
+            if (typeof renderDispatchMap === 'function') renderDispatchMap();
         }
 
         function parseInputs(text) {
@@ -3637,6 +3704,12 @@ function distanceMatrixStatus(state) {
                     checkTrafficForTech(tech);
                 }
             });
+            // Repaint the route map from the board that was just rendered. Every
+            // path that changes assignments -- arrow moves, move-to-top, sort,
+            // reassign, done/cancel/tomorrow, undo, and an applied AI diff --
+            // funnels through here, so this one call keeps the map in step with
+            // the tiles without each of those callers knowing the map exists.
+            if (typeof renderDispatchMap === 'function') renderDispatchMap();
         }
 
         // ── DRIVE TIME TOGGLE ────────────────────────────────────────────
@@ -4507,6 +4580,10 @@ function distanceMatrixStatus(state) {
         function generateFinalMessages() {
             const resultsDiv = document.getElementById('results');
             const dateInput = document.getElementById('dispatchDate');
+            // The messages view replaces the board; the map lives outside
+            // #results so it has to be hidden explicitly. The "Back" button
+            // calls renderReviewBoard(), which brings it back.
+            hideDispatchMapPanel();
             
             let dispatchDate = new Date();
             if (dateInput && dateInput.value) {
@@ -5550,7 +5627,10 @@ ${content}</body></html>`;
                 if (changed.length) {
                     applyAiRoutes(data.routes);
                     // Immediate UI refresh so the tech tiles reflect the change
-                    // without the dispatcher touching anything.
+                    // without the dispatcher touching anything. This also
+                    // repaints the route map -- renderReviewBoard() ends with a
+                    // renderDispatchMap() call -- so an applied diff moves the
+                    // pins and polylines in the same frame as the tiles.
                     renderReviewBoard(true);
                     if (typeof buildPrintableReport === 'function' && window._lastDateStr) {
                         buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
@@ -5646,7 +5726,335 @@ ${content}</body></html>`;
             if ((document.getElementById('aiCommandStatus') || {}).textContent === 'Listening…') setAiStatus('');
         }
 
-        document.addEventListener('DOMContentLoaded', refreshAiBarState);
+        // ═══════════════════════════════════════════════════════════════════
+        // ROUTE MAP VISUALIZER — v1, added 2026-08-18
+        //
+        // Draws the current board on a Leaflet map above the tech cards: one
+        // colour per technician, numbered pins in visit order, polylines in that
+        // same order, and a dashed hop from the tech's start location to stop 1
+        // (the "from home" leg the cards already price out).
+        //
+        // Everything is read from the same in-memory state the cards render
+        // from -- window.currentAssignments for the routes, LOCATIONS/TECHS for
+        // coordinates, getCachedLegInfo() for mileage -- so the map can never
+        // disagree with the tiles next to it, and drawing it costs no network
+        // calls beyond OpenStreetMap's free raster tiles.
+        //
+        // renderDispatchMap() is idempotent and cheap enough to call on every
+        // board change; renderReviewBoard() is the single place that does so,
+        // which is why reorders, reassignments, sorts and applied AI diffs all
+        // repaint the map without each of those paths knowing the map exists.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Ordered so neighbours in the legend stay far apart on the colour wheel,
+        // and all dark enough to read as lines over OSM's light basemap.
+        const MAP_ROUTE_COLORS = [
+            '#e6194b', '#0071c5', '#2e9e3e', '#f07d02', '#8e24aa',
+            '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
+        ];
+
+        let _dispatchMap = null;
+        let _dispatchMapLayers = {};              // tech name -> L.LayerGroup
+        let _dispatchMapHiddenTechs = new Set();  // legend chips toggled off
+        let _dispatchMapBounds = null;            // last fit target, for re-fits
+
+        /**
+         * Same tech ordering the board uses (same-day techs first, each group
+         * alphabetical) so legend colours line up with the card order instead of
+         * shuffling when someone's stops change bucket.
+         */
+        function dispatchMapTechOrder(assignments) {
+            const withStops = Object.keys(assignments)
+                .filter(t => (assignments[t] || []).length > 0).sort();
+            const sameDay  = withStops.filter(t => assignments[t].some(i => i.isSameDay));
+            const tomorrow = withStops.filter(t => !assignments[t].some(i => i.isSameDay));
+            return [...new Set([...sameDay, ...tomorrow])];
+        }
+
+        /** One Leaflet instance for the life of the page; created on first use. */
+        function ensureDispatchMap() {
+            if (_dispatchMap) return _dispatchMap;
+            const el = document.getElementById('dispatchMap');
+            if (!el || typeof L === 'undefined') return null;
+
+            _dispatchMap = L.map(el, { scrollWheelZoom: false });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(_dispatchMap);
+            _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds
+
+            // Wheel zoom is off until the map is clicked, so scrolling past a
+            // long board doesn't hijack the page scroll into a zoom.
+            _dispatchMap.on('click', () => _dispatchMap.scrollWheelZoom.enable());
+            _dispatchMap.on('mouseout', () => _dispatchMap.scrollWheelZoom.disable());
+            return _dispatchMap;
+        }
+
+        /**
+         * Rebuilds every route layer from the live board and re-fits the view.
+         *
+         * Layers are thrown away and rebuilt rather than diffed: stop order,
+         * pin numbers and the tech list all move together on a reassignment, so
+         * a diff would touch nearly every layer anyway.
+         */
+        function renderDispatchMap() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (!panel) return;
+
+            // Leaflet is a CDN dependency. If it was blocked or is still in
+            // flight, the board has to keep working -- the panel just stays out
+            // of the way rather than throwing on every render.
+            if (typeof L === 'undefined') { panel.classList.remove('visible'); return; }
+
+            const assignments = window.currentAssignments || {};
+            const routes = [];
+            const unmappedCodes = [];
+            let stopCount = 0;
+            let fleetMi = 0;
+
+            dispatchMapTechOrder(assignments).forEach((tech, techIndex) => {
+                const pts = [];
+                let prevCode = null;
+                (assignments[tech] || []).forEach(item => {
+                    const loc = LOCATIONS[item.code];
+                    if (!loc || loc.lat == null || loc.lng == null) {
+                        unmappedCodes.push(item.code);
+                        return;
+                    }
+                    // Same cached matrix/haversine numbers the cards show; wrapped
+                    // because a code with no LOCATIONS entry upstream would throw.
+                    let leg = null;
+                    try { leg = getCachedLegInfo(tech, prevCode, item.code); } catch (err) { leg = null; }
+                    if (leg && leg.distanceMi != null) fleetMi += leg.distanceMi;
+                    pts.push({ lat: Number(loc.lat), lng: Number(loc.lng), item: item, loc: loc, leg: leg });
+                    prevCode = item.code;
+                });
+                if (!pts.length) return;
+
+                const info = TECHS[tech] || {};
+                const home = (info.lat != null && info.lng != null)
+                    ? { lat: Number(info.lat), lng: Number(info.lng), label: info.startLocation || '' }
+                    : null;
+                routes.push({
+                    tech: tech,
+                    color: MAP_ROUTE_COLORS[techIndex % MAP_ROUTE_COLORS.length],
+                    // Past the end of the palette colours repeat, so those routes
+                    // are drawn dashed to stay distinguishable.
+                    dashed: techIndex >= MAP_ROUTE_COLORS.length,
+                    pts: pts,
+                    home: home
+                });
+                stopCount += pts.length;
+            });
+
+            if (!routes.length) {
+                Object.keys(_dispatchMapLayers).forEach(t => {
+                    if (_dispatchMap) _dispatchMap.removeLayer(_dispatchMapLayers[t]);
+                });
+                _dispatchMapLayers = {};
+                panel.classList.remove('visible');
+                return;
+            }
+
+            // Panel must be visible before the map is built or measured: Leaflet
+            // reads zero dimensions out of a display:none container.
+            panel.classList.add('visible');
+            const map = ensureDispatchMap();
+            if (!map) { panel.classList.remove('visible'); return; }
+
+            Object.keys(_dispatchMapLayers).forEach(t => map.removeLayer(_dispatchMapLayers[t]));
+            _dispatchMapLayers = {};
+
+            // Drop hide flags for techs who no longer hold stops, so someone who
+            // was toggled off, emptied out and later refilled comes back visible.
+            const activeTechs = new Set(routes.map(r => r.tech));
+            [..._dispatchMapHiddenTechs].forEach(t => {
+                if (!activeTechs.has(t)) _dispatchMapHiddenTechs.delete(t);
+            });
+
+            const allPoints = [];
+            const visiblePoints = [];
+
+            routes.forEach(route => {
+                const group = L.layerGroup();
+                const latlngs = route.pts.map(p => [p.lat, p.lng]);
+                const shown = !_dispatchMapHiddenTechs.has(route.tech);
+                const collect = point => {
+                    allPoints.push(point);
+                    if (shown) visiblePoints.push(point);
+                };
+
+                if (route.home) {
+                    L.polyline([[route.home.lat, route.home.lng], latlngs[0]], {
+                        color: route.color, weight: 2, opacity: 0.55, dashArray: '4,7'
+                    }).addTo(group);
+                    L.marker([route.home.lat, route.home.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div class="map-home-pin" style="background:' + route.color + ';">&#x1F3E0;</div>',
+                            iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                        }),
+                        title: route.tech + ' — start'
+                    }).bindPopup(
+                        '<div class="map-pop-code">' + escapeAiHtml(route.tech) + ' — start</div>'
+                        + (route.home.label ? '<div style="color:#666;">' + escapeAiHtml(route.home.label) + '</div>' : '')
+                    ).addTo(group);
+                    collect([route.home.lat, route.home.lng]);
+                }
+
+                if (latlngs.length > 1) {
+                    L.polyline(latlngs, {
+                        color: route.color,
+                        weight: 3.5,
+                        opacity: 0.85,
+                        dashArray: route.dashed ? '9,6' : null
+                    }).addTo(group);
+                }
+
+                route.pts.forEach((p, i) => {
+                    const legLabel = p.leg && p.leg.distanceMi != null
+                        ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
+                            + (p.leg.durationMin != null ? ' · ' + p.leg.durationMin + ' min' : '')
+                            + (p.leg.isReal ? '' : ' (est.)')
+                            + (i === 0 ? ' from home' : ' from prev. stop')
+                        : '';
+                    L.marker([p.lat, p.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div class="map-stop-pin" style="background:' + route.color + ';">' + (i + 1) + '</div>',
+                            iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -13]
+                        }),
+                        title: 'Stop ' + (i + 1) + ' — ' + p.item.code + ' (' + route.tech + ')'
+                    }).bindPopup(
+                        '<div class="map-pop-code">Stop ' + (i + 1) + ' — ' + escapeAiHtml(p.item.code) + '</div>'
+                        + '<div>' + escapeAiHtml(p.loc.name || '') + '</div>'
+                        + (p.loc.address ? '<div style="color:#666;">' + escapeAiHtml(p.loc.address) + '</div>' : '')
+                        + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;'
+                        + 'border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>'
+                        + escapeAiHtml(route.tech) + '</div>'
+                        + (legLabel ? '<div style="color:#666;">&#x1F4CF; ' + escapeAiHtml(legLabel) + '</div>' : '')
+                    ).addTo(group);
+                    collect([p.lat, p.lng]);
+                });
+
+                _dispatchMapLayers[route.tech] = group;
+                if (shown) group.addTo(map);
+            });
+
+            // Fit to what's actually on screen; fall back to everything when the
+            // dispatcher has hidden every route.
+            _dispatchMapBounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
+            fitDispatchMapBounds();
+            renderDispatchMapLegend(routes);
+
+            const meta = document.getElementById('dispatchMapMeta');
+            if (meta) {
+                meta.textContent = routes.length + (routes.length === 1 ? ' tech · ' : ' techs · ')
+                    + stopCount + (stopCount === 1 ? ' stop · ' : ' stops · ')
+                    + (Math.round(fleetMi * 10) / 10) + ' mi';
+            }
+
+            const note = document.getElementById('dispatchMapNote');
+            if (note) {
+                const missing = [...new Set(unmappedCodes)];
+                note.style.display = missing.length ? '' : 'none';
+                note.textContent = missing.length
+                    ? '⚠ Not plotted (no coordinates on file): ' + missing.join(', ')
+                    : '';
+            }
+        }
+
+        /**
+         * Leaflet cannot measure a collapsed container, so fitting is skipped
+         * while the body is hidden and redone by toggleDispatchMap() on expand.
+         */
+        function fitDispatchMapBounds() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (!_dispatchMap || !_dispatchMapBounds || !_dispatchMapBounds.isValid()) return;
+            if (!panel || !panel.classList.contains('visible') || panel.classList.contains('collapsed')) return;
+
+            _dispatchMap.invalidateSize();
+            if (_dispatchMapBounds.getNorthEast().equals(_dispatchMapBounds.getSouthWest())) {
+                _dispatchMap.setView(_dispatchMapBounds.getCenter(), 12); // single stop
+            } else {
+                _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
+            }
+        }
+
+        function renderDispatchMapLegend(routes) {
+            const el = document.getElementById('dispatchMapLegend');
+            if (!el) return;
+            const chips = routes.map(route => {
+                // Escaped twice on purpose: once so the name survives as a JS
+                // string literal, once so it survives as an HTML attribute.
+                const arg = escapeAiHtml(route.tech.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+                return '<span class="map-legend-chip' + (_dispatchMapHiddenTechs.has(route.tech) ? ' off' : '') + '"'
+                    + ' onclick="toggleDispatchMapTech(\'' + arg + '\')" title="Show or hide this route">'
+                    + '<span class="map-legend-swatch" style="background:' + route.color + ';"></span>'
+                    + escapeAiHtml(route.tech) + ' (' + route.pts.length + ')</span>';
+            });
+            if (_dispatchMapHiddenTechs.size) {
+                chips.push('<span class="map-legend-chip" onclick="showAllDispatchMapTechs()"'
+                    + ' title="Bring every hidden route back">&#x2942; Show all</span>');
+            }
+            el.innerHTML = chips.join('');
+        }
+
+        /** Legend chip click — hide or restore one tech's route. */
+        function toggleDispatchMapTech(tech) {
+            if (_dispatchMapHiddenTechs.has(tech)) _dispatchMapHiddenTechs.delete(tech);
+            else _dispatchMapHiddenTechs.add(tech);
+            renderDispatchMap(); // re-fits the view and repaints the legend
+        }
+
+        function showAllDispatchMapTechs() {
+            _dispatchMapHiddenTechs.clear();
+            renderDispatchMap();
+        }
+
+        function toggleDispatchMap() {
+            const panel = document.getElementById('dispatchMapPanel');
+            const btn = document.getElementById('mapToggleBtn');
+            if (!panel) return;
+            const collapsed = panel.classList.toggle('collapsed');
+            if (btn) {
+                btn.textContent = collapsed ? 'Show Map' : 'Hide Map';
+                btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
+            try { localStorage.setItem('mcr_map_collapsed', collapsed ? '1' : '0'); } catch (err) { /* silent */ }
+            // First expand is the first time the container has real dimensions,
+            // so this is where the deferred measure-and-fit happens.
+            if (!collapsed) fitDispatchMapBounds();
+        }
+
+        function restoreDispatchMapState() {
+            const panel = document.getElementById('dispatchMapPanel');
+            const btn = document.getElementById('mapToggleBtn');
+            if (!panel) return;
+            let collapsed = false;
+            try { collapsed = localStorage.getItem('mcr_map_collapsed') === '1'; } catch (err) { /* silent */ }
+            panel.classList.toggle('collapsed', collapsed);
+            if (btn) {
+                btn.textContent = collapsed ? 'Show Map' : 'Hide Map';
+                btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
+        }
+
+        /** Used by the views that take over #results (messages, mobile report). */
+        function hideDispatchMapPanel() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (panel) panel.classList.remove('visible');
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshAiBarState();
+            restoreDispatchMapState();
+            // Page-load paint: window.onload may still rebuild the board from
+            // saved dispatch text afterwards, and that lands back here through
+            // renderReviewBoard().
+            renderDispatchMap();
+        });
 
     </script>
     <!-- Site History Modal -->
