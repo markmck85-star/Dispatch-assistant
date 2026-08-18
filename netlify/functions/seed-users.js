@@ -1,16 +1,18 @@
-const { getStore } = require("@netlify/blobs");
+const { getStore, connectLambda } = require("@netlify/blobs");
 
 function json(statusCode, obj) {
   return { statusCode, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
 }
 
 exports.handler = async (event) => {
+  connectLambda(event);
+
   if (event.httpMethod !== "POST") {
     return json(405, { error: "Method Not Allowed" });
   }
 
   try {
-    const store = getStore({ name: "dispatch", siteID: process.env.SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN });
+    const store = getStore("dispatch");
     const existing = await store.get("users", { type: "json" });
 
     if (existing && existing.length > 0) {
