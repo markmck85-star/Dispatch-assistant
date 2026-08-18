@@ -5,7 +5,7 @@
 [functions."bluefolder-sync"]
   schedule = "0,30 * * * *"
 
-[functions."salesforce-report-sync-background"]
+[functions."salesforce-report-sync-trigger"]
   schedule = "*/20 * * * *"
 
 [functions."check-report-sync-health"]
