@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>MCR Dispatch Hub v9.78 (blobs-149)</title>
+
+    <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
+         command bar. Loaded from unpkg as a plain (non-async) script so `L` is
+         defined by the time the inline script's DOMContentLoaded handler calls
+         renderDispatchMap(). Subresource integrity hashes are the ones Leaflet
+         publishes for this exact version. Basemap tiles are OpenStreetMap
+         raster tiles -- free, keyless, and the only network calls the map makes. -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.6; font-size: 16px; }
@@ -100,6 +111,37 @@
         .tech-cards-grid { columns: 280px; column-gap: 14px; }
         .tech-cards-grid .tech-card { break-inside: avoid; margin-bottom: 14px; }
 
+        /* ── ROUTE MAP VISUALIZER ──────────────────────────────────────
+           The panel deliberately lives outside #results: renderReviewBoard()
+           replaces that node's entire innerHTML on every board change, so a
+           map mounted inside it would be destroyed and rebuilt (losing pan,
+           zoom and re-requesting every tile) on each reorder. Keeping the
+           node stable lets one Leaflet instance live for the whole session.
+           position/z-index keep Leaflet's internal panes (z-index up to 800)
+           underneath the report overlay and floating controls pill. */
+        .map-panel { display: none; position: relative; z-index: 0; background: #1e1e1e; border: 1px solid #444; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+        .map-panel.visible { display: block; }
+        .map-panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .map-panel-title { font-weight: bold; color: #7ec8e3; font-size: 14px; }
+        .map-panel-meta { font-size: 11px; color: #888; margin-left: auto; text-align: right; }
+        #mapToggleBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        #mapToggleBtn:hover { background: #33334a; }
+        .map-panel-body { margin-top: 10px; }
+        .map-panel.collapsed .map-panel-body { display: none; }
+        #dispatchMap { height: 320px; border-radius: 6px; background: #2a2a2a; }
+        #dispatchMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
+        .map-legend-chip:hover { border-color: #7ec8e3; }
+        .map-legend-chip.off { opacity: 0.45; text-decoration: line-through; }
+        .map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
+        /* Stop pins are divIcons rather than images, so each tech's route colour
+           can be applied inline -- one shared shape instead of a PNG per colour. */
+        .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
+        .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+        .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
+
         /* ── Desktop responsive layout ── */
         @media (min-width: 960px) {
             body { padding: 24px 40px; font-size: 18px; background: #e8e8e8; }
@@ -165,6 +207,7 @@
             .desktop-layout { display: flex; align-items: flex-start; gap: 28px; }
             .input-panel { flex: 0 0 380px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; transition: flex-basis 0.25s ease, opacity 0.2s ease; }
             .results-panel { flex: 1 1 auto; min-width: 0; }
+            #dispatchMap { height: 480px; }
             .desktop-layout.controls-collapsed .input-panel {
                 flex: 0 0 0;
                 width: 0;
@@ -195,7 +238,7 @@
                 <div class="top-row">
                     <div>
                         <label>Region:</label>
-                        <select id="stateSelector" onchange="updateContext()">
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink();">
                             <option value="GA">Georgia / NC / SC</option>
                             <option value="FL">Florida</option>
                             <option value="MI">Michigan</option>
@@ -209,6 +252,7 @@
                             <option value="WV">West Virginia</option>
                             <option value="OR">Oregon</option>
                         </select>
+                        <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:6px;padding:4px 10px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;">🐕 Watchdog</a>
                     </div>
                     <div>
                         <label>Dispatch Date:</label>
@@ -224,6 +268,26 @@
                             <option value="3000" selected>3,000</option>
                         </select>
                     </div>
+                </div>
+
+                <!-- AI DISPATCH ASSISTANT COMMAND BAR -->
+                <!-- Compact voice/text command bar. Only useful once a board
+                     exists, so it stays disabled until processDispatch() has
+                     populated window.currentAssignments (see refreshAiBarState). -->
+                <div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
+                        <input type="text" id="aiCommandInput" autocomplete="off"
+                            placeholder='e.g. "move stop 2 from Robert to Keontae"'
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();submitAiCommand();}"
+                            style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+                        <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
+                            style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+                        <button type="button" id="aiSendBtn" onclick="submitAiCommand()"
+                            style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+                    </div>
+                    <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
+                    <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
                 </div>
 
                 <!-- AVAILABILITY PANEL -->
@@ -297,6 +361,25 @@
             </div>
 
             <div class="results-panel">
+                <!-- ROUTE MAP VISUALIZER -->
+                <!-- Sits above the technician cards and outside #results on
+                     purpose (see .map-panel CSS). Stays hidden until a board
+                     with plottable coordinates exists; the collapse state is
+                     remembered in localStorage the same way the controls panel
+                     does it. -->
+                <div id="dispatchMapPanel" class="map-panel">
+                    <div class="map-panel-head">
+                        <span class="map-panel-title">&#x1F5FA;&#xFE0F; Map View</span>
+                        <button type="button" id="mapToggleBtn" onclick="toggleDispatchMap()"
+                            aria-expanded="true" aria-controls="dispatchMapBody">Hide Map</button>
+                        <span id="dispatchMapMeta" class="map-panel-meta"></span>
+                    </div>
+                    <div id="dispatchMapBody" class="map-panel-body">
+                        <div id="dispatchMap"></div>
+                        <div id="dispatchMapLegend"></div>
+                        <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
+                    </div>
+                </div>
                 <div id="results" class="results hidden"></div>
             </div>
         </div>
@@ -1557,21 +1640,48 @@
             } catch(e) { return dueDateStr; }
         }
 
-        function formatServerSlaTime(isoStr) {
-            // Server-computed SLA/due times (from mailgun-inbound.js) are stored as
-            // naive wall-clock digits labeled UTC, matching calculateSlaDeadline's
-            // existing convention -- must read back with UTC getters, not local
-            // ones, or the displayed time shifts by the browser's own timezone
+        // Mirrors STATE_TIMEZONES in netlify/functions/mailgun-inbound.js --
+        // keep in sync if a new state is added there.
+        const STATE_TIMEZONES = {
+            GA: 'America/New_York', NC: 'America/New_York', SC: 'America/New_York',
+            FL: 'America/New_York', IN: 'America/New_York', OH: 'America/New_York',
+            WV: 'America/New_York', MI: 'America/Detroit', IL: 'America/Chicago',
+            MN: 'America/Chicago', NV: 'America/Los_Angeles', OR: 'America/Los_Angeles',
+            CO: 'America/Denver', ID: 'America/Boise',
+        };
+        function tzForSiteCode(siteCode) {
+            const state = siteCode ? siteCode.substring(0, 2) : 'GA';
+            return STATE_TIMEZONES[state] || 'America/New_York';
+        }
+        function getZonedParts(date, tz) {
+            const dtf = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz, hourCycle: 'h23',
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+            });
+            const parts = {};
+            for (const p of dtf.formatToParts(date)) { if (p.type !== 'literal') parts[p.type] = parseInt(p.value, 10); }
+            return parts;
+        }
+
+        function formatServerSlaTime(isoStr, siteCode) {
+            // Server-computed SLA/due times (from mailgun-inbound.js) are now
+            // stored as genuine UTC instants (fixed 2026-08-15 -- see
+            // calculateSlaDeadline). Must be explicitly projected into the
+            // SITE's own timezone here, not read with raw UTC or browser-local
+            // getters, or the displayed time is wrong by that state's UTC
             // offset. Distinct from formatDueDate, which is only ever used on
-            // values parsed client-side in this same browser (self-consistent,
-            // no cross-environment mismatch, don't touch it).
+            // values computed client-side in this same browser (self-
+            // consistent, no cross-environment mismatch, don't touch it).
             if (!isoStr) return '';
             try {
                 const d = new Date(isoStr);
+                const tz = tzForSiteCode(siteCode);
+                const p = getZonedParts(d, tz);
                 const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                const day = days[d.getUTCDay()];
-                let hours = d.getUTCHours();
-                const mins = String(d.getUTCMinutes()).padStart(2,'0');
+                const day = days[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()];
+                let hours = p.hour;
+                const mins = String(p.minute).padStart(2,'0');
                 const ampm = hours >= 12 ? 'PM' : 'AM';
                 hours = hours % 12 || 12;
                 return `${day} ${hours}:${mins} ${ampm}`;
@@ -2321,9 +2431,19 @@ function distanceMatrixStatus(state) {
             if (collapsed) toggleControls();
         }
 
+        // Keeps the "Watchdog" link pointed at whichever region is currently
+        // selected, using the /watchdog/:state shortcut added to _redirects
+        // 2026-08-12. Called on region change and once on page load.
+        function updateWatchdogLink() {
+            const sel = document.getElementById('stateSelector');
+            const link = document.getElementById('watchdogLink');
+            if (sel && link) link.href = '/watchdog/' + sel.value;
+        }
+
         window.onload = async function() {
             restoreJournalThreshold();
             restoreControlsState();
+            updateWatchdogLink();
             // Restore manual availability overrides from Blobs — auto-clears if date doesn't match today
             try {
                 const res = await fetch('/.netlify/functions/get-availability');
@@ -2422,6 +2542,13 @@ function distanceMatrixStatus(state) {
                 if (ta) {
                     ta.value = savedText;
                     autoDetectDispatchDate(savedText);
+                    // Auto-rebuild the board on load/refresh so it reflects what's
+                    // actually persisted in Supabase, instead of requiring a manual
+                    // "Generate Dispatches" click first. Previously a refresh or
+                    // logout/login left the page showing stale/empty state until
+                    // that click re-ran the derivation logic that honors
+                    // assignedBy==='manual' overrides.
+                    await processDispatch();
                 }
             }
             // Save textarea content on input and auto-detect date
@@ -2575,7 +2702,16 @@ function distanceMatrixStatus(state) {
             JOURNAL_LOW_THRESHOLD = parseInt(saved);
         }
 
-        function showRoutePopover(event, techKey) {
+        // Route button now opens Google Maps directly -- no intermediate popover.
+        // Cluster assignment (rarely used) moved to its own small entry point;
+        // see showClusterPopover below.
+        function openTechRoute(techKey) {
+            const data = window.techRouteData && window.techRouteData[techKey];
+            if (!data || !data.mapLink) return;
+            window.open(data.mapLink, '_blank');
+        }
+
+        function showClusterPopover(event, techKey) {
             // Remove any existing popover
             const existing = document.getElementById('routePopover');
             if (existing) { existing.remove(); return; }
@@ -2595,46 +2731,50 @@ function distanceMatrixStatus(state) {
                 `<option value="${c}">${c}</option>`
             ).join('');
 
+            const stopCheckboxes = data.codes.map(code => {
+                const loc = LOCATIONS[code];
+                const label = loc && loc.name ? `${code} - ${loc.name}` : code;
+                return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px;color:#f0f0f0;font-weight:normal;">
+                    <input type="checkbox" class="cluster-stop-cb" value="${code}" checked>
+                    <span>${label}</span>
+                </label>`;
+            }).join('');
+
             const popover = document.createElement('div');
             popover.id = 'routePopover';
             popover.style.cssText = `
                 position:fixed; z-index:9999;
                 background:#2c2c2c; border:1px solid #555; border-radius:10px;
                 padding:14px; box-shadow:0 6px 20px rgba(0,0,0,0.6);
-                min-width:260px; font-size:14px; color:#f0f0f0;
+                min-width:260px; max-width:320px; font-size:14px; color:#f0f0f0;
             `;
 
             popover.innerHTML = `
-                <div style="font-weight:bold;margin-bottom:10px;color:#f0a500;">🗺️ Route Options</div>
-                <a href="${data.mapLink}" target="_blank"
-                    style="display:block;background:#17a2b8;color:#fff;text-align:center;
-                    padding:8px;border-radius:6px;text-decoration:none;margin-bottom:10px;"
-                    onclick="document.getElementById('routePopover').remove()">
-                    🗺️ Show Route
-                </a>
-                <div style="border-top:1px solid #444;padding-top:10px;">
-                    <div style="margin-bottom:6px;color:#ccc;font-size:13px;">📍 Set Cluster for these stops:</div>
-                    <select id="clusterSelect" style="width:100%;padding:6px;border-radius:6px;
-                        background:#1e1e1e;color:#f0f0f0;border:1px solid #555;margin-bottom:6px;">
-                        <option value="">— Select or type new —</option>
-                        ${clusterOptions}
-                        <option value="__new__">✏️ New cluster...</option>
-                    </select>
-                    <input id="clusterNewInput" type="text" placeholder="New cluster name..."
-                        style="display:none;width:100%;padding:6px;border-radius:6px;box-sizing:border-box;
-                        background:#1e1e1e;color:#f0f0f0;border:1px solid #f0a500;margin-bottom:6px;">
-                    <div style="display:flex;gap:8px;">
-                        <button onclick="applyClusterAssignment('${techKey}')"
-                            style="flex:1;background:#28a745;color:#fff;border:none;
-                            border-radius:6px;padding:7px;cursor:pointer;font-weight:bold;">
-                            Save Cluster
-                        </button>
-                        <button onclick="document.getElementById('routePopover').remove()"
-                            style="background:#555;color:#fff;border:none;
-                            border-radius:6px;padding:7px 12px;cursor:pointer;">
-                            Cancel
-                        </button>
-                    </div>
+                <div style="font-weight:bold;margin-bottom:10px;color:#f0a500;">📍 Set Cluster</div>
+                <div style="margin-bottom:6px;color:#ccc;font-size:13px;">Include these stops:</div>
+                <div style="max-height:160px;overflow-y:auto;border:1px solid #444;border-radius:6px;padding:6px 8px;margin-bottom:10px;">
+                    ${stopCheckboxes}
+                </div>
+                <select id="clusterSelect" style="width:100%;padding:6px;border-radius:6px;
+                    background:#1e1e1e;color:#f0f0f0;border:1px solid #555;margin-bottom:6px;">
+                    <option value="">— Select or type new —</option>
+                    ${clusterOptions}
+                    <option value="__new__">✏️ New cluster...</option>
+                </select>
+                <input id="clusterNewInput" type="text" placeholder="New cluster name..."
+                    style="display:none;width:100%;padding:6px;border-radius:6px;box-sizing:border-box;
+                    background:#1e1e1e;color:#f0f0f0;border:1px solid #f0a500;margin-bottom:6px;">
+                <div style="display:flex;gap:8px;">
+                    <button onclick="applyClusterAssignment('${techKey}')"
+                        style="flex:1;background:#28a745;color:#fff;border:none;
+                        border-radius:6px;padding:7px;cursor:pointer;font-weight:bold;">
+                        Save Cluster
+                    </button>
+                    <button onclick="document.getElementById('routePopover').remove()"
+                        style="background:#555;color:#fff;border:none;
+                        border-radius:6px;padding:7px 12px;cursor:pointer;">
+                        Cancel
+                    </button>
                 </div>
             `;
 
@@ -2689,11 +2829,17 @@ function distanceMatrixStatus(state) {
             const data = window.techRouteData && window.techRouteData[techKey];
             if (!data || !data.codes.length) return;
 
+            const checkedCodes = Array.from(document.querySelectorAll('.cluster-stop-cb:checked')).map(cb => cb.value);
+            if (checkedCodes.length === 0) {
+                showToast('⚠️ Select at least one stop to include.');
+                return;
+            }
+
             document.getElementById('routePopover').remove();
-            showToast(`Saving cluster "${clusterName}" for ${data.codes.length} location(s)...`, 8000);
+            showToast(`Saving cluster "${clusterName}" for ${checkedCodes.length} location(s)...`, 8000);
 
             let saved = 0, failed = 0;
-            for (const code of data.codes) {
+            for (const code of checkedCodes) {
                 const loc = LOCATIONS[code];
                 if (!loc) continue;
                 try {
@@ -2774,6 +2920,11 @@ function distanceMatrixStatus(state) {
             if (codesInput && codesInput.value.trim()) {
                 processDispatch();
             }
+            // Region switch swapped LOCATIONS/TECHS out from under the map, so
+            // re-fit to the stops that belong to the state now being viewed.
+            // processDispatch() above is async and will repaint again when it
+            // finishes; this handles the case where it never runs.
+            if (typeof renderDispatchMap === 'function') renderDispatchMap();
         }
 
         function parseInputs(text) {
@@ -3092,6 +3243,21 @@ function distanceMatrixStatus(state) {
             // Trigger add-location prompts for unknown codes alongside valid dispatch
             if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 600);
 
+            // 2026-08-06: also check for open trouble/maintenance tickets that
+            // never matched any site at all (site_id IS NULL) -- these have
+            // no code to even be "unknown" above, they're just sitting
+            // invisible with nowhere to show up. Fire-and-forget: never lets
+            // a fetch failure here block the actual dispatch generation this
+            // function exists to do.
+            fetch('/.netlify/functions/get-unmatched-tickets?state=' + CURRENT_STATE, { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && data.unmatched && data.unmatched.length > 0) {
+                        setTimeout(() => showAddLocationPromptQueueForTickets(data.unmatched), 900);
+                    }
+                })
+                .catch(e => console.warn('[dispatch] get-unmatched-tickets check failed (non-fatal):', e.message));
+
             // Attach restockBy date and right form flag from parsed form counts
             const today = new Date();
             today.setHours(0,0,0,0);
@@ -3259,6 +3425,11 @@ function distanceMatrixStatus(state) {
             const assignments = window.currentAssignments;
             const _savedScrollY = preserveScroll ? window.scrollY : null;
 
+            // Every path that changes the board ends up here, so this is the one
+            // place the AI command bar needs to re-check whether it has a board
+            // to act on (see refreshAiBarState).
+            if (typeof refreshAiBarState === 'function') refreshAiBarState();
+
             // Live availability (not dispatch-time snapshot) for the reassign dropdown --
             // matches the same pattern showFallbackAssignmentQueue already uses, so marking
             // someone unavailable after dispatch generation removes them from Reassign too.
@@ -3352,7 +3523,7 @@ function distanceMatrixStatus(state) {
             // Store route data globally so popover can access it
             if (!window.techRouteData) window.techRouteData = {};
 
-            function renderTechCard(tech, items) {
+            function renderTechCard(tech, items, techNumber) {
                 const techStart = TECHS[tech] ? (TECHS[tech].startLocation || '') : '';
                 const stops = items.map(i => encodeURIComponent(LOCATIONS[i.code].address)).join('/');
                 const mapLink = `https://www.google.com/maps/dir/${encodeURIComponent(techStart)}/${stops}`;
@@ -3380,10 +3551,11 @@ function distanceMatrixStatus(state) {
 
                 let cardHtml = `<div class="tech-card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                        <strong>${tech} (${items.length})</strong>
+                        <strong>${techNumber != null ? `<span style="color:#7ec8e3;">#${techNumber}</span> ` : ''}${tech} (${items.length})</strong>
                         <div>
-                            <button class="control-btn" style="background:#17a2b8; color:white;" onclick="showRoutePopover(event,'${techKey}')">🗺️ Route</button>
+                            <button class="control-btn" style="background:#17a2b8; color:white;" onclick="openTechRoute('${techKey}')">🗺️ Route</button>
                             <button class="control-btn" style="background:#d68910; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
+                            <button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍</button>
                         </div>
                     </div>
                     ${routeSummary ? `<div style="font-size:12px;color:#888;margin-bottom:4px;">📏 ${routeSummary} total</div>` : ''}
@@ -3405,7 +3577,7 @@ function distanceMatrixStatus(state) {
                         : '';
                     const restockByStr = item.restockBy ? `<span style="font-size:11px;color:#888;margin-left:6px;">by ${item.restockBy}</span>` : '';
                     const ticketInfoStr = item.fromTicket
-                        ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(item.ticketSlaEnd)}</strong>` : ''}</div>`
+                        ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : ''}</div>`
                         : '';
                     cardHtml += `<div class="os-stop">
                                 <div style="margin-right:10px; display:flex; flex-direction:column;">
@@ -3422,7 +3594,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div>
-                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
+                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">📏 ${legLabel}${index === 0 ? ' from home' : ' from prev. stop'}</div>
                                     ${ticketInfoStr}
@@ -3460,15 +3632,15 @@ function distanceMatrixStatus(state) {
                 // Show section dividers
                 html += `<div style="font-size:11px;font-weight:bold;color:#ff6b6b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Today — Action Required</div>`;
                 html += `<div class="tech-cards-grid">`;
-                techsSameDay.forEach(tech => { html += renderTechCard(tech, assignments[tech]); });
+                techsSameDay.forEach(tech => { html += renderTechCard(tech, assignments[tech], allTechsOrdered.indexOf(tech) + 1); });
                 html += `</div>`;
                 html += `<div style="font-size:11px;font-weight:bold;color:#007bff;text-transform:uppercase;letter-spacing:0.06em;margin:16px 0 8px;">Tomorrow</div>`;
                 html += `<div class="tech-cards-grid">`;
-                techsTomorrow.forEach(tech => { html += renderTechCard(tech, assignments[tech]); });
+                techsTomorrow.forEach(tech => { html += renderTechCard(tech, assignments[tech], allTechsOrdered.indexOf(tech) + 1); });
                 html += `</div>`;
             } else {
                 html += `<div class="tech-cards-grid">`;
-                allTechsOrdered.forEach(tech => { html += renderTechCard(tech, assignments[tech]); });
+                allTechsOrdered.forEach((tech, i) => { html += renderTechCard(tech, assignments[tech], i + 1); });
                 html += `</div>`;
             }
 
@@ -3532,6 +3704,12 @@ function distanceMatrixStatus(state) {
                     checkTrafficForTech(tech);
                 }
             });
+            // Repaint the route map from the board that was just rendered. Every
+            // path that changes assignments -- arrow moves, move-to-top, sort,
+            // reassign, done/cancel/tomorrow, undo, and an applied AI diff --
+            // funnels through here, so this one call keeps the map in step with
+            // the tiles without each of those callers knowing the map exists.
+            if (typeof renderDispatchMap === 'function') renderDispatchMap();
         }
 
         // ── DRIVE TIME TOGGLE ────────────────────────────────────────────
@@ -3908,6 +4086,19 @@ function distanceMatrixStatus(state) {
                 const insertAt = Math.min(entry.originalIndex, assignments[entry.tech].length);
                 assignments[entry.tech].splice(insertAt, 0, JSON.parse(JSON.stringify(entry.snapshot)));
             }
+            // 2026-08-06: this function previously only updated the in-memory
+            // browser view (window.currentAssignments/removedStops) and never
+            // told Supabase anything changed -- so the underlying
+            // assignments.status row stayed 'completed'/'removed' regardless
+            // of clicking Undo. The moment the dispatcher reprocessed, fresh
+            // data came straight from the still-unchanged database and the
+            // stop reappeared as completed again, making Undo look broken
+            // (confirmed live: Mark saw exactly this on Florida tonight).
+            // removeStop()'s own snapshot is the full item object (not the
+            // stripped-down {code} version used elsewhere), so it's already
+            // everything syncAssignmentToSupabase needs to properly restore
+            // the persisted status back to 'planned'.
+            syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual');
             window.removedStops.splice(removedIndex, 1);
             renderReviewBoard(true);
         }
@@ -3957,6 +4148,9 @@ function distanceMatrixStatus(state) {
             if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
             window.currentAssignments[newTech].unshift(item);
             syncAssignmentToSupabase(newTech, item, 'planned', 'manual');
+            // Auto-sort the receiving tech's card so the reassigned stop slots
+            // into route order instead of just sitting at the top of the list.
+            sortStopsByDistance(newTech);
             renderReviewBoard(true);
             // Recalc travel time for receiving tech so "To 1st Stop" reflects the reassigned stop
             if (window.google && window.google.maps && window.currentAssignments[newTech].length > 0) {
@@ -4091,6 +4285,14 @@ function distanceMatrixStatus(state) {
                     movedStop.needsFallbackAssignment = false;
                     if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
                     window.currentAssignments[newTech].unshift(movedStop);
+                    // Persist THIS assignment as a manual override so it's honored on
+                    // reprocess/reload -- without this, neither modal button survives
+                    // logout+login when primary+fallback are both unavailable, since
+                    // the reprocess logic only skips re-deriving when assignedBy==='manual'.
+                    syncAssignmentToSupabase(newTech, movedStop, 'planned', 'manual');
+                    // Auto-sort the receiving tech's card so the newly added stop
+                    // slots into route order instead of just sitting at the top.
+                    sortStopsByDistance(newTech);
                 }
                 renderReviewBoard(true);
                 div.remove();
@@ -4226,9 +4428,162 @@ function distanceMatrixStatus(state) {
                 .catch(e => { status.textContent = 'Network error: ' + e.message; });
             };
         }
+
+        // 2026-08-06: ticket-driven variant of the Add Location toast above.
+        // Mark asked whether a trouble/maintenance ticket for a location the
+        // app doesn't recognize could automatically trigger this toast,
+        // instead of him having to notice it's missing and manually paste a
+        // code into Location Codes first -- confirmed live there was
+        // already a real backlog of these sitting invisible with no site
+        // match at all. Deliberately scoped to trouble/maintenance tickets
+        // only (see get-unmatched-tickets.js) -- site_survey tickets are
+        // excluded, since Mark's plan for those (a temporary category,
+        // promoted to a real site once the install actually happens) is a
+        // separate, not-yet-designed concept.
+        //
+        // Differs from showAddLocationPrompt in one key way: that flow
+        // starts from a CODE the dispatcher already typed (just unrecognized),
+        // so it only needs name/address. Here there's no code at all yet --
+        // the ticket is just a raw text description -- so this asks the
+        // dispatcher to choose/confirm the new site's code themselves,
+        // deliberately NOT auto-generating one. Given tonight's whole
+        // session was largely about site codes silently colliding with
+        // existing ones, auto-picking a "next available" number here would
+        // risk creating the exact same class of bug -- a human choosing the
+        // code, informed by the ticket's own text, is safer.
+        function showAddLocationPromptQueueForTickets(ticketList) {
+            if (!ticketList || ticketList.length === 0) return;
+            const [first, ...rest] = ticketList;
+            showAddLocationPromptForTicket(first, (resolvedCode) => {
+                // 2026-08-07: if the just-saved toast's backend sweep (see
+                // link-ticket-to-site.js) resolved OTHER tickets sharing the
+                // same site code too, drop any of those still sitting in
+                // this already-fetched queue -- otherwise a second ticket
+                // for the same brand-new site (that arrived before the
+                // first toast got filled out) would still pop its own
+                // redundant toast even though it's already been linked.
+                const remaining = resolvedCode ? rest.filter(t => t.suggestedCode !== resolvedCode) : rest;
+                if (remaining.length > 0) setTimeout(() => showAddLocationPromptQueueForTickets(remaining), 300);
+            });
+        }
+
+        function showAddLocationPromptForTicket(ticket, onComplete) {
+            var existing = document.getElementById('add-location-prompt');
+            if (existing) existing.remove();
+
+            var state = CURRENT_STATE;
+            var techOptions = buildTechOptions(Object.keys(TECHS), state + '0000', state);
+
+            var div = document.createElement('div');
+            div.id = 'add-location-prompt';
+            div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #ffa500;border-radius:8px;padding:16px 18px;z-index:9999;width:min(92vw,400px);box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
+            div.innerHTML = `
+                <div style="font-weight:bold;color:#ffa500;margin-bottom:4px;">&#43; New location from ticket</div>
+                <div style="font-size:12px;color:#aaa;margin-bottom:12px;">WO ${ticket.woNumber || '?'} -- ${[ticket.issueCategory, ticket.issueDetail].filter(Boolean).join(' – ') || 'see ticket for details'}</div>
+                <input id="alp-code" value="${(ticket.suggestedCode || '').replace(/"/g, '&quot;')}" placeholder="Site code (e.g. ${state}1150)" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;text-transform:uppercase;">
+                <input id="alp-name" value="${(ticket.suggestedName || '').replace(/"/g, '&quot;')}" placeholder="Location name" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <input id="alp-address" value="${(ticket.suggestedAddress || '').replace(/"/g, '&quot;')}" placeholder="Full address" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                ${(ticket.suggestedCode || ticket.suggestedAddress) ? '<div style="font-size:11px;color:#8ab;margin:-4px 0 8px;">Pre-filled from the ticket — please verify before saving.</div>' : ''}
+                <select id="alp-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                    <option value="">-- Primary tech (optional) --</option>
+                    ${techOptions}
+                </select>
+                <select id="alp-machinetype" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:12px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                    <option value="SK">SK — Small Kahuna (default)</option>
+                    <option value="SB">SB — Surfboard</option>
+                    <option value="BK">BK — Big Kahuna (cash)</option>
+                </select>
+                <div style="display:flex;gap:10px;">
+                    <button id="alp-save" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Save &amp; reprocess</button>
+                    <button id="alp-skip" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Skip for now</button>
+                </div>
+                <div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
+            document.body.appendChild(div);
+
+            document.getElementById('alp-skip').onclick = function() { div.remove(); if (onComplete) onComplete(); };
+            document.getElementById('alp-save').onclick = function() {
+                var code = document.getElementById('alp-code').value.trim().toUpperCase();
+                var name = document.getElementById('alp-name').value.trim();
+                var address = document.getElementById('alp-address').value.trim();
+                var tech = document.getElementById('alp-tech').value;
+                var machineType = document.getElementById('alp-machinetype').value;
+                var status = document.getElementById('alp-status');
+                if (!code) { status.textContent = 'Site code is required.'; return; }
+                if (LOCATIONS[code]) { status.textContent = code + ' already exists -- pick a different code.'; return; }
+                if (!name) { status.textContent = 'Location name is required.'; return; }
+                if (!address) { status.textContent = 'Address is required.'; return; }
+
+                // 2026-08-06: added after a live near-miss -- a ticket for
+                // "GA - Clayton County Jonesboro Kroger" auto-triggered this
+                // toast even though that exact site already existed as
+                // GA1057 (same address, just word-order-swapped in the
+                // ticket's raw text with no embedded code, which is likely
+                // why it never auto-matched during ingestion). Since this
+                // toast fires automatically rather than from something the
+                // dispatcher deliberately typed, there's less natural
+                // opportunity to notice a duplicate before saving -- so
+                // check here instead. Compares street number + first
+                // street-name word (the same lightweight signature used
+                // throughout tonight's site-matching cleanup) against every
+                // existing site already loaded for this state; a match
+                // doesn't block saving outright (a genuinely different site
+                // can share a similar-looking address -- different suite,
+                // shopping center, etc.) but does require the dispatcher to
+                // explicitly confirm before proceeding.
+                var addrMatch = address.match(/^\s*(\d{2,6})\s+([A-Za-z][A-Za-z.']*)/);
+                if (addrMatch) {
+                    var typedNum = addrMatch[1];
+                    var typedStreetWord = addrMatch[2].toLowerCase();
+                    var possibleDup = Object.values(LOCATIONS).find(function(loc) {
+                        if (!loc.address || loc.state !== state) return false;
+                        var m = loc.address.match(/^\s*(\d{2,6})\s+([A-Za-z][A-Za-z.']*)/);
+                        return m && m[1] === typedNum && m[2].toLowerCase() === typedStreetWord;
+                    });
+                    if (possibleDup) {
+                        var proceed = confirm(
+                            'A site with a similar address already exists:\n\n' +
+                            possibleDup.code + ' — ' + possibleDup.name + '\n' + possibleDup.address +
+                            '\n\nSave ' + code + ' as a NEW, separate site anyway?\n\n' +
+                            '(Cancel this, then use "Skip for now" and link the ticket to ' + possibleDup.code + ' manually instead if this is the same location.)'
+                        );
+                        if (!proceed) { status.textContent = 'Cancelled -- consider linking to ' + possibleDup.code + ' instead.'; return; }
+                    }
+                }
+
+                status.textContent = 'Saving…';
+                fetch('/.netlify/functions/save-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, state, name, address, primaryTech: tech, fallbackTech: '', contractorOverride: false, contractorName: '', machineType })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) { status.textContent = 'Save failed: ' + (data.error || 'unknown error'); return null; }
+                    LOCATIONS[code] = { code, state, name, address, primaryTech: tech, defaultTech: tech, fallbackTech: '', machineType };
+                    status.textContent = 'Linking ticket…';
+                    return fetch('/.netlify/functions/link-ticket-to-site', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ticketId: ticket.ticketId, siteCode: code })
+                    }).then(r => r.json());
+                })
+                .then(linkData => {
+                    if (!linkData) return; // save-location itself already failed above
+                    if (!linkData.ok) { status.textContent = 'Site saved, but linking the ticket failed: ' + (linkData.error || 'unknown error'); return; }
+                    div.remove();
+                    processDispatch(); // re-run -- the now-linked ticket auto-surfaces same as any other
+                    if (onComplete) onComplete(code);
+                })
+                .catch(e => { status.textContent = 'Network error: ' + e.message; });
+            };
+        }
         function generateFinalMessages() {
             const resultsDiv = document.getElementById('results');
             const dateInput = document.getElementById('dispatchDate');
+            // The messages view replaces the board; the map lives outside
+            // #results so it has to be hidden explicitly. The "Back" button
+            // calls renderReviewBoard(), which brings it back.
+            hideDispatchMapPanel();
             
             let dispatchDate = new Date();
             if (dateInput && dateInput.value) {
@@ -4261,7 +4616,7 @@ function distanceMatrixStatus(state) {
                     let issueStr = (item.fromTicket && item.ticketIssue) ? item.ticketIssue : (meta.issueDetail || 'Trouble ticket');
                     const woNum = (item.fromTicket && item.ticketWo) ? item.ticketWo : meta.woNumber;
                     const woStr = woNum ? `WO ${woNum} – ` : '';
-                    const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
+                    const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd, item.code) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                     msg = `⚡ URGENT - Hey ${info.firstName}, a trouble ticket for ${loc.name} just came in:\n\n`;
                     msg += `1. ${woStr}${issueStr}${reassignNote}\n`;
@@ -4281,7 +4636,7 @@ function distanceMatrixStatus(state) {
                             const woStr2 = woNum2 ? `WO ${woNum2} – ` : '';
                             const issueTxt = (item.fromTicket && item.ticketIssue) ? item.ticketIssue : meta.issueDetail;
                             issueStr = ` - ${woStr2}${issueTxt}`;
-                            const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
+                            const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd, item.code) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                         }
                         const stopType = item.urgent ? issueStr : (item.isSameDay ? ' - Consumable Restock ⚡ COMPLETE TODAY' : ' - Consumable Restock');
@@ -4610,7 +4965,7 @@ function distanceMatrixStatus(state) {
                     const dtLeg = dtLegs[index];
                     const dtStr = dtLeg ? `<div style="font-size:11px;color:#2e7d32;margin-top:1px;">🕐 ${dtLeg.duration} (${dtLeg.distance})</div>` : '';
                     const ticketInfoStr = stop.fromTicket
-                        ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${stop.ticketWo || '—'}${stop.ticketIssue ? ' – ' + stop.ticketIssue : ''}${stop.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(stop.ticketSlaEnd)}</strong>` : ''}</div>`
+                        ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${stop.ticketWo || '—'}${stop.ticketIssue ? ' – ' + stop.ticketIssue : ''}${stop.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(stop.ticketSlaEnd, code)}</strong>` : ''}</div>`
                         : '';
 
                     return `<div class="print-stop">
@@ -5039,6 +5394,692 @@ ${content}</body></html>`;
                 body.innerHTML = '<span style="color:#c62828;">Error loading history: ' + err.message + '</span>';
             }
         }
+        // ═══════════════════════════════════════════════════════════════════
+        // AI DISPATCH ASSISTANT — v1, added 2026-08-18
+        //
+        // Drives the compact command bar at the top of the Dispatch Tool. The
+        // dispatcher types or dictates one instruction ("move stop 2 from
+        // Robert to Keontae", "re-sort Gina's route"); the whole live board is
+        // posted to /.netlify/functions/dispatch-ai, which parses the intent
+        // with Gemini function calling, applies it, persists it to Supabase,
+        // and returns the new stop order plus a mileage/duration diff.
+        //
+        // The server is the one that reorders, so the returned ordering is
+        // applied verbatim rather than re-sorted here -- that keeps the diff
+        // the dispatcher just read and the board they're looking at from
+        // drifting apart. Mileage in that diff comes from the same locally
+        // pre-computed distance matrix the tech cards use; no mapping API is
+        // involved on either side.
+        // ═══════════════════════════════════════════════════════════════════
+
+        let _aiRecognition = null;
+        let _aiListening = false;
+        let _aiBusy = false;
+
+        /** Every tech who could hold a stop today, not just those who already do. */
+        /**
+         * Same ordering renderReviewBoard uses for its own tech cards (same-day
+         * techs alphabetically, then tomorrow-only techs alphabetically) --
+         * MUST match, since this is also the order the visible "#1 / #2 / ..."
+         * badges on each card are numbered from. If this list and the board's
+         * own allTechsOrdered ever diverge, "tech 1" on screen and "tech 1" in
+         * a typed/voice command would silently mean two different people.
+         */
+        function aiTechRoster() {
+            const assignments = window.currentAssignments || {};
+            const withStopsSameDay = Object.keys(assignments).sort().filter(t =>
+                (assignments[t] || []).length > 0 && assignments[t].some(i => i.isSameDay)
+            );
+            const withStopsTomorrow = Object.keys(assignments).sort().filter(t =>
+                (assignments[t] || []).length > 0 && !assignments[t].some(i => i.isSameDay)
+            );
+            const withStops = [...new Set([...withStopsSameDay, ...withStopsTomorrow])];
+            const seen = new Set(withStops);
+            // Idle techs (no stops at all) have no card and so no visible number --
+            // still appended so "give it to Keontae" works when Keontae is empty,
+            // just not something a numbered voice command can reference yet.
+            const idle = Object.keys(TECHS || {})
+                .filter(t => !seen.has(t) && (TECHS[t] || {}).active !== false)
+                .sort();
+            return withStops.concat(idle);
+        }
+
+        /**
+         * The board as the backend wants it: an ordered list of techs, each with
+         * their stop codes in current display order. Idle techs are included with
+         * empty stop lists so "give it to Keontae" works even when Keontae has
+         * nothing on the board yet.
+         */
+        function aiRoutesSnapshot() {
+            const assignments = window.currentAssignments || {};
+            return aiTechRoster().map(tech => ({
+                tech: tech,
+                stops: (assignments[tech] || []).map(item => item.code)
+            }));
+        }
+
+        /** Command bar is only meaningful once a dispatch has been generated. */
+        function refreshAiBarState() {
+            const input = document.getElementById('aiCommandInput');
+            const sendBtn = document.getElementById('aiSendBtn');
+            const micBtn = document.getElementById('aiMicBtn');
+            if (!input || !sendBtn) return;
+
+            const assignments = window.currentAssignments || {};
+            const hasBoard = Object.values(assignments).some(stops => (stops || []).length > 0);
+            const enabled = hasBoard && !_aiBusy;
+
+            input.disabled = !enabled;
+            sendBtn.disabled = !enabled;
+            sendBtn.style.opacity = enabled ? '1' : '0.5';
+            sendBtn.style.cursor = enabled ? 'pointer' : 'default';
+            input.placeholder = hasBoard
+                ? 'e.g. "move stop 2 from Robert to Keontae"'
+                : 'Generate dispatches to use the assistant';
+
+            if (micBtn) {
+                const speechSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+                micBtn.style.display = speechSupported ? '' : 'none';
+                micBtn.disabled = !enabled;
+                micBtn.style.opacity = enabled ? '1' : '0.5';
+            }
+        }
+
+        function setAiStatus(msg, color) {
+            const el = document.getElementById('aiCommandStatus');
+            if (!el) return;
+            el.textContent = msg || '';
+            el.style.color = color || '#888';
+        }
+
+        /**
+         * Quick diff summary line, e.g.
+         *   ✅ Moved Stop 2 (GA1017) to Keontae | Net Fleet: -4.2 mi
+         * with the per-tech breakdown underneath so a "net -4.2" that's really
+         * "-18 off Robert, +13.8 onto Keontae" is visible rather than hidden.
+         */
+        function renderAiDiff(data) {
+            const el = document.getElementById('aiCommandDiff');
+            if (!el) return;
+
+            const applied = (data.actions || []).filter(a => a.type !== 'error');
+            const errors = (data.actions || []).filter(a => a.type === 'error');
+
+            if (!applied.length && !errors.length) {
+                el.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            if (applied.length) {
+                const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#7edb8e' : '#ffb56b';
+                html += '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+                    + '<div style="color:#e8f5ec;font-weight:bold;">✅ '
+                    + escapeAiHtml(applied.map(a => a.summary).join(' · '))
+                    + '</div>'
+                    + '<div style="margin-top:3px;color:' + netColor + ';font-weight:bold;">Net Fleet: '
+                    + escapeAiHtml(data.fleetDelta || '0.0 mi') + '</div>';
+
+                const detail = [];
+                applied.forEach(a => {
+                    if (a.type === 'reassign_stop') {
+                        detail.push(escapeAiHtml(a.fromTech) + ' ' + escapeAiHtml(a.fromDelta)
+                            + ' &middot; ' + escapeAiHtml(a.toTech) + ' ' + escapeAiHtml(a.toDelta));
+                    } else if (a.type === 'sort_route' && a.reordered) {
+                        detail.push(escapeAiHtml(a.tech) + ' ' + escapeAiHtml(a.delta));
+                    }
+                });
+                if (detail.length) {
+                    html += '<div style="margin-top:3px;color:#9fb8a8;font-size:11px;">' + detail.join('<br>') + '</div>';
+                }
+                if (data.persisted === false) {
+                    html += '<div style="margin-top:3px;color:#ffb56b;font-size:11px;">⚠ Board updated but not saved'
+                        + (data.reason ? ' (' + escapeAiHtml(data.reason) + ')' : '') + '</div>';
+                }
+                html += '</div>';
+            }
+            if (errors.length) {
+                html += '<div style="margin-top:4px;color:#ffb56b;font-size:11px;">'
+                    + escapeAiHtml(errors.map(a => a.summary).join(' · ')) + '</div>';
+            }
+            el.innerHTML = html;
+        }
+
+        function escapeAiHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        /**
+         * Rebuilds window.currentAssignments from the ordering the backend
+         * returned, reusing the existing stop objects (they carry urgency, forms,
+         * journal and ticket flags the backend never sees, so they must be moved
+         * rather than recreated). Anything the backend didn't mention is kept
+         * where it was, so a partial response can't silently drop stops.
+         */
+        function applyAiRoutes(newRoutes) {
+            const current = window.currentAssignments || {};
+            const itemByCode = {};
+            Object.values(current).forEach(stops => (stops || []).forEach(item => {
+                if (item && item.code) itemByCode[item.code] = item;
+            }));
+
+            const returnedCodes = new Set();
+            const next = {};
+            (newRoutes || []).forEach(route => {
+                const stops = [];
+                (route.stops || []).forEach(code => {
+                    const item = itemByCode[code];
+                    if (!item || returnedCodes.has(code)) return;
+                    returnedCodes.add(code);
+                    stops.push(item);
+                });
+                if (stops.length) next[route.tech] = stops;
+            });
+
+            Object.entries(current).forEach(([tech, stops]) => {
+                const leftovers = (stops || []).filter(item => item && item.code && !returnedCodes.has(item.code));
+                if (leftovers.length) next[tech] = (next[tech] || []).concat(leftovers);
+            });
+
+            window.currentAssignments = next;
+        }
+
+        async function submitAiCommand() {
+            if (_aiBusy) return;
+            const input = document.getElementById('aiCommandInput');
+            if (!input) return;
+
+            const text = (input.value || '').trim();
+            if (!text) {
+                setAiStatus('Type or dictate a command first.', '#ffb56b');
+                return;
+            }
+
+            const assignments = window.currentAssignments || {};
+            if (!Object.values(assignments).some(stops => (stops || []).length > 0)) {
+                setAiStatus('Generate dispatches before using the assistant.', '#ffb56b');
+                return;
+            }
+
+            const dateInput = document.getElementById('dispatchDate');
+            const dispatchDate = dateInput && dateInput.value ? dateInput.value : '';
+            if (!dispatchDate) {
+                setAiStatus('Set a dispatch date first.', '#ffb56b');
+                return;
+            }
+
+            if (_aiListening) stopAiVoice();
+            _aiBusy = true;
+            refreshAiBarState();
+            setAiStatus('Working on it…', '#7ec8e3');
+            const diffEl = document.getElementById('aiCommandDiff');
+            if (diffEl) diffEl.innerHTML = '';
+
+            try {
+                // Same live-availability check the Reassign dropdown and the
+                // fallback-assignment queue already use -- comp days, BlueFolder
+                // sync, and manual toggles all folded in. Sent along so the
+                // backend can refuse a reassign onto someone who's actually out
+                // today instead of moving a real stop onto them silently.
+                const unavailableTechs = [...getUnavailableTechsForDate(dispatchDate)];
+                const res = await fetch('/.netlify/functions/dispatch-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        state: CURRENT_STATE,
+                        dispatchDate: dispatchDate,
+                        routes: aiRoutesSnapshot(),
+                        unavailableTechs: unavailableTechs
+                    })
+                });
+                const data = await res.json().catch(() => null);
+
+                if (!res.ok || !data || !data.ok) {
+                    setAiStatus((data && data.error) || ('Assistant failed (HTTP ' + res.status + ')'), '#ff8a80');
+                    return;
+                }
+
+                if (!(data.actions || []).length) {
+                    setAiStatus(data.reply || 'Nothing to change.', '#ffb56b');
+                    return;
+                }
+
+                const changed = data.changedTechs || [];
+                if (changed.length) {
+                    applyAiRoutes(data.routes);
+                    // Immediate UI refresh so the tech tiles reflect the change
+                    // without the dispatcher touching anything. This also
+                    // repaints the route map -- renderReviewBoard() ends with a
+                    // renderDispatchMap() call -- so an applied diff moves the
+                    // pins and polylines in the same frame as the tiles.
+                    renderReviewBoard(true);
+                    if (typeof buildPrintableReport === 'function' && window._lastDateStr) {
+                        buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
+                    }
+                    // Same follow-up reassignStop does: refresh "To 1st Stop"
+                    // traffic for any tech whose first stop may have changed.
+                    if (window.google && window.google.maps && typeof checkTrafficForTech === 'function') {
+                        changed.forEach(tech => {
+                            if ((window.currentAssignments[tech] || []).length > 0) checkTrafficForTech(tech);
+                        });
+                    }
+                }
+
+                renderAiDiff(data);
+                setAiStatus('', '#888');
+                // Keep a rejected command in the box so it can be corrected
+                // rather than retyped; clear it once something actually applied.
+                if (changed.length) input.value = '';
+            } catch (err) {
+                setAiStatus('Assistant unreachable: ' + err.message, '#ff8a80');
+            } finally {
+                _aiBusy = false;
+                refreshAiBarState();
+            }
+        }
+
+        // ─── VOICE INPUT ──────────────────────────────────────────────────────
+        // Web Speech API only -- the transcript is what gets posted, so no audio
+        // ever leaves the browser. Unsupported browsers just get the text box
+        // (the mic button hides itself in refreshAiBarState).
+        function toggleAiVoice() {
+            if (_aiListening) { stopAiVoice(); return; }
+
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {
+                setAiStatus('Voice input is not supported in this browser — type the command instead.', '#ffb56b');
+                return;
+            }
+
+            try {
+                _aiRecognition = new SR();
+            } catch (err) {
+                setAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
+                return;
+            }
+
+            _aiRecognition.lang = 'en-US';
+            _aiRecognition.interimResults = true;
+            _aiRecognition.continuous = false;
+            _aiRecognition.maxAlternatives = 1;
+
+            _aiRecognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = 0; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+                const input = document.getElementById('aiCommandInput');
+                if (input) input.value = transcript.trim();
+                // Auto-run once the phrase is final so a hands-free command
+                // doesn't need a second tap.
+                if (event.results[event.results.length - 1].isFinal) {
+                    stopAiVoice();
+                    submitAiCommand();
+                }
+            };
+            _aiRecognition.onerror = (event) => {
+                stopAiVoice();
+                setAiStatus(event.error === 'not-allowed'
+                    ? 'Microphone permission denied.'
+                    : 'Voice input error: ' + event.error, '#ff8a80');
+            };
+            _aiRecognition.onend = () => { if (_aiListening) stopAiVoice(); };
+
+            _aiListening = true;
+            setAiStatus('Listening…', '#7edb8e');
+            const micBtn = document.getElementById('aiMicBtn');
+            if (micBtn) { micBtn.style.background = '#8b2e2e'; micBtn.style.color = '#fff'; }
+
+            try {
+                _aiRecognition.start();
+            } catch (err) {
+                stopAiVoice();
+                setAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
+            }
+        }
+
+        function stopAiVoice() {
+            _aiListening = false;
+            if (_aiRecognition) {
+                try { _aiRecognition.stop(); } catch (err) { /* already stopped */ }
+                _aiRecognition = null;
+            }
+            const micBtn = document.getElementById('aiMicBtn');
+            if (micBtn) { micBtn.style.background = '#2a2a3e'; micBtn.style.color = '#ccc'; }
+            if ((document.getElementById('aiCommandStatus') || {}).textContent === 'Listening…') setAiStatus('');
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ROUTE MAP VISUALIZER — v1, added 2026-08-18
+        //
+        // Draws the current board on a Leaflet map above the tech cards: one
+        // colour per technician, numbered pins in visit order, polylines in that
+        // same order, and a dashed hop from the tech's start location to stop 1
+        // (the "from home" leg the cards already price out).
+        //
+        // Everything is read from the same in-memory state the cards render
+        // from -- window.currentAssignments for the routes, LOCATIONS/TECHS for
+        // coordinates, getCachedLegInfo() for mileage -- so the map can never
+        // disagree with the tiles next to it, and drawing it costs no network
+        // calls beyond OpenStreetMap's free raster tiles.
+        //
+        // renderDispatchMap() is idempotent and cheap enough to call on every
+        // board change; renderReviewBoard() is the single place that does so,
+        // which is why reorders, reassignments, sorts and applied AI diffs all
+        // repaint the map without each of those paths knowing the map exists.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Ordered so neighbours in the legend stay far apart on the colour wheel,
+        // and all dark enough to read as lines over OSM's light basemap.
+        const MAP_ROUTE_COLORS = [
+            '#e6194b', '#0071c5', '#2e9e3e', '#f07d02', '#8e24aa',
+            '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
+        ];
+
+        let _dispatchMap = null;
+        let _dispatchMapLayers = {};              // tech name -> L.LayerGroup
+        let _dispatchMapHiddenTechs = new Set();  // legend chips toggled off
+        let _dispatchMapBounds = null;            // last fit target, for re-fits
+
+        /**
+         * Same tech ordering the board uses (same-day techs first, each group
+         * alphabetical) so legend colours line up with the card order instead of
+         * shuffling when someone's stops change bucket.
+         */
+        function dispatchMapTechOrder(assignments) {
+            const withStops = Object.keys(assignments)
+                .filter(t => (assignments[t] || []).length > 0).sort();
+            const sameDay  = withStops.filter(t => assignments[t].some(i => i.isSameDay));
+            const tomorrow = withStops.filter(t => !assignments[t].some(i => i.isSameDay));
+            return [...new Set([...sameDay, ...tomorrow])];
+        }
+
+        /** One Leaflet instance for the life of the page; created on first use. */
+        function ensureDispatchMap() {
+            if (_dispatchMap) return _dispatchMap;
+            const el = document.getElementById('dispatchMap');
+            if (!el || typeof L === 'undefined') return null;
+
+            _dispatchMap = L.map(el, { scrollWheelZoom: false });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(_dispatchMap);
+            _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds
+
+            // Wheel zoom is off until the map is clicked, so scrolling past a
+            // long board doesn't hijack the page scroll into a zoom.
+            _dispatchMap.on('click', () => _dispatchMap.scrollWheelZoom.enable());
+            _dispatchMap.on('mouseout', () => _dispatchMap.scrollWheelZoom.disable());
+            return _dispatchMap;
+        }
+
+        /**
+         * Rebuilds every route layer from the live board and re-fits the view.
+         *
+         * Layers are thrown away and rebuilt rather than diffed: stop order,
+         * pin numbers and the tech list all move together on a reassignment, so
+         * a diff would touch nearly every layer anyway.
+         */
+        function renderDispatchMap() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (!panel) return;
+
+            // Leaflet is a CDN dependency. If it was blocked or is still in
+            // flight, the board has to keep working -- the panel just stays out
+            // of the way rather than throwing on every render.
+            if (typeof L === 'undefined') { panel.classList.remove('visible'); return; }
+
+            const assignments = window.currentAssignments || {};
+            const routes = [];
+            const unmappedCodes = [];
+            let stopCount = 0;
+            let fleetMi = 0;
+
+            dispatchMapTechOrder(assignments).forEach((tech, techIndex) => {
+                const pts = [];
+                let prevCode = null;
+                (assignments[tech] || []).forEach(item => {
+                    const loc = LOCATIONS[item.code];
+                    if (!loc || loc.lat == null || loc.lng == null) {
+                        unmappedCodes.push(item.code);
+                        return;
+                    }
+                    // Same cached matrix/haversine numbers the cards show; wrapped
+                    // because a code with no LOCATIONS entry upstream would throw.
+                    let leg = null;
+                    try { leg = getCachedLegInfo(tech, prevCode, item.code); } catch (err) { leg = null; }
+                    if (leg && leg.distanceMi != null) fleetMi += leg.distanceMi;
+                    pts.push({ lat: Number(loc.lat), lng: Number(loc.lng), item: item, loc: loc, leg: leg });
+                    prevCode = item.code;
+                });
+                if (!pts.length) return;
+
+                const info = TECHS[tech] || {};
+                const home = (info.lat != null && info.lng != null)
+                    ? { lat: Number(info.lat), lng: Number(info.lng), label: info.startLocation || '' }
+                    : null;
+                routes.push({
+                    tech: tech,
+                    color: MAP_ROUTE_COLORS[techIndex % MAP_ROUTE_COLORS.length],
+                    // Past the end of the palette colours repeat, so those routes
+                    // are drawn dashed to stay distinguishable.
+                    dashed: techIndex >= MAP_ROUTE_COLORS.length,
+                    pts: pts,
+                    home: home
+                });
+                stopCount += pts.length;
+            });
+
+            if (!routes.length) {
+                Object.keys(_dispatchMapLayers).forEach(t => {
+                    if (_dispatchMap) _dispatchMap.removeLayer(_dispatchMapLayers[t]);
+                });
+                _dispatchMapLayers = {};
+                panel.classList.remove('visible');
+                return;
+            }
+
+            // Panel must be visible before the map is built or measured: Leaflet
+            // reads zero dimensions out of a display:none container.
+            panel.classList.add('visible');
+            const map = ensureDispatchMap();
+            if (!map) { panel.classList.remove('visible'); return; }
+
+            Object.keys(_dispatchMapLayers).forEach(t => map.removeLayer(_dispatchMapLayers[t]));
+            _dispatchMapLayers = {};
+
+            // Drop hide flags for techs who no longer hold stops, so someone who
+            // was toggled off, emptied out and later refilled comes back visible.
+            const activeTechs = new Set(routes.map(r => r.tech));
+            [..._dispatchMapHiddenTechs].forEach(t => {
+                if (!activeTechs.has(t)) _dispatchMapHiddenTechs.delete(t);
+            });
+
+            const allPoints = [];
+            const visiblePoints = [];
+
+            routes.forEach(route => {
+                const group = L.layerGroup();
+                const latlngs = route.pts.map(p => [p.lat, p.lng]);
+                const shown = !_dispatchMapHiddenTechs.has(route.tech);
+                const collect = point => {
+                    allPoints.push(point);
+                    if (shown) visiblePoints.push(point);
+                };
+
+                if (route.home) {
+                    L.polyline([[route.home.lat, route.home.lng], latlngs[0]], {
+                        color: route.color, weight: 2, opacity: 0.55, dashArray: '4,7'
+                    }).addTo(group);
+                    L.marker([route.home.lat, route.home.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div class="map-home-pin" style="background:' + route.color + ';">&#x1F3E0;</div>',
+                            iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                        }),
+                        title: route.tech + ' — start'
+                    }).bindPopup(
+                        '<div class="map-pop-code">' + escapeAiHtml(route.tech) + ' — start</div>'
+                        + (route.home.label ? '<div style="color:#666;">' + escapeAiHtml(route.home.label) + '</div>' : '')
+                    ).addTo(group);
+                    collect([route.home.lat, route.home.lng]);
+                }
+
+                if (latlngs.length > 1) {
+                    L.polyline(latlngs, {
+                        color: route.color,
+                        weight: 3.5,
+                        opacity: 0.85,
+                        dashArray: route.dashed ? '9,6' : null
+                    }).addTo(group);
+                }
+
+                route.pts.forEach((p, i) => {
+                    const legLabel = p.leg && p.leg.distanceMi != null
+                        ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
+                            + (p.leg.durationMin != null ? ' · ' + p.leg.durationMin + ' min' : '')
+                            + (p.leg.isReal ? '' : ' (est.)')
+                            + (i === 0 ? ' from home' : ' from prev. stop')
+                        : '';
+                    L.marker([p.lat, p.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div class="map-stop-pin" style="background:' + route.color + ';">' + (i + 1) + '</div>',
+                            iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -13]
+                        }),
+                        title: 'Stop ' + (i + 1) + ' — ' + p.item.code + ' (' + route.tech + ')'
+                    }).bindPopup(
+                        '<div class="map-pop-code">Stop ' + (i + 1) + ' — ' + escapeAiHtml(p.item.code) + '</div>'
+                        + '<div>' + escapeAiHtml(p.loc.name || '') + '</div>'
+                        + (p.loc.address ? '<div style="color:#666;">' + escapeAiHtml(p.loc.address) + '</div>' : '')
+                        + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;'
+                        + 'border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>'
+                        + escapeAiHtml(route.tech) + '</div>'
+                        + (legLabel ? '<div style="color:#666;">&#x1F4CF; ' + escapeAiHtml(legLabel) + '</div>' : '')
+                    ).addTo(group);
+                    collect([p.lat, p.lng]);
+                });
+
+                _dispatchMapLayers[route.tech] = group;
+                if (shown) group.addTo(map);
+            });
+
+            // Fit to what's actually on screen; fall back to everything when the
+            // dispatcher has hidden every route.
+            _dispatchMapBounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
+            fitDispatchMapBounds();
+            renderDispatchMapLegend(routes);
+
+            const meta = document.getElementById('dispatchMapMeta');
+            if (meta) {
+                meta.textContent = routes.length + (routes.length === 1 ? ' tech · ' : ' techs · ')
+                    + stopCount + (stopCount === 1 ? ' stop · ' : ' stops · ')
+                    + (Math.round(fleetMi * 10) / 10) + ' mi';
+            }
+
+            const note = document.getElementById('dispatchMapNote');
+            if (note) {
+                const missing = [...new Set(unmappedCodes)];
+                note.style.display = missing.length ? '' : 'none';
+                note.textContent = missing.length
+                    ? '⚠ Not plotted (no coordinates on file): ' + missing.join(', ')
+                    : '';
+            }
+        }
+
+        /**
+         * Leaflet cannot measure a collapsed container, so fitting is skipped
+         * while the body is hidden and redone by toggleDispatchMap() on expand.
+         */
+        function fitDispatchMapBounds() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (!_dispatchMap || !_dispatchMapBounds || !_dispatchMapBounds.isValid()) return;
+            if (!panel || !panel.classList.contains('visible') || panel.classList.contains('collapsed')) return;
+
+            _dispatchMap.invalidateSize();
+            if (_dispatchMapBounds.getNorthEast().equals(_dispatchMapBounds.getSouthWest())) {
+                _dispatchMap.setView(_dispatchMapBounds.getCenter(), 12); // single stop
+            } else {
+                _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
+            }
+        }
+
+        function renderDispatchMapLegend(routes) {
+            const el = document.getElementById('dispatchMapLegend');
+            if (!el) return;
+            const chips = routes.map(route => {
+                // Escaped twice on purpose: once so the name survives as a JS
+                // string literal, once so it survives as an HTML attribute.
+                const arg = escapeAiHtml(route.tech.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+                return '<span class="map-legend-chip' + (_dispatchMapHiddenTechs.has(route.tech) ? ' off' : '') + '"'
+                    + ' onclick="toggleDispatchMapTech(\'' + arg + '\')" title="Show or hide this route">'
+                    + '<span class="map-legend-swatch" style="background:' + route.color + ';"></span>'
+                    + escapeAiHtml(route.tech) + ' (' + route.pts.length + ')</span>';
+            });
+            if (_dispatchMapHiddenTechs.size) {
+                chips.push('<span class="map-legend-chip" onclick="showAllDispatchMapTechs()"'
+                    + ' title="Bring every hidden route back">&#x2942; Show all</span>');
+            }
+            el.innerHTML = chips.join('');
+        }
+
+        /** Legend chip click — hide or restore one tech's route. */
+        function toggleDispatchMapTech(tech) {
+            if (_dispatchMapHiddenTechs.has(tech)) _dispatchMapHiddenTechs.delete(tech);
+            else _dispatchMapHiddenTechs.add(tech);
+            renderDispatchMap(); // re-fits the view and repaints the legend
+        }
+
+        function showAllDispatchMapTechs() {
+            _dispatchMapHiddenTechs.clear();
+            renderDispatchMap();
+        }
+
+        function toggleDispatchMap() {
+            const panel = document.getElementById('dispatchMapPanel');
+            const btn = document.getElementById('mapToggleBtn');
+            if (!panel) return;
+            const collapsed = panel.classList.toggle('collapsed');
+            if (btn) {
+                btn.textContent = collapsed ? 'Show Map' : 'Hide Map';
+                btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
+            try { localStorage.setItem('mcr_map_collapsed', collapsed ? '1' : '0'); } catch (err) { /* silent */ }
+            // First expand is the first time the container has real dimensions,
+            // so this is where the deferred measure-and-fit happens.
+            if (!collapsed) fitDispatchMapBounds();
+        }
+
+        function restoreDispatchMapState() {
+            const panel = document.getElementById('dispatchMapPanel');
+            const btn = document.getElementById('mapToggleBtn');
+            if (!panel) return;
+            let collapsed = false;
+            try { collapsed = localStorage.getItem('mcr_map_collapsed') === '1'; } catch (err) { /* silent */ }
+            panel.classList.toggle('collapsed', collapsed);
+            if (btn) {
+                btn.textContent = collapsed ? 'Show Map' : 'Hide Map';
+                btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
+        }
+
+        /** Used by the views that take over #results (messages, mobile report). */
+        function hideDispatchMapPanel() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (panel) panel.classList.remove('visible');
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshAiBarState();
+            restoreDispatchMapState();
+            // Page-load paint: window.onload may still rebuild the board from
+            // saved dispatch text afterwards, and that lands back here through
+            // renderReviewBoard().
+            renderDispatchMap();
+        });
+
     </script>
     <!-- Site History Modal -->
     <div id="siteHistoryOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;" onclick="if(event.target===this)closeSiteHistory()">
