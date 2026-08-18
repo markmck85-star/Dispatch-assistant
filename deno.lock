@@ -11,10 +11,14 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@google/genai@^2.17.1",
         "npm:@netlify/blobs@^7.3.4",
+        "npm:@sparticuz/chromium@149",
         "npm:@supabase/supabase-js@^2.45.0",
         "npm:fast-xml-parser@^4.5.0",
-        "npm:nodemailer@^6.9.9"
+        "npm:nodemailer@^6.9.9",
+        "npm:playwright-core@^1.62.0",
+        "npm:xlsx@~0.18.5"
       ]
     }
   }

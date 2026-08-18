@@ -227,6 +227,26 @@
                     </div>
                 </div>
 
+                <!-- AI DISPATCH ASSISTANT COMMAND BAR -->
+                <!-- Compact voice/text command bar. Only useful once a board
+                     exists, so it stays disabled until processDispatch() has
+                     populated window.currentAssignments (see refreshAiBarState). -->
+                <div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
+                        <input type="text" id="aiCommandInput" autocomplete="off"
+                            placeholder='e.g. "move stop 2 from Robert to Keontae"'
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();submitAiCommand();}"
+                            style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+                        <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
+                            style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+                        <button type="button" id="aiSendBtn" onclick="submitAiCommand()"
+                            style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+                    </div>
+                    <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
+                    <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
+                </div>
+
                 <!-- AVAILABILITY PANEL -->
                 <div id="availabilityPanel" style="margin-top:10px; padding:10px; background:#1e1e1e; border:1px solid #444; border-radius:8px; display:none;">
                     <div style="font-weight:bold; color:#ffa500; margin-bottom:8px;">👥 Technician Availability</div>
@@ -3338,6 +3358,11 @@ function distanceMatrixStatus(state) {
             const assignments = window.currentAssignments;
             const _savedScrollY = preserveScroll ? window.scrollY : null;
 
+            // Every path that changes the board ends up here, so this is the one
+            // place the AI command bar needs to re-check whether it has a board
+            // to act on (see refreshAiBarState).
+            if (typeof refreshAiBarState === 'function') refreshAiBarState();
+
             // Live availability (not dispatch-time snapshot) for the reassign dropdown --
             // matches the same pattern showFallbackAssignmentQueue already uses, so marking
             // someone unavailable after dispatch generation removes them from Reassign too.
@@ -5292,6 +5317,337 @@ ${content}</body></html>`;
                 body.innerHTML = '<span style="color:#c62828;">Error loading history: ' + err.message + '</span>';
             }
         }
+        // ═══════════════════════════════════════════════════════════════════
+        // AI DISPATCH ASSISTANT — v1, added 2026-08-18
+        //
+        // Drives the compact command bar at the top of the Dispatch Tool. The
+        // dispatcher types or dictates one instruction ("move stop 2 from
+        // Robert to Keontae", "re-sort Gina's route"); the whole live board is
+        // posted to /.netlify/functions/dispatch-ai, which parses the intent
+        // with Gemini function calling, applies it, persists it to Supabase,
+        // and returns the new stop order plus a mileage/duration diff.
+        //
+        // The server is the one that reorders, so the returned ordering is
+        // applied verbatim rather than re-sorted here -- that keeps the diff
+        // the dispatcher just read and the board they're looking at from
+        // drifting apart. Mileage in that diff comes from the same locally
+        // pre-computed distance matrix the tech cards use; no mapping API is
+        // involved on either side.
+        // ═══════════════════════════════════════════════════════════════════
+
+        let _aiRecognition = null;
+        let _aiListening = false;
+        let _aiBusy = false;
+
+        /** Every tech who could hold a stop today, not just those who already do. */
+        function aiTechRoster() {
+            const assignments = window.currentAssignments || {};
+            const withStops = Object.keys(assignments).filter(t => (assignments[t] || []).length > 0);
+            const seen = new Set(withStops);
+            const idle = Object.keys(TECHS || {})
+                .filter(t => !seen.has(t) && (TECHS[t] || {}).active !== false)
+                .sort();
+            return withStops.concat(idle);
+        }
+
+        /**
+         * The board as the backend wants it: an ordered list of techs, each with
+         * their stop codes in current display order. Idle techs are included with
+         * empty stop lists so "give it to Keontae" works even when Keontae has
+         * nothing on the board yet.
+         */
+        function aiRoutesSnapshot() {
+            const assignments = window.currentAssignments || {};
+            return aiTechRoster().map(tech => ({
+                tech: tech,
+                stops: (assignments[tech] || []).map(item => item.code)
+            }));
+        }
+
+        /** Command bar is only meaningful once a dispatch has been generated. */
+        function refreshAiBarState() {
+            const input = document.getElementById('aiCommandInput');
+            const sendBtn = document.getElementById('aiSendBtn');
+            const micBtn = document.getElementById('aiMicBtn');
+            if (!input || !sendBtn) return;
+
+            const assignments = window.currentAssignments || {};
+            const hasBoard = Object.values(assignments).some(stops => (stops || []).length > 0);
+            const enabled = hasBoard && !_aiBusy;
+
+            input.disabled = !enabled;
+            sendBtn.disabled = !enabled;
+            sendBtn.style.opacity = enabled ? '1' : '0.5';
+            sendBtn.style.cursor = enabled ? 'pointer' : 'default';
+            input.placeholder = hasBoard
+                ? 'e.g. "move stop 2 from Robert to Keontae"'
+                : 'Generate dispatches to use the assistant';
+
+            if (micBtn) {
+                const speechSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+                micBtn.style.display = speechSupported ? '' : 'none';
+                micBtn.disabled = !enabled;
+                micBtn.style.opacity = enabled ? '1' : '0.5';
+            }
+        }
+
+        function setAiStatus(msg, color) {
+            const el = document.getElementById('aiCommandStatus');
+            if (!el) return;
+            el.textContent = msg || '';
+            el.style.color = color || '#888';
+        }
+
+        /**
+         * Quick diff summary line, e.g.
+         *   ✅ Moved Stop 2 (GA1017) to Keontae | Net Fleet: -4.2 mi
+         * with the per-tech breakdown underneath so a "net -4.2" that's really
+         * "-18 off Robert, +13.8 onto Keontae" is visible rather than hidden.
+         */
+        function renderAiDiff(data) {
+            const el = document.getElementById('aiCommandDiff');
+            if (!el) return;
+
+            const applied = (data.actions || []).filter(a => a.type !== 'error');
+            const errors = (data.actions || []).filter(a => a.type === 'error');
+
+            if (!applied.length && !errors.length) {
+                el.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            if (applied.length) {
+                const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#7edb8e' : '#ffb56b';
+                html += '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+                    + '<div style="color:#e8f5ec;font-weight:bold;">✅ '
+                    + escapeAiHtml(applied.map(a => a.summary).join(' · '))
+                    + '</div>'
+                    + '<div style="margin-top:3px;color:' + netColor + ';font-weight:bold;">Net Fleet: '
+                    + escapeAiHtml(data.fleetDelta || '0.0 mi') + '</div>';
+
+                const detail = [];
+                applied.forEach(a => {
+                    if (a.type === 'reassign_stop') {
+                        detail.push(escapeAiHtml(a.fromTech) + ' ' + escapeAiHtml(a.fromDelta)
+                            + ' &middot; ' + escapeAiHtml(a.toTech) + ' ' + escapeAiHtml(a.toDelta));
+                    } else if (a.type === 'sort_route' && a.reordered) {
+                        detail.push(escapeAiHtml(a.tech) + ' ' + escapeAiHtml(a.delta));
+                    }
+                });
+                if (detail.length) {
+                    html += '<div style="margin-top:3px;color:#9fb8a8;font-size:11px;">' + detail.join('<br>') + '</div>';
+                }
+                if (data.persisted === false) {
+                    html += '<div style="margin-top:3px;color:#ffb56b;font-size:11px;">⚠ Board updated but not saved'
+                        + (data.reason ? ' (' + escapeAiHtml(data.reason) + ')' : '') + '</div>';
+                }
+                html += '</div>';
+            }
+            if (errors.length) {
+                html += '<div style="margin-top:4px;color:#ffb56b;font-size:11px;">'
+                    + escapeAiHtml(errors.map(a => a.summary).join(' · ')) + '</div>';
+            }
+            el.innerHTML = html;
+        }
+
+        function escapeAiHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        /**
+         * Rebuilds window.currentAssignments from the ordering the backend
+         * returned, reusing the existing stop objects (they carry urgency, forms,
+         * journal and ticket flags the backend never sees, so they must be moved
+         * rather than recreated). Anything the backend didn't mention is kept
+         * where it was, so a partial response can't silently drop stops.
+         */
+        function applyAiRoutes(newRoutes) {
+            const current = window.currentAssignments || {};
+            const itemByCode = {};
+            Object.values(current).forEach(stops => (stops || []).forEach(item => {
+                if (item && item.code) itemByCode[item.code] = item;
+            }));
+
+            const returnedCodes = new Set();
+            const next = {};
+            (newRoutes || []).forEach(route => {
+                const stops = [];
+                (route.stops || []).forEach(code => {
+                    const item = itemByCode[code];
+                    if (!item || returnedCodes.has(code)) return;
+                    returnedCodes.add(code);
+                    stops.push(item);
+                });
+                if (stops.length) next[route.tech] = stops;
+            });
+
+            Object.entries(current).forEach(([tech, stops]) => {
+                const leftovers = (stops || []).filter(item => item && item.code && !returnedCodes.has(item.code));
+                if (leftovers.length) next[tech] = (next[tech] || []).concat(leftovers);
+            });
+
+            window.currentAssignments = next;
+        }
+
+        async function submitAiCommand() {
+            if (_aiBusy) return;
+            const input = document.getElementById('aiCommandInput');
+            if (!input) return;
+
+            const text = (input.value || '').trim();
+            if (!text) {
+                setAiStatus('Type or dictate a command first.', '#ffb56b');
+                return;
+            }
+
+            const assignments = window.currentAssignments || {};
+            if (!Object.values(assignments).some(stops => (stops || []).length > 0)) {
+                setAiStatus('Generate dispatches before using the assistant.', '#ffb56b');
+                return;
+            }
+
+            const dateInput = document.getElementById('dispatchDate');
+            const dispatchDate = dateInput && dateInput.value ? dateInput.value : '';
+            if (!dispatchDate) {
+                setAiStatus('Set a dispatch date first.', '#ffb56b');
+                return;
+            }
+
+            if (_aiListening) stopAiVoice();
+            _aiBusy = true;
+            refreshAiBarState();
+            setAiStatus('Working on it…', '#7ec8e3');
+            const diffEl = document.getElementById('aiCommandDiff');
+            if (diffEl) diffEl.innerHTML = '';
+
+            try {
+                const res = await fetch('/.netlify/functions/dispatch-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        state: CURRENT_STATE,
+                        dispatchDate: dispatchDate,
+                        routes: aiRoutesSnapshot()
+                    })
+                });
+                const data = await res.json().catch(() => null);
+
+                if (!res.ok || !data || !data.ok) {
+                    setAiStatus((data && data.error) || ('Assistant failed (HTTP ' + res.status + ')'), '#ff8a80');
+                    return;
+                }
+
+                if (!(data.actions || []).length) {
+                    setAiStatus(data.reply || 'Nothing to change.', '#ffb56b');
+                    return;
+                }
+
+                const changed = data.changedTechs || [];
+                if (changed.length) {
+                    applyAiRoutes(data.routes);
+                    // Immediate UI refresh so the tech tiles reflect the change
+                    // without the dispatcher touching anything.
+                    renderReviewBoard(true);
+                    if (typeof buildPrintableReport === 'function' && window._lastDateStr) {
+                        buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
+                    }
+                    // Same follow-up reassignStop does: refresh "To 1st Stop"
+                    // traffic for any tech whose first stop may have changed.
+                    if (window.google && window.google.maps && typeof checkTrafficForTech === 'function') {
+                        changed.forEach(tech => {
+                            if ((window.currentAssignments[tech] || []).length > 0) checkTrafficForTech(tech);
+                        });
+                    }
+                }
+
+                renderAiDiff(data);
+                setAiStatus('', '#888');
+                // Keep a rejected command in the box so it can be corrected
+                // rather than retyped; clear it once something actually applied.
+                if (changed.length) input.value = '';
+            } catch (err) {
+                setAiStatus('Assistant unreachable: ' + err.message, '#ff8a80');
+            } finally {
+                _aiBusy = false;
+                refreshAiBarState();
+            }
+        }
+
+        // ─── VOICE INPUT ──────────────────────────────────────────────────────
+        // Web Speech API only -- the transcript is what gets posted, so no audio
+        // ever leaves the browser. Unsupported browsers just get the text box
+        // (the mic button hides itself in refreshAiBarState).
+        function toggleAiVoice() {
+            if (_aiListening) { stopAiVoice(); return; }
+
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {
+                setAiStatus('Voice input is not supported in this browser — type the command instead.', '#ffb56b');
+                return;
+            }
+
+            try {
+                _aiRecognition = new SR();
+            } catch (err) {
+                setAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
+                return;
+            }
+
+            _aiRecognition.lang = 'en-US';
+            _aiRecognition.interimResults = true;
+            _aiRecognition.continuous = false;
+            _aiRecognition.maxAlternatives = 1;
+
+            _aiRecognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = 0; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+                const input = document.getElementById('aiCommandInput');
+                if (input) input.value = transcript.trim();
+                // Auto-run once the phrase is final so a hands-free command
+                // doesn't need a second tap.
+                if (event.results[event.results.length - 1].isFinal) {
+                    stopAiVoice();
+                    submitAiCommand();
+                }
+            };
+            _aiRecognition.onerror = (event) => {
+                stopAiVoice();
+                setAiStatus(event.error === 'not-allowed'
+                    ? 'Microphone permission denied.'
+                    : 'Voice input error: ' + event.error, '#ff8a80');
+            };
+            _aiRecognition.onend = () => { if (_aiListening) stopAiVoice(); };
+
+            _aiListening = true;
+            setAiStatus('Listening…', '#7edb8e');
+            const micBtn = document.getElementById('aiMicBtn');
+            if (micBtn) { micBtn.style.background = '#8b2e2e'; micBtn.style.color = '#fff'; }
+
+            try {
+                _aiRecognition.start();
+            } catch (err) {
+                stopAiVoice();
+                setAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
+            }
+        }
+
+        function stopAiVoice() {
+            _aiListening = false;
+            if (_aiRecognition) {
+                try { _aiRecognition.stop(); } catch (err) { /* already stopped */ }
+                _aiRecognition = null;
+            }
+            const micBtn = document.getElementById('aiMicBtn');
+            if (micBtn) { micBtn.style.background = '#2a2a3e'; micBtn.style.color = '#ccc'; }
+            if ((document.getElementById('aiCommandStatus') || {}).textContent === 'Listening…') setAiStatus('');
+        }
+
+        document.addEventListener('DOMContentLoaded', refreshAiBarState);
+
     </script>
     <!-- Site History Modal -->
     <div id="siteHistoryOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;" onclick="if(event.target===this)closeSiteHistory()">
