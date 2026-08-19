@@ -378,6 +378,10 @@
   <div class="dm-row">
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-top:4px;">
+    <input type="checkbox" id="dmForceFullRebuild">
+    Force full rebuild (ignore existing data -- use only if site coordinates changed, not for adding new sites)
+  </label>
 
   <div id="dm-status" class="dm-status">Ready.</div>
 </div>
@@ -403,12 +407,15 @@
 
   window.dmBuildSiteMatrix = async function () {
     const state = dmState();
+    const forceFullRebuild = document.getElementById('dmForceFullRebuild').checked;
     const n = DM_SITE_COUNT_HINTS[state];
     const pairs = n ? Math.round((n * n) / 2) : null;
-    const costNote = pairs
-      ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
-      : 'Cost scales with site count squared.';
-    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
+    const costNote = forceFullRebuild
+      ? (pairs
+          ? 'Full rebuild forced -- roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
+          : 'Full rebuild forced -- cost scales with site count squared.')
+      : 'Incremental -- if this state already has a matrix, only pairs touching sites added since the last build will be fetched (likely far cheaper than a full rebuild).';
+    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
 
     // Second password specifically for this paid action (2026-08-18) --
     // deliberately separate from the regular admin login, so it stays
@@ -426,7 +433,7 @@
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, offset, adminSecret }),
+          body: JSON.stringify({ state, offset, adminSecret, fullRebuild: forceFullRebuild }),
         });
         const data = await res.json();
         if (res.status === 409 && data.resumeOffset != null) {
@@ -443,8 +450,11 @@
         if (!done) offset = data.nextOffset;
       }
       dmSetStatus(
-        '✅ Site-to-site matrix built for ' + state + '.\n' +
-        lastResult.siteCount + ' sites, ' + lastResult.newEntryCount + ' pairs computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
+        '✅ Site-to-site matrix built for ' + state + (lastResult.incremental ? ' (incremental)' : ' (full rebuild)') + '.\n' +
+        (lastResult.incremental
+          ? lastResult.newSiteCount + ' new site(s) detected -- only pairs touching them were fetched.\n'
+          : '') +
+        lastResult.siteCount + ' total sites, ' + lastResult.newEntryCount + ' pair(s) computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
         'Total matrix now has ' + lastResult.totalEntryCount + ' entries (tech-to-site + site-to-site combined).' +
         (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '')
       );
