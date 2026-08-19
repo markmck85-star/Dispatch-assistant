@@ -79,6 +79,33 @@ exports.handler = async (event) => {
   if (mode === "driving" && !apiKey)
     return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set (required for driving mode)" });
 
+  // Same paid-action gate as compute-site-distance-matrix.js (2026-08-18)
+  // -- only applies to "driving" mode, since haversine is free/local math
+  // and never touches Google's API, so it doesn't need locking down.
+  if (mode === "driving") {
+    const requiredSecret = process.env.DISTANCE_MATRIX_ADMIN_PASSWORD;
+    if (!requiredSecret) {
+      return json(500, { error: "DISTANCE_MATRIX_ADMIN_PASSWORD is not configured -- refusing to run a paid build until it is set." });
+    }
+    if (String(payload.adminSecret || "") !== requiredSecret) {
+      return json(401, { error: "Incorrect or missing admin secret for this paid operation." });
+    }
+
+    const COOLDOWN_HOURS = 24;
+    const cooldownStore = getStore("dispatch");
+    const cooldownKey = "distance-matrix-cooldown/tech-site/" + state;
+    const lastRun = await cooldownStore.get(cooldownKey, { type: "text" });
+    if (lastRun) {
+      const hoursSince = (Date.now() - new Date(lastRun).getTime()) / 36e5;
+      if (hoursSince < COOLDOWN_HOURS) {
+        return json(429, {
+          error: `A driving-mode tech-to-site build for ${state} already ran ${hoursSince.toFixed(1)}h ago -- please wait ${(COOLDOWN_HOURS - hoursSince).toFixed(1)}h before running it again.`,
+        });
+      }
+    }
+    await cooldownStore.set(cooldownKey, new Date().toISOString());
+  }
+
   const store = getStore("dispatch");
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);

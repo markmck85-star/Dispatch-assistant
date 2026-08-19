@@ -110,6 +110,29 @@ exports.handler = async (event) => {
     return json(401, { error: "Incorrect or missing admin secret for this paid operation." });
   }
 
+  // Cooldown (2026-08-18) -- these are one-time-per-state builds in normal
+  // use (Mark: "they obviously don't need to be run very often"), so a
+  // short-window abuse pattern (someone scripting repeat calls, or a stray
+  // client-side loop) is easy to tell apart from legitimate use just by
+  // spacing. Only checked when STARTING a fresh build (offset===0) -- a
+  // resume call (offset>0) is continuing a build that already passed this
+  // gate, not a new one, so it's allowed through regardless of cooldown.
+  const COOLDOWN_HOURS = 24;
+  if (offset === 0) {
+    const cooldownKey = "distance-matrix-cooldown/site-site/" + state;
+    const store2 = getStore("dispatch");
+    const lastRun = await store2.get(cooldownKey, { type: "text" });
+    if (lastRun) {
+      const hoursSince = (Date.now() - new Date(lastRun).getTime()) / 36e5;
+      if (hoursSince < COOLDOWN_HOURS) {
+        return json(429, {
+          error: `A site-to-site build for ${state} already ran ${hoursSince.toFixed(1)}h ago -- please wait ${(COOLDOWN_HOURS - hoursSince).toFixed(1)}h before running it again. (Cooldown exists to prevent repeated accidental/malicious spend; site locations don't change often enough to need frequent rebuilds.)`,
+        });
+      }
+    }
+    await store2.set(cooldownKey, new Date().toISOString());
+  }
+
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set" });
 
