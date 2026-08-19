@@ -1,7 +1,7 @@
 const USERS = [
-  { username: "gina",  pin: "2847", states: ["GA", "NC", "SC"], role: "dispatcher" },
-  { username: "admin", pin: "2847", states: ["GA", "NC", "SC", "FL"], role: "admin" },
-  { username: "tj",    pin: "2847", states: ["GA", "NC", "SC", "FL", "MI", "IN", "OH", "NV", "IL", "MN", "WV", "OR"], role: "admin" }
+  { username: "gina",  pin: "4084", states: ["GA", "NC", "SC"], role: "dispatcher" },
+  { username: "admin", pin: "9602", states: ["GA", "NC", "SC", "FL"], role: "admin" },
+  { username: "tj",    pin: "8278", states: ["GA", "NC", "SC", "FL", "MI", "IN", "OH", "NV", "IL", "MN", "WV", "OR"], role: "admin" }
 ];
 
 function json(statusCode, obj) {
