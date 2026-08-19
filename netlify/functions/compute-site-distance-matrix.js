@@ -139,6 +139,27 @@ exports.handler = async (event) => {
   const store = getStore("dispatch");
   const existing = await store.get("distance-matrix/" + state, { type: "json" });
 
+  // Orphaned-build guard (2026-08-18, found via a real ~$122 overspend
+  // investigation with Gemini) -- the client always starts a fresh build at
+  // offset:0, with no memory of whether a PREVIOUS build for this state got
+  // interrupted (tab closed, phone locked, connection dropped) partway
+  // through. Its partial progress is real and already paid for
+  // (meta.siteToSite.partialMatrix, saved every chunk -- see below), but
+  // nothing was stopping a fresh offset:0 call from silently ignoring it and
+  // re-fetching (re-billing) every pair the abandoned attempt already
+  // covered. Now: a fresh-start request (offset:0, no force flag) against a
+  // state with real in-progress leftovers is refused, telling the caller
+  // exactly where to resume from instead. Pass force:true to deliberately
+  // discard old progress and start clean (e.g. after the site list changed).
+  if (offset === 0 && !payload.force && existing && existing.meta && existing.meta.siteToSite && existing.meta.siteToSite.inProgress) {
+    const sf = existing.meta.siteToSite;
+    return json(409, {
+      error: `An interrupted ${state} build already has ${sf.elementsUsed || 0} billed elements saved (from a previous session that didn't finish). Resume it with offset:${sf.lastOffset || 0} to avoid re-billing that work, or pass force:true to discard it and start completely over.`,
+      resumeOffset: sf.lastOffset || 0,
+      priorElementsUsed: sf.elementsUsed || 0,
+    });
+  }
+
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const { data: sites, error: sitesErr } = await supabase
     .from("sites")
@@ -264,6 +285,7 @@ exports.handler = async (event) => {
       elementsUsed,
       failedPairs,
       partialMatrix: matrix,
+      lastOffset: nextOffset,
     },
   };
   await store.setJSON("distance-matrix/" + state, { meta: mergedMeta, matrix: existingMatrix });
