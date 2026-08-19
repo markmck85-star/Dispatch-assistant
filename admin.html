@@ -410,6 +410,13 @@
       : 'Cost scales with site count squared.';
     if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
 
+    // Second password specifically for this paid action (2026-08-18) --
+    // deliberately separate from the regular admin login, so it stays
+    // gated even once other admin-role logins exist. Entered once per
+    // build, reused across every chunked call below (not stored anywhere).
+    const adminSecret = prompt('Enter the distance-matrix admin password to confirm this paid build:');
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+
     let offset = 0;
     let done = false;
     let lastResult = null;
@@ -419,7 +426,7 @@
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, offset }),
+          body: JSON.stringify({ state, offset, adminSecret }),
         });
         const data = await res.json();
         if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
