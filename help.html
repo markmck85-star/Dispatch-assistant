@@ -80,7 +80,7 @@
 <body>
 <header>
   <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.49 / blobs-123 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>v9.78 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
@@ -89,6 +89,7 @@
   <a href="#login">Login</a>
   <a href="#daily">Daily Dispatch</a>
   <a href="#card-controls">Card Controls</a>
+  <a href="#map-view">Map View</a>
   <a href="#session-actions">Session Actions</a>
   <a href="#urgent">Urgent / Trouble Ticket</a>
   <a href="#unknown">Unknown Codes</a>
@@ -104,23 +105,32 @@
   <section id="whats-new">
     <h2>🆕 What's New</h2>
 
+    <h3>Map View</h3>
+    <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to see every tech's route plotted geographically, color-coded per tech, with a legend showing stop counts. Useful for spotting stops that are geographically close but assigned to different techs -- something that isn't always obvious from the text list alone, especially for anyone covering a state they don't know well.</p>
+
+    <h3>Route Button Goes Straight to Maps</h3>
+    <p>🗺️ <strong>Route</strong> on a tech's card now opens Google Maps directly with that tech's full route, no extra tap or popup in the way.</p>
+
+    <h3>Cluster Tool</h3>
+    <p>The 📍 pin icon next to Route lets you tag a tech's stops with a shared cluster name (e.g. "South Atlanta") for the corridor/preemptive-restock banner. A checklist lets you include or exclude specific stops -- useful when one stop is a genuine outlier (e.g. Sean has a Macon call mixed in with several South Atlanta stops).</p>
+
+    <h3>Unmatched Sites -- SA Numbers &amp; Map Lookup</h3>
+    <p>The Admin Panel's Unmatched Sites tool now shows the Salesforce SA number(s) tied to each unresolved name, and a <strong>📍 Locate via Maps</strong> button that geocodes the raw name and shows the nearest existing site with a real-world distance -- a much stronger signal than name-similarity alone for telling apart two differently-worded records of the same site, or two similarly-named but genuinely different sites.</p>
+
+    <h3>Technician Numbering</h3>
+    <p>Each tech's card now shows a small <strong>#</strong> number and a colored dot matching their route color on the Map View, making it easy to cross-reference a tech's stops between the list and the map at a glance.</p>
+
+    <h3>Security Hardening</h3>
+    <p>Login PINs are now unique per person (previously shared). The site-to-site and drive-time distance matrix builds -- both real, billed Google Maps API calls -- now require a separate admin password beyond the regular login, and are capped to one build per state per 24 hours to prevent runaway cost from a stray repeated click or a compromised login.</p>
+
     <h3>Inbound Dispatch via Email</h3>
     <p>Forward any dispatch list or trouble ticket email to <strong>dispatch@mcrdispatch.net</strong> and the app processes it automatically. A gold banner appears at the top when a new dispatch list arrives — tap <strong>Load</strong> to import it instantly.</p>
 
     <h3>Trouble Ticket SMS Alerts</h3>
-    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an SMS alert fires automatically to all configured recipients with the WO number, site name, issue, and SLA deadline.</p>
-
-    <h3>Send Dispatches Directly to Technicians</h3>
-    <p>After generating dispatches, tap the <strong>📤 Send</strong> button on any tech's message card. The app sends a full formatted email to their MCR address and a short SMS ping to their phone — no copy-paste needed. Set up each tech's carrier and SMS address in the Admin Panel under Technicians.</p>
+    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an SMS alert fires automatically to configured recipients (set per-state, per-person, with active-hours windows in Admin → Notifications) with the WO number, site name, issue, and SLA deadline.</p>
 
     <h3>Technician Availability Board</h3>
-    <p>The availability panel shows all techs with real-time status. Comp days and Saturday on-call rules apply automatically. Tap <strong>Mark Out</strong> to manually mark a tech unavailable for unscheduled absences — the dispatch engine routes around them immediately. Availability persists across page reloads for the current day.</p>
-
-    <h3>Fallback Assignment Improvements</h3>
-    <p>When a tech is unavailable and no fallback is set, a prompt appears to assign coverage. If the designated fallback is also unavailable, the prompt correctly shows <strong>Fallback also unavailable</strong> and hides the permanent save option to prevent accidental database changes. Use <strong>Skip All</strong> to dismiss all pending prompts at once.</p>
-
-    <h3>Permanent Assignment Saving</h3>
-    <p>Use <strong>Assign &amp; save as fallback</strong> in the fallback prompt, or <strong>Yes, save it</strong> in the inline Reassign dropdown, to permanently update a site's default or fallback technician in the database.</p>
+    <p>The availability panel shows all techs with real-time status. Comp days and Saturday on-call rules apply automatically. Tap <strong>Mark Out</strong> to manually mark a tech unavailable for unscheduled absences — the dispatch engine routes around them immediately.</p>
   </section>
   <section id="login">
     <h2>Logging In</h2>
@@ -150,7 +160,7 @@
       If a location has no fallback and the primary is out, a queue prompt cycles through each affected location asking who should cover.
     </div>
     <div class="step"><strong>Step 6 — Send messages.</strong><br>
-      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send.
+      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send manually -- or tap <strong>📤 Send</strong> on a tech's card to have the app email and text them directly, no copy-paste needed. Set each tech's carrier and SMS address in Admin → Technicians first.
     </div>
     <div class="step"><strong>Step 7 — Print or open Restock Tracker.</strong><br>
       Tap <strong>Print Dispatch Summary</strong> at the top to open a printable summary in a new tab.<br>
@@ -161,11 +171,12 @@
   <!-- CARD CONTROLS -->
   <section id="card-controls">
     <h2>Dispatch Card Controls</h2>
-    <p>Each stop on a technician's card has the following controls:</p>
+    <p>Each tech's card shows a <strong>#</strong> number and a colored dot -- the same color used for that tech's route on Map View, so you can cross-reference between the list and the map at a glance. Each stop within a card is also numbered.</p>
     <table>
       <tr><th>Control</th><th>What it does</th></tr>
-      <tr><td>🚦 <strong>Traffic</strong></td><td>Opens Google Maps traffic view from the tech's home to their first stop.</td></tr>
-      <tr><td>🗺️ <strong>Route</strong></td><td>Opens a multi-stop Google Maps route for all of the tech's stops in order.</td></tr>
+      <tr><td>🗺️ <strong>Route</strong></td><td>Opens Google Maps directly with all of that tech's stops in order.</td></tr>
+      <tr><td>↻ <strong>Sort</strong></td><td>Re-sorts a tech's stops by distance -- useful after a stop gets reassigned to them, since it doesn't slot into route order automatically.</td></tr>
+      <tr><td>📍 <strong>Cluster</strong></td><td>Tags selected stops with a shared cluster name for the corridor/preemptive-restock banner. Shows a checklist so you can exclude an outlier stop from the group.</td></tr>
       <tr><td>▲ / ▼</td><td>Reorder stops within a tech's list before generating messages or a route.</td></tr>
       <tr><td><strong>Reassign</strong></td><td>Move a stop to a different tech. Prompts to save the change as permanent.</td></tr>
       <tr><td>→ <strong>Tomorrow</strong></td><td>Pushes a same-day stop to the next day. Only appears on TODAY-flagged stops.</td></tr>
@@ -180,7 +191,16 @@
       <tr><td><span class="badge badge-blue">Reassigned</span></td><td>Stop was moved from its default tech this session.</td></tr>
     </table>
     <h3>Cluster / Corridor Banner</h3>
-    <p>When a dispatched site is in a known remote cluster (Augusta area, Charlotte NC, Fayette/Clayton corridor), a blue banner appears suggesting you check the Restock Tracker for nearby sites that may benefit from a preemptive restock.</p>
+    <p>When a dispatched site carries a cluster tag (set via the 📍 tool above, or one of the built-in remote clusters like the Fayette/Clayton corridor), a blue banner appears suggesting you check the Restock Tracker for nearby sites that may benefit from a preemptive restock.</p>
+  </section>
+
+  <!-- MAP VIEW -->
+  <section id="map-view">
+    <h2>Map View</h2>
+    <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to plot every tech's stops geographically. Each tech gets a distinct color, matching the dot next to their name on their card. Tap any pin for that stop's site name, address, and distance from the previous stop.</p>
+    <p>The legend below the map lists each tech with their stop count and lets you toggle their route on/off. Stops without saved coordinates are listed separately under the map ("Not plotted") rather than silently dropped.</p>
+    <p>Distance figures use the real site-to-site driving-distance matrix where it's been built for that state (GA has the most complete coverage); elsewhere, or for specific pairs the matrix build didn't resolve, distances fall back to straight-line and are marked <strong>(est.)</strong>.</p>
+    <div class="note"><strong>Note:</strong> whether the map is shown or hidden persists across a page refresh.</div>
   </section>
 
   <!-- SESSION ACTIONS -->
@@ -246,16 +266,47 @@ Please acknowledge receipt.</div>
       <li>Search by site code, name, or address.</li>
       <li>Edit any location to set Primary Tech, Fallback Tech, and Machine Type (SK/SB/BK).</li>
       <li>Add new locations manually.</li>
-      <li>Delete locations — hardcoded locations will reappear on next load; edit them to create a Blob override instead.</li>
     </ul>
     <h3>Technicians Tab</h3>
     <ul>
       <li>Add, edit, or remove technicians for any state. Changes take effect immediately.</li>
+      <li>Set each tech's carrier and SMS address here to enable the direct-Send feature on dispatch cards.</li>
     </ul>
-    <h3>Backup / Restore</h3>
+    <h3>Backup Tab</h3>
     <ul>
       <li>Download a JSON backup of all saved data for the selected state.</li>
       <li>Restore from a previous backup file if needed.</li>
+    </ul>
+    <h3>Notifications Tab</h3>
+    <ul>
+      <li>Control who receives SMS alerts when trouble tickets arrive.</li>
+      <li>Each recipient can be scoped to specific states (or all), with their own active-hours window and timezone -- outside that window, they're queued for a digest instead of texted immediately.</li>
+    </ul>
+    <h3>Distance Matrix Tab</h3>
+    <ul>
+      <li>Builds real driving-distance data via the Google Maps API -- either tech-to-site (cheaper, ~$3-6/state) or the fuller site-to-site matrix (~$23-45 for a state GA's size), which also powers Map View's real distance labels and route sorting.</li>
+      <li>Both driving-mode builds require a separate admin password beyond your regular login, and are limited to one build per state per 24 hours -- these are one-time-per-state builds in normal use, not something to re-run casually.</li>
+      <li>A haversine (straight-line) mode is also available, free and instant, as a fallback for states without a real matrix yet.</li>
+    </ul>
+    <h3>Closed Tickets Tab</h3>
+    <ul>
+      <li>Manually upload a Salesforce closed-ticket export, or trigger the automated sync on demand with Refresh Now.</li>
+      <li>An automatic sync also runs every 20 minutes in the background when enabled.</li>
+    </ul>
+    <h3>Repeat Issues Tab</h3>
+    <ul>
+      <li>Flags sites with 3+ trouble tickets for the same issue category within a rolling window (default 90 days) -- standard practice is to consider replacing hardware on the 3rd repeat, though it's worth confirming with the tech what they actually found on-site before deciding, since the same category can cover very different root causes.</li>
+      <li>Adjustable scope (state or all), window, and minimum ticket count.</li>
+    </ul>
+    <h3>Unmatched Sites Tab</h3>
+    <ul>
+      <li>Closed-ticket rows where the site name couldn't be confidently auto-matched, grouped by raw name so one fix updates every row sharing that name.</li>
+      <li>Shows the Salesforce SA number(s) tied to each group for cross-referencing, plus a suggested match by name similarity.</li>
+      <li>📍 <strong>Locate via Maps</strong> geocodes the raw name and shows the nearest existing site with a real-world distance -- a stronger signal than name similarity alone, especially for telling apart two differently-named records of the same site versus two genuinely different similarly-named sites.</li>
+    </ul>
+    <h3>Restock Schedule Tab</h3>
+    <ul>
+      <li>View and manage the on-call / Saturday coverage schedule.</li>
     </ul>
   </section>
 
@@ -276,9 +327,11 @@ Please acknowledge receipt.</div>
           <li>Unknown code detection + add flow with machine type</li>
           <li>URGENT mode with automatic SLA calculation</li>
           <li>Done / Cancel / Tomorrow controls with ↩ Undo</li>
-          <li>Traffic + Route buttons</li>
+          <li>Direct-to-Maps Route button, Sort, Cluster tagging</li>
+          <li>Map View with real driving-distance labels</li>
+          <li>Direct email + SMS send to technicians</li>
           <li>Print dispatch summary</li>
-          <li>Desktop responsive layout</li>
+          <li>Board auto-rebuilds from saved state on page load/refresh</li>
         </ul>
       </div>
       <div class="feature-card">
@@ -289,7 +342,7 @@ Please acknowledge receipt.</div>
           <li>Right Forms badge + confirmation — GA SK/BK only</li>
           <li>Partial restock SWAP warning — GA SK/BK only</li>
           <li>Color/decal rules — GA only</li>
-          <li>Cluster/corridor banners — GA only</li>
+          <li>Cluster/corridor banners, taggable per stop</li>
           <li>NC all-surfboard auto-detected</li>
           <li>SC auto-assigns to Michael Newboult</li>
         </ul>
@@ -297,18 +350,19 @@ Please acknowledge receipt.</div>
       <div class="feature-card">
         <h4>⚙️ Admin</h4>
         <ul>
-          <li>State-scoped location management</li>
-          <li>Location search bar</li>
-          <li>Primary + fallback + machine type per location</li>
-          <li>Blob-based persistent storage</li>
+          <li>State-scoped location + technician management</li>
+          <li>Notification recipients with per-person hours/timezone</li>
+          <li>Site-to-site + tech-to-site distance matrix builds (password + cooldown protected)</li>
+          <li>Closed-ticket sync (manual or automatic)</li>
+          <li>Repeat-issue and unmatched-site detection tools</li>
           <li>Backup and restore per state</li>
         </ul>
       </div>
       <div class="feature-card">
         <h4>🔔 Watchdog</h4>
         <ul>
-          <li>Email monitoring (dispatch + RMA)</li>
-          <li>SMS alert on trouble tickets</li>
+          <li>Email monitoring (dispatch, trouble/maintenance tickets, RMA shipping)</li>
+          <li>SMS alert on trouble tickets, filtered by state + active hours</li>
           <li>PC Name, WO number, issue category + detail parsed into alerts</li>
           <li>Duplicate reply filtering</li>
         </ul>
@@ -319,29 +373,22 @@ Please acknowledge receipt.</div>
   <!-- PLANNED -->
   <section id="planned">
     <h2>Planned Features &amp; Future Upgrades</h2>
-    <h3>Short Term</h3>
+    <h3>In Testing</h3>
     <ul>
-      <li>Watchdog subject classifier fix</li>
-      <li>Watchdog <code>--test</code> mode — process a local sample email without touching live mailbox</li>
-      <li>Watchdog → Mailgun inbound webhook migration (event-driven, replaces polling)</li>
-      <li>On-call schedule to Blobs with admin edit UI</li>
-      <li>DCO toggle for right/left form selection</li>
-      <li>FL location database reconciliation (33 sites pending code verification)</li>
+      <li>AI-assisted dispatch commands ("move stop 2 from Robert to Keontae") -- built, not yet live for general use while it's being tested.</li>
+      <li>Standalone map/lookup page for quick reference (route map, ticket + closing-note history, RMA shipment status, repeat-issue flags) without the full dispatch-generation workflow.</li>
     </ul>
     <h3>Medium Term</h3>
     <ul>
-      <li>Salesforce API integration — live WO data feed to dispatch tool</li>
-      <li>Remote location cluster flag on dispatch cards (Columbus, Albany, Augusta, south of Macon)</li>
-      <li>FL on-call schedule support</li>
-      <li>Supabase parts tracking (via Watchdog)</li>
-      <li>PWA share target — share dispatch email directly from any email app</li>
+      <li>Closing-note visibility -- Neumo doesn't currently include these in the closed-ticket report; exploring both asking them to add the field and a browser-automation workaround.</li>
+      <li>Automated UPS delivery/return confirmation, replacing manual "Mark Returned" tracking.</li>
+      <li>Day-of-week restock volume reference, especially useful for someone covering an unfamiliar state.</li>
     </ul>
     <h3>Longer Term</h3>
     <ul>
-      <li>Distance matrix for automatic proximity-based tech assignment</li>
-      <li>Two-tech travel comparison — compare drive time and mileage before assigning</li>
-      <li>Supabase migration — replace Netlify Blobs as primary state store</li>
-      <li>Full dynamic location loading from Blobs</li>
+      <li>Per-dispatcher logins with individually configurable state coverage.</li>
+      <li>Site-to-site distance matrix coverage for states beyond GA.</li>
+      <li>Bundled/opportunistic restock suggestions when a tech is already near a site approaching its threshold.</li>
     </ul>
   </section>
 
@@ -349,15 +396,14 @@ Please acknowledge receipt.</div>
   <section id="limits">
     <h2>Known Limitations</h2>
     <ul>
-      <li>Hardcoded locations cannot be permanently deleted from admin — edit them to create a Blob override, or request removal in the next code update.</li>
-      <li>FL technician list is currently hardcoded — Dynamic TECHS from Blobs will fix this.</li>
-      <li>On-call schedule is hardcoded through early 2027 — Blobs migration will make it editable without a code deploy.</li>
       <li>SLA calculation requires the Earliest Start Permitted field to be present in the ticket email.</li>
       <li>NC and SC share the GA location database in admin — separate NC/SC databases not yet implemented.</li>
-      <li>FL location codes are partially unreconciled — 33 sites are pending correct PC code verification. Unknown codes will prompt for manual entry at dispatch time.</li>
-      <li>Undo is session-only — refreshing the page clears all session action history.</li>
+      <li>Undo is session-only — refreshing the page clears session action history (though the board itself now reloads correctly on refresh).</li>
+      <li>Map View / route-sorting shows real driving distance only where the site-to-site matrix has been built (GA has the most complete coverage) -- other states, and any specific pairs the build didn't resolve, fall back to straight-line distance, marked "(est.)".</li>
+      <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
+      <li>Closing notes from Neumo aren't currently available in the closed-ticket report, so full ticket history for a site still requires manually checking Salesforce.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: May 14, 2026 &nbsp;·&nbsp; Deploy 80 / blobs-51</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: August 18, 2026 &nbsp;·&nbsp; v9.78</p>
   </section>
 
 </main>
