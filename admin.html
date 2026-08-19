@@ -492,13 +492,18 @@
   window.dmBuildMatrix = async function (mode) {
     const state = dmState();
     const label = mode === 'driving' ? 'drive-time (calls Google Maps API — confirm intent)' : 'straight-line haversine';
-    if (mode === 'driving' && !confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
+    let adminSecret = '';
+    if (mode === 'driving') {
+      if (!confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
+      adminSecret = prompt('Enter the distance-matrix admin password to confirm this paid build:');
+      if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+    }
     dmSetStatus('Building ' + label + ' matrix for ' + state + '…');
     try {
       const res = await fetch('/.netlify/functions/compute-distance-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, mode }),
+        body: JSON.stringify({ state, mode, adminSecret }),
       });
       const data = await res.json();
       if (data.ok) {
