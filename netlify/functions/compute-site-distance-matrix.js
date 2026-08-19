@@ -94,6 +94,22 @@ exports.handler = async (event) => {
   if (!state || !/^[A-Z]{2}$/.test(state)) return json(400, { error: "Valid 2-letter state required" });
   const offset = Number.isInteger(payload.offset) ? payload.offset : 0;
 
+  // Real spend gate (2026-08-18) -- this function previously had NO auth
+  // check of any kind; the only thing stopping an unauthenticated call was
+  // admin.html's own browser confirm() dialog, which guards the button, not
+  // the endpoint. A full state build costs real money (~$23-45 for a state
+  // GA's size, scaling with site-count^2), so this needs its own secret
+  // independent of the regular admin login/role system -- deliberately NOT
+  // reusing DISTANCE_MATRIX_ADMIN_PASSWORD is left unset in an environment
+  // by mistake, this fails closed (blocks the call) rather than open.
+  const requiredSecret = process.env.DISTANCE_MATRIX_ADMIN_PASSWORD;
+  if (!requiredSecret) {
+    return json(500, { error: "DISTANCE_MATRIX_ADMIN_PASSWORD is not configured -- refusing to run a paid build until it is set." });
+  }
+  if (String(payload.adminSecret || "") !== requiredSecret) {
+    return json(401, { error: "Incorrect or missing admin secret for this paid operation." });
+  }
+
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set" });
 
