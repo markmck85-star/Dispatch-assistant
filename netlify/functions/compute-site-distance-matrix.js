@@ -178,6 +178,39 @@ exports.handler = async (event) => {
   }
 
   const existingMatrix = (existing && existing.matrix) || {};
+
+  // Incremental rebuild (2026-08-18, added after confirming a re-run
+  // previously recomputed the ENTIRE state from scratch -- a real, recurring
+  // cost given how often new kiosk installs get added to an already-built
+  // state). A site counts as "already known" if it appears on either side
+  // of any existing pair key; a site with zero such appearances is "new"
+  // since the last completed build for this state. known x known pairs are
+  // guaranteed already covered by that prior build, so they're skipped
+  // entirely -- only new x new and new x known pairs get fetched. Reordering
+  // so new sites come first lets the existing origin/destination-slice
+  // batching logic below work unchanged; only the origin range being
+  // iterated (newSites.length instead of locEntries.length) actually
+  // changes for the incremental case.
+  //
+  // Falls back to a full rebuild automatically when there's no existing
+  // matrix at all (first build for this state -- every site is "new") or
+  // when the caller explicitly passes fullRebuild:true (e.g. site
+  // coordinates changed and old pairs need refreshing, not just new ones
+  // added).
+  const knownCodes = new Set();
+  for (const key of Object.keys(existingMatrix)) {
+    const [a, b] = key.split("|");
+    knownCodes.add(a);
+    knownCodes.add(b);
+  }
+  const fullRebuild = !!payload.fullRebuild || knownCodes.size === 0;
+  const newSites = fullRebuild ? locEntries : locEntries.filter(([code]) => !knownCodes.has(code));
+  const knownSites = fullRebuild ? [] : locEntries.filter(([code]) => knownCodes.has(code));
+  // New sites first, so slicing destRange from an origin's index still
+  // naturally includes remaining new sites (avoiding duplicate new x new
+  // pairs) followed by every known site (giving the new x known pairs).
+  const orderedEntries = [...newSites, ...knownSites];
+
   // Resume any in-progress build's partial results (stored under meta.siteToSite.partialMatrix
   // between calls) rather than starting the merge over from scratch each chunk.
   const priorPartial = (offset > 0 && existing && existing.meta && existing.meta.siteToSite && existing.meta.siteToSite.partialMatrix) || {};
@@ -186,14 +219,17 @@ exports.handler = async (event) => {
   const failedPairs = [...priorFailed];
   let elementsUsed = (offset > 0 && existing && existing.meta && existing.meta.siteToSite && existing.meta.siteToSite.elementsUsed) || 0;
 
+  // Only iterate origins over the NEW portion of orderedEntries -- known x
+  // known pairs (everything past newSites.length as an origin) never needed
+  // recomputing in the first place.
   const originStarts = [];
-  for (let oStart = 0; oStart < locEntries.length; oStart += ORIGIN_BATCH) originStarts.push(oStart);
+  for (let oStart = 0; oStart < newSites.length; oStart += ORIGIN_BATCH) originStarts.push(oStart);
 
   const chunkStarts = originStarts.slice(offset, offset + ORIGIN_BATCHES_PER_CALL);
 
   for (const oStart of chunkStarts) {
-    const originBatch = locEntries.slice(oStart, oStart + ORIGIN_BATCH);
-    const destRange = locEntries.slice(oStart);
+    const originBatch = orderedEntries.slice(oStart, oStart + ORIGIN_BATCH);
+    const destRange = orderedEntries.slice(oStart);
     const origins = originBatch.map(([, l]) => `${l.lat},${l.lng}`).join("|");
 
     for (let dStart = 0; dStart < destRange.length; dStart += DEST_BATCH) {
@@ -271,6 +307,8 @@ exports.handler = async (event) => {
       newEntryCount: Object.keys(matrix).length,
       totalEntryCount: Object.keys(mergedMatrix).length,
       failedCount: failedPairs.length,
+      incremental: !fullRebuild,
+      newSiteCount: newSites.length,
     });
   }
 
