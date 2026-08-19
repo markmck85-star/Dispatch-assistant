@@ -429,6 +429,14 @@
           body: JSON.stringify({ state, offset, adminSecret }),
         });
         const data = await res.json();
+        if (res.status === 409 && data.resumeOffset != null) {
+          // A previous build for this state got interrupted and left real,
+          // already-billed progress behind -- resume it instead of quietly
+          // re-fetching (re-billing) pairs it already paid for.
+          if (!confirm(data.error + '\n\nResume from where it left off?')) { dmSetStatus('Cancelled.'); return; }
+          offset = data.resumeOffset;
+          continue;
+        }
         if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
         lastResult = data;
         done = data.done;
