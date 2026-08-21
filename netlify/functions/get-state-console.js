@@ -179,6 +179,18 @@ exports.handler = async (event) => {
   let recentTickets = [];
   let lastImportedAt = null;
   if (siteIds.length) {
+    // Raised from 20 to 150 (2026-08-21) -- confirmed via a real case that
+    // 20 was actively hiding genuine tickets on an ordinary busy Friday:
+    // GA1005 (Cobb County Canton, WO 00150203) showed correctly as "Open"
+    // earlier the same evening, then vanished entirely -- not flipped to
+    // closed, just gone -- once enough newer restock tickets had arrived
+    // to push it past the top-20-by-received_at cutoff. It was never a
+    // data/ingestion problem (confirmed via the original dispatch email
+    // and its neighboring WO numbers importing fine); the query itself was
+    // silently discarding real, current information. 150 gives a state
+    // like GA (which saw 28+ restock tickets alone in one 3-day window
+    // during testing) comfortable headroom without querying an unbounded
+    // amount.
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
@@ -187,7 +199,7 @@ exports.handler = async (event) => {
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
       .order('received_at', { ascending: false })
-      .limit(20);
+      .limit(150);
     if (ticketsErr) return json(500, { ok: false, error: 'tickets fetch failed: ' + ticketsErr.message });
 
     // Closed = a site_visit from the closed-ticket import has already
@@ -233,6 +245,20 @@ exports.handler = async (event) => {
     if (freshErr) return json(500, { ok: false, error: 'import-freshness fetch failed: ' + freshErr.message });
     lastImportedAt = (freshRows && freshRows[0]) ? freshRows[0].imported_at : null;
 
+    // Best-effort county extraction from the site name for grouping on the
+    // frontend (2026-08-21) -- there's no dedicated county column on
+    // `sites`, just the free-text name MCR already uses everywhere else
+    // ("Cobb County Canton DMV", "Hall County Kroger Jesse Jewell"). Sites
+    // that don't literally contain the word "County" (e.g. "Gwinnett
+    // Kroger Lawrenceville") fall back to null and get grouped separately
+    // on the frontend rather than guessed at -- a wrong guess here would
+    // be worse than an honest "couldn't tell."
+    function extractCounty(name) {
+      if (!name) return null;
+      const m = name.match(/^([A-Za-z.]+(?:\s[A-Za-z.]+)?\sCounty)\b/i);
+      return m ? m[1] : null;
+    }
+
     recentTickets = (tickets || []).map(t => {
       const site = siteById[t.site_id];
       const closedOn = closedByTicketId[t.id] || null;
@@ -250,6 +276,7 @@ exports.handler = async (event) => {
       return {
         siteCode: site ? site.site_code : null,
         siteName: site ? site.name : '(unknown site)',
+        county: extractCounty(site ? site.name : null),
         issueCategory: t.issue_category,
         issueDetail: t.issue_detail,
         ticketKind: t.ticket_kind,
