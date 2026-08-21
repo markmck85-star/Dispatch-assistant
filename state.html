@@ -118,6 +118,7 @@
         </div>
       </div>
       <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
+      <div id="refreshImportedList" style="display:none;margin-bottom:12px;"></div>
       <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
 
       <a class="sf-link" href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru" target="_blank">🔗 Open Salesforce Report</a>
@@ -731,6 +732,7 @@ async function triggerManualSync() {
   btn.disabled = true;
   statusEl.textContent = 'Starting sync…';
   statusEl.style.color = 'var(--muted)';
+  document.getElementById('refreshImportedList').style.display = 'none';
   syncTriggeredAt = Date.now();
   hasSeenInProgress = false;
 
@@ -829,6 +831,27 @@ async function pollSyncStatus() {
         setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%'; }, 1500);
         statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
         statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
+        // List of what was actually imported this run, so a dispatcher
+        // watching for a specific ticket can confirm it landed right here
+        // instead of scrolling to hunt for it in the list above -- also
+        // doubles as a quick troubleshooting signal: if a ticket you expect
+        // isn't in this list at all, the import itself didn't pick it up
+        // (different problem than "imported but not showing as completed
+        // elsewhere," which would show the ticket here just fine).
+        const sampleListEl = document.getElementById('refreshImportedList');
+        if (s.insertedSamples && s.insertedSamples.length) {
+          sampleListEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:var(--muted);">Imported this run' +
+            (s.inserted > s.insertedSamples.length ? ` (showing ${s.insertedSamples.length} of ${s.inserted})` : '') + ':</div>' +
+            '<ul style="margin:4px 0 0 0;padding-left:18px;font-size:12px;color:#ccc;max-height:160px;overflow-y:auto;">' +
+            s.insertedSamples.map(function(row) {
+              const woLabel = row.woNumber ? 'WO ' + row.woNumber : '(no WO#)';
+              const flag = row.matched ? '' : ' <span style="color:#e0a030;">(no site match)</span>';
+              return '<li>' + (row.state || '') + ' — ' + (row.accountName || 'Unknown site') + ' — ' + woLabel + flag + '</li>';
+            }).join('') + '</ul>';
+          sampleListEl.style.display = 'block';
+        } else {
+          sampleListEl.style.display = 'none';
+        }
         loadAll();
         return;
       }
