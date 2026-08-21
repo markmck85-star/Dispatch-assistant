@@ -54,6 +54,7 @@
   .ticket-card .meta { color: #999; font-size: 12px; margin-top: 2px; }
   @keyframes importPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
   #importProgressBar.active { animation: importPulse 1.2s ease-in-out infinite; }
+  #refreshProgressBar.active { animation: importPulse 1.2s ease-in-out infinite; }
   #importStatus.importing { font-size: 15px; font-weight: 600; color: #4fa87b; }
 
   .restock-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -111,6 +112,11 @@
         Automatic sync every 20 minutes
       </label>
       <div id="autoSyncToggleStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+      <div id="refreshProgressWrap" style="display:none;margin-top:6px;margin-bottom:8px;">
+        <div style="background:#333;border-radius:6px;height:14px;overflow:hidden;">
+          <div id="refreshProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#4fa87b);height:100%;width:0%;transition:width 0.4s ease;"></div>
+        </div>
+      </div>
       <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
       <div style="font-size:11px;color:#999;margin-bottom:12px;">Triggers the same automated sync that already runs every 20 minutes. Use this when you need current data right now instead of waiting for the next cycle.</div>
 
@@ -747,22 +753,44 @@ async function triggerManualSync() {
   pollSyncStatus();
 }
 
+// Stage -> approximate percent, purely for a visually reassuring bar --
+// these aren't real byte-level progress (there's no file the browser can
+// watch download/upload; the work happens server-side in a headless
+// browser), just rough proportions of a typical run's total time based on
+// where each stage tends to fall (matches the confirmed real run 2026-08-21:
+// ~16s finding the report, then export+download+import all within another
+// ~90s).
+const REFRESH_STAGE_PERCENT = {
+  'Logging in': 10,
+  'Waiting for report to load': 30,
+  'Preparing export': 55,
+  'Downloading file': 75,
+  'Importing rows': 90,
+};
+
 async function pollSyncStatus() {
   const btn = document.getElementById('refreshNowBtn');
   const statusEl = document.getElementById('refreshStatus');
+  const progressWrap = document.getElementById('refreshProgressWrap');
+  const progressBar = document.getElementById('refreshProgressBar');
   try {
     const res = await fetch('/.netlify/functions/get-report-sync-status');
     const data = await res.json();
+    window._syncPollFirstFailureAt = null; // a successful poll clears any prior failure streak
 
     if (data.inProgress) {
       hasSeenInProgress = true;
       const startedAt = data.startedAt ? new Date(data.startedAt) : null;
       const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
-      statusEl.textContent = `⏳ Sync running${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
+      const stageLabel = data.stage || 'Starting';
+      statusEl.textContent = `⏳ ${stageLabel}${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
       statusEl.style.color = '#4fa87b';
       statusEl.style.fontWeight = '600';
       statusEl.style.fontSize = '15px';
       btn.disabled = true;
+      progressWrap.style.display = 'block';
+      progressBar.classList.add('active');
+      progressBar.style.width = (REFRESH_STAGE_PERCENT[data.stage] || 5) + '%';
       return;
     }
 
@@ -781,18 +809,24 @@ async function pollSyncStatus() {
       statusEl.textContent = '⏳ Starting sync…';
       statusEl.style.color = 'var(--muted)';
       btn.disabled = true;
+      progressWrap.style.display = 'block';
+      progressBar.classList.add('active');
+      progressBar.style.width = '5%';
       return;
     }
 
     clearInterval(refreshPollTimer);
     refreshPollTimer = null;
     btn.disabled = false;
+    progressBar.classList.remove('active');
 
     if (data.lastSuccess) {
       const s = data.lastSuccess;
       const at = new Date(s.at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
       if (secondsAgo < 360) {
+        progressBar.style.width = '100%';
+        setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%'; }, 1500);
         statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
         statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
         loadAll();
@@ -805,20 +839,42 @@ async function pollSyncStatus() {
       const at = new Date(f.at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
       if (secondsAgo < 360) {
+        progressWrap.style.display = 'none';
+        progressBar.style.width = '0%';
         statusEl.textContent = `❌ Sync failed: ${f.reason}`;
         statusEl.style.color = '#e08a8a';
         return;
       }
     }
 
+    progressWrap.style.display = 'none';
+    progressBar.style.width = '0%';
     statusEl.textContent = 'Sync finished (no recent result found -- check the Netlify function log).';
     statusEl.style.color = 'var(--muted)';
   } catch (err) {
-    clearInterval(refreshPollTimer);
-    refreshPollTimer = null;
-    btn.disabled = false;
-    statusEl.textContent = 'Could not check sync status: ' + err.message;
-    statusEl.style.color = '#e08a8a';
+    // A single failed status-check request (network blip, tab backgrounded
+    // briefly, etc.) doesn't mean the sync itself failed -- that's a
+    // separate process running server-side regardless of whether THIS
+    // browser tab can currently reach the status endpoint. Previously any
+    // one failed poll permanently stopped the whole interval, showing a
+    // scary "Failed to fetch" error even when the actual sync went on to
+    // complete successfully moments later (confirmed happening 2026-08-21).
+    // Now: keep polling silently through occasional failures, and only
+    // surface an error if it can't reach the status endpoint for a full
+    // minute straight -- long enough to rule out a one-off blip.
+    if (!window._syncPollFirstFailureAt) window._syncPollFirstFailureAt = Date.now();
+    const failingForMs = Date.now() - window._syncPollFirstFailureAt;
+    if (failingForMs > 60000) {
+      clearInterval(refreshPollTimer);
+      refreshPollTimer = null;
+      btn.disabled = false;
+      document.getElementById('refreshProgressBar').classList.remove('active');
+      statusEl.textContent = 'Could not check sync status for over a minute: ' + err.message + ' (the sync itself may still be running or have finished -- check the Netlify function log).';
+      statusEl.style.color = '#e08a8a';
+      window._syncPollFirstFailureAt = null;
+    }
+    // else: stay quiet, keep the existing "Starting sync…" / "Sync
+    // running…" text on screen, and let the next 3s tick try again.
   }
 }
 
