@@ -160,7 +160,7 @@ function render() {
 
     let rows = allShipments;
     if (stateVal) rows = rows.filter(s => s.state === stateVal);
-    if (techVal) rows = rows.filter(s => s.technicianId === techVal);
+    if (techVal) rows = rows.filter(s => String(s.technicianId) === String(techVal));
     if (needsReturnOnly) rows = rows.filter(s => s.returnBrokenPart && !s.returnedAt);
 
     const content = document.getElementById('content');
