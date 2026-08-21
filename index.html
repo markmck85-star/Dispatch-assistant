@@ -138,6 +138,7 @@
         /* Stop pins are divIcons rather than images, so each tech's route colour
            can be applied inline -- one shared shape instead of a PNG per colour. */
         .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
         .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
         .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
         .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
@@ -372,10 +373,16 @@
                         <span class="map-panel-title">&#x1F5FA;&#xFE0F; Map View</span>
                         <button type="button" id="mapToggleBtn" onclick="toggleDispatchMap()"
                             aria-expanded="true" aria-controls="dispatchMapBody">Hide Map</button>
+                        <button type="button" id="mapRefreshBtn" onclick="refreshDispatchMap()"
+                            title="Re-pull current status from the database (e.g. tickets the sync auto-completed since this loaded) without re-parsing the pasted dispatch list">&#x1F504; Refresh</button>
                         <span id="dispatchMapMeta" class="map-panel-meta"></span>
                     </div>
                     <div id="dispatchMapBody" class="map-panel-body">
                         <div id="dispatchMap"></div>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
+                            <input type="checkbox" id="mapShowCompletedToggle" checked onchange="toggleMapShowCompleted(this.checked)">
+                            Show completed stops (✓, muted)
+                        </label>
                         <div id="dispatchMapLegend"></div>
                         <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
                     </div>
@@ -5787,11 +5794,17 @@ ${content}</body></html>`;
          * alphabetical) so legend colours line up with the card order instead of
          * shuffling when someone's stops change bucket.
          */
-        function dispatchMapTechOrder(assignments) {
-            const withStops = Object.keys(assignments)
-                .filter(t => (assignments[t] || []).length > 0).sort();
-            const sameDay  = withStops.filter(t => assignments[t].some(i => i.isSameDay));
-            const tomorrow = withStops.filter(t => !assignments[t].some(i => i.isSameDay));
+        // extraTechNames (2026-08-21): a Set of tech names who may have ONLY
+        // completed stops and zero active ones -- without this they'd never
+        // get a route entry at all (and so no legend chip, no completed pins),
+        // since this function was only ever driven by active assignments
+        // before completed stops started staying on the map.
+        function dispatchMapTechOrder(assignments, extraTechNames) {
+            const allNames = new Set([...Object.keys(assignments), ...(extraTechNames || [])]);
+            const withStops = [...allNames]
+                .filter(t => (assignments[t] || []).length > 0 || (extraTechNames && extraTechNames.has(t))).sort();
+            const sameDay  = withStops.filter(t => (assignments[t] || []).some(i => i.isSameDay));
+            const tomorrow = withStops.filter(t => !(assignments[t] || []).some(i => i.isSameDay));
             return [...new Set([...sameDay, ...tomorrow])];
         }
 
@@ -5837,7 +5850,27 @@ ${content}</body></html>`;
             let stopCount = 0;
             let fleetMi = 0;
 
-            dispatchMapTechOrder(assignments).forEach((tech, techIndex) => {
+            // Completed stops, grouped by tech (2026-08-21) -- Mark specifically
+            // wants these to STAY on the map rather than vanish once done, so a
+            // dispatcher can see where a tech has actually already been (not
+            // just where they were originally routed) alongside where they're
+            // still headed. Keeps each tech's own color rather than switching
+            // to a separate status-color scheme, since the point is tracing one
+            // tech's whole-day path, not distinguishing techs by status.
+            // Deliberately NOT included in the connecting route polyline or
+            // fleet-mileage total below -- their true completion ORDER isn't
+            // reliably known (they're pulled from the separate completed/
+            // removed list, not the sequenced active board), so a line through
+            // them would imply a path that may not be real.
+            const completedByTech = {};
+            (window.removedStops || []).forEach(r => {
+                if (r.reason !== 'completed' || !r.tech || !r.code) return;
+                if (!completedByTech[r.tech]) completedByTech[r.tech] = [];
+                completedByTech[r.tech].push(r);
+            });
+            const allTechNames = new Set([...Object.keys(assignments), ...Object.keys(completedByTech)]);
+
+            dispatchMapTechOrder(assignments, allTechNames).forEach((tech, techIndex) => {
                 const pts = [];
                 let prevCode = null;
                 (assignments[tech] || []).forEach(item => {
@@ -5854,7 +5887,15 @@ ${content}</body></html>`;
                     pts.push({ lat: Number(loc.lat), lng: Number(loc.lng), item: item, loc: loc, leg: leg });
                     prevCode = item.code;
                 });
-                if (!pts.length) return;
+
+                const completedPts = [];
+                (completedByTech[tech] || []).forEach(r => {
+                    const loc = LOCATIONS[r.code];
+                    if (!loc || loc.lat == null || loc.lng == null) { unmappedCodes.push(r.code); return; }
+                    completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code: r.code, loc: loc });
+                });
+
+                if (!pts.length && !completedPts.length) return;
 
                 const info = TECHS[tech] || {};
                 const home = (info.lat != null && info.lng != null)
@@ -5867,6 +5908,7 @@ ${content}</body></html>`;
                     // are drawn dashed to stay distinguishable.
                     dashed: techIndex >= MAP_ROUTE_COLORS.length,
                     pts: pts,
+                    completedPts: completedPts,
                     home: home
                 });
                 stopCount += pts.length;
@@ -5962,6 +6004,33 @@ ${content}</body></html>`;
                     collect([p.lat, p.lng]);
                 });
 
+                // Completed stops -- same tech color, muted + checkmark instead
+                // of a numbered pin, so they read as "done" at a glance without
+                // losing which tech's day they belong to. Hidden together with
+                // the tech's active stops via the same layer group/legend
+                // toggle, plus its own separate show/hide-all toggle
+                // (window._dispatchMapShowCompleted, default true).
+                if (window._dispatchMapShowCompleted !== false) {
+                    route.completedPts.forEach(p => {
+                        L.marker([p.lat, p.lng], {
+                            icon: L.divIcon({
+                                className: '',
+                                html: '<div class="map-stop-pin map-stop-pin-done" style="background:' + route.color + ';">&#x2713;</div>',
+                                iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                            }),
+                            title: 'Completed — ' + p.code + ' (' + route.tech + ')'
+                        }).bindPopup(
+                            '<div class="map-pop-code">✓ Completed — ' + escapeAiHtml(p.code) + '</div>'
+                            + '<div>' + escapeAiHtml(p.loc.name || '') + '</div>'
+                            + (p.loc.address ? '<div style="color:#666;">' + escapeAiHtml(p.loc.address) + '</div>' : '')
+                            + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;'
+                            + 'border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>'
+                            + escapeAiHtml(route.tech) + '</div>'
+                        ).addTo(group);
+                        collect([p.lat, p.lng]);
+                    });
+                }
+
                 _dispatchMapLayers[route.tech] = group;
                 if (shown) group.addTo(map);
             });
@@ -6013,10 +6082,14 @@ ${content}</body></html>`;
                 // Escaped twice on purpose: once so the name survives as a JS
                 // string literal, once so it survives as an HTML attribute.
                 const arg = escapeAiHtml(route.tech.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+                const doneCount = route.completedPts.length;
+                const countLabel = doneCount
+                    ? route.pts.length + ' + ' + doneCount + ' done'
+                    : String(route.pts.length);
                 return '<span class="map-legend-chip' + (_dispatchMapHiddenTechs.has(route.tech) ? ' off' : '') + '"'
                     + ' onclick="toggleDispatchMapTech(\'' + arg + '\')" title="Show or hide this route">'
                     + '<span class="map-legend-swatch" style="background:' + route.color + ';"></span>'
-                    + escapeAiHtml(route.tech) + ' (' + route.pts.length + ')</span>';
+                    + escapeAiHtml(route.tech) + ' (' + countLabel + ')</span>';
             });
             if (_dispatchMapHiddenTechs.size) {
                 chips.push('<span class="map-legend-chip" onclick="showAllDispatchMapTechs()"'
@@ -6050,6 +6123,32 @@ ${content}</body></html>`;
             // First expand is the first time the container has real dimensions,
             // so this is where the deferred measure-and-fit happens.
             if (!collapsed) fitDispatchMapBounds();
+        }
+
+        // Re-pulls current board status (e.g. a ticket the background sync
+        // auto-completed since this page loaded) without needing a full page
+        // refresh. Deliberately reuses processDispatch() rather than a new,
+        // separate lightweight fetch path -- that function's Supabase-fetch
+        // step (fetchExistingAssignments) already correctly rebuilds both
+        // window.currentAssignments AND window.removedStops from whatever's
+        // actually true right now, exactly what the map needs; a second,
+        // parallel implementation would just be a second place for the same
+        // logic to drift or break. Note this does re-read the whole board,
+        // same as opening the page fresh -- there's no cheaper partial-update
+        // path available given how the rest of the pipeline is built.
+        async function refreshDispatchMap() {
+            const btn = document.getElementById('mapRefreshBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ …'; }
+            try {
+                await processDispatch();
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerHTML = '&#x1F504; Refresh'; }
+            }
+        }
+
+        function toggleMapShowCompleted(checked) {
+            window._dispatchMapShowCompleted = checked;
+            renderDispatchMap();
         }
 
         function restoreDispatchMapState() {
