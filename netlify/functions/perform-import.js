@@ -67,10 +67,46 @@ function matchSite(accountName, state, sitesForState, aliasMap) {
   return { siteId: null, matched: false, matchSource: null };
 }
 
+// Neumo's closed-ticket report gives Actual Start/End as plain
+// "M/D/YYYY, h:mm AM/PM" strings with NO timezone marker -- these are
+// Eastern wall-clock times (Neumo/MCR both operate on Eastern), but a bare
+// `new Date(val)` on a server running in UTC (Netlify functions do) was
+// silently treating that string AS IF it were already UTC, storing a value
+// 4-5 hours off (depending on daylight saving) from the real moment. Found
+// 2026-08-21 via two independent exact-4-hour matches between the raw
+// report and the app's display (both during EDT). getEasternOffsetMinutes
+// uses Intl's real America/New_York timezone data to get the correct
+// UTC offset for the specific date in question, so this stays correct
+// across the EST/EDT boundary rather than hardcoding either one.
+function getEasternOffsetMinutes(date) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const parts = dtf.formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const asIfUTC = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  return (asIfUTC - date.getTime()) / 60000;
+}
+
 function parseSalesforceDate(val) {
   if (!val) return null;
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d.toISOString();
+  const m = String(val).match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) {
+    // Fallback for any format that isn't the plain Neumo export shape --
+    // e.g. an already-ISO string with its own explicit offset, which
+    // new Date() handles correctly on its own.
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  let [, mo, da, yr, hr, mi, ap] = m;
+  hr = parseInt(hr, 10);
+  if (/pm/i.test(ap) && hr !== 12) hr += 12;
+  if (/am/i.test(ap) && hr === 12) hr = 0;
+  const naiveUTC = Date.UTC(+yr, +mo - 1, +da, hr, +mi);
+  const offsetMinutes = getEasternOffsetMinutes(new Date(naiveUTC));
+  const trueUTC = naiveUTC - offsetMinutes * 60000;
+  return new Date(trueUTC).toISOString();
 }
 
 /**
@@ -131,6 +167,7 @@ async function performImport(supabase, rows) {
 
   const toInsert = [];
   const reviewSamples = [];
+  const insertedSamples = []; // for the Refresh Now progress display, so a dispatcher watching can confirm a specific ticket landed without hunting the list above
   let siteMatchedCount = 0;
   let techMatchedCount = 0;
   let needsReviewCount = 0;
@@ -139,6 +176,10 @@ async function performImport(supabase, rows) {
   // confirms the work actually happened -- see the update block after the
   // site_visits insert for why.
   const ticketIdsToClose = new Set();
+  // 2026-08-12: paired with the site_visits.ticket_id backfill below --
+  // see the comment inside the loop for why this is needed alongside
+  // ticketIdsToClose.
+  const appointmentToTicketId = [];
 
   for (const r of rows) {
     if (!r.appointmentNumber) continue;
@@ -163,6 +204,25 @@ async function performImport(supabase, rows) {
     // imported.
     const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
     if (linkedTicket) ticketIdsToClose.add(linkedTicket.id);
+
+    // 2026-08-12, same session as the fix above: get-state-console.js's
+    // Open/Closed label does NOT read tickets.status at all -- it
+    // independently checks whether a site_visits row's ticket_id is
+    // populated (see that file's own comments: closedOn is derived purely
+    // from site_visits, deliberately not tickets.status). So the fix above
+    // makes the WATCHDOG log correct (it reads tickets.status), but the
+    // STATE CONSOLE stayed blind to the exact same class of ticket: a
+    // site_visits row inserted on an earlier import, before its matching
+    // ticket existed yet, has ticket_id permanently NULL -- nothing ever
+    // went back and linked it after the fact, even once the ticket showed
+    // up and even after today's tickets.status fix. Track every
+    // appointment-number -> ticket-id pair with a real WO match here
+    // (regardless of whether the row is new or already-imported), then
+    // batch-backfill site_visits.ticket_id for the already-imported ones
+    // after the main insert below.
+    if (linkedTicket && r.appointmentNumber) {
+      appointmentToTicketId.push({ appointment_number: r.appointmentNumber, ticket_id: linkedTicket.id });
+    }
 
     if (existingSet.has(r.appointmentNumber)) continue;
 
@@ -194,6 +254,10 @@ async function performImport(supabase, rows) {
     if (technicianId) techMatchedCount++;
 
     const ticketId = linkedTicket ? linkedTicket.id : null;
+
+    if (insertedSamples.length < 25) {
+      insertedSamples.push({ accountName: r.accountName, state: r.state, woNumber: r.woNumber, appointmentNumber: r.appointmentNumber, matched });
+    }
 
     toInsert.push({
       appointment_number: r.appointmentNumber,
@@ -246,6 +310,41 @@ async function performImport(supabase, rows) {
     }
   }
 
+  // 2026-08-12: backfill site_visits.ticket_id for rows that already
+  // existed from an earlier import but whose ticket didn't exist yet at
+  // that time -- see the comment inside the main loop above.
+  //
+  // v2, same session: the first version of this used .upsert(chunk,
+  // { onConflict: 'appointment_number' }), which requires a matching
+  // UNIQUE constraint on that column to work at all. site_visits almost
+  // certainly doesn't have one -- the insert-dedup above relies on a
+  // separate SELECT + JS-side existingSet check instead of a DB-level
+  // onConflict the way mailgun-inbound.js does for tickets.wo_number,
+  // which is a strong tell there's no such constraint here. That upsert
+  // was silently failing every call (error caught and logged server-side
+  // only, invisible to Mark), backfilling nothing while the import still
+  // reported success -- confirmed live: a full redeploy + reimport + wait
+  // produced zero change on the state console. Switched to plain
+  // row-by-row .update().eq('appointment_number', ...) instead -- needs
+  // no constraint, and is safer besides: update can only ever touch a
+  // row that already exists, where upsert risks silently inserting a
+  // malformed new row (missing every other required column) if a match
+  // ever unexpectedly fails.
+  let ticketIdsBackfilled = 0;
+  for (const { appointment_number, ticket_id } of appointmentToTicketId) {
+    const { error: backfillErr, count: backfillCount } = await supabase
+      .from('site_visits')
+      .update({ ticket_id })
+      .eq('appointment_number', appointment_number)
+      .is('ticket_id', null)
+      .select('id', { count: 'exact', head: true });
+    if (backfillErr) {
+      console.error(`[perform-import] site_visits.ticket_id backfill failed for ${appointment_number}:`, backfillErr.message);
+    } else {
+      ticketIdsBackfilled += backfillCount || 0;
+    }
+  }
+
   let ticketsClosed = 0;
   let assignmentsCompleted = 0;
   if (ticketIdsToClose.size) {
@@ -295,9 +394,17 @@ async function performImport(supabase, rows) {
     techMatched: techMatchedCount,
     needsReview: needsReviewCount,
     reviewSamples,
+    // Rows are sampled when queued, before we know whether the actual
+    // insert call succeeds -- pruning out anything that ended up in
+    // rowErrors keeps this list accurate even in the rare case a row
+    // fails at the database level after being queued.
+    insertedSamples: insertedSamples.filter(
+      (s) => !rowErrors.some((e) => e.appointmentNumber === s.appointmentNumber)
+    ),
     rowErrors,
     ticketsClosed,
     assignmentsCompleted,
+    ticketIdsBackfilled,
   };
 }
 

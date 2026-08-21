@@ -614,7 +614,7 @@ export default async (req, context) => {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     await setStage('Importing rows');
 
-    let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0, allRowErrors = [];
+    let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0, allRowErrors = [], allInsertedSamples = [];
     const BATCH_SIZE = 250;
     for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
       const batch = mapped.slice(i, i + BATCH_SIZE);
@@ -623,6 +623,13 @@ export default async (req, context) => {
       totalSkipped += result.skippedExisting;
       totalNeedsReview += result.needsReview;
       allRowErrors = allRowErrors.concat(result.rowErrors);
+      // Capped at 25 total across all batches (not 25 per batch) -- this is
+      // for a dispatcher glancing at the Refresh Now result to confirm a
+      // specific ticket landed, not a full audit log, so a smaller than-
+      // total sample is fine as long as it's not misleadingly large.
+      if (allInsertedSamples.length < 25) {
+        allInsertedSamples = allInsertedSamples.concat(result.insertedSamples).slice(0, 25);
+      }
     }
 
     await recordSuccess({
@@ -631,6 +638,7 @@ export default async (req, context) => {
       skippedExisting: totalSkipped,
       needsReview: totalNeedsReview,
       rowErrorCount: allRowErrors.length,
+      insertedSamples: allInsertedSamples,
     });
 
     if (allRowErrors.length) {
