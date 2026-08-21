@@ -209,7 +209,26 @@ export default async (req, context) => {
     }
   }
 
-  await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: forceRun ? 'manual' : (req.method === 'POST' ? 'manual-or-cron' : 'scheduled') }));
+  await store.set('in-progress', JSON.stringify({ startedAt: new Date().toISOString(), trigger: forceRun ? 'manual' : (req.method === 'POST' ? 'manual-or-cron' : 'scheduled'), stage: 'Logging in' }));
+
+  // Staged progress for state.html's Refresh Now progress bar (added
+  // 2026-08-21). There's no real byte-level progress available here -- the
+  // work happens in a headless browser server-side, not a file the
+  // frontend can watch upload/download -- so this reports discrete STAGES
+  // instead, updating the same in-progress record at each real transition
+  // the code already goes through. Startedat/trigger are preserved on
+  // every update so elapsed-time display and the stale-run check both
+  // keep working unchanged.
+  async function setStage(stage) {
+    try {
+      const raw = await store.get('in-progress');
+      const existing = raw ? JSON.parse(raw) : {};
+      await store.set('in-progress', JSON.stringify({ ...existing, stage }));
+    } catch (e) {
+      // Non-fatal -- worst case the progress bar just doesn't advance for
+      // this one stage, the sync itself is unaffected either way.
+    }
+  }
 
   const username = (process.env.SALESFORCE_USERNAME || '').trim();
   const password = (process.env.SALESFORCE_PASSWORD || '').trim();
@@ -325,6 +344,7 @@ export default async (req, context) => {
     } catch (navErr) {
       console.log('Initial navigation threw (often benign -- Salesforce doing its own internal redirect):', navErr.message);
     }
+    await setStage('Waiting for report to load');
     await page.waitForTimeout(2000);
 
     // Give Salesforce's login page a real chance to render before deciding
@@ -441,6 +461,7 @@ export default async (req, context) => {
         exportLocator = found.locator;
         exportStrategy = found.strategy;
         console.log(`[salesforce-report-sync] Export found via ${exportStrategy} @ ${Math.round((Date.now() - diagStart) / 1000)}s`);
+        await setStage('Preparing export');
         break;
       }
 
@@ -505,6 +526,7 @@ export default async (req, context) => {
       }
     }
     if (!clicked) throw new Error('Could not click the Export button after it was found.');
+    await setStage('Downloading file');
 
     const dialog = page.getByRole('dialog');
     await dialog.waitFor({ state: 'visible', timeout: 20000 }).catch(() => null);
@@ -590,6 +612,7 @@ export default async (req, context) => {
       .filter((r) => r.appointmentNumber);
 
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    await setStage('Importing rows');
 
     let totalInserted = 0, totalSkipped = 0, totalNeedsReview = 0, allRowErrors = [];
     const BATCH_SIZE = 250;
