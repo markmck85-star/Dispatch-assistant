@@ -194,17 +194,30 @@ exports.handler = async (event) => {
     // linked back to this ticket (import-service-appointments.js sets
     // site_visits.ticket_id by matching WO number). Take the earliest
     // matching visit if more than one somehow references the same ticket.
+    //
+    // Fixed 2026-08-21: the DISPLAYED date used to read started_at
+    // (Salesforce's "Actual Start" -- when the tech arrived) and label it
+    // "Closed on", which could show a completion time earlier than the
+    // ticket's own received time -- a real bug, not just a display quirk
+    // (arrival can't logically follow closure). ended_at ("Actual End",
+    // already captured by perform-import.js but never used here) is the
+    // field that actually means "closed" -- used now, with started_at kept
+    // only as a fallback for the rare row where ended_at itself is missing.
+    // Deliberately does NOT change what counts as "closed" at all -- that
+    // still just means "a linked visit exists," true even if this specific
+    // visit is missing one of its two timestamps; the actual work has
+    // clearly already happened either way.
     const ticketIds = (tickets || []).map(t => t.id);
     let closedByTicketId = {};
     if (ticketIds.length) {
       const { data: closingVisits, error: closingErr } = await supabase
         .from('site_visits')
-        .select('ticket_id, started_at')
+        .select('ticket_id, started_at, ended_at')
         .in('ticket_id', ticketIds)
         .order('started_at', { ascending: true });
       if (closingErr) return json(500, { ok: false, error: 'closing-visit fetch failed: ' + closingErr.message });
       for (const v of (closingVisits || [])) {
-        if (!closedByTicketId[v.ticket_id]) closedByTicketId[v.ticket_id] = v.started_at;
+        if (!(v.ticket_id in closedByTicketId)) closedByTicketId[v.ticket_id] = v.ended_at || v.started_at;
       }
     }
 
