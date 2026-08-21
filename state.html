@@ -106,6 +106,7 @@
 
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
     <div class="import-box">
+      <div id="importFreshnessNearBtn" class="status-line" style="font-size:11px;margin-bottom:8px;"></div>
       <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;cursor:pointer;">
         <input type="checkbox" id="autoSyncToggle" onchange="toggleAutoSync()" checked>
@@ -312,6 +313,35 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+function relativeTimeAgo(iso) {
+  const secs = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  return Math.round(hrs / 24) + 'd ago';
+}
+
+// Two copies shown (near the ticket list, and right next to Refresh Now)
+// so it's visible wherever you're actually looking, kept in sync from the
+// one stored value -- see the comment where window._lastImportedAtIso gets
+// set. Also doubles as a passive health check for the automated 20-minute
+// sync: if this ever reads "2h ago" instead of a number under ~20, that's
+// a visible sign the pipeline stopped without anyone needing to dig
+// through Netlify's function logs to notice.
+function updateImportFreshnessDisplays() {
+  const iso = window._lastImportedAtIso;
+  const text = iso
+    ? 'Closed-ticket data last imported: ' + relativeTimeAgo(iso) + ' (' + fmtDateTime(iso) + ')'
+    : 'Closed-ticket data has never been imported for this state — "open" status below can\'t be trusted yet.';
+  const a = document.getElementById('importFreshness');
+  const b = document.getElementById('importFreshnessNearBtn');
+  if (a) a.textContent = text;
+  if (b) b.textContent = text;
+}
+setInterval(updateImportFreshnessDisplays, 30000);
+
 // Restock/maintenance due dates are date-only by nature (parsed from free
 // text like "by 8/17", anchored to a fixed noon-UTC placeholder time purely
 // to keep the calendar day stable across timezones -- see
@@ -358,12 +388,14 @@ async function loadConsole(state) {
     }
 
     ticketStatus.textContent = data.recentTickets.length + ' ticket(s) in the last 3 days';
-    const importFreshness = document.getElementById('importFreshness');
-    if (importFreshness) {
-      importFreshness.textContent = data.lastImportedAt
-        ? 'Closed-ticket data last imported: ' + fmtDateTime(data.lastImportedAt)
-        : 'Closed-ticket data has never been imported for this state — "open" status below can\'t be trusted yet.';
-    }
+    // Stored raw so updateImportFreshnessDisplays() can keep the relative
+    // time ("14m ago") advancing on its own via setInterval below, without
+    // needing a fresh fetch every tick -- previously this only ever showed
+    // a fixed clock time set once when the page loaded, so a dispatcher
+    // watching it had no way to tell "still fresh" from "sync silently
+    // stopped 3 hours ago" without doing the subtraction themselves.
+    window._lastImportedAtIso = data.lastImportedAt || null;
+    updateImportFreshnessDisplays();
     if (!data.recentTickets.length) {
       ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
     } else {
