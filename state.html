@@ -433,16 +433,20 @@ async function loadConsole(state) {
     } else {
       const sortedTickets = [...data.recentTickets].sort((a, b) => {
         // Trouble tickets first as a group (they "burn brighter" -- Mark's
-        // words), then maintenance/restock. Within each group, soonest due
-        // first -- consistent with dueAt now being the primary displayed
-        // date. An open restock that's lingered past its expected window
-        // is itself worth noticing, not something to bury among trouble
-        // tickets by pure chronological interleaving.
+        // words), then maintenance/restock. Within each group, by county
+        // (2026-08-21, so calls likely to land on the same technician's
+        // route cluster visually at a glance -- previously pure due-date
+        // ordering could scatter a tech's whole day across the list),
+        // then soonest due within a county.
         if (a.ticketKind !== b.ticketKind) {
           return a.ticketKind === 'maintenance' ? 1 : -1;
         }
+        const countyA = a.county || 'zzz'; // unparseable county names sort last, not first
+        const countyB = b.county || 'zzz';
+        if (countyA !== countyB) return countyA.localeCompare(countyB);
         return new Date(a.dueAt) - new Date(b.dueAt);
       });
+      let lastKind = null, lastCounty = null;
       ticketList.innerHTML = sortedTickets.map(t => {
         const statusBadge = t.status === 'closed'
           ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
@@ -450,7 +454,17 @@ async function loadConsole(state) {
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
-        return `<div class="ticket-card ${t.ticketKind}">
+        // County subheading whenever it changes within the current kind
+        // group -- reset on a kind change too, so "Cobb County" under
+        // Trouble and "Cobb County" under Restock each get their own
+        // heading rather than the second one being silently skipped.
+        let countyHeader = '';
+        if (t.ticketKind !== lastKind || t.county !== lastCounty) {
+          countyHeader = `<div class="county-header" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin:10px 0 4px;">${escapeHtml(t.county || 'Other / unrecognized county')}</div>`;
+          lastKind = t.ticketKind;
+          lastCounty = t.county;
+        }
+        return countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
