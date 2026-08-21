@@ -3603,7 +3603,7 @@ function distanceMatrixStatus(state) {
                                 <div style="margin-left:auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
                                     <select class="control-btn" onchange="reassignStop('${tech}', ${index}, this.value)" style="padding:2px;">
                                         <option value="" disabled selected>Reassign</option>
-                                        ${buildTechOptions(Object.keys(TECHS).filter(t => !currentUnavailableTechs.has(t)), item.code, CURRENT_STATE, '', new Set([tech]))}
+                                        ${buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false && !currentUnavailableTechs.has(t)), item.code, CURRENT_STATE, '', new Set([tech]))}
                                     </select>
                                     <button class="control-btn" onclick="pushToTomorrow('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">${window._isFriday ? '→ Mon' : window._isSaturday ? '→ Mon' : '→ Tomorrow'}</button>
                                     ${item.noSavedDefault ? `<button class="control-btn" onclick="setAsDefaultTech('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#5a2d82;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Set Default</button>` : ''}
@@ -4372,7 +4372,7 @@ function distanceMatrixStatus(state) {
             var existing = document.getElementById('add-location-prompt');
             if (existing) existing.remove();
 
-            var techOptions = buildTechOptions(Object.keys(TECHS), code, CURRENT_STATE);
+            var techOptions = buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false), code, CURRENT_STATE);
             var state = code.substring(0, 2);
 
             var div = document.createElement('div');
@@ -4472,7 +4472,7 @@ function distanceMatrixStatus(state) {
             if (existing) existing.remove();
 
             var state = CURRENT_STATE;
-            var techOptions = buildTechOptions(Object.keys(TECHS), state + '0000', state);
+            var techOptions = buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false), state + '0000', state);
 
             var div = document.createElement('div');
             div.id = 'add-location-prompt';
