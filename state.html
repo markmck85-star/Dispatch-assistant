@@ -323,22 +323,54 @@ function relativeTimeAgo(iso) {
   return Math.round(hrs / 24) + 'd ago';
 }
 
-// Two copies shown (near the ticket list, and right next to Refresh Now)
-// so it's visible wherever you're actually looking, kept in sync from the
-// one stored value -- see the comment where window._lastImportedAtIso gets
-// set. Also doubles as a passive health check for the automated 20-minute
-// sync: if this ever reads "2h ago" instead of a number under ~20, that's
-// a visible sign the pipeline stopped without anyone needing to dig
-// through Netlify's function logs to notice.
-function updateImportFreshnessDisplays() {
+// Two DIFFERENT signals, deliberately shown separately (2026-08-21, added
+// after CO's per-state timestamp looked stale at 18h even though the
+// automated sync has genuinely been running fine every 20 minutes) --
+// conflating them was the actual source of that confusion:
+//   - lastImportedAt (per-state, from get-state-console.js) = when THIS
+//     state's data last actually CHANGED. A state with no new completed
+//     tickets recently will legitimately show an old timestamp here even
+//     with a perfectly healthy sync -- there was just nothing new for it
+//     to import.
+//   - lastSyncRunAt (global, from get-report-sync-status.js, same one the
+//     Refresh Now button already talks to) = when the sync job itself last
+//     actually ran, successfully, for ALL states at once (it's one
+//     combined Salesforce report, not per-state runs). THIS is the one
+//     that answers "is the pipeline actually still running" -- it should
+//     read the same few minutes regardless of which state's page you're
+//     looking at.
+async function updateImportFreshnessDisplays(forceRefetchSync) {
+  // Re-fetched on first call, then roughly every 2 minutes after (every 4th
+  // 30s tick) -- not just once ever -- so this also picks up the
+  // SCHEDULED sync running quietly in the background, not only the ones
+  // triggered from this tab's own Refresh Now button.
+  window._syncFetchTickCount = (window._syncFetchTickCount || 0) + 1;
+  if (forceRefetchSync || window._lastSyncRunAt === undefined || window._syncFetchTickCount % 4 === 0) {
+    try {
+      const res = await fetch('/.netlify/functions/get-report-sync-status');
+      const data = await res.json();
+      window._lastSyncRunAt = data.lastSuccess ? data.lastSuccess.at : null;
+    } catch (err) {
+      window._lastSyncRunAt = window._lastSyncRunAt || null;
+    }
+  }
+
   const iso = window._lastImportedAtIso;
-  const text = iso
-    ? 'Closed-ticket data last imported: ' + relativeTimeAgo(iso) + ' (' + fmtDateTime(iso) + ')'
+  const stateText = iso
+    ? 'This state\'s data last changed: ' + relativeTimeAgo(iso) + ' (' + fmtDateTime(iso) + ')'
     : 'Closed-ticket data has never been imported for this state — "open" status below can\'t be trusted yet.';
+  const syncIso = window._lastSyncRunAt;
+  const syncText = syncIso
+    ? 'Automated sync last ran: ' + relativeTimeAgo(syncIso) + ' (' + fmtDateTime(syncIso) + ') — same for every state'
+    : 'Automated sync: no recent successful run found';
+  const fullText = stateText + '\n' + syncText;
+
   const a = document.getElementById('importFreshness');
   const b = document.getElementById('importFreshnessNearBtn');
-  if (a) a.textContent = text;
-  if (b) b.textContent = text;
+  if (a) a.style.whiteSpace = 'pre-line';
+  if (b) b.style.whiteSpace = 'pre-line';
+  if (a) a.textContent = fullText;
+  if (b) b.textContent = fullText;
 }
 setInterval(updateImportFreshnessDisplays, 30000);
 
@@ -858,6 +890,8 @@ async function pollSyncStatus() {
       const s = data.lastSuccess;
       const at = new Date(s.at);
       const secondsAgo = (Date.now() - at.getTime()) / 1000;
+      window._lastSyncRunAt = s.at;
+      updateImportFreshnessDisplays();
       if (secondsAgo < 360) {
         progressBar.style.width = '100%';
         setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%'; }, 1500);
