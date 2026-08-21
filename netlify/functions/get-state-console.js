@@ -97,7 +97,19 @@ function getCompDaysForDate(dateStr) {
 }
 
 function json(statusCode, obj) {
-  return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      // 2026-08-21: this endpoint's response was never covered by the
+      // earlier _headers no-cache fix (that only applies to HTML pages,
+      // not /.netlify/functions/* calls) -- meaning a genuinely stale
+      // cached response could sit around even after a real backend
+      // change (like adding the `county` field) had already deployed.
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+    body: JSON.stringify(obj),
+  };
 }
 
 exports.handler = async (event) => {
