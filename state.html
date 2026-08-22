@@ -414,8 +414,14 @@ async function loadConsole(state) {
     } else {
       techGrid.innerHTML = data.technicians.map(t => {
         const cls = t.available ? 'avail' : 'out';
-        const statusText = t.available ? 'Available' : (t.reason || 'Out') + (t.note ? ' — ' + escapeHtml(t.note) : '');
-        return `<div class="tech-chip ${cls}"><div class="name">${escapeHtml(t.name)}</div><div class="status">${statusText}</div></div>`;
+        // Simplified 2026-08-23 -- Mark: the red/green color already says
+        // everything needed for who's out; the reason/note text underneath
+        // was just clutter. Kept exactly one exception: the on-call pair
+        // gets a small "On call" label, since that's the one piece of
+        // "why are they the ones available today" info actually worth
+        // keeping visible at a glance.
+        const statusText = t.onCall ? 'On call' : '';
+        return `<div class="tech-chip ${cls}"><div class="name">${escapeHtml(t.name)}</div>${statusText ? `<div class="status">${statusText}</div>` : ''}</div>`;
       }).join('');
     }
 
