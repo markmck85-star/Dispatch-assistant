@@ -441,8 +441,8 @@ async function loadConsole(state) {
         if (a.ticketKind !== b.ticketKind) {
           return a.ticketKind === 'maintenance' ? 1 : -1;
         }
-        const countyA = a.county || 'zzz'; // unparseable county names sort last, not first
-        const countyB = b.county || 'zzz';
+        const countyA = (a.county || 'zzz').toLowerCase(); // case-insensitive: "Dekalb County" and "DeKalb County" are the same place, just inconsistent site-name capitalization
+        const countyB = (b.county || 'zzz').toLowerCase();
         if (countyA !== countyB) return countyA.localeCompare(countyB);
         return new Date(a.dueAt) - new Date(b.dueAt);
       });
@@ -455,14 +455,17 @@ async function loadConsole(state) {
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
         // County subheading whenever it changes within the current kind
-        // group -- reset on a kind change too, so "Cobb County" under
-        // Trouble and "Cobb County" under Restock each get their own
-        // heading rather than the second one being silently skipped.
+        // group -- compared case-insensitively (see the sort above) so a
+        // capitalization difference in the underlying site name can't
+        // split one real county into two separate header blocks. The
+        // header TEXT itself still shows whichever capitalization this
+        // particular ticket's site happened to use -- only the grouping
+        // decision is case-insensitive, not the displayed label.
         let countyHeader = '';
-        if (t.ticketKind !== lastKind || t.county !== lastCounty) {
+        if (t.ticketKind !== lastKind || (t.county || '').toLowerCase() !== lastCounty) {
           countyHeader = `<div class="county-header" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin:10px 0 4px;">${escapeHtml(t.county || 'Other / unrecognized county')}</div>`;
           lastKind = t.ticketKind;
-          lastCounty = t.county;
+          lastCounty = (t.county || '').toLowerCase();
         }
         return countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
