@@ -214,6 +214,35 @@ exports.handler = async (event) => {
   for (const s of (sites || [])) siteById[s.id] = s;
   const siteIds = Object.keys(siteById);
 
+  // Open (not-yet-returned) RMA shipments per site (2026-08-23) -- flags a
+  // ticket card when its site has a pending shipment sitting around, so a
+  // dispatcher handling a NEW call at a site doesn't miss that a
+  // technician still needs to bring back a bad part (or that a part is
+  // already en route) from a PREVIOUS visit. Deliberately keyed by site,
+  // not by matching this exact ticket's own id -- the value here is
+  // "does this site have unfinished shipment business," which matters
+  // regardless of which specific ticket originally generated the
+  // shipment. Known limitation, same one already documented on the RMA
+  // page itself: this only ever works when the shipping email's WO number
+  // successfully linked to site_id in the first place -- a shipment tied
+  // to a ticket that didn't exist yet when the email arrived stays
+  // invisible here, same as everywhere else this data is used.
+  let openShipmentsBySite = {};
+  if (siteIds.length) {
+    const { data: shipments, error: shipErr } = await supabase
+      .from('rma_shipments')
+      .select('site_id, return_broken_part, warehouse_name')
+      .in('site_id', siteIds)
+      .is('returned_at', null);
+    if (shipErr) return json(500, { ok: false, error: 'rma_shipments fetch failed: ' + shipErr.message });
+    (shipments || []).forEach(s => {
+      if (!s.site_id) return;
+      if (!openShipmentsBySite[s.site_id]) openShipmentsBySite[s.site_id] = { count: 0, needsReturn: false };
+      openShipmentsBySite[s.site_id].count++;
+      if (s.return_broken_part) openShipmentsBySite[s.site_id].needsReturn = true;
+    });
+  }
+
   let recentTickets = [];
   let lastImportedAt = null;
   if (siteIds.length) {
@@ -323,6 +352,7 @@ exports.handler = async (event) => {
         dueAt,
         status,
         closedOn,
+        openShipment: openShipmentsBySite[t.site_id] || null,
         manuallyResolvedAt: t.manually_resolved_at,
         manuallyResolvedNote: t.manually_resolved_note,
       };
