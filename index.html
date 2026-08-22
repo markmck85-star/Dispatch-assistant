@@ -6142,40 +6142,86 @@ ${content}</body></html>`;
         // instead -- restored to the original value on close so the rest of
         // the app keeps normal pinch-zoom.
         let _mapFullscreenPrevViewport = null;
+        // Whether opening fullscreen actually managed to push a history
+        // entry (pushState can theoretically throw/be blocked) -- controls
+        // whether closing should go through history.back() or clean up
+        // directly, so a blocked pushState can't leave the map stuck open.
+        let _mapFullscreenHistoryPushed = false;
+
+        // Entry point for the Expand/Close buttons and the Escape key.
+        // Opening is immediate; closing is routed through history.back() so
+        // the overlay consumes the phone's back button/gesture instead of
+        // leaving the page (which was closing the whole browser tab, since
+        // the overlay isn't a real page and there was nothing else in the
+        // history stack for "back" to land on).
         function toggleDispatchMapFullscreen() {
             const panel = document.getElementById('dispatchMapPanel');
             if (!panel) return;
-            const goingFullscreen = !panel.classList.contains('map-fullscreen');
-            panel.classList.toggle('map-fullscreen', goingFullscreen);
-
-            const viewportMeta = document.querySelector('meta[name="viewport"]');
-            if (goingFullscreen) {
-                if (viewportMeta) {
-                    _mapFullscreenPrevViewport = viewportMeta.getAttribute('content');
-                    viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-                }
-                document.addEventListener('keydown', _mapFullscreenEscHandler);
+            if (!panel.classList.contains('map-fullscreen')) {
+                _openDispatchMapFullscreen();
+            } else if (_mapFullscreenHistoryPushed) {
+                history.back(); // triggers popstate -> _closeDispatchMapFullscreen()
             } else {
-                if (viewportMeta && _mapFullscreenPrevViewport) {
-                    viewportMeta.setAttribute('content', _mapFullscreenPrevViewport);
-                }
-                document.removeEventListener('keydown', _mapFullscreenEscHandler);
+                _closeDispatchMapFullscreen();
             }
+        }
 
+        function _openDispatchMapFullscreen() {
+            const panel = document.getElementById('dispatchMapPanel');
+            panel.classList.add('map-fullscreen');
+            try {
+                history.pushState({ mcrMapFullscreen: true }, '', location.href);
+                _mapFullscreenHistoryPushed = true;
+            } catch (err) {
+                _mapFullscreenHistoryPushed = false; // Close button/Escape will clean up directly instead
+            }
+            const viewportMeta = document.querySelector('meta[name="viewport"]');
+            if (viewportMeta) {
+                _mapFullscreenPrevViewport = viewportMeta.getAttribute('content');
+                viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+            }
+            document.addEventListener('keydown', _mapFullscreenEscHandler);
+            _fitDispatchMapAfterResize();
+        }
+
+        function _closeDispatchMapFullscreen() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (!panel) return;
+            panel.classList.remove('map-fullscreen');
+            const viewportMeta = document.querySelector('meta[name="viewport"]');
+            if (viewportMeta && _mapFullscreenPrevViewport) {
+                viewportMeta.setAttribute('content', _mapFullscreenPrevViewport);
+            }
+            document.removeEventListener('keydown', _mapFullscreenEscHandler);
+            _mapFullscreenHistoryPushed = false;
+            _fitDispatchMapAfterResize();
+        }
+
+        function _fitDispatchMapAfterResize() {
             requestAnimationFrame(() => {
                 if (_dispatchMap) {
                     _dispatchMap.invalidateSize();
-                    // Re-fit so the current route/pins are centered in the new,
-                    // larger viewport rather than left wherever they sat before.
+                    // Re-fit so the current route/pins are centered in the new
+                    // viewport rather than left wherever they sat before.
                     if (_dispatchMapBounds && _dispatchMapBounds.isValid()) {
                         _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
                     }
                 }
             });
         }
+
         function _mapFullscreenEscHandler(e) {
             if (e.key === 'Escape') toggleDispatchMapFullscreen();
         }
+
+        // Physical/gesture back button while the map overlay is open: the
+        // pushState above means this fires INSTEAD OF leaving the page.
+        window.addEventListener('popstate', function() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (panel && panel.classList.contains('map-fullscreen')) {
+                _closeDispatchMapFullscreen();
+            }
+        });
 
         function toggleDispatchMap() {
             const panel = document.getElementById('dispatchMapPanel');
