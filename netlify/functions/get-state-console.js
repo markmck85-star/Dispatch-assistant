@@ -167,6 +167,27 @@ exports.handler = async (event) => {
       const id = nameToId[c.tech];
       if (id && !unavailableToday[id]) unavailableToday[id] = { reason: 'comp_day', note: c.reason };
     });
+
+    // Saturday-only-on-call rule (2026-08-23) -- this file only ever had
+    // the COMP DAY half of the on-call schedule (the weekday before a
+    // Saturday), never the Saturday itself. On an actual on-call Saturday,
+    // getCompDaysForDate() correctly returns nothing (a comp day always
+    // lands on a weekday, never the Saturday it's compensating for), so
+    // this state console was showing every technician as available with
+    // no code path that could ever mark the non-on-call ones out --
+    // meanwhile index.html has always correctly handled this via its own
+    // separate isSaturday/onCallTechs check. Mirrored here exactly: parse
+    // todayStr as a real Date rather than assume the caller only ever asks
+    // about a Saturday, since ?date= can request any day.
+    const requestedDow = new Date(todayStr + 'T12:00:00Z').getUTCDay();
+    if (requestedDow === 6 && ONCALL_SCHEDULE_GA[todayStr]) {
+      const onCallSet = new Set(ONCALL_SCHEDULE_GA[todayStr]);
+      (techs || []).forEach(t => {
+        if (!onCallSet.has(t.name) && !unavailableToday[t.id]) {
+          unavailableToday[t.id] = { reason: 'not_on_call', note: `Not on call Sat ${todayStr}` };
+        }
+      });
+    }
   }
 
   const technicians = (techs || []).map(t => ({
