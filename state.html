@@ -505,6 +505,18 @@ async function loadConsole(state) {
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
+        // Open-shipment flag (2026-08-23) -- distinguishes an actual
+        // pending return (a bad part still needs to come back) from a
+        // plain parts request (something shipped out, nothing to send
+        // back) -- return_broken_part is real data from the shipping
+        // email itself, not a guess. Only shown when there's something
+        // still open; a fully returned/closed-out shipment history isn't
+        // worth cluttering every card with.
+        const shipmentTag = t.openShipment
+          ? (t.openShipment.needsReturn
+              ? `<div class="meta" style="color:#e0a030;">📦 Part return pending at this site${t.openShipment.count > 1 ? ' (' + t.openShipment.count + ')' : ''}</div>`
+              : `<div class="meta" style="color:#4a9eda;">📦 Open parts request at this site (nothing to return)</div>`)
+          : '';
 
         const thisDateKey = dateKey(t.dueAt);
         const thisCounty = (t.county || '').toLowerCase();
@@ -525,6 +537,7 @@ async function loadConsole(state) {
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
+          ${shipmentTag}
         </div>`;
       }).join('');
     }
