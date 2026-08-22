@@ -121,6 +121,20 @@
            underneath the report overlay and floating controls pill. */
         .map-panel { display: none; position: relative; z-index: 0; background: #1e1e1e; border: 1px solid #444; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
         .map-panel.visible { display: block; }
+        /* Fullscreen overlay mode -- toggled by toggleDispatchMapFullscreen().
+           Same Leaflet instance/container, just repositioned to fill the
+           viewport (no navigation, no re-fetch). z-index above the site
+           history modal (9999) so the two never fight if both are ever
+           opened in sequence. #dispatchMap's fixed 320px height is overridden
+           to fill whatever's left below the header row. */
+        .map-panel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
+        .map-panel.map-fullscreen .map-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        .map-panel.map-fullscreen #dispatchMap { flex: 1; height: auto; }
+        #mapFullscreenBtn, #mapFullscreenCloseBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        #mapFullscreenBtn:hover, #mapFullscreenCloseBtn:hover { background: #33334a; }
+        #mapFullscreenCloseBtn { display: none; }
+        .map-panel.map-fullscreen #mapFullscreenCloseBtn { display: inline-block; }
+        .map-panel.map-fullscreen #mapFullscreenBtn { display: none; }
         .map-panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .map-panel-title { font-weight: bold; color: #7ec8e3; font-size: 14px; }
         .map-panel-meta { font-size: 11px; color: #888; margin-left: auto; text-align: right; }
@@ -375,6 +389,9 @@
                             aria-expanded="true" aria-controls="dispatchMapBody">Hide Map</button>
                         <button type="button" id="mapRefreshBtn" onclick="refreshDispatchMap()"
                             title="Re-pull current status from the database (e.g. tickets the sync auto-completed since this loaded) without re-parsing the pasted dispatch list">&#x1F504; Refresh</button>
+                        <button type="button" id="mapFullscreenBtn" onclick="toggleDispatchMapFullscreen()"
+                            title="Expand the map to fill the screen -- better for pinch-zoom and reading pins on mobile">&#x26F6; Expand</button>
+                        <button type="button" id="mapFullscreenCloseBtn" onclick="toggleDispatchMapFullscreen()">&#x2715; Close</button>
                         <span id="dispatchMapMeta" class="map-panel-meta"></span>
                     </div>
                     <div id="dispatchMapBody" class="map-panel-body">
@@ -6108,6 +6125,56 @@ ${content}</body></html>`;
         function showAllDispatchMapTechs() {
             _dispatchMapHiddenTechs.clear();
             renderDispatchMap();
+        }
+
+        // Expand/collapse the map to a fullscreen overlay. Leaflet caches its
+        // container's pixel size, so a pure CSS resize leaves the map either
+        // showing stale tiles in a corner or looking cut off until something
+        // tells it to remeasure -- invalidateSize() is that something, and it
+        // has to run AFTER the CSS class change has taken effect (rAF, not a
+        // fixed setTimeout, to only wait exactly as long as the browser needs
+        // to paint the new layout).
+        //
+        // Separately: mobile pinch-to-zoom on the map fights with the PAGE's
+        // own pinch-zoom (both are listening to the same two-finger gesture).
+        // While fullscreen, this temporarily disables page-level pinch-zoom
+        // via the viewport meta tag so the gesture goes to Leaflet's own zoom
+        // instead -- restored to the original value on close so the rest of
+        // the app keeps normal pinch-zoom.
+        let _mapFullscreenPrevViewport = null;
+        function toggleDispatchMapFullscreen() {
+            const panel = document.getElementById('dispatchMapPanel');
+            if (!panel) return;
+            const goingFullscreen = !panel.classList.contains('map-fullscreen');
+            panel.classList.toggle('map-fullscreen', goingFullscreen);
+
+            const viewportMeta = document.querySelector('meta[name="viewport"]');
+            if (goingFullscreen) {
+                if (viewportMeta) {
+                    _mapFullscreenPrevViewport = viewportMeta.getAttribute('content');
+                    viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+                }
+                document.addEventListener('keydown', _mapFullscreenEscHandler);
+            } else {
+                if (viewportMeta && _mapFullscreenPrevViewport) {
+                    viewportMeta.setAttribute('content', _mapFullscreenPrevViewport);
+                }
+                document.removeEventListener('keydown', _mapFullscreenEscHandler);
+            }
+
+            requestAnimationFrame(() => {
+                if (_dispatchMap) {
+                    _dispatchMap.invalidateSize();
+                    // Re-fit so the current route/pins are centered in the new,
+                    // larger viewport rather than left wherever they sat before.
+                    if (_dispatchMapBounds && _dispatchMapBounds.isValid()) {
+                        _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
+                    }
+                }
+            });
+        }
+        function _mapFullscreenEscHandler(e) {
+            if (e.key === 'Escape') toggleDispatchMapFullscreen();
         }
 
         function toggleDispatchMap() {
