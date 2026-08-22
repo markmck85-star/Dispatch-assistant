@@ -102,6 +102,10 @@
     <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
     <div id="ticketStatus" class="status-line">Loading…</div>
     <div id="importFreshness" class="status-line" style="font-size:11px;"></div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:8px 0;cursor:pointer;">
+      <input type="checkbox" id="troubleOnlyToggle" onchange="loadConsole(document.getElementById('stateSel').value)">
+      🔧 Trouble tickets only
+    </label>
     <div id="ticketList"></div>
 
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
@@ -385,6 +389,15 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// For a bare YYYY-MM-DD key (not a full ISO datetime) -- anchored to noon
+// UTC rather than parsed as UTC midnight, so it can't roll back a day in
+// US timezones the way a bare "new Date('2026-08-22')" would (the same
+// class of bug already fixed elsewhere in this project's date handling).
+function fmtDateOnly(dateKey) {
+  if (!dateKey) return '—';
+  return new Date(dateKey + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+}
+
 async function loadAll() {
   const state = document.getElementById('stateSel').value;
   loadConsole(state);
@@ -425,7 +438,6 @@ async function loadConsole(state) {
       }).join('');
     }
 
-    ticketStatus.textContent = data.recentTickets.length + ' ticket(s) in the last 3 days';
     // Stored raw so updateImportFreshnessDisplays() can keep the relative
     // time ("14m ago") advancing on its own via setInterval below, without
     // needing a fresh fetch every tick -- previously this only ever showed
@@ -435,24 +447,57 @@ async function loadConsole(state) {
     window._lastImportedAtIso = data.lastImportedAt || null;
     updateImportFreshnessDisplays();
     if (!data.recentTickets.length) {
+      ticketStatus.textContent = '0 ticket(s) in the last 3 days';
       ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
     } else {
-      const sortedTickets = [...data.recentTickets].sort((a, b) => {
-        // Trouble tickets first as a group (they "burn brighter" -- Mark's
-        // words), then maintenance/restock. Within each group, by county
-        // (2026-08-21, so calls likely to land on the same technician's
-        // route cluster visually at a glance -- previously pure due-date
-        // ordering could scatter a tech's whole day across the list),
-        // then soonest due within a county.
-        if (a.ticketKind !== b.ticketKind) {
-          return a.ticketKind === 'maintenance' ? 1 : -1;
-        }
-        const countyA = (a.county || 'zzz').toLowerCase(); // case-insensitive: "Dekalb County" and "DeKalb County" are the same place, just inconsistent site-name capitalization
+      // Trouble-only toggle (2026-08-23) -- filtered BEFORE grouping, so
+      // the date/county headers below are built from whatever's left
+      // rather than needing their own separate trouble-only rendering
+      // path. Trouble tickets are rare enough on an ordinary day that a
+      // dispatcher scanning "what's actually broken" would otherwise have
+      // to scroll past a lot of restock-only county blocks to find them.
+      const showTroubleOnly = document.getElementById('troubleOnlyToggle') && document.getElementById('troubleOnlyToggle').checked;
+      const visibleTickets = showTroubleOnly
+        ? data.recentTickets.filter(t => t.ticketKind === 'trouble')
+        : data.recentTickets;
+      ticketStatus.textContent = showTroubleOnly
+        ? visibleTickets.length + ' trouble ticket(s) of ' + data.recentTickets.length + ' total in the last 3 days'
+        : data.recentTickets.length + ' ticket(s) in the last 3 days';
+
+      if (!visibleTickets.length) {
+        ticketList.innerHTML = '<div class="empty-state">No trouble tickets in the last 3 days.</div>';
+        return;
+      }
+
+      // Date -> County -> Kind (2026-08-23, replacing the old County ->
+      // Kind -> Date order). Mark's actual complaint with the county-only
+      // grouping wasn't really about trouble-vs-restock ordering -- it was
+      // that today's calls and a future day's (Monday's dispatch list,
+      // etc.) were visually blending together with no clear boundary
+      // between them. Putting date at the TOP fixes that directly; county
+      // and kind still give the same at-a-glance clustering as before,
+      // just nested one level deeper instead of competing with date for
+      // top billing.
+      const dateKey = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const tomorrowKey = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      function dateLabel(key) {
+        if (key === todayKey) return 'TODAY — ' + fmtDateOnly(key);
+        if (key === tomorrowKey) return 'TOMORROW — ' + fmtDateOnly(key);
+        return fmtDateOnly(key);
+      }
+
+      const sortedTickets = [...visibleTickets].sort((a, b) => {
+        const dateA = dateKey(a.dueAt), dateB = dateKey(b.dueAt);
+        if (dateA !== dateB) return dateA.localeCompare(dateB); // soonest date first
+        if (a.ticketKind !== b.ticketKind) return a.ticketKind === 'maintenance' ? 1 : -1; // trouble first within a date
+        const countyA = (a.county || 'zzz').toLowerCase();
         const countyB = (b.county || 'zzz').toLowerCase();
         if (countyA !== countyB) return countyA.localeCompare(countyB);
         return new Date(a.dueAt) - new Date(b.dueAt);
       });
-      let lastKind = null, lastCounty = null;
+
+      let lastDate = null, lastKind = null, lastCounty = null;
       ticketList.innerHTML = sortedTickets.map(t => {
         const statusBadge = t.status === 'closed'
           ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
@@ -460,20 +505,22 @@ async function loadConsole(state) {
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
-        // County subheading whenever it changes within the current kind
-        // group -- compared case-insensitively (see the sort above) so a
-        // capitalization difference in the underlying site name can't
-        // split one real county into two separate header blocks. The
-        // header TEXT itself still shows whichever capitalization this
-        // particular ticket's site happened to use -- only the grouping
-        // decision is case-insensitive, not the displayed label.
-        let countyHeader = '';
-        if (t.ticketKind !== lastKind || (t.county || '').toLowerCase() !== lastCounty) {
+
+        const thisDateKey = dateKey(t.dueAt);
+        const thisCounty = (t.county || '').toLowerCase();
+        let dateHeader = '', countyHeader = '';
+        if (thisDateKey !== lastDate) {
+          dateHeader = `<div class="date-header" style="font-size:14px;font-weight:700;color:#eee;border-bottom:1px solid #444;padding-bottom:4px;margin:18px 0 8px;">${dateLabel(thisDateKey)}</div>`;
+          lastDate = thisDateKey;
+          lastKind = null; // force the county/kind header to re-print under the new date too
+          lastCounty = null;
+        }
+        if (t.ticketKind !== lastKind || thisCounty !== lastCounty) {
           countyHeader = `<div class="county-header" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin:10px 0 4px;">${escapeHtml(t.county || 'Other / unrecognized county')}</div>`;
           lastKind = t.ticketKind;
-          lastCounty = (t.county || '').toLowerCase();
+          lastCounty = thisCounty;
         }
-        return countyHeader + `<div class="ticket-card ${t.ticketKind}">
+        return dateHeader + countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
