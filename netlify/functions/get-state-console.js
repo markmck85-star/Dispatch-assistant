@@ -190,12 +190,17 @@ exports.handler = async (event) => {
     }
   }
 
+  const onCallToday = (state === 'GA' && new Date(todayStr + 'T12:00:00Z').getUTCDay() === 6 && ONCALL_SCHEDULE_GA[todayStr])
+    ? new Set(ONCALL_SCHEDULE_GA[todayStr])
+    : new Set();
+
   const technicians = (techs || []).map(t => ({
     id: t.id,
     name: t.name,
     available: !unavailableToday[t.id],
     reason: unavailableToday[t.id] ? unavailableToday[t.id].reason : null,
     note: unavailableToday[t.id] ? unavailableToday[t.id].note : null,
+    onCall: onCallToday.has(t.name),
   }));
 
   // Recent tickets (trouble/maintenance) for sites in this state, last 3 days
