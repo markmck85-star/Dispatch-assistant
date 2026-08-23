@@ -89,6 +89,24 @@ function getEasternOffsetMinutes(date) {
   return (asIfUTC - date.getTime()) / 60000;
 }
 
+// 2026-08-23: used by the new site_id+dispatch_date assignment-completion
+// match below -- turns an already-corrected ISO timestamp (from
+// parseSalesforceDate) into a plain "YYYY-MM-DD" Eastern calendar date, so
+// it can be compared directly against assignments.dispatch_date (a plain
+// `date` column, no time component). Reuses America/New_York the same way
+// getEasternOffsetMinutes does, so this stays correct across the EST/EDT
+// boundary too.
+function easternDateOnly(isoString) {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return null;
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const parts = dtf.formatToParts(d).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function parseSalesforceDate(val) {
   if (!val) return null;
   const m = String(val).match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(AM|PM)/i);
@@ -140,6 +158,15 @@ async function performImport(supabase, rows) {
 
   const incomingApptNumbers = rows.map((r) => r.appointmentNumber).filter(Boolean);
   const existingSet = new Set();
+  // 2026-08-23: also capture site_id/started_at for already-imported rows,
+  // not just the appointment_number used for the skip check below -- the
+  // new site+date completion pass needs to re-evaluate EVERY row on every
+  // re-import (same reason as the 2026-08-12 ticket_id fix a few lines
+  // down: a row already sitting in site_visits from a past import must
+  // still get a chance to complete its assignment, not just brand-new
+  // rows). Re-using the site_id already resolved and stored on that past
+  // insert is both simpler and more correct than re-running matchSite().
+  const existingRowInfo = new Map();
   // Chunk the "already imported?" lookup -- a full scraped report can be
   // ~3,000 appointment numbers in one go (state.html only ever sends 250 at
   // a time), and a single .in() filter that large risks an oversized query.
@@ -147,10 +174,13 @@ async function performImport(supabase, rows) {
     const chunk = incomingApptNumbers.slice(i, i + 500);
     const { data: existing, error: existingErr } = await supabase
       .from('site_visits')
-      .select('appointment_number')
+      .select('appointment_number, site_id, started_at')
       .in('appointment_number', chunk);
     if (existingErr) throw new Error('existing lookup failed: ' + existingErr.message);
-    for (const r of existing || []) existingSet.add(r.appointment_number);
+    for (const r of existing || []) {
+      existingSet.add(r.appointment_number);
+      existingRowInfo.set(r.appointment_number, { site_id: r.site_id, started_at: r.started_at });
+    }
   }
 
   const incomingWoNumbers = rows.map((r) => r.woNumber).filter(Boolean);
@@ -180,6 +210,25 @@ async function performImport(supabase, rows) {
   // see the comment inside the loop for why this is needed alongside
   // ticketIdsToClose.
   const appointmentToTicketId = [];
+  // 2026-08-23: ticketIdsToClose/ticket_id-matching above only ever catches
+  // assignments dispatched through the individual single-ticket flow
+  // (singleTicketWo/window.ticketMeta) -- the vast majority of daily
+  // volume, routine restocks sent through the bulk Location-Codes paste,
+  // never gets assignments.ticket_id set at all, so those planned stops
+  // were silently never auto-completing. Confirmed live via Supabase:
+  // whole days of no-ticket planned assignments (15 on 8/20, 33 on 8/21)
+  // sitting stuck while ticket-linked ones on the same days completed
+  // normally. Fix: also collect {site_id, visit_date} for every row that
+  // resolved to a real site, and complete any 'planned' assignment that
+  // exact-matches on site_id + dispatch_date below. Confirmed via a live
+  // data check that site_id+dispatch_date is unique among planned
+  // assignments (no site ever has two planned stops the same day), and
+  // that real same-day matches exist (day_diff 0) when the completion is
+  // actually in this import -- so an EXACT date match is safe here; a
+  // fuzzy/nearest-date match would not be, since stale planned rows for
+  // the same site can span weeks and a loose match could complete the
+  // wrong day's stop.
+  const siteDateCompletions = [];
 
   for (const r of rows) {
     if (!r.appointmentNumber) continue;
@@ -224,7 +273,20 @@ async function performImport(supabase, rows) {
       appointmentToTicketId.push({ appointment_number: r.appointmentNumber, ticket_id: linkedTicket.id });
     }
 
-    if (existingSet.has(r.appointmentNumber)) continue;
+    // 2026-08-23: reaches the actual backlog -- a row already imported on
+    // a past sync (before this completion pass existed) still needs a
+    // chance to complete its assignment on THIS re-import. Use its
+    // already-stored site_id/started_at directly rather than falling
+    // through to the fresh-match logic below, which only runs for rows
+    // that make it past the skip on the next line.
+    if (existingSet.has(r.appointmentNumber)) {
+      const info = existingRowInfo.get(r.appointmentNumber);
+      if (info && info.site_id && info.started_at) {
+        const visitDate = easternDateOnly(info.started_at);
+        if (visitDate) siteDateCompletions.push({ site_id: info.site_id, visit_date: visitDate });
+      }
+      continue;
+    }
 
     // 2026-08-04: prefer a WO-number-matched ticket's already-resolved
     // site_id over fuzzy text matching whenever available. This is the
@@ -259,6 +321,18 @@ async function performImport(supabase, rows) {
       insertedSamples.push({ accountName: r.accountName, state: r.state, woNumber: r.woNumber, appointmentNumber: r.appointmentNumber, matched });
     }
 
+    const startedAtIso = parseSalesforceDate(r.actualStart);
+    // 2026-08-23: this is the NEW-row half of the site+date completion
+    // candidate list -- the already-imported half is pushed above, before
+    // the existingSet skip. Only queue a candidate when this row actually
+    // resolved to a real site and has a usable completion date -- an
+    // unmatched site (needs_review) or a missing/unparseable actualStart
+    // must never produce a phantom match.
+    if (matched && siteId && startedAtIso) {
+      const visitDate = easternDateOnly(startedAtIso);
+      if (visitDate) siteDateCompletions.push({ site_id: siteId, visit_date: visitDate });
+    }
+
     toInsert.push({
       appointment_number: r.appointmentNumber,
       site_id: siteId,
@@ -266,7 +340,7 @@ async function performImport(supabase, rows) {
       state: r.state || null,
       wo_number: r.woNumber || null,
       ticket_id: ticketId,
-      started_at: parseSalesforceDate(r.actualStart),
+      started_at: startedAtIso,
       ended_at: parseSalesforceDate(r.actualEnd),
       duration_min: r.durationMin != null ? r.durationMin : null,
       tech_name_raw: r.techName || null,
@@ -387,6 +461,39 @@ async function performImport(supabase, rows) {
     }
   }
 
+  // 2026-08-23: second, independent auto-complete pass covering the
+  // no-ticket bulk-restock case -- see the siteDateCompletions comment
+  // above for why this exists and why an exact date match is safe. Kept
+  // as a fully separate pass from the ticket_id block above (rather than
+  // merged into one query) since Postgres/Supabase can't express "match
+  // ANY of these (site_id, date) pairs" in a single .in()-style filter the
+  // way it can for a flat list of ticket ids -- same row-by-row shape
+  // already used for the ticket_id backfill above. A row already
+  // completed via the ticket_id pass above is a no-op here (its status is
+  // no longer 'planned', so the .eq('status','planned') filter below
+  // simply matches nothing for it) -- safe to run unconditionally for
+  // every matched row rather than needing to exclude ticket-linked ones.
+  let assignmentsCompletedBySiteDate = 0;
+  const uniqueSiteDatePairs = new Map();
+  for (const { site_id, visit_date } of siteDateCompletions) {
+    uniqueSiteDatePairs.set(`${site_id}|${visit_date}`, { site_id, visit_date });
+  }
+  for (const { site_id, visit_date } of uniqueSiteDatePairs.values()) {
+    const { error: siteDateErr, count: siteDateCount } = await supabase
+      .from('assignments')
+      .update({ status: 'completed' })
+      .eq('site_id', site_id)
+      .eq('dispatch_date', visit_date)
+      .eq('status', 'planned')
+      .select('id', { count: 'exact', head: true });
+    if (siteDateErr) {
+      console.error(`[perform-import] site/date auto-complete failed for ${site_id} ${visit_date}:`, siteDateErr.message);
+    } else {
+      assignmentsCompletedBySiteDate += siteDateCount || 0;
+    }
+  }
+  assignmentsCompleted += assignmentsCompletedBySiteDate;
+
   return {
     inserted,
     skippedExisting: rows.length - toInsert.length,
@@ -404,8 +511,14 @@ async function performImport(supabase, rows) {
     rowErrors,
     ticketsClosed,
     assignmentsCompleted,
+    // 2026-08-23: assignmentsCompleted above is now the COMBINED total from
+    // both the ticket_id pass and this new pass; this breakout is just for
+    // visibility (e.g. on the Refresh Now progress display) into how many
+    // of today's completions were bulk-restock stops that the old
+    // ticket_id-only logic would have missed entirely.
+    assignmentsCompletedBySiteDate,
     ticketIdsBackfilled,
   };
 }
 
-module.exports = { performImport, matchSite, tokenize, stripStatePrefix, parseSalesforceDate };
+module.exports = { performImport, matchSite, tokenize, stripStatePrefix, parseSalesforceDate, easternDateOnly };
