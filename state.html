@@ -106,6 +106,10 @@
       <input type="checkbox" id="troubleOnlyToggle" onchange="loadConsole(document.getElementById('stateSel').value)">
       🔧 Trouble tickets only
     </label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:8px 0;cursor:pointer;">
+      <input type="checkbox" id="hideClosedToggle" onchange="loadConsole(document.getElementById('stateSel').value)">
+      🙈 Hide closed tickets
+    </label>
     <div id="ticketList"></div>
 
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
@@ -456,16 +460,27 @@ async function loadConsole(state) {
       // path. Trouble tickets are rare enough on an ordinary day that a
       // dispatcher scanning "what's actually broken" would otherwise have
       // to scroll past a lot of restock-only county blocks to find them.
+      //
+      // Hide-closed toggle (2026-08-24) -- same idea, same filter-before-
+      // grouping approach, added alongside trouble-only rather than
+      // replacing it -- the two are independent (a dispatcher might want
+      // "open trouble tickets only" as the combination of both checked).
+      // Relies on t.status === 'closed', the same signal the ✓ Closed
+      // badge below already uses -- see get-state-console.js's own
+      // comments on what "closed" means here (confirmed by the imported
+      // closed-ticket report, not necessarily true-to-the-minute).
       const showTroubleOnly = document.getElementById('troubleOnlyToggle') && document.getElementById('troubleOnlyToggle').checked;
-      const visibleTickets = showTroubleOnly
-        ? data.recentTickets.filter(t => t.ticketKind === 'trouble')
-        : data.recentTickets;
-      ticketStatus.textContent = showTroubleOnly
-        ? visibleTickets.length + ' trouble ticket(s) of ' + data.recentTickets.length + ' total in the last 3 days'
+      const hideClosed = document.getElementById('hideClosedToggle') && document.getElementById('hideClosedToggle').checked;
+      const visibleTickets = data.recentTickets
+        .filter(t => !showTroubleOnly || t.ticketKind === 'trouble')
+        .filter(t => !hideClosed || t.status !== 'closed');
+      const filterLabel = [showTroubleOnly ? 'trouble' : null, hideClosed ? 'open' : null].filter(Boolean).join(', ');
+      ticketStatus.textContent = filterLabel
+        ? visibleTickets.length + ' ' + filterLabel + ' ticket(s) of ' + data.recentTickets.length + ' total in the last 3 days'
         : data.recentTickets.length + ' ticket(s) in the last 3 days';
 
       if (!visibleTickets.length) {
-        ticketList.innerHTML = '<div class="empty-state">No trouble tickets in the last 3 days.</div>';
+        ticketList.innerHTML = '<div class="empty-state">' + (filterLabel ? 'No ' + filterLabel + ' tickets' : 'Nothing') + ' in the last 3 days.</div>';
         return;
       }
 
