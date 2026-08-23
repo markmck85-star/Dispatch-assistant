@@ -388,4 +388,12 @@ ${content}</body></html>`;
     const blobUrl = URL.createObjectURL(blob);
     const printWin = window.open(blobUrl, '_blank');
     if (!printWin) {
-        alert('Please allow popups to export this, or long-press the Save as PD
+        alert('Please allow popups to export this, or long-press the Save as PDF button and choose "Open in new tab".');
+        URL.revokeObjectURL(blobUrl);
+        return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+}
+</script>
+</body>
+</html>
