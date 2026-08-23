@@ -95,19 +95,25 @@
     <div id="techStatus" class="status-line">Loading…</div>
     <div id="techGrid" class="tech-grid"></div>
 
-    <h2 class="section-label">🔄 Restock Status</h2>
-    <div id="restockStatus" class="status-line">Loading…</div>
-    <div id="restockSummary"></div>
+    <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <span>🔄 Restock Status</span>
+      <button type="button" id="restockToggleBtn" onclick="toggleRestockSection()"
+        style="font-size:11px;padding:3px 9px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;cursor:pointer;">Show</button>
+    </h2>
+    <div id="restockSection" style="display:none;">
+      <div id="restockStatus" class="status-line">Loading…</div>
+      <div id="restockSummary"></div>
+    </div>
 
     <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
     <div id="ticketStatus" class="status-line">Loading…</div>
     <div id="importFreshness" class="status-line" style="font-size:11px;"></div>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:8px 0;cursor:pointer;">
-      <input type="checkbox" id="troubleOnlyToggle" onchange="loadConsole(document.getElementById('stateSel').value)">
+      <input type="checkbox" id="troubleOnlyToggle" onchange="saveTroubleOnlyPref()">
       🔧 Trouble tickets only
     </label>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:8px 0;cursor:pointer;">
-      <input type="checkbox" id="hideClosedToggle" onchange="loadConsole(document.getElementById('stateSel').value)">
+      <input type="checkbox" id="hideClosedToggle" onchange="saveHideClosedPref()">
       🙈 Hide closed tickets
     </label>
     <div id="ticketList"></div>
@@ -1065,6 +1071,58 @@ async function pollSyncStatus() {
   }
 }
 
+// 2026-08-24: persist the trouble-only / hide-closed / restock-section
+// display preferences across reloads -- previously these reset to their
+// HTML defaults (both ticket checkboxes unchecked, restock section
+// visible) every time the page loaded, so a dispatcher who set them once
+// had to redo it on every refresh. Same plain-localStorage approach
+// index.html already uses for mcr_controls_collapsed/mcr_map_collapsed --
+// these are personal display preferences for this one page, not data that
+// needs to sync across devices or dispatchers.
+function restoreConsolePrefs() {
+  try {
+    const troubleOnly = document.getElementById('troubleOnlyToggle');
+    const hideClosed = document.getElementById('hideClosedToggle');
+    if (troubleOnly) troubleOnly.checked = localStorage.getItem('mcr_state_troubleOnly') === '1';
+    if (hideClosed) hideClosed.checked = localStorage.getItem('mcr_state_hideClosed') === '1';
+    // Restock section: Mark's stated preference is that it defaults to
+    // HIDDEN (the other sections are more generally useful; restock status
+    // is an opt-in view for when a dispatcher is specifically looking for
+    // opportunistic restocks) -- so absence of a stored value means
+    // hidden, not shown. Only an explicit '1' from a prior toggle shows it.
+    const restockVisible = localStorage.getItem('mcr_state_restockVisible') === '1';
+    setRestockSectionVisibility(restockVisible);
+  } catch { /* localStorage unavailable -- fall back to HTML defaults */ }
+}
+
+function saveTroubleOnlyPref() {
+  const el = document.getElementById('troubleOnlyToggle');
+  try { localStorage.setItem('mcr_state_troubleOnly', el && el.checked ? '1' : '0'); } catch { /* silent */ }
+  loadConsole(document.getElementById('stateSel').value);
+}
+
+function saveHideClosedPref() {
+  const el = document.getElementById('hideClosedToggle');
+  try { localStorage.setItem('mcr_state_hideClosed', el && el.checked ? '1' : '0'); } catch { /* silent */ }
+  loadConsole(document.getElementById('stateSel').value);
+}
+
+function setRestockSectionVisibility(visible) {
+  const section = document.getElementById('restockSection');
+  const btn = document.getElementById('restockToggleBtn');
+  if (section) section.style.display = visible ? '' : 'none';
+  if (btn) btn.textContent = visible ? 'Hide' : 'Show';
+}
+
+function toggleRestockSection() {
+  const section = document.getElementById('restockSection');
+  const currentlyVisible = section && section.style.display !== 'none';
+  const next = !currentlyVisible;
+  setRestockSectionVisibility(next);
+  try { localStorage.setItem('mcr_state_restockVisible', next ? '1' : '0'); } catch { /* silent */ }
+}
+
+restoreConsolePrefs();
 loadAll();
 </script>
 </body>
