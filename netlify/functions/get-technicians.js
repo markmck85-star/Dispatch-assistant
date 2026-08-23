@@ -46,10 +46,23 @@ exports.handler = async (event) => {
     try {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+      // 2026-08-23: was .eq("home_state", state) -- an exact match, which
+      // silently excluded any technician whose real home_state differs
+      // from the region they're being viewed under. Found via Evan Zent
+      // (home NC) and Michael Newboult (home SC) missing their home-base
+      // pin on Gina's combined GA/NC/SC dispatch map -- their tickets/
+      // sites showed fine (site records ARE stored with state='GA' by
+      // design for that combined region), but technicians never got the
+      // same treatment, so a state='GA' fetch never returned them at all.
+      // additional_states (new column) lets a tech be included under
+      // states beyond their real home_state without changing what their
+      // home_state actually is -- Evan/Michael both get additional_states
+      // = ['GA'] so they now show up on the GA screen alongside their
+      // real NC/SC home_state.
       const { data: techs, error: techErr } = await supabase
         .from("technicians")
-        .select("slug, name, home_state, phone, email, home_address, sms_address, active, lat, lng, geocoded_at")
-        .eq("home_state", state);
+        .select("slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, lat, lng, geocoded_at")
+        .or(`home_state.eq.${state},additional_states.cs.{${state}}`);
 
       if (techErr) throw techErr;
 
