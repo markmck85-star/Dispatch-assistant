@@ -121,6 +121,31 @@ function runSearch() {
     const st = stateFilter.value;
     activeIndex = -1;
     if (!q) {
+        // 2026-08-24: previously cleared the dropdown any time the search
+        // box was empty, even right after picking a state -- so selecting
+        // "GA" alone did nothing until you also typed something. Now an
+        // empty box with a specific state selected browses that state's
+        // full site list instead. Left "All states" + empty box as a
+        // prompt rather than listing every site across every state
+        // unprompted (500+ sites, not really "browsable" at that size).
+        if (st) {
+            filteredResults = allSites
+                .filter(s => s.state === st)
+                .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            if (!filteredResults.length) {
+                resultsDropdown.innerHTML = '<div class="result-row muted">No sites for this state</div>';
+                resultsDropdown.classList.add('open');
+                return;
+            }
+            resultsDropdown.innerHTML = filteredResults.map((s, i) =>
+                `<div class="result-row" data-i="${i}"><span class="state-tag">${escapeHtml(s.state)}</span><span class="code">${escapeHtml(s.site_code || '')}</span>${escapeHtml(s.name)}</div>`
+            ).join('');
+            resultsDropdown.classList.add('open');
+            resultsDropdown.querySelectorAll('.result-row[data-i]').forEach(row => {
+                row.addEventListener('click', () => selectSite(filteredResults[+row.dataset.i]));
+            });
+            return;
+        }
         resultsDropdown.classList.remove('open');
         resultsDropdown.innerHTML = '';
         return;
@@ -145,6 +170,7 @@ function runSearch() {
 }
 
 searchInput.addEventListener('input', runSearch);
+searchInput.addEventListener('focus', runSearch);
 stateFilter.addEventListener('change', runSearch);
 
 searchInput.addEventListener('keydown', (e) => {
@@ -362,12 +388,4 @@ ${content}</body></html>`;
     const blobUrl = URL.createObjectURL(blob);
     const printWin = window.open(blobUrl, '_blank');
     if (!printWin) {
-        alert('Please allow popups to export this, or long-press the Save as PDF button and choose "Open in new tab".');
-        URL.revokeObjectURL(blobUrl);
-        return;
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-}
-</script>
-</body>
-</html>
+        alert('Please allow popups to export this, or long-press the Save as PD
