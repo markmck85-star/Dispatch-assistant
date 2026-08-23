@@ -2566,15 +2566,31 @@ function distanceMatrixStatus(state) {
                 if (ta) {
                     ta.value = savedText;
                     autoDetectDispatchDate(savedText);
-                    // Auto-rebuild the board on load/refresh so it reflects what's
-                    // actually persisted in Supabase, instead of requiring a manual
-                    // "Generate Dispatches" click first. Previously a refresh or
-                    // logout/login left the page showing stale/empty state until
-                    // that click re-ran the derivation logic that honors
-                    // assignedBy==='manual' overrides.
-                    await processDispatch();
                 }
             }
+            // 2026-08-23: always call processDispatch() on load, not just when
+            // this BROWSER has cached paste text -- previously this whole call
+            // sat inside `if (savedText)`, so the auto-rebuild-from-Supabase
+            // comment below only ever fired for the same dispatcher reloading
+            // their OWN browser. lastDispatchText lives in localStorage, which
+            // is per-device -- a second dispatcher (e.g. Gina) opening the app
+            // on her own device has no local paste history at all, so that
+            // whole block never ran and her board stayed empty even though
+            // every stop the first dispatcher processed was already sitting
+            // correctly in Supabase. processDispatch() -> _processDispatchCore()
+            // already fetches persisted assignments for the date and
+            // auto-surfaces them (see the ticket-linked and, as of today, plain
+            // fromSupabaseOnly branches there) -- that auto-surface is what
+            // actually needs to run unconditionally, independent of whether
+            // this specific browser has local paste text to re-parse.
+            //
+            // Auto-rebuild the board on load/refresh so it reflects what's
+            // actually persisted in Supabase, instead of requiring a manual
+            // "Generate Dispatches" click first. Previously a refresh or
+            // logout/login left the page showing stale/empty state until
+            // that click re-ran the derivation logic that honors
+            // assignedBy==='manual' overrides.
+            await processDispatch(true);
             // Save textarea content on input and auto-detect date
             const dispatchTextarea = document.getElementById('locationCodes');
             if (dispatchTextarea) {
@@ -2983,7 +2999,7 @@ function distanceMatrixStatus(state) {
             return [...new Set(rawCodes)].map(c => ({ code: c, urgent: isUrgent }));
         }
 
-        async function processDispatch() {
+        async function processDispatch(auto) {
             const codesInput = document.getElementById('locationCodes');
             const resultsDiv = document.getElementById('results');
             
@@ -2991,7 +3007,22 @@ function distanceMatrixStatus(state) {
             const staleDialog = document.getElementById('fallback-assign-prompt');
             if (staleDialog) staleDialog.remove();
 
-            if (!codesInput || !codesInput.value.trim()) { alert("Paste text first!"); return; }
+            if (!codesInput || !codesInput.value.trim()) {
+                if (!auto) { alert("Paste text first!"); return; }
+                // 2026-08-23: `auto` is set on the page-load call so an empty
+                // Location Codes box (the normal case for a dispatcher who
+                // hasn't personally pasted anything into THIS browser -- e.g.
+                // Gina opening the board after Mark already processed it
+                // elsewhere) doesn't pop a blocking alert on every load. Skip
+                // straight to _processDispatchCore() -- it fetches persisted
+                // assignments for the date and auto-surfaces them regardless
+                // of pasted text (see the fromSupabaseOnly branch there) --
+                // just without the manual-paste-only parsing steps below,
+                // since there's no text to parse.
+                window.ticketMeta = {};
+                await _processDispatchCore();
+                return;
+            }
 
             // Ensure remote locations and technicians are loaded before generating
             if (window.__remoteDataPromise) {
@@ -3250,6 +3281,40 @@ function distanceMatrixStatus(state) {
                         ticketIssue: [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – '),
                         ticketSlaEnd: existing.ticket.slaEndsAt,
                     });
+                } else if (existing.status === 'planned' && !existing.ticket) {
+                    // 2026-08-23: the ticket-linked branch above already solved
+                    // "board is blank on an empty Location Codes box" for
+                    // trouble/maintenance tickets, but the vast majority of daily
+                    // volume -- routine restocks dispatched through the bulk
+                    // Location-Codes paste -- has no ticket at all, so it was
+                    // never covered by that fix. Root cause of a real case: Mark
+                    // pastes and processes a dispatch list, reassigns some stops,
+                    // then Gina opens the board later on her own device with an
+                    // empty paste box (her localStorage never had Mark's pasted
+                    // text) and saw nothing, even though every stop Mark
+                    // processed was already sitting correctly in Supabase.
+                    // Mirrors the ticket branch's own pastedByCode-skip / missing-
+                    // LOCATIONS guard, but pushes a plain stop instead of a
+                    // ticket-enriched one.
+                    //
+                    // Known limitation: this restores the CORRECT stop + tech for
+                    // every persisted assignment, but NOT the restock-count/
+                    // consumables detail (Left/Right Forms, Ribbon, Journal) --
+                    // that comes only from parsing the raw dispatch-list email
+                    // text via parseFormCounts(), which lives in
+                    // window.parsedFormCounts and was never persisted to
+                    // Supabase, only the assignment itself was. A stop surfaced
+                    // this way shows site/tech correctly but with restock detail
+                    // blank until someone pastes the original dispatch list text
+                    // in this browser too. fromSupabaseOnly flags this so the UI
+                    // can show a lighter badge instead of implying full detail
+                    // is present.
+                    if (pastedByCode[code]) return;
+                    if (!LOCATIONS[code]) {
+                        console.warn(`[dispatch] Auto-added planned stop for ${code} skipped: not in LOCATIONS`);
+                        return;
+                    }
+                    relevant.push({ code, fromSupabaseOnly: true });
                 }
             });
 
@@ -3599,6 +3664,16 @@ function distanceMatrixStatus(state) {
                     const noDefaultBadge = item.noSavedDefault
                         ? `<span style="background:#5a2d82;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">⚠ no saved default</span>`
                         : '';
+                    // 2026-08-23: flags a stop that was auto-surfaced from a
+                    // persisted Supabase assignment rather than parsed from
+                    // pasted dispatch-list text in THIS browser -- site/tech are
+                    // correct, but restock-count/consumables detail (only ever
+                    // derived from the raw pasted email text via
+                    // parseFormCounts, never persisted) is not available here.
+                    // See the fromSupabaseOnly comment in _processDispatchCore.
+                    const supabaseOnlyBadge = item.fromSupabaseOnly
+                        ? `<span style="background:#2a4a6b;color:#9ecbf5;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="Loaded from a previously-processed dispatch -- restock counts not shown here. Paste the original dispatch list to see them.">☁ from saved dispatch</span>`
+                        : '';
                     const restockByStr = item.restockBy ? `<span style="font-size:11px;color:#888;margin-left:6px;">by ${item.restockBy}</span>` : '';
                     const ticketInfoStr = item.fromTicket
                         ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : ''}</div>`
@@ -3618,7 +3693,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div>
-                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${restockByStr}</div>
+                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">📏 ${legLabel}${index === 0 ? ' from home' : ' from prev. stop'}</div>
                                     ${ticketInfoStr}
