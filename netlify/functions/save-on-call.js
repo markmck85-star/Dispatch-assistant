@@ -27,13 +27,10 @@
 // existing read-side BlueFolder sync).
 
 const { createClient } = require('@supabase/supabase-js');
+const { XMLParser } = require('fast-xml-parser');
 
 const BF_BASE = 'https://app.bluefolder.com/api/2.0';
-
-function bfAuthHeader() {
-  const token = process.env.BLUEFOLDER_API_TOKEN;
-  return 'Basic ' + Buffer.from(`${token}:X`).toString('base64');
-}
+const xmlParser = new XMLParser({ ignoreAttributes: false });
 
 // BlueFolder wants "YYYY.MM.DD HH:MM AM" -- dots in the date, 12-hour
 // clock with a space before AM/PM.
@@ -48,35 +45,35 @@ function toBFDateTime(dayStr, hour24, minute) {
 }
 
 function xmlEscape(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s ?? '').replace(/[<>&'"]/g, (c) => ({
+    '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;',
+  }[c]));
 }
 
-// Minimal extraction -- BlueFolder's responses are simple/flat, so a
-// regex is enough and avoids pulling in an XML parser dependency.
-function parseBFResponse(xmlText) {
-  const statusMatch = xmlText.match(/<response\s+status="(\w+)"/);
-  const status = statusMatch ? statusMatch[1] : 'unknown';
-  if (status !== 'ok') {
-    const errMatch = xmlText.match(/<error[^>]*>([\s\S]*?)<\/error>/);
-    const msg = errMatch ? errMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : 'Unknown BlueFolder error';
-    return { ok: false, error: msg };
-  }
-  const apptIdMatch = xmlText.match(/<apptId>(\d+)<\/apptId>/);
-  return { ok: true, apptId: apptIdMatch ? apptIdMatch[1] : null };
-}
-
-async function bfRequest(path, bodyXml) {
-  const res = await fetch(`${BF_BASE}/${path}`, {
+// Same request shape as the confirmed-working read sync in
+// bluefolder-sync.js -- Content-Type must be text/xml (application/xml
+// gets rejected), and fast-xml-parser correctly surfaces the real error
+// instead of a generic message when the response doesn't parse as expected.
+async function bfRequest(endpoint, bodyXml) {
+  const token = process.env.BLUEFOLDER_API_TOKEN;
+  const auth = Buffer.from(`${token}:x`).toString('base64');
+  const res = await fetch(`${BF_BASE}/${endpoint}`, {
     method: 'POST',
-    headers: {
-      'Authorization': bfAuthHeader(),
-      'Content-Type': 'application/xml',
-    },
+    headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'text/xml' },
     body: bodyXml,
   });
   const text = await res.text();
-  return parseBFResponse(text);
+  const parsed = xmlParser.parse(text);
+  if (parsed?.response?.['@_status'] === 'fail') {
+    throw new Error(JSON.stringify(parsed.response.error));
+  }
+  if (!parsed?.response) {
+    // Didn't parse as a BlueFolder response at all -- surface the raw body
+    // (truncated) rather than a generic message, since that's the only way
+    // to debug a shape we didn't anticipate.
+    throw new Error(`HTTP ${res.status}, unexpected response: ${text.slice(0, 300) || '(empty body)'}`);
+  }
+  return parsed.response;
 }
 
 exports.handler = async (event) => {
@@ -134,23 +131,24 @@ exports.handler = async (event) => {
   </appointmentAdd>
 </request>`;
 
-    let bfResult;
+    let bfResponse;
     try {
-      bfResult = await bfRequest('appointments/add.aspx', requestXml);
+      bfResponse = await bfRequest('appointments/add.aspx', requestXml);
     } catch (err) {
-      return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'Could not reach BlueFolder: ' + err.message }) };
+      return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'BlueFolder rejected the appointment: ' + err.message }) };
     }
-    if (!bfResult.ok) {
-      return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'BlueFolder rejected the appointment: ' + bfResult.error }) };
+    const apptId = bfResponse?.apptId;
+    if (!apptId) {
+      return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'BlueFolder returned no appointment id: ' + JSON.stringify(bfResponse) }) };
     }
 
     const { error: updateErr } = await sb
       .from('on_call_schedule')
-      .update({ bluefolder_appt_id: bfResult.apptId })
+      .update({ bluefolder_appt_id: String(apptId) })
       .match({ state, day, technician_id });
     if (updateErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: updateErr.message }) };
 
-    return { statusCode: 200, body: JSON.stringify({ ok: true, apptId: bfResult.apptId }) };
+    return { statusCode: 200, body: JSON.stringify({ ok: true, apptId: String(apptId) }) };
   }
 
   // ---- delete: remove locally; if pushed, cancel (don't delete) in BlueFolder ----
@@ -172,14 +170,11 @@ exports.handler = async (event) => {
   </appointmentEdit>
 </request>`;
       try {
-        const bfResult = await bfRequest('appointments/edit.aspx', editXml);
-        if (!bfResult.ok) {
-          // Don't block the local removal on a BlueFolder hiccup -- surface
-          // it, but let the local delete proceed below.
-          console.error('BlueFolder cancel-edit failed:', bfResult.error);
-        }
+        await bfRequest('appointments/edit.aspx', editXml);
       } catch (err) {
-        console.error('BlueFolder cancel-edit request failed:', err.message);
+        // Don't block the local removal on a BlueFolder hiccup -- log it,
+        // but let the local delete proceed below.
+        console.error('BlueFolder cancel-edit failed:', err.message);
       }
     }
 
