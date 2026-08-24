@@ -81,6 +81,9 @@
   .day-block.reason-pto { background: #4a1a5c; }
   .day-block.reason-comp_day { background: #1a3a5c; }
   .day-block.reason-manual, .day-block.reason-other { background: #3a3a3a; }
+  .day-block.reason-last_day { background: #8a3a00; }
+  .day-block.reason-info { background: #1f5c4a; }
+  .day-block.reason-on_call { background: #0a6e5c; border: 1px solid #14a085; }
 
   .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 30px 10px; color: #666; }
   .error-state { color: #e57373; }
@@ -116,11 +119,19 @@
   .day-detail-entry .entry-name { font-size: 14.5px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px; }
   .day-detail-entry .entry-type { font-size: 11.5px; opacity: 0.85; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.03em; }
   .day-detail-entry .entry-note { font-size: 13px; color: #f0f0f0; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+  .day-detail-entry .entry-remove {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.3); color: #fff;
+    border-radius: 5px; padding: 4px 9px; font-size: 11.5px; margin-top: 8px; cursor: pointer;
+  }
+  .day-detail-entry .entry-remove:active { background: rgba(0,0,0,0.5); }
   .day-detail-entry.reason-vacation { background: #5c1a1a; }
   .day-detail-entry.reason-personal { background: #7a5200; }
   .day-detail-entry.reason-pto { background: #4a1a5c; }
   .day-detail-entry.reason-comp_day { background: #1a3a5c; }
   .day-detail-entry.reason-manual, .day-detail-entry.reason-other { background: #3a3a3a; }
+  .day-detail-entry.reason-last_day { background: #8a3a00; }
+  .day-detail-entry.reason-info { background: #1f5c4a; }
+  .day-detail-entry.reason-on_call { background: #0a6e5c; border: 1px solid #14a085; }
 </style>
 </head>
 <body>
@@ -138,6 +149,7 @@
       </div>
       <button class="today-btn" id="todayBtn">Today</button>
       <button class="btn-primary" id="openAddModalBtn">+ Add Entry</button>
+      <button class="btn-primary" id="openOnCallModalBtn" style="background:#0a6e5c;">+ Set On-Call</button>
       <select id="stateFilter"><option value="">All states</option></select>
     </div>
 
@@ -149,6 +161,9 @@
       <div class="legend-item"><span class="legend-dot" style="background:#4a1a5c"></span>PTO</div>
       <div class="legend-item"><span class="legend-dot" style="background:#1a3a5c"></span>Comp day</div>
       <div class="legend-item"><span class="legend-dot" style="background:#3a3a3a"></span>Other / Manual</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#8a3a00"></span>Last Day</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1f5c4a"></span>Info / Note</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#0a6e5c"></span>Saturday On-Call</div>
     </div>
   </div>
 </div>
@@ -174,6 +189,8 @@
             <option value="pto">PTO</option>
             <option value="comp_day">Comp Day</option>
             <option value="manual">Other / Appt</option>
+            <option value="last_day">Last Day</option>
+            <option value="info">Info / Note (not time off)</option>
           </select>
         </div>
       </div>
@@ -199,18 +216,44 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="onCallModal">
+  <div class="modal">
+    <h2>Set Saturday On-Call</h2>
+    <form id="onCallForm">
+      <div class="form-group">
+        <label for="onCallState">State</label>
+        <select id="onCallState" required></select>
+      </div>
+      <div class="form-group">
+        <label for="onCallTech">Technician</label>
+        <select id="onCallTech" required></select>
+      </div>
+      <div class="form-group">
+        <label for="onCallDate">Saturday</label>
+        <input type="date" id="onCallDate" required>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="closeOnCallBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save On-Call</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tZWhyZm9xaGxqenltYXplbWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzEzMjEsImV4cCI6MjA5OTEwNzMyMX0.rSMvkmpf9rTT4seMKSNf4xlgPkbxcOvia-sP2ZhvOmE';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out' };
+const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last Day', info: 'Note' };
 const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 let viewDate = new Date();
 viewDate.setDate(1);
 let currentByDay = new Map();
+let currentOnCallByDay = new Map();
+let saturdayStates = [];
 
 function monthLabel(d) {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -242,6 +285,28 @@ async function loadStatesAndTechs() {
     opt.value = t.id; 
     opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
     selTech.appendChild(opt);
+  }
+
+  // Populate On-Call Tech Dropdown (same list -- any tech can be assigned to any state's rotation)
+  const selOnCallTech = document.getElementById('onCallTech');
+  selOnCallTech.innerHTML = '';
+  for (const t of techData) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+    selOnCallTech.appendChild(opt);
+  }
+
+  // Saturday-coverage states -- only these get on-call chips/rotation entry
+  const { data: stateData } = await sb.from('states').select('code, name').eq('saturday_coverage', true).order('code');
+  saturdayStates = stateData || [];
+  const selOnCallState = document.getElementById('onCallState');
+  selOnCallState.innerHTML = '';
+  for (const s of saturdayStates) {
+    const opt = document.createElement('option');
+    opt.value = s.code;
+    opt.textContent = `${s.name} (${s.code})`;
+    selOnCallState.appendChild(opt);
   }
 }
 
@@ -276,11 +341,31 @@ async function loadMonth() {
     byDay.get(row.day).push(row);
   }
 
+  // Saturday on-call -- separate table (state, day, technician), only
+  // relevant for states with saturday_coverage=true.
+  let onCallQuery = sb
+    .from('on_call_schedule')
+    .select('state, day, technician_id, technicians!inner(name, home_state)')
+    .gte('day', monthStart)
+    .lte('day', monthEnd)
+    .order('day', { ascending: true });
+  if (stateFilter) onCallQuery = onCallQuery.eq('state', stateFilter);
+
+  const { data: onCallData, error: onCallError } = await onCallQuery;
+  const onCallByDay = new Map();
+  if (!onCallError) {
+    for (const row of (onCallData || [])) {
+      if (!onCallByDay.has(row.day)) onCallByDay.set(row.day, []);
+      onCallByDay.get(row.day).push(row);
+    }
+  }
+
   currentByDay = byDay;
-  renderMonthGrid(year, month, byDay);
+  currentOnCallByDay = onCallByDay;
+  renderMonthGrid(year, month, byDay, onCallByDay);
 }
 
-function renderMonthGrid(year, month, byDay) {
+function renderMonthGrid(year, month, byDay, onCallByDay) {
   const body = document.getElementById('calendarBody');
   const todayStr = isoLocal(new Date());
 
@@ -321,6 +406,11 @@ function renderMonthGrid(year, month, byDay) {
       const noteHtml = row.note ? `<span class="block-note">${escapeHtml(row.note)}</span>` : '';
       html += `<span class="day-block reason-${reason}" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}${synced}${noteHtml}</span>`;
     }
+    const onCallRows = onCallByDay.get(dayStr) || [];
+    for (const row of onCallRows) {
+      const titleAttr = `${row.technicians.name} — On-Call (${row.state})`;
+      html += `<span class="day-block reason-on_call" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}<span class="block-note">On-Call (${escapeHtml(row.state)})</span></span>`;
+    }
     html += `</div>`;
   }
   html += '</div></div>';
@@ -347,6 +437,20 @@ document.getElementById('openAddModalBtn').addEventListener('click', () => {
 });
 document.getElementById('closeModalBtn').addEventListener('click', () => modal.classList.remove('active'));
 
+// On-Call Modal
+const onCallModal = document.getElementById('onCallModal');
+function nextSaturdayISO() {
+  const d = new Date();
+  const offset = (6 - d.getDay() + 7) % 7; // days until next Saturday (0 if today is Saturday)
+  d.setDate(d.getDate() + offset);
+  return isoLocal(d);
+}
+document.getElementById('openOnCallModalBtn').addEventListener('click', () => {
+  document.getElementById('onCallDate').value = nextSaturdayISO();
+  onCallModal.classList.add('active');
+});
+document.getElementById('closeOnCallBtn').addEventListener('click', () => onCallModal.classList.remove('active'));
+
 // Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
 // themselves) opens a bigger view of just that day, since the inline
 // cards on a busy day don't have room to show every note in full.
@@ -361,12 +465,13 @@ function formatDayHeading(dayStr) {
 
 function openDayDetail(dayStr) {
   const rows = currentByDay.get(dayStr) || [];
+  const onCallRows = currentOnCallByDay.get(dayStr) || [];
   dayDetailTitle.textContent = formatDayHeading(dayStr);
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && onCallRows.length === 0) {
     dayDetailList.innerHTML = '<div class="day-detail-empty">No entries for this day.</div>';
   } else {
-    dayDetailList.innerHTML = rows.map((row) => {
+    const availabilityHtml = rows.map((row) => {
       const reason = row.reason || 'other';
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
       const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
@@ -377,9 +482,46 @@ function openDayDetail(dayStr) {
         ${noteHtml}
       </div>`;
     }).join('');
+
+    const onCallHtml = onCallRows.map((row) => {
+      return `<div class="day-detail-entry reason-on_call">
+        <div class="entry-name">${escapeHtml(row.technicians.name)}</div>
+        <div class="entry-type">On-Call (${escapeHtml(row.state)})</div>
+        <button type="button" class="entry-remove" data-oncall-remove
+          data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+          Remove
+        </button>
+      </div>`;
+    }).join('');
+
+    dayDetailList.innerHTML = availabilityHtml + onCallHtml;
   }
   dayDetailModal.classList.add('active');
 }
+
+dayDetailList.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-oncall-remove]');
+  if (!btn) return;
+  const { state, day, tech } = btn.dataset;
+  if (!confirm('Remove this on-call assignment?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+  try {
+    const res = await fetch('/.netlify/functions/save-on-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, day, technician_id: tech, action: 'delete' })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    await loadMonth();
+    openDayDetail(day);
+  } catch (err) {
+    alert('Error removing on-call entry: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Remove';
+  }
+});
 
 document.getElementById('calendarBody').addEventListener('click', (e) => {
   const cell = e.target.closest('.day-cell');
@@ -416,6 +558,36 @@ document.getElementById('addAvailabilityForm').addEventListener('submit', async 
     loadMonth();
   } catch (err) {
     alert('Error saving entry: ' + err.message);
+  }
+});
+
+// On-Call form submission -- goes through save-on-call.js (service-role
+// key, server-side), same reasoning as save-tech-availability above:
+// on_call_schedule's write RLS requires an authenticated admin/dispatcher
+// session, and this page only ever has the anon key.
+document.getElementById('onCallForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const state = document.getElementById('onCallState').value;
+  const technician_id = document.getElementById('onCallTech').value;
+  const day = document.getElementById('onCallDate').value;
+
+  const [y, m, d] = day.split('-').map(Number);
+  if (new Date(y, m - 1, d).getDay() !== 6) {
+    if (!confirm(`${day} is not a Saturday. Save it anyway?`)) return;
+  }
+
+  try {
+    const res = await fetch('/.netlify/functions/save-on-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, technician_id, day })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    onCallModal.classList.remove('active');
+    loadMonth();
+  } catch (err) {
+    alert('Error saving on-call entry: ' + err.message);
   }
 });
 
