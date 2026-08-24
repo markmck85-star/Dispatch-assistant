@@ -345,7 +345,7 @@ async function loadMonth() {
   // relevant for states with saturday_coverage=true.
   let onCallQuery = sb
     .from('on_call_schedule')
-    .select('state, day, technician_id, technicians!inner(name, home_state)')
+    .select('state, day, technician_id, bluefolder_appt_id, technicians!inner(name, home_state)')
     .gte('day', monthStart)
     .lte('day', monthEnd)
     .order('day', { ascending: true });
@@ -484,13 +484,22 @@ function openDayDetail(dayStr) {
     }).join('');
 
     const onCallHtml = onCallRows.map((row) => {
+      const pushControl = row.bluefolder_appt_id
+        ? `<span class="synced" title="Synced to BlueFolder (appt #${escapeHtml(row.bluefolder_appt_id)})">&#128279; Synced to BlueFolder</span>`
+        : `<button type="button" class="entry-remove" data-oncall-push
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+            Push to BlueFolder
+          </button>`;
       return `<div class="day-detail-entry reason-on_call">
         <div class="entry-name">${escapeHtml(row.technicians.name)}</div>
         <div class="entry-type">On-Call (${escapeHtml(row.state)})</div>
-        <button type="button" class="entry-remove" data-oncall-remove
-          data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
-          Remove
-        </button>
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          ${pushControl}
+          <button type="button" class="entry-remove" data-oncall-remove
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+            Remove
+          </button>
+        </div>
       </div>`;
     }).join('');
 
@@ -500,6 +509,29 @@ function openDayDetail(dayStr) {
 }
 
 dayDetailList.addEventListener('click', async (e) => {
+  const pushBtn = e.target.closest('[data-oncall-push]');
+  if (pushBtn) {
+    const { state, day, tech } = pushBtn.dataset;
+    pushBtn.disabled = true;
+    pushBtn.textContent = 'Pushing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, day, technician_id: tech, action: 'push' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error pushing to BlueFolder: ' + err.message);
+      pushBtn.disabled = false;
+      pushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
   const btn = e.target.closest('[data-oncall-remove]');
   if (!btn) return;
   const { state, day, tech } = btn.dataset;
