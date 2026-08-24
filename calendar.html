@@ -176,7 +176,7 @@
 
 <div class="modal-overlay" id="addModal">
   <div class="modal">
-    <h2>Schedule Time Off / Exception</h2>
+    <h2 id="addModalTitle">Schedule Time Off / Exception</h2>
     <form id="addAvailabilityForm">
       <div class="form-group">
         <label for="techSelect">Technician</label>
@@ -208,7 +208,7 @@
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-cancel" id="closeModalBtn">Cancel</button>
-        <button type="submit" class="btn-primary">Save Entry</button>
+        <button type="submit" class="btn-primary" id="addModalSubmitBtn">Save Entry</button>
       </div>
     </form>
   </div>
@@ -226,7 +226,7 @@
 
 <div class="modal-overlay" id="onCallModal">
   <div class="modal">
-    <h2>Set Saturday On-Call</h2>
+    <h2 id="onCallModalTitle">Set Saturday On-Call</h2>
     <form id="onCallForm">
       <div class="form-group">
         <label for="onCallState">State</label>
@@ -242,7 +242,7 @@
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-cancel" id="closeOnCallBtn">Cancel</button>
-        <button type="submit" class="btn-primary">Save On-Call</button>
+        <button type="submit" class="btn-primary" id="onCallModalSubmitBtn">Save On-Call</button>
       </div>
     </form>
   </div>
@@ -439,24 +439,62 @@ document.getElementById('stateFilter').addEventListener('change', loadMonth);
 
 // Modal Controls
 const modal = document.getElementById('addModal');
-document.getElementById('openAddModalBtn').addEventListener('click', () => {
-  document.getElementById('eventDate').value = new Date().toISOString().slice(0, 10);
+const addModalTitle = document.getElementById('addModalTitle');
+const addModalSubmitBtn = document.getElementById('addModalSubmitBtn');
+let editingAvailKey = null; // { technician_id, day } when editing, null when adding fresh
+
+function openAddModal(prefill) {
+  if (prefill) {
+    editingAvailKey = { technician_id: prefill.technician_id, day: prefill.day };
+    addModalTitle.textContent = 'Edit Entry';
+    addModalSubmitBtn.textContent = 'Update Entry';
+    document.getElementById('techSelect').value = prefill.technician_id;
+    document.getElementById('eventDate').value = prefill.day;
+    document.getElementById('eventReason').value = prefill.reason || 'other';
+    document.getElementById('eventNote').value = prefill.note || '';
+  } else {
+    editingAvailKey = null;
+    addModalTitle.textContent = 'Schedule Time Off / Exception';
+    addModalSubmitBtn.textContent = 'Save Entry';
+    document.getElementById('eventDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('eventReason').value = 'vacation';
+    document.getElementById('eventNote').value = '';
+  }
   modal.classList.add('active');
-});
+}
+document.getElementById('openAddModalBtn').addEventListener('click', () => openAddModal(null));
 document.getElementById('closeModalBtn').addEventListener('click', () => modal.classList.remove('active'));
 
 // On-Call Modal
 const onCallModal = document.getElementById('onCallModal');
+const onCallModalTitle = document.getElementById('onCallModalTitle');
+const onCallModalSubmitBtn = document.getElementById('onCallModalSubmitBtn');
+let editingOnCallKey = null; // { state, day, technician_id } when editing, null when adding fresh
+
 function nextSaturdayISO() {
   const d = new Date();
   const offset = (6 - d.getDay() + 7) % 7; // days until next Saturday (0 if today is Saturday)
   d.setDate(d.getDate() + offset);
   return isoLocal(d);
 }
-document.getElementById('openOnCallModalBtn').addEventListener('click', () => {
-  document.getElementById('onCallDate').value = nextSaturdayISO();
+
+function openOnCallModal(prefill) {
+  if (prefill) {
+    editingOnCallKey = { state: prefill.state, day: prefill.day, technician_id: prefill.technician_id };
+    onCallModalTitle.textContent = 'Edit On-Call';
+    onCallModalSubmitBtn.textContent = 'Update On-Call';
+    document.getElementById('onCallState').value = prefill.state;
+    document.getElementById('onCallTech').value = prefill.technician_id;
+    document.getElementById('onCallDate').value = prefill.day;
+  } else {
+    editingOnCallKey = null;
+    onCallModalTitle.textContent = 'Set Saturday On-Call';
+    onCallModalSubmitBtn.textContent = 'Save On-Call';
+    document.getElementById('onCallDate').value = nextSaturdayISO();
+  }
   onCallModal.classList.add('active');
-});
+}
+document.getElementById('openOnCallModalBtn').addEventListener('click', () => openOnCallModal(null));
 document.getElementById('closeOnCallBtn').addEventListener('click', () => onCallModal.classList.remove('active'));
 
 // Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
@@ -495,6 +533,10 @@ function openDayDetail(dayStr) {
         ${noteHtml}
         <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
           ${pushControl}
+          <button type="button" class="entry-remove" data-avail-edit
+            data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
+            Edit
+          </button>
           <button type="button" class="entry-remove" data-avail-remove
             data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
             Remove
@@ -515,6 +557,10 @@ function openDayDetail(dayStr) {
         <div class="entry-type">On-Call (${escapeHtml(row.state)})</div>
         <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
           ${pushControl}
+          <button type="button" class="entry-remove" data-oncall-edit
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+            Edit
+          </button>
           <button type="button" class="entry-remove" data-oncall-remove
             data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
             Remove
@@ -529,6 +575,26 @@ function openDayDetail(dayStr) {
 }
 
 dayDetailList.addEventListener('click', async (e) => {
+  const availEditBtn = e.target.closest('[data-avail-edit]');
+  if (availEditBtn) {
+    const { tech, day } = availEditBtn.dataset;
+    const row = (currentByDay.get(day) || []).find(r => String(r.technician_id) === tech);
+    if (!row) { alert('Could not find that entry to edit.'); return; }
+    dayDetailModal.classList.remove('active');
+    openAddModal({ technician_id: row.technician_id, day: row.day, reason: row.reason, note: row.note });
+    return;
+  }
+
+  const onCallEditBtn = e.target.closest('[data-oncall-edit]');
+  if (onCallEditBtn) {
+    const { state, day, tech } = onCallEditBtn.dataset;
+    const row = (currentOnCallByDay.get(day) || []).find(r => r.state === state && String(r.technician_id) === tech);
+    if (!row) { alert('Could not find that on-call entry to edit.'); return; }
+    dayDetailModal.classList.remove('active');
+    openOnCallModal({ state: row.state, day: row.day, technician_id: row.technician_id });
+    return;
+  }
+
   const availPushBtn = e.target.closest('[data-avail-push]');
   if (availPushBtn) {
     const { tech, day } = availPushBtn.dataset;
@@ -645,6 +711,21 @@ document.getElementById('addAvailabilityForm').addEventListener('submit', async 
   const note = document.getElementById('eventNote').value;
 
   try {
+    // Editing, and the technician or date changed -- (technician_id, day) is
+    // the row's identity, so this isn't an in-place update, it's a move.
+    // Delete the old row first (which also cancels its BlueFolder
+    // appointment if it had one) so nothing's left behind at the old slot,
+    // then create fresh at the new slot.
+    if (editingAvailKey && (String(editingAvailKey.technician_id) !== String(technician_id) || editingAvailKey.day !== day)) {
+      const delRes = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id: editingAvailKey.technician_id, day: editingAvailKey.day, action: 'delete' })
+      });
+      const delData = await delRes.json();
+      if (!delRes.ok || !delData.ok) throw new Error('Could not move old entry: ' + (delData.error || ('HTTP ' + delRes.status)));
+    }
+
     const res = await fetch('/.netlify/functions/save-tech-availability', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -654,6 +735,7 @@ document.getElementById('addAvailabilityForm').addEventListener('submit', async 
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
     modal.classList.remove('active');
     document.getElementById('eventNote').value = '';
+    editingAvailKey = null;
     loadMonth();
   } catch (err) {
     alert('Error saving entry: ' + err.message);
@@ -676,14 +758,37 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
   }
 
   try {
-    const res = await fetch('/.netlify/functions/save-on-call', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, technician_id, day })
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    // On-call has no fields beyond its own identity (state/day/technician),
+    // so "editing" always means moving to a different key -- there's
+    // nothing to update in place. If nothing actually changed, skip the
+    // round-trip entirely rather than needlessly cancelling and re-pushing
+    // an already-synced BlueFolder appointment.
+    const keyUnchanged = editingOnCallKey
+      && editingOnCallKey.state === state
+      && editingOnCallKey.day === day
+      && String(editingOnCallKey.technician_id) === String(technician_id);
+
+    if (editingOnCallKey && !keyUnchanged) {
+      const delRes = await fetch('/.netlify/functions/save-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: editingOnCallKey.state, day: editingOnCallKey.day, technician_id: editingOnCallKey.technician_id, action: 'delete' })
+      });
+      const delData = await delRes.json();
+      if (!delRes.ok || !delData.ok) throw new Error('Could not move old on-call entry: ' + (delData.error || ('HTTP ' + delRes.status)));
+    }
+
+    if (!keyUnchanged) {
+      const res = await fetch('/.netlify/functions/save-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, technician_id, day })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    }
     onCallModal.classList.remove('active');
+    editingOnCallKey = null;
     loadMonth();
   } catch (err) {
     alert('Error saving on-call entry: ' + err.message);
