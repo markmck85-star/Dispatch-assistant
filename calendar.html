@@ -83,6 +83,8 @@
   .day-block.reason-manual, .day-block.reason-other { background: #3a3a3a; }
   .day-block.reason-last_day { background: #8a3a00; }
   .day-block.reason-info { background: #1f5c4a; }
+  .day-block.reason-site_survey { background: #7a1a4a; }
+  .day-block.reason-install { background: #1a5c2e; }
   .day-block.reason-on_call { background: #0a6e5c; border: 1px solid #14a085; }
 
   .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 30px 10px; color: #666; }
@@ -131,6 +133,8 @@
   .day-detail-entry.reason-manual, .day-detail-entry.reason-other { background: #3a3a3a; }
   .day-detail-entry.reason-last_day { background: #8a3a00; }
   .day-detail-entry.reason-info { background: #1f5c4a; }
+  .day-detail-entry.reason-site_survey { background: #7a1a4a; }
+  .day-detail-entry.reason-install { background: #1a5c2e; }
   .day-detail-entry.reason-on_call { background: #0a6e5c; border: 1px solid #14a085; }
 </style>
 </head>
@@ -163,6 +167,8 @@
       <div class="legend-item"><span class="legend-dot" style="background:#3a3a3a"></span>Other / Manual</div>
       <div class="legend-item"><span class="legend-dot" style="background:#8a3a00"></span>Last Day</div>
       <div class="legend-item"><span class="legend-dot" style="background:#1f5c4a"></span>Info / Note</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#7a1a4a"></span>Site Survey</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1a5c2e"></span>Install</div>
       <div class="legend-item"><span class="legend-dot" style="background:#0a6e5c"></span>Saturday On-Call</div>
     </div>
   </div>
@@ -191,6 +197,8 @@
             <option value="manual">Other / Appt</option>
             <option value="last_day">Last Day</option>
             <option value="info">Info / Note (not time off)</option>
+            <option value="site_survey">Site Survey</option>
+            <option value="install">Install</option>
           </select>
         </div>
       </div>
@@ -246,7 +254,7 @@ const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tZWhyZm9xaGxqenltYXplbWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzEzMjEsImV4cCI6MjA5OTEwNzMyMX0.rSMvkmpf9rTT4seMKSNf4xlgPkbxcOvia-sP2ZhvOmE';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last Day', info: 'Note' };
+const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last Day', info: 'Note', site_survey: 'Site Survey', install: 'Install' };
 const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 let viewDate = new Date();
@@ -322,7 +330,7 @@ async function loadMonth() {
 
   let query = sb
     .from('technician_availability')
-    .select('day, reason, note, bluefolder_appt_id, technicians!inner(name, home_state)')
+    .select('day, technician_id, reason, note, bluefolder_appt_id, technicians!inner(name, home_state)')
     .eq('available', false)
     .gte('day', monthStart)
     .lte('day', monthEnd)
@@ -474,12 +482,24 @@ function openDayDetail(dayStr) {
     const availabilityHtml = rows.map((row) => {
       const reason = row.reason || 'other';
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
-      const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
       const noteHtml = row.note ? `<div class="entry-note">${escapeHtml(row.note)}</div>` : '';
+      const pushControl = row.bluefolder_appt_id
+        ? `<span class="synced" title="Synced to BlueFolder (appt #${escapeHtml(row.bluefolder_appt_id)})">&#128279; Synced to BlueFolder</span>`
+        : `<button type="button" class="entry-remove" data-avail-push
+            data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
+            Push to BlueFolder
+          </button>`;
       return `<div class="day-detail-entry reason-${reason}">
-        <div class="entry-name">${escapeHtml(row.technicians.name)}${synced}</div>
+        <div class="entry-name">${escapeHtml(row.technicians.name)}</div>
         <div class="entry-type">${escapeHtml(label)}</div>
         ${noteHtml}
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          ${pushControl}
+          <button type="button" class="entry-remove" data-avail-remove
+            data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
+            Remove
+          </button>
+        </div>
       </div>`;
     }).join('');
 
@@ -509,6 +529,53 @@ function openDayDetail(dayStr) {
 }
 
 dayDetailList.addEventListener('click', async (e) => {
+  const availPushBtn = e.target.closest('[data-avail-push]');
+  if (availPushBtn) {
+    const { tech, day } = availPushBtn.dataset;
+    availPushBtn.disabled = true;
+    availPushBtn.textContent = 'Pushing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id: tech, day, action: 'push' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error pushing to BlueFolder: ' + err.message);
+      availPushBtn.disabled = false;
+      availPushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
+  const availRemoveBtn = e.target.closest('[data-avail-remove]');
+  if (availRemoveBtn) {
+    const { tech, day } = availRemoveBtn.dataset;
+    if (!confirm('Remove this entry?')) return;
+    availRemoveBtn.disabled = true;
+    availRemoveBtn.textContent = 'Removing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id: tech, day, action: 'delete' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error removing entry: ' + err.message);
+      availRemoveBtn.disabled = false;
+      availRemoveBtn.textContent = 'Remove';
+    }
+    return;
+  }
+
   const pushBtn = e.target.closest('[data-oncall-push]');
   if (pushBtn) {
     const { state, day, tech } = pushBtn.dataset;
