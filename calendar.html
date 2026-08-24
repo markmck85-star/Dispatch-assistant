@@ -57,8 +57,9 @@
   .dow-header:last-child { border-right: none; }
   .day-cell {
     min-height: 76px; border-right: 1px solid #262626; border-bottom: 1px solid #262626;
-    padding: 4px; background: #161616;
+    padding: 4px; background: #161616; cursor: pointer;
   }
+  .day-cell:active { background: #1c1c1c; }
   .month-grid .day-cell:nth-child(7n) { border-right: none; }
   .day-cell.other-month { background: #121212; }
   .day-cell.other-month .cell-date { color: #444; }
@@ -71,6 +72,10 @@
     text-overflow: ellipsis; white-space: nowrap; cursor: default;
   }
   .day-block .synced { opacity: 0.65; font-size: 9px; margin-left: 2px; }
+  .day-block .block-note {
+    display: block; font-size: 9px; font-weight: 400; opacity: 0.85;
+    white-space: normal; word-break: break-word; margin-top: 1px;
+  }
   .day-block.reason-vacation { background: #5c1a1a; }
   .day-block.reason-personal { background: #7a5200; }
   .day-block.reason-pto { background: #4a1a5c; }
@@ -104,6 +109,18 @@
   .form-row { display: flex; gap: 10px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .btn-cancel { background: transparent; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+
+  .day-detail-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+  .day-detail-empty { font-size: 13.5px; color: #888; padding: 6px 0; }
+  .day-detail-entry { border-radius: 8px; padding: 10px 12px; }
+  .day-detail-entry .entry-name { font-size: 14.5px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px; }
+  .day-detail-entry .entry-type { font-size: 11.5px; opacity: 0.85; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .day-detail-entry .entry-note { font-size: 13px; color: #f0f0f0; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+  .day-detail-entry.reason-vacation { background: #5c1a1a; }
+  .day-detail-entry.reason-personal { background: #7a5200; }
+  .day-detail-entry.reason-pto { background: #4a1a5c; }
+  .day-detail-entry.reason-comp_day { background: #1a3a5c; }
+  .day-detail-entry.reason-manual, .day-detail-entry.reason-other { background: #3a3a3a; }
 </style>
 </head>
 <body>
@@ -172,6 +189,16 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="dayDetailModal">
+  <div class="modal">
+    <h2 id="dayDetailTitle">&nbsp;</h2>
+    <div class="day-detail-list" id="dayDetailList"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-cancel" id="closeDayDetailBtn">Close</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
@@ -183,6 +210,7 @@ const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 let viewDate = new Date();
 viewDate.setDate(1);
+let currentByDay = new Map();
 
 function monthLabel(d) {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -248,6 +276,7 @@ async function loadMonth() {
     byDay.get(row.day).push(row);
   }
 
+  currentByDay = byDay;
   renderMonthGrid(year, month, byDay);
 }
 
@@ -283,13 +312,14 @@ function renderMonthGrid(year, month, byDay) {
     const rows = byDay.get(dayStr) || [];
 
     let cellClass = 'day-cell' + (otherMonth ? ' other-month' : '') + (isToday ? ' is-today' : '');
-    html += `<div class="${cellClass}"><div class="cell-date">${dayNum}</div>`;
+    html += `<div class="${cellClass}" data-day="${dayStr}"><div class="cell-date">${dayNum}</div>`;
     for (const row of rows) {
       const reason = row.reason || 'other';
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
       const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
       const titleAttr = `${row.technicians.name} — ${label}${row.note ? ': ' + row.note : ''}`;
-      html += `<span class="day-block reason-${reason}" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}${synced}</span>`;
+      const noteHtml = row.note ? `<span class="block-note">${escapeHtml(row.note)}</span>` : '';
+      html += `<span class="day-block reason-${reason}" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}${synced}${noteHtml}</span>`;
     }
     html += `</div>`;
   }
@@ -316,6 +346,47 @@ document.getElementById('openAddModalBtn').addEventListener('click', () => {
   modal.classList.add('active');
 });
 document.getElementById('closeModalBtn').addEventListener('click', () => modal.classList.remove('active'));
+
+// Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
+// themselves) opens a bigger view of just that day, since the inline
+// cards on a busy day don't have room to show every note in full.
+const dayDetailModal = document.getElementById('dayDetailModal');
+const dayDetailTitle = document.getElementById('dayDetailTitle');
+const dayDetailList = document.getElementById('dayDetailList');
+
+function formatDayHeading(dayStr) {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function openDayDetail(dayStr) {
+  const rows = currentByDay.get(dayStr) || [];
+  dayDetailTitle.textContent = formatDayHeading(dayStr);
+
+  if (rows.length === 0) {
+    dayDetailList.innerHTML = '<div class="day-detail-empty">No entries for this day.</div>';
+  } else {
+    dayDetailList.innerHTML = rows.map((row) => {
+      const reason = row.reason || 'other';
+      const label = REASON_LABEL[reason] || REASON_LABEL.other;
+      const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
+      const noteHtml = row.note ? `<div class="entry-note">${escapeHtml(row.note)}</div>` : '';
+      return `<div class="day-detail-entry reason-${reason}">
+        <div class="entry-name">${escapeHtml(row.technicians.name)}${synced}</div>
+        <div class="entry-type">${escapeHtml(label)}</div>
+        ${noteHtml}
+      </div>`;
+    }).join('');
+  }
+  dayDetailModal.classList.add('active');
+}
+
+document.getElementById('calendarBody').addEventListener('click', (e) => {
+  const cell = e.target.closest('.day-cell');
+  if (cell && cell.dataset.day) openDayDetail(cell.dataset.day);
+});
+document.getElementById('closeDayDetailBtn').addEventListener('click', () => dayDetailModal.classList.remove('active'));
+dayDetailModal.addEventListener('click', (e) => { if (e.target === dayDetailModal) dayDetailModal.classList.remove('active'); });
 
 // Form Submission -- goes through save-tech-availability.js (service-role
 // key, server-side) rather than a direct client-side insert. The direct
