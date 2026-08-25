@@ -57,6 +57,48 @@ function cleanBody(text) {
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// Neumo's own field labels -- same list the ticket parser (mailgun-inbound.js
+// getField()) already recognizes as real field boundaries, reused here so
+// this doesn't invent a second, possibly-inconsistent notion of what counts
+// as a label. Longest-first avoids a short label (e.g. "Case Number")
+// matching inside a longer one that starts the same way ("Parent Case
+// Number") before the longer alternative gets a chance to.
+const NEUMO_FIELD_LABELS = [
+  'Work Order Number', 'Priority', 'Earliest Start', 'Due Date', 'Location', 'Address', 'Phone',
+  'Line Item Number', 'Account Name', 'ATM ID', 'SST Name', 'PC Name', 'SST Type', 'Out of Service',
+  'Line Item Issue Category', 'Line Item Issue Detail', 'Line Item Description', 'Device Errors',
+  'Consumable Counts', 'Restock SST', 'SST ID',
+  'Printer 1 Forms', 'Printer 2 Forms', 'Printer 3 Forms', 'Printer 4 Forms',
+  'Printer 1 Ribbon', 'Printer 2 Ribbon', 'Printer 3 Ribbon', 'Printer 4 Ribbon',
+  'Journal Printer',
+  'Outbound Tracking Number', 'Inbound Tracking Number', 'Warehouse Name',
+  'Parent Case Number', 'Case Number', 'Transfer ID', 'Request Details',
+].sort((a, b) => b.length - a.length);
+
+const NEUMO_LABEL_RE = new RegExp(
+  '(' + NEUMO_FIELD_LABELS.map(l => l.replace(/\s+/g, '\\s+')).join('|') + ')\\s*[:?]',
+  'g'
+);
+
+// Neumo's plain-text emails have each field on its own line in the
+// original -- but whatever converts them to the plain body_text stored in
+// inbound_emails collapses those line breaks, leaving one dense run-on
+// paragraph ("Priority: LowLocation: GA..."). Rather than touch that
+// upstream conversion (shared by every ticket type parsed from this same
+// text), insert a blank line before each real field label here, in the
+// viewer only.
+function addFieldBreaks(text) {
+  if (!text) return text;
+  let sawFirstLabel = false;
+  return text.replace(NEUMO_LABEL_RE, (m, label, offset, str) => {
+    // Never insert a break before the very first label in the body --
+    // that one already sits at the top with nothing above it to separate
+    // from.
+    if (!sawFirstLabel) { sawFirstLabel = true; return m; }
+    return '\n\n' + m;
+  });
+}
+
 exports.handler = async (event) => {
   const params = event.queryStringParameters || {};
   const id = params.id;
@@ -77,6 +119,6 @@ exports.handler = async (event) => {
     subject: email.subject || '(no subject)',
     sender: email.sender || null,
     receivedAt: email.received_at,
-    bodyText: cleanBody(email.body_text),
+    bodyText: addFieldBreaks(cleanBody(email.body_text)),
   });
 };
