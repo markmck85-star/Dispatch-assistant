@@ -4880,8 +4880,28 @@ function distanceMatrixStatus(state) {
 
             // Count stops for SMS ping
             const stopCount = (txt.match(/^\d+\./gm) || []).length;
+            // 2026-08-25 fix: the fallback here used to be the hardcoded
+            // literal word 'tomorrow' whenever no spelled-out weekday/date
+            // appears in the message body -- an assumption that only holds
+            // for the normal evening-before send. A same-day/urgent dispatch
+            // correctly says "today" in the message body instead of a full
+            // weekday/date, so the regex below finds nothing and this
+            // fallback was mislabeling same-day texts/emails as being for
+            // tomorrow (real case: Steve Reynolds/Sandy Springs/N Decatur
+            // sent same-day, subject line read "MCR Dispatch — tomorrow").
+            // Now derives the fallback from the actual selected dispatch
+            // date instead of assuming.
             const dateMatch = txt.match(/\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d+/i);
-            const dateStr = dateMatch ? dateMatch[0] : 'tomorrow';
+            let dateStr;
+            if (dateMatch) {
+                dateStr = dateMatch[0];
+            } else {
+                const dateInputForMsg = document.getElementById('dispatchDate');
+                let dispatchDateForMsg = new Date();
+                if (dateInputForMsg && dateInputForMsg.value) dispatchDateForMsg = new Date(dateInputForMsg.value + 'T12:00:00');
+                const isTodayForMsg = dispatchDateForMsg.toDateString() === new Date().toDateString();
+                dateStr = isTodayForMsg ? 'today' : 'tomorrow';
+            }
             const smsPing = `MCR Dispatch: You have ${stopCount} stop${stopCount !== 1 ? 's' : ''} for ${dateStr}. Details sent to your email.`;
 
             // Convert plain text to simple HTML email
