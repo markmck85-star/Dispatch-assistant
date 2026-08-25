@@ -3025,7 +3025,7 @@ function distanceMatrixStatus(state) {
                 // just without the manual-paste-only parsing steps below,
                 // since there's no text to parse.
                 window.ticketMeta = {};
-                await _processDispatchCore();
+                await _processDispatchCore(true);
                 return;
             }
 
@@ -3097,7 +3097,7 @@ function distanceMatrixStatus(state) {
             const dispatchDateVal = document.getElementById('dispatchDate')?.value;
             if (dispatchDateVal) refreshAvailabilityPanel(dispatchDateVal);
 
-            await _processDispatchCore();
+            await _processDispatchCore(auto);
         }
 
         function showReceivedTimePrompt(onConfirm) {
@@ -3171,7 +3171,7 @@ function distanceMatrixStatus(state) {
             };
         }
 
-        async function _processDispatchCore() {
+        async function _processDispatchCore(auto) {
             const codesInput = document.getElementById('locationCodes');
             const resultsDiv = document.getElementById('results');
 
@@ -3486,6 +3486,27 @@ function distanceMatrixStatus(state) {
                     // fall through and sync the new assignment so Supabase doesn't keep
                     // pointing at someone who's now marked out.
                     if (existingByCode[item.code] && existingByCode[item.code].techName === tech) return;
+                    // 2026-08-25 fix: the silent page-load auto-run (auto=true, see
+                    // window.onload) used to persist EVERY parsed stop just like an
+                    // explicit Generate Dispatches click would -- meaning simply
+                    // opening the board, with whatever stale text happened to be
+                    // cached in Location Codes from a previous day, silently wrote
+                    // brand-new "planned" assignments for today. Real, widespread
+                    // case found 2026-08-25: 20 sites across 5 states got a phantom
+                    // duplicate "planned" stop this way, several created by someone
+                    // just loading a state's board hours after that site had already
+                    // been correctly completed for the day. fromSupabaseOnly/fromTicket
+                    // items are already real, confirmed server-side data (safe to
+                    // re-sync even silently) -- it's specifically a plain bulk-restock
+                    // stop freshly parsed from whatever's sitting in the paste box that
+                    // must never be written without a deliberate user action. The
+                    // silent pass still DISPLAYS everything exactly as before; it just
+                    // stops short of saving this category until Generate Dispatches is
+                    // actually clicked.
+                    if (auto && !item.fromSupabaseOnly && !item.fromTicket) {
+                        console.log(`[dispatch] Silent auto-load: not persisting ${item.code} (freshly parsed from Location Codes text, not yet in the database) -- click Generate Dispatches to save a fresh list.`);
+                        return;
+                    }
                     const assignedBy = CONTRACTOR_ASSIGNMENTS[item.code] ? 'contractor_rule'
                         : (item.reassignedFrom ? 'fallback_rule' : 'auto');
                     syncAssignmentToSupabase(tech, item, 'planned', assignedBy,
