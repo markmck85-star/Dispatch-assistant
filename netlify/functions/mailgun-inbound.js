@@ -570,7 +570,22 @@ function parseEmailBody(text, receivedAt, subject) {
   // date, not just same-day. These never get an SMS (routine/Low priority,
   // would be a flood of texts for something that isn't urgent) -- they're
   // board-only, added via the same auto-add-to-board path as trouble tickets.
-  if (/Maintenance/i.test(text) || /Consumable Restock/i.test(text)) {
+  // 2026-08-25 fix: an "Add Line Item to Work Order #NNNN" follow-up whose
+  // FIRST line item happens to be a restock (Maintenance/Consumable
+  // Restock) was matching this bare keyword test and getting routed here
+  // as a brand-new maintenance ticket -- even when it's really a follow-up
+  // on an EXISTING ticket of any kind. This branch has no isLineItemAddition
+  // handling at all, so the follow-up (and the real fact that a site needed
+  // another look) was silently dropped by the ignoreDuplicates upsert below.
+  // Real case: GA1023 (N Decatur), WO 00150423 -- a restock line item added
+  // to an already-existing Journal Printer trouble ticket vanished with no
+  // trace, no note, no re-open. "Add Line Item" emails now always fall
+  // through to the Trouble ticket branch below instead, which has the
+  // correct existing-ticket append logic (keyed on WO number -- works
+  // regardless of which line item happens to appear first in the body).
+  const isAddLineItemFollowUp = /Add\s+Line\s+Item\s+to\s+Work\s+Order/i.test(subject || '')
+    || /add\s+the\s+following\s+line\s+item\s+to\s+the\s+existing\s+Work\s+Order/i.test(text);
+  if (!isAddLineItemFollowUp && (/Maintenance/i.test(text) || /Consumable Restock/i.test(text))) {
     const woNum = getField('Work Order Number');
     const account = getField('Account Name');
     const sstName = getField('SST Name');
@@ -1175,6 +1190,7 @@ exports.handler = async (event) => {
             else if (siteDetail && siteDetail.primary_tech_id) {
               const { data: ticketRowFetched } = await supabase
                 .from('tickets').select('id').eq('wo_number', parsed.woNum).maybeSingle();
+              const newTicketId = ticketRowFetched ? ticketRowFetched.id : null;
 
               let dispatchDateStr;
               if ((parsed.ticketKind || 'trouble') === 'maintenance' && parsed.dueDateRaw) {
@@ -1203,19 +1219,61 @@ exports.handler = async (event) => {
                 dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
               }
 
-              const { data: boardData, error: boardErr } = await supabase
+              // 2026-08-25 fix: the plain upsert here used to be
+              // ignoreDuplicates on (dispatch_date, site_id) -- meaning a
+              // genuinely separate, later ticket arriving at a site that
+              // ALREADY had a board entry today (even a completed one from
+              // an earlier stop) silently got no board visibility at all,
+              // logged only as "skipped, site already had an entry today".
+              // Real case: GA1043 (Steve Reynolds) -- a new same-day trouble
+              // ticket never showed up because that morning's restock stop
+              // had already been marked completed. Now explicitly checks
+              // what's there first: a genuinely different ticket on a
+              // completed/removed row reopens that row as a fresh planned
+              // stop (a real second visit is needed today); a still-planned
+              // row is left untouched exactly as before, since that's an
+              // active dispatcher decision this should never overwrite.
+              const { data: existingAssignment, error: existingAssignErr } = await supabase
                 .from('assignments')
-                .upsert({
-                  dispatch_date: dispatchDateStr,
-                  site_id: siteId,
-                  technician_id: siteDetail.primary_tech_id,
-                  assigned_by: 'auto',
-                  status: 'planned',
-                  ticket_id: ticketRowFetched ? ticketRowFetched.id : null,
-                }, { onConflict: 'dispatch_date,site_id', ignoreDuplicates: true })
-                .select();
-              if (boardErr) console.error('[mailgun-inbound] auto-add to board failed:', boardErr.message);
-              else console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: ${(boardData && boardData.length > 0) ? 'added' : 'skipped, site already had an entry today'}`);
+                .select('id, status, ticket_id')
+                .eq('dispatch_date', dispatchDateStr)
+                .eq('site_id', siteId)
+                .maybeSingle();
+
+              if (existingAssignErr) {
+                console.error('[mailgun-inbound] existing-assignment lookup for auto-add failed:', existingAssignErr.message);
+              } else if (!existingAssignment) {
+                const { error: insertErr } = await supabase
+                  .from('assignments')
+                  .insert({
+                    dispatch_date: dispatchDateStr,
+                    site_id: siteId,
+                    technician_id: siteDetail.primary_tech_id,
+                    assigned_by: 'auto',
+                    status: 'planned',
+                    ticket_id: newTicketId,
+                  });
+                if (insertErr) console.error('[mailgun-inbound] auto-add to board failed:', insertErr.message);
+                else console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: added`);
+              } else if (
+                (existingAssignment.status === 'completed' || existingAssignment.status === 'removed')
+                && newTicketId
+                && existingAssignment.ticket_id !== newTicketId
+              ) {
+                const { error: reopenErr } = await supabase
+                  .from('assignments')
+                  .update({
+                    status: 'planned',
+                    ticket_id: newTicketId,
+                    assigned_by: 'auto',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', existingAssignment.id);
+                if (reopenErr) console.error('[mailgun-inbound] auto-reopen for new ticket failed:', reopenErr.message);
+                else console.log(`[mailgun-inbound] Reopened ${dispatchDateStr} board entry for a new ticket (${parsed.woNum}) at an already-${existingAssignment.status} site`);
+              } else {
+                console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: skipped, site already had a ${existingAssignment.status} entry today`);
+              }
             } else {
               console.log(`[mailgun-inbound] Skipped auto-add for ${parsed.woNum}: no primary tech configured for site`);
             }
