@@ -355,8 +355,74 @@ exports.handler = async (event) => {
         openShipment: openShipmentsBySite[t.site_id] || null,
         manuallyResolvedAt: t.manually_resolved_at,
         manuallyResolvedNote: t.manually_resolved_note,
+        source: 'ticket_email',
       };
     });
+
+    // 2026-08-25: bulk-list restocks (the routine daily Location-Codes
+    // paste volume) never get a `tickets` row at all -- Phase 2 Stage 1
+    // only inserts into `tickets` for individually-emailed trouble/
+    // maintenance tickets, so until now this console only ever showed a
+    // small slice of the real daily restock volume (whatever happened to
+    // also arrive as its own WO email), while the dispatch board itself
+    // shows the full bulk list. Mark wants the state console to become the
+    // semi-live "what's actually going on" view and the dispatch board to
+    // stay focused on dispatching -- so pull the bulk stops directly from
+    // `assignments` here and merge them in with the same shape as a
+    // ticket, deriving status from the board's own planned/completed/
+    // removed rather than a Salesforce closed-ticket-report match (there
+    // is none for these -- no WO number exists for a bulk-list stop).
+    // ticket_id IS NULL excludes anything already represented above via
+    // the tickets query (a bulk stop that also matched an individually-
+    // emailed ticket already appears once, with the more authoritative
+    // Salesforce-confirmed status).
+    const sinceDateOnly = sinceDate.slice(0, 10);
+    const { data: bulkAssignments, error: bulkErr } = await supabase
+      .from('assignments')
+      .select('id, site_id, technician_id, dispatch_date, status, updated_at')
+      .in('site_id', siteIds)
+      .is('ticket_id', null)
+      .gte('dispatch_date', sinceDateOnly)
+      .order('dispatch_date', { ascending: false })
+      .limit(150);
+    if (bulkErr) return json(500, { ok: false, error: 'bulk assignments fetch failed: ' + bulkErr.message });
+
+    const bulkTechIds = [...new Set((bulkAssignments || []).map(a => a.technician_id).filter(Boolean))];
+    let bulkTechNameById = {};
+    if (bulkTechIds.length) {
+      const { data: bulkTechs, error: bulkTechErr } = await supabase
+        .from('technicians')
+        .select('id, name')
+        .in('id', bulkTechIds);
+      if (bulkTechErr) return json(500, { ok: false, error: 'bulk assignment technicians fetch failed: ' + bulkTechErr.message });
+      (bulkTechs || []).forEach(t => { bulkTechNameById[t.id] = t.name; });
+    }
+
+    const bulkStatusMap = { planned: 'open', completed: 'closed', removed: 'cancelled' };
+    const bulkEntries = (bulkAssignments || []).map(a => {
+      const site = siteById[a.site_id];
+      const status = bulkStatusMap[a.status] || 'open';
+      return {
+        siteCode: site ? site.site_code : null,
+        siteName: site ? site.name : '(unknown site)',
+        county: extractCounty(site ? site.name : null),
+        issueCategory: 'Restock',
+        issueDetail: null,
+        ticketKind: 'maintenance', // reuses the existing 📦 RESTOCK tag/sort/grouping
+        woNumber: null,
+        receivedAt: a.updated_at,
+        dueAt: a.dispatch_date,
+        status,
+        closedOn: status === 'closed' ? a.updated_at : null,
+        openShipment: openShipmentsBySite[a.site_id] || null,
+        manuallyResolvedAt: null,
+        manuallyResolvedNote: null,
+        source: 'bulk_dispatch_list',
+        technicianName: a.technician_id ? (bulkTechNameById[a.technician_id] || null) : null,
+      };
+    });
+
+    recentTickets = recentTickets.concat(bulkEntries);
   }
 
   return json(200, { ok: true, state, date: todayStr, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
