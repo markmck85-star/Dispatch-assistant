@@ -83,7 +83,7 @@ function stripHtml(html) {
 // ── State detection ───────────────────────────────────────────────────────────
 
 function detectStates(text) {
-  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID"];
+  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID","AL"];
   const found = new Set();
   const lines = text.split(/\n/).map(l => l.trim());
   for (const line of lines) {
@@ -307,7 +307,7 @@ function parseDispatchListSiteDates(text) {
 // Returns [{ state, refNum, dispatchDate }] for the caller to resolve
 // against sites.name.
 function findDispatchListFallbackRows(text) {
-  const KNOWN_STATES = new Set(['GA','FL','MI','IN','OH','WV','IL','MN','NV','OR','CO','ID','NC','SC']);
+  const KNOWN_STATES = new Set(['GA','FL','MI','IN','OH','WV','IL','MN','NV','OR','CO','ID','AL','NC','SC']);
   const rows = [];
   const stateMatches = [...text.matchAll(/\n\s*([A-Z]{2})\s*\n/g)].filter(m => KNOWN_STATES.has(m[1]));
   for (let i = 0; i < stateMatches.length; i++) {
@@ -528,7 +528,7 @@ function parseEmailBody(text, receivedAt, subject) {
     // Salesforce report has. Falls back to detectStates() against the
     // whole body if Component doesn't parse cleanly.
     const componentStateM = component.match(/\b(Georgia|Florida|Michigan|Indiana|Ohio|Nevada|Colorado|Illinois|Minnesota|Oregon|Idaho|California|Hawaii|North Carolina|South Carolina|West Virginia)\b/i);
-    const STATE_NAME_TO_ABBR = { georgia: 'GA', florida: 'FL', michigan: 'MI', indiana: 'IN', ohio: 'OH', nevada: 'NV', colorado: 'CO', illinois: 'IL', minnesota: 'MN', oregon: 'OR', idaho: 'ID', california: 'CA', hawaii: 'HI', 'north carolina': 'NC', 'south carolina': 'SC', 'west virginia': 'WV' };
+    const STATE_NAME_TO_ABBR = { georgia: 'GA', florida: 'FL', michigan: 'MI', indiana: 'IN', ohio: 'OH', nevada: 'NV', colorado: 'CO', illinois: 'IL', minnesota: 'MN', oregon: 'OR', idaho: 'ID', alabama: 'AL', california: 'CA', hawaii: 'HI', 'north carolina': 'NC', 'south carolina': 'SC', 'west virginia': 'WV' };
     const state = componentStateM ? STATE_NAME_TO_ABBR[componentStateM[1].toLowerCase()] : (detectStates(text)[0] || null);
 
     return {
