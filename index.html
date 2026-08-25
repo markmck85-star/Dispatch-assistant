@@ -2500,43 +2500,23 @@ function distanceMatrixStatus(state) {
             } catch { /* silent fail — falls back to comp-day/manual/Saturday logic only */ }
             const dateInput = document.getElementById('dispatchDate');
             if (dateInput) {
-                // 2026-08-25 redesign: this used to default to "tomorrow" (or
-                // Monday/Saturday-adjusted) on the assumption a dispatcher
-                // opening the page is always pre-building the NEXT day's
-                // dispatch. That's exactly backwards from how the board is
-                // actually used first thing in the morning -- it silently
-                // skipped past today's still-open tickets/restocks (a real
-                // case: GA1043 trouble ticket + GA1020 restock, both due
-                // today, invisible because the board defaulted to tomorrow
-                // instead). New rule, per Mark: default to TODAY, since
-                // that's the live state that matters most; only jump to
-                // tomorrow if a dispatch list for tomorrow has already been
-                // imported (real persisted assignments already exist for
-                // that date) -- that means prep work on tomorrow has
-                // genuinely started and tomorrow is what the dispatcher
-                // actually wants to see.
+                // 2026-08-25, simplified same day: the "default to tomorrow
+                // unless tomorrow's list is already imported" heuristic
+                // below was found to be self-poisoning -- a one-time stray
+                // page load during today's deploy transition persisted a
+                // handful of real assignment rows dated tomorrow, which the
+                // "already imported" check then kept finding on every
+                // subsequent load, permanently snapping the default back to
+                // tomorrow regardless of what actually happened that day.
+                // Dropped the inference entirely -- always default to
+                // TODAY, full stop. A "prep tomorrow" convenience is better
+                // served later by an explicit button than by guessing from
+                // assignment rows that can exist for all kinds of reasons.
                 const today = new Date();
                 const y = today.getFullYear();
                 const m = String(today.getMonth() + 1).padStart(2, '0');
                 const d = String(today.getDate()).padStart(2, '0');
-                const todayStr = y + '-' + m + '-' + d;
-
-                const tomorrow = new Date(today);
-                tomorrow.setDate(today.getDate() + 1);
-                const ty = tomorrow.getFullYear();
-                const tm = String(tomorrow.getMonth() + 1).padStart(2, '0');
-                const td = String(tomorrow.getDate()).padStart(2, '0');
-                const tomorrowStr = ty + '-' + tm + '-' + td;
-
-                let targetDateStr = todayStr;
-                try {
-                    const tomorrowAssignments = await fetchExistingAssignments(tomorrowStr);
-                    if (tomorrowAssignments && Object.keys(tomorrowAssignments).length > 0) {
-                        targetDateStr = tomorrowStr;
-                    }
-                } catch { /* any lookup failure just leaves the default at today */ }
-
-                dateInput.value = targetDateStr;
+                dateInput.value = y + '-' + m + '-' + d;
             }
             // Do NOT auto-force URGENT on Saturdays — dispatcher chooses based on dispatch type
             // Saturday can have regular restock dispatches with counts, not just trouble tickets
