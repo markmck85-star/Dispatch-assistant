@@ -4666,6 +4666,13 @@ function distanceMatrixStatus(state) {
                 .then(data => {
                     if (!data.ok) { status.textContent = 'Save failed: ' + (data.error || 'unknown error'); return null; }
                     LOCATIONS[code] = { code, state, name, address, primaryTech: tech, defaultTech: tech, fallbackTech: '', machineType };
+                    // 2026-08-25: a Supabase-side failure now comes back as
+                    // ok:true + supabaseSyncFailed:true (see save-location.js)
+                    // instead of only a swallowed server log -- stop here and
+                    // surface it plainly rather than proceeding into a
+                    // ticket-link attempt that's guaranteed to fail with a
+                    // more confusing message.
+                    if (data.supabaseSyncFailed) { status.textContent = data.error; return null; }
                     status.textContent = 'Linking ticket…';
                     return fetch('/.netlify/functions/link-ticket-to-site', {
                         method: 'POST',
