@@ -137,6 +137,7 @@
                     <option value="SB">SB — Surfboard (700 forms)</option>
                     <option value="BK">BK — Big Kahuna / Cash Side (800 forms)</option>
                     <option value="BH">BH — Big Hoku 7000 (4 printers)</option>
+                    <option value="OTHER">Other — testing/OTC, no restock cycle</option>
                 </select>
                 <div class="checkbox-row" style="margin-top:4px;">
                     <input type="checkbox" id="locRemote">
@@ -1151,7 +1152,7 @@
                     '<div class="card-detail">' + esc(loc.address) + '</div>' +
                     '<div class="card-detail">State: ' + esc(loc.state || currentState) + ' | Primary: ' + esc(loc.primaryTech || loc.defaultTech || '—') + (loc.fallbackTech ? ' | Fallback: ' + esc(loc.fallbackTech) : '') + '</div>' +
                     (loc.contractorOverride ? '<div class="card-detail">Contractor: ' + esc(loc.contractorName) + '</div>' : '') +
-                    (loc.machineType === 'SB' ? '<div class="card-detail" style="color:#f0a500;">🏄 Surfboard (SB)</div>' : loc.machineType === 'BK' ? '<div class="card-detail" style="color:#17a2b8;">💰 Big Kahuna / Cash Side (BK)</div>' : loc.machineType === 'BH' ? '<div class="card-detail" style="color:#9b59b6;">🏛️ Big Hoku 7000 (BH)</div>' : '') +
+                    (loc.machineType === 'SB' ? '<div class="card-detail" style="color:#f0a500;">🏄 Surfboard (SB)</div>' : loc.machineType === 'BK' ? '<div class="card-detail" style="color:#17a2b8;">💰 Big Kahuna / Cash Side (BK)</div>' : loc.machineType === 'BH' ? '<div class="card-detail" style="color:#9b59b6;">🏛️ Big Hoku 7000 (BH)</div>' : loc.machineType === 'OTHER' ? '<div class="card-detail" style="color:#888;">🅾️ Other / no restock cycle</div>' : '') +
                     '<div class="card-actions">' +
                     '<button class="edit-btn" onclick="editLocation(\'' + escAttr(code) + '\')">Edit</button>' +
                     '<button class="del-btn" onclick="deleteLocation(\'' + escAttr(code) + '\', \'' + locCardId + '\')">Delete</button>' +
