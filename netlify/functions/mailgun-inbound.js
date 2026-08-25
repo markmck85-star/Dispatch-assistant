@@ -653,24 +653,38 @@ function parseEmailBody(text, receivedAt, subject) {
   // contains. No SMS alert for these -- board/data-only, same treatment as
   // maintenance tickets.
   if (/(?:Outbound|Inbound) Tracking Number/i.test(text)) {
-    const caseNumber = getField('Case Number');
-    const parentCaseNumber = getField('Parent Case Number');
+    // 2026-08-25 fix: these fields were never normalized -- literal "<br>"
+    // tags and mid-value line-wrap newlines from Neumo's HTML-formatted
+    // notification survived straight into case_number/warehouse_name/
+    // account_name (e.g. "01414342<br>", "MCR (GA) Gina Ownbey \nWhse").
+    // Harmless-looking but broke real things downstream: the warehouse-
+    // name-to-technician-name regex match below, and text matching against
+    // these fields anywhere else (shipments.html's technician filter).
+    // cleanField collapses everything to one line for identifiers/names;
+    // requestDetails alone keeps intentional multi-line formatting (its
+    // display column uses white-space:pre-wrap on purpose), so it only
+    // converts <br> to a real newline rather than collapsing all whitespace.
+    const cleanField = (v) => (v || '').replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim();
+    const cleanMultilineField = (v) => (v || '').replace(/<br\s*\/?>/gi, '\n').replace(/[ \t]+/g, ' ').trim();
+
+    const caseNumber = cleanField(getField('Case Number'));
+    const parentCaseNumber = cleanField(getField('Parent Case Number'));
     // "Work Order Number:" can get line-wrapped mid-phrase by some email
     // clients ("Work \nOrder Number:") -- \s+ tolerates that, unlike the
     // literal space the trouble-ticket parser's own version below uses.
     const woNumM = text.match(/Work\s+Order\s+Number:\s*\n?\s*(\S+)/i);
-    const woNum = woNumM ? woNumM[1] : '';
-    const transferId = getField('Transfer ID');
-    const outboundTracking = getField('Outbound Tracking Number UPS') || getField('Outbound Tracking Number');
-    const inboundTracking = getField('Inbound Tracking Number UPS') || getField('Inbound Tracking Number');
-    const accountName = getField('Account Name');
-    const warehouseName = getField('Warehouse Name');
+    const woNum = woNumM ? cleanField(woNumM[1]) : '';
+    const transferId = cleanField(getField('Transfer ID'));
+    const outboundTracking = cleanField(getField('Outbound Tracking Number UPS') || getField('Outbound Tracking Number'));
+    const inboundTracking = cleanField(getField('Inbound Tracking Number UPS') || getField('Inbound Tracking Number'));
+    const accountName = cleanField(getField('Account Name'));
+    const warehouseName = cleanField(getField('Warehouse Name'));
     // Warehouse Name is usually "MCR (STATE) Tech Name Whse" -- but not
     // always; sometimes it's a third-party repair vendor (e.g. "Next GI")
     // with no tech involved at all. techName is null when it doesn't match.
     const techM = warehouseName.match(/^MCR\s*\([A-Z]{2}\)\s*(.+?)\s*Whse\s*$/i);
     const techName = techM ? techM[1].trim() : null;
-    const requestDetails = getField('Request Details');
+    const requestDetails = cleanMultilineField(getField('Request Details'));
     const returnBrokenPart = /PLEASE RETURN BROKEN PART/i.test(text);
 
     return {
