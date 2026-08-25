@@ -122,7 +122,27 @@ exports.handler = async (event) => {
               siteRow.lng = null;
             }
             const { error: supaErr } = await supabase.from("sites").upsert(siteRow, { onConflict: "site_code" });
-            if (supaErr) console.error("[save-location] Supabase sync failed (non-fatal):", supaErr.message);
+            if (supaErr) {
+              // 2026-08-25 fix: this used to only console.error and continue,
+              // meaning the frontend saw ok:true and treated the site as
+              // fully saved even when Supabase rejected the row entirely --
+              // real case: OHC001, machine_type 'OTHER' hit a DB CHECK
+              // constraint that didn't yet allow it. Blobs (the primary
+              // store) had it, Supabase (what ticket-linking and the
+              // dispatch board's auto-surface actually query) didn't, and
+              // the only visible symptom was a confusing downstream
+              // "linking failed" message that gave no hint the site itself
+              // was the real problem. Now returns a real error so the
+              // dispatcher isn't misled -- the Blobs write above still
+              // stands either way, so nothing is lost by surfacing this.
+              console.error("[save-location] Supabase sync failed:", supaErr.message);
+              return json(200, {
+                ok: true,
+                location: merged,
+                supabaseSyncFailed: true,
+                error: "Saved, but the database sync failed (" + supaErr.message + ") -- ticket linking and board auto-surface won't work for this site until that's fixed.",
+              });
+            }
           } catch (supaEx) {
             console.error("[save-location] Supabase sync error (non-fatal):", supaEx.message);
           }
