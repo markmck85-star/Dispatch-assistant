@@ -156,11 +156,25 @@ function fmtDate(iso) {
 
 function render() {
     const stateVal = document.getElementById('stateFilter').value;
-    const techVal = document.getElementById('techFilter').value;
+    const techSel = document.getElementById('techFilter');
+    const techVal = techSel.value;
+    const techName = techVal ? (techSel.options[techSel.selectedIndex] ? techSel.options[techSel.selectedIndex].textContent : '') : '';
 
     let rows = allShipments;
     if (stateVal) rows = rows.filter(s => s.state === stateVal);
-    if (techVal) rows = rows.filter(s => String(s.technicianId) === String(techVal));
+    // 2026-08-25 fix: a shipment addressed to a technician's named
+    // warehouse (e.g. "MCR (GA) Gina Ownbey Whse") has no technicianId at
+    // all -- it's a staging destination, not a field assignment -- but
+    // still visibly shows that person's name in this same Technician
+    // column (see techLabel below), so filtering on technician ID alone
+    // silently hid it. Real case: Gina Ownbey's filter showed only her one
+    // ID-linked shipment, not the warehouse-addressed one from the same
+    // week that plainly displays her name too. Now also matches on
+    // warehouse-name text, consistent with what's actually shown.
+    if (techVal) {
+        rows = rows.filter(s => String(s.technicianId) === String(techVal)
+            || (techName && s.warehouseName && s.warehouseName.toLowerCase().includes(techName.toLowerCase())));
+    }
     if (needsReturnOnly) rows = rows.filter(s => s.returnBrokenPart && !s.returnedAt);
 
     const content = document.getElementById('content');
