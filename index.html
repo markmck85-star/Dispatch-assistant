@@ -263,6 +263,7 @@
                             <option value="IL">Illinois</option>
                             <option value="CO">Colorado</option>
                             <option value="ID">Idaho</option>
+                            <option value="AL">Alabama</option>
                             <option value="MN">Minnesota</option>
                             <option value="WV">West Virginia</option>
                             <option value="OR">Oregon</option>
@@ -1378,6 +1379,15 @@
             "AJ Willis":{"phone": "(775) 299-2071", "firstName": "AJ", "state": "ID"}
         };
 
+        // ── AL ─────────────────────────────────────────────────
+        // No real sites or techs yet -- Alabama added 2026-08-25, first
+        // work order is a site survey for a future SST install (UAT
+        // Montgomery DMV, WO 00150596). Same starting pattern as ID above:
+        // populate via the admin panel as real locations/techs get
+        // confirmed.
+        const LOCATIONS_AL = {};
+        const TECHS_AL = {};
+
         // ── SATURDAY ON-CALL SCHEDULE (all states) ──────────────────────────
         const SAT_DISPATCHER = {"2026-02-07":"Gina", "2026-02-14":"Justin", "2026-02-21":"Caleb", "2026-02-28":"Rich", "2026-03-07":"Gina", "2026-03-14":"Caleb", "2026-03-21":"Justin", "2026-03-28":"Rich", "2026-04-04":"Caleb", "2026-04-11":"Gina", "2026-04-18":"Justin", "2026-04-25":"Caleb", "2026-05-02":"Rich", "2026-05-09":"Gina", "2026-05-16":"Caleb", "2026-05-23":"Justin", "2026-05-30":"Rich", "2026-06-06":"Caleb", "2026-06-13":"Gina", "2026-06-20":"Justin", "2026-06-27":"Caleb", "2026-07-04":"Rich", "2026-07-11":"Gina", "2026-07-18":"Caleb", "2026-07-25":"Justin", "2026-08-01":"Rich", "2026-08-08":"Caleb", "2026-08-15":"Gina", "2026-08-22":"Justin", "2026-08-29":"Caleb", "2026-09-05":"Rich", "2026-09-12":"Gina", "2026-09-19":"Caleb", "2026-09-26":"Justin", "2026-10-03":"Rich", "2026-10-10":"Caleb", "2026-10-17":"Gina", "2026-10-24":"Justin", "2026-10-31":"Caleb", "2026-11-07":"Rich", "2026-11-14":"Gina", "2026-11-21":"Caleb", "2026-11-28":"Justin", "2026-12-05":"Rich", "2026-12-12":"Caleb", "2026-12-19":"Gina", "2026-12-26":"Justin", "2027-01-02":"Caleb"};
         const SAT_ONCALL_GA = {"2026-02-07":["Omari Williams","Robert Medley"], "2026-02-14":["Nyzier Moore","Sean Reich"], "2026-02-21":["Omari Williams","Robert Medley"], "2026-02-28":["Nyzier Moore","Sean Reich"], "2026-03-07":["Omari Williams","Robert Medley"], "2026-03-14":["Nyzier Moore","Sean Reich"], "2026-03-21":["Omari Williams","Robert Medley"], "2026-03-28":["Nyzier Moore","Sean Reich"], "2026-04-04":["Omari Williams","Robert Medley"], "2026-04-11":["Nyzier Moore","Sean Reich"], "2026-04-18":["Omari Williams","Robert Medley"], "2026-04-25":["Nyzier Moore","Sean Reich"], "2026-05-02":["Omari Williams","Robert Medley"], "2026-05-09":["Nyzier Moore","Sean Reich"], "2026-05-16":["Omari Williams","Robert Medley"], "2026-05-23":["Nyzier Moore","Sean Reich"], "2026-05-30":["Omari Williams","Robert Medley"], "2026-06-06":["Nyzier Moore","Sean Reich"], "2026-06-13":["Omari Williams","Robert Medley"], "2026-06-20":["Nyzier Moore","Sean Reich"], "2026-06-27":["Omari Williams","Robert Medley"], "2026-07-04":["Nyzier Moore","Sean Reich"], "2026-07-11":["Omari Williams","Robert Medley"], "2026-07-18":["Nyzier Moore","Sean Reich"], "2026-07-25":["Omari Williams","Robert Medley"], "2026-08-01":["Nyzier Moore","Sean Reich"], "2026-08-08":["Omari Williams","Robert Medley"], "2026-08-15":["Nyzier Moore","Sean Reich"], "2026-08-22":["Omari Williams","Robert Medley"], "2026-08-29":["Nyzier Moore","Sean Reich"], "2026-09-05":["Omari Williams","Robert Medley"], "2026-09-12":["Nyzier Moore","Sean Reich"], "2026-09-19":["Omari Williams","Robert Medley"], "2026-09-26":["Nyzier Moore","Sean Reich"], "2026-10-03":["Omari Williams","Robert Medley"], "2026-10-10":["Nyzier Moore","Sean Reich"], "2026-10-17":["Omari Williams","Robert Medley"], "2026-10-24":["Nyzier Moore","Sean Reich"], "2026-10-31":["Omari Williams","Robert Medley"], "2026-11-07":["Nyzier Moore","Sean Reich"], "2026-11-14":["Omari Williams","Robert Medley"], "2026-11-21":["Nyzier Moore","Sean Reich"], "2026-11-28":["Omari Williams","Robert Medley"], "2026-12-05":["Nyzier Moore","Sean Reich"], "2026-12-12":["Omari Williams","Robert Medley"], "2026-12-19":["Nyzier Moore","Sean Reich"], "2026-12-26":["Omari Williams","Robert Medley"], "2027-01-02":["Nyzier Moore","Sean Reich"]};
@@ -1773,6 +1783,7 @@
                 { blobState: 'IL', targetMap: LOCATIONS_IL },
                 { blobState: 'CO', targetMap: LOCATIONS_CO },
                 { blobState: 'ID', targetMap: LOCATIONS_ID },
+                { blobState: 'AL', targetMap: LOCATIONS_AL },
                 { blobState: 'MN', targetMap: LOCATIONS_MN },
                 { blobState: 'WV', targetMap: LOCATIONS_WV },
                 { blobState: 'OR', targetMap: LOCATIONS_OR },
@@ -1825,6 +1836,7 @@
                 { blobState: 'IL', targetMap: TECHS_IL },
                 { blobState: 'CO', targetMap: TECHS_CO },
                 { blobState: 'ID', targetMap: TECHS_ID },
+                { blobState: 'AL', targetMap: TECHS_AL },
                 { blobState: 'MN', targetMap: TECHS_MN },
                 { blobState: 'WV', targetMap: TECHS_WV },
                 { blobState: 'OR', targetMap: TECHS_OR },
@@ -2655,7 +2667,7 @@ function distanceMatrixStatus(state) {
             const STATE_LABELS = {
                 'GA': 'Georgia / NC / SC', 'FL': 'Florida', 'MI': 'Michigan',
                 'IN': 'Indiana', 'OH': 'Ohio', 'NV': 'Nevada', 'IL': 'Illinois',
-                'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho'
+                'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
             const stateLabel = STATE_LABELS[CURRENT_STATE] || CURRENT_STATE;
             const toast = document.createElement('div');
@@ -2692,7 +2704,7 @@ function distanceMatrixStatus(state) {
             const STATE_LABELS = {
                 'GA': 'Georgia / NC / SC', 'FL': 'Florida', 'MI': 'Michigan',
                 'IN': 'Indiana', 'OH': 'Ohio', 'NV': 'Nevada', 'IL': 'Illinois',
-                'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho'
+                'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
             const stateLabel = STATE_LABELS[CURRENT_STATE] || CURRENT_STATE;
             try {
@@ -2946,6 +2958,7 @@ function distanceMatrixStatus(state) {
                 'IL': { locs: LOCATIONS_IL, techs: TECHS_IL },
                 'CO': { locs: LOCATIONS_CO, techs: TECHS_CO },
                 'ID': { locs: LOCATIONS_ID, techs: TECHS_ID },
+                'AL': { locs: LOCATIONS_AL, techs: TECHS_AL },
                 'MN': { locs: LOCATIONS_MN, techs: TECHS_MN },
                 'WV': { locs: LOCATIONS_WV, techs: TECHS_WV },
                 'OR': { locs: LOCATIONS_OR, techs: TECHS_OR },
@@ -2978,7 +2991,7 @@ function distanceMatrixStatus(state) {
             // Accept codes matching current state prefix (GA also accepts NC/SC)
             const STATE_PREFIXES = {
                 'GA': '(GA|NC|SC)', 'FL': '(FL)', 'MI': '(MI)', 'IN': '(IN)',
-                'OH': '(OH)', 'NV': '(NV)', 'IL': '(IL)', 'MN': '(MN)', 'CO': '(CO)', 'ID': '(ID)',
+                'OH': '(OH)', 'NV': '(NV)', 'IL': '(IL)', 'MN': '(MN)', 'CO': '(CO)', 'ID': '(ID)', 'AL': '(AL)',
                 'WV': '(WV)', 'OR': '(OR)'
             };
             const validPrefixes = STATE_PREFIXES[CURRENT_STATE] || '([A-Z]{2})';
@@ -3047,7 +3060,7 @@ function distanceMatrixStatus(state) {
             
             if (parsedCount < expectedCodes.length * 0.5 || nvOnly) {
                 const allLines = codesInput.value.split(/\n/).map(l => l.trim()).filter(Boolean);
-                const STATE_TOKENS = new Set(['NV','GA','FL','MI','IN','OH','MN','WV','OR','IL','NC','SC','CO','ID']);
+                const STATE_TOKENS = new Set(['NV','GA','FL','MI','IN','OH','MN','WV','OR','IL','NC','SC','CO','ID','AL']);
                 let ni = 0;
                 while (ni < allLines.length) {
                     const line = allLines[ni];

@@ -340,6 +340,7 @@
     <option value="OR">OR — Oregon</option>
     <option value="CO">CO — Colorado</option>
     <option value="ID">ID — Idaho</option>
+    <option value="AL">AL — Alabama</option>
   </select>
 
   <!-- Step 1: Geocode addresses (one-time, idempotent) -->
@@ -747,7 +748,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID']
+                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID', 'AL']
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');
