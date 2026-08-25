@@ -2560,13 +2560,21 @@ function distanceMatrixStatus(state) {
             
             // ADD CLEAR BUTTON
             // Restore last pasted dispatch text
+            // 2026-08-25 fix: this restore used to also call
+            // autoDetectDispatchDate(savedText) -- but savedText here is
+            // whatever was last pasted, possibly days ago, and its
+            // embedded Restock-By dates have nothing to do with today.
+            // That silently overwrote the correct tomorrow-default (set
+            // just above) with a stale date from old text -- confirmed
+            // live 2026-08-25 (a days-old Aug 21 forward, majority-dated
+            // 8/24, overrode a correctly-computed 8/26 default). Date
+            // auto-detection should only ever run off text the dispatcher
+            // is actively pasting/typing right now -- see the input/paste
+            // listeners below, which still call it correctly.
             const savedText = localStorage.getItem('lastDispatchText');
             if (savedText) {
                 const ta = document.getElementById('locationCodes');
-                if (ta) {
-                    ta.value = savedText;
-                    autoDetectDispatchDate(savedText);
-                }
+                if (ta) ta.value = savedText;
             }
             // 2026-08-23: always call processDispatch() on load, not just when
             // this BROWSER has cached paste text -- previously this whole call

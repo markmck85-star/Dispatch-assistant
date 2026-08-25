@@ -477,9 +477,13 @@ async function loadConsole(state) {
       // closed-ticket report, not necessarily true-to-the-minute).
       const showTroubleOnly = document.getElementById('troubleOnlyToggle') && document.getElementById('troubleOnlyToggle').checked;
       const hideClosed = document.getElementById('hideClosedToggle') && document.getElementById('hideClosedToggle').checked;
+      // 2026-08-25: 'cancelled' (a locally-removed bulk-list stop) hides
+      // alongside 'closed' under this same toggle -- a dispatcher hiding
+      // resolved items wants both kinds of "nothing left to do here" out
+      // of the way together.
       const visibleTickets = data.recentTickets
         .filter(t => !showTroubleOnly || t.ticketKind === 'trouble')
-        .filter(t => !hideClosed || t.status !== 'closed');
+        .filter(t => !hideClosed || (t.status !== 'closed' && t.status !== 'cancelled'));
       const filterLabel = [showTroubleOnly ? 'trouble' : null, hideClosed ? 'open' : null].filter(Boolean).join(', ');
       ticketStatus.textContent = filterLabel
         ? visibleTickets.length + ' ' + filterLabel + ' ticket(s) of ' + data.recentTickets.length + ' total in the last 3 days'
@@ -520,9 +524,17 @@ async function loadConsole(state) {
 
       let lastDate = null, lastKind = null, lastCounty = null;
       ticketList.innerHTML = sortedTickets.map(t => {
+        // 2026-08-25: bulk-list entries (source: 'bulk_dispatch_list') have
+        // no Salesforce closed-ticket-report confirmation to speak of --
+        // their status comes straight from the dispatch board's own
+        // planned/completed/removed, so the badge wording says so instead
+        // of implying an import that never applies to them.
+        const isBulk = t.source === 'bulk_dispatch_list';
         const statusBadge = t.status === 'closed'
-          ? `<span style="color:#7bc796;font-weight:600;">✓ Closed${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
-          : `<span style="color:#e0a030;font-weight:600;">● Open (per last import)</span>`;
+          ? `<span style="color:#7bc796;font-weight:600;">✓ ${isBulk ? 'Done' : 'Closed'}${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
+          : t.status === 'cancelled'
+          ? `<span style="color:#888;font-weight:600;">✖ Cancelled${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
+          : `<span style="color:#e0a030;font-weight:600;">● Open${isBulk ? ' (on board)' : ' (per last import)'}</span>`;
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
@@ -555,8 +567,8 @@ async function loadConsole(state) {
         }
         return dateHeader + countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
-          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}</div>
-          <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(received ${fmtDateTime(t.receivedAt)})</span></div>
+          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}</div>
+          <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
           ${shipmentTag}
         </div>`;
