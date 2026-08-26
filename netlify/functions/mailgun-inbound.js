@@ -1113,12 +1113,30 @@ exports.handler = async (event) => {
         // dispatcher to make the actual call -- surfacing what the SLA
         // would be if this were genuinely urgent, without asserting it.
         let appendedToExisting = false;
+        // 2026-08-26: tracks the EXISTING ticket's own state, for the SMS
+        // state filter further down. Found live (WO 00150671, Plainfield IN
+        // -- Mark got an unwanted text despite only covering GA/FL): an
+        // "Add Line Item to Work Order #NNNN" email never repeats the
+        // account name/site code/address anywhere in its body -- it's
+        // purely a follow-up about the new line item, so detectStates()
+        // and the normal siteCode-based state detection both correctly
+        // find nothing in THIS email, even though the ticket being
+        // appended to already has a known site. That correctly triggers
+        // the documented "can't determine state, fail open" behavior --
+        // except failing open here means every enabled recipient gets
+        // texted for every appended-line-item ticket regardless of state,
+        // which defeats the point of per-recipient state coverage for this
+        // entire ticket category. Fixed by looking up the real state from
+        // the ticket's own already-matched site instead of trying to
+        // detect it fresh from an email that was never going to contain it.
+        let appendedTicketState = null;
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
-            .from('tickets').select('id, description, ticket_kind').eq('wo_number', parsed.woNum).maybeSingle();
+            .from('tickets').select('id, description, ticket_kind, site_id, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
           if (existingErr) {
             console.error('[mailgun-inbound] existing-ticket lookup for line item addition failed:', existingErr.message);
           } else if (existingTicket) {
+            appendedTicketState = existingTicket.sites?.state || null;
             const stamp = receivedAt.toISOString().slice(0, 10);
             const addedText = parsed.description || parsed.issue || 'See email for details';
             let noteLine = `[Line item added ${stamp}] ${addedText}`;
@@ -1138,11 +1156,12 @@ exports.handler = async (event) => {
               .from('tickets').update(updateFields).eq('id', existingTicket.id);
             if (updateErr) console.error('[mailgun-inbound] append line item failed:', updateErr.message);
             else {
-              console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum}`);
+              console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum} (site state: ${appendedTicketState || 'still unknown -- original ticket has no site match either'})`);
               appendedToExisting = true;
             }
           }
         }
+
 
         if (!appendedToExisting) {
 
@@ -1448,9 +1467,18 @@ exports.handler = async (event) => {
       // everyone) rather than fail closed -- that was the actual bug
       // behind "I'm getting every state's texts again," in two different
       // parsing paths found on 2026-07-09.
-      const ticketState = (parsed.siteCode && parsed.siteCode.length >= 2)
+      // 2026-08-26: appendedTicketState (looked up from the DB for
+      // isLineItemAddition tickets, see above) now takes priority over all
+      // of this -- an "Add Line Item to Work Order" email never contains a
+      // site code, state, or address anywhere in its own body, so every
+      // path below always came up empty for this ticket category and hit
+      // the same fail-open behavior every single time, not just
+      // occasionally. Live-confirmed via WO 00150671 (Plainfield IN):
+      // texted a GA/FL-only recipient because "States:" logged completely
+      // blank despite the ticket's underlying site being correctly known.
+      const ticketState = appendedTicketState || ((parsed.siteCode && parsed.siteCode.length >= 2)
         ? parsed.siteCode.substring(0, 2)
-        : (parsed.state || (states.length > 0 ? states[0] : null));
+        : (parsed.state || (states.length > 0 ? states[0] : null)));
 
       // Matches the app's own region convention: the "Georgia/NC/SC" admin
       // checkbox only ever stores 'GA', since GA's dispatch view already
