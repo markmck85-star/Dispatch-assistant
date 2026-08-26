@@ -332,6 +332,31 @@ export default async (req, context) => {
       }
     });
 
+    // 2026-08-26: block image/font/media requests -- added after a real
+    // failure (net::ERR_INSUFFICIENT_RESOURCES across a whole burst of
+    // requests: icons, JS bundles, CSS, several aura action-batch calls,
+    // all failing together mid-load) that looks like the container's
+    // socket/file-descriptor ceiling getting hit partway through this
+    // page's load, not a Salesforce-side rejection -- none of the actual
+    // HTTP responses in that log were error status codes, every failure
+    // was the browser giving up on the request itself. The Lightning
+    // report page is heavy (icons, fonts, several parallel aura calls) and
+    // none of it is needed here -- this script only ever needs to reach
+    // the Export button and capture a CSV download, never anything
+    // visual. Cutting the two purely-visual resource types (plus media,
+    // unused here) meaningfully thins the concurrent-connection load
+    // without touching anything the export flow's selectors depend on
+    // (stylesheets/JS/XHR are untouched, since those could plausibly
+    // affect whether Playwright's visibility/click checks behave the same
+    // as before).
+    await page.route('**/*', (route) => {
+      const type = route.request().resourceType();
+      if (type === 'image' || type === 'font' || type === 'media') {
+        return route.abort();
+      }
+      return route.continue();
+    });
+
     // Navigating directly to the report while unauthenticated should bounce
     // through Salesforce's standard login page and land back here on success.
     // 'commit' (not 'domcontentloaded') avoids a known Playwright race where
