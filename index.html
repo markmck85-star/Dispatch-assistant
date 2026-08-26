@@ -6165,7 +6165,7 @@ ${content}</body></html>`;
                     if (shown) visiblePoints.push(point);
                 };
 
-                if (route.home) {
+                if (route.home && latlngs.length) {
                     L.polyline([[route.home.lat, route.home.lng], latlngs[0]], {
                         color: route.color, weight: 2, opacity: 0.55, dashArray: '4,7'
                     }).addTo(group);
