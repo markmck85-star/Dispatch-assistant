@@ -23,6 +23,12 @@
  *   TJ sees it on the master calendar too. The returned apptId is stored
  *   back on the row, which is what prevents the next PULL from re-importing
  *   the same event.
+ *   2026-08-26: a technician with no bluefolder_user_id (BlueFolder has a
+ *   hard seat limit) used to be skipped here entirely. Now creates the same
+ *   appointment with no <assignedTo> block -- a plain, unassigned entry
+ *   with the technician's name in the subject, mirroring TJ's own manual
+ *   workaround for these technicians exactly. Not yet confirmed live that
+ *   BlueFolder's API accepts a request with assignedTo omitted.
  *
  * ⚠️ OPEN QUESTIONS FOR MARK BEFORE THIS GOES LIVE (not guessed at here):
  *   1. TIME_OFF_KEYWORDS below is my best guess at how TJ labels vacation/
@@ -210,9 +216,19 @@ exports.handler = async () => {
 
   for (const row of unpushed || []) {
     const bfUserId = row.technicians?.bluefolder_user_id;
-    if (!bfUserId) { summary.skipped_no_mapping++; continue; }
 
+    // 2026-08-26: previously skipped entirely here when a technician has no
+    // BlueFolder user ID (BlueFolder has a hard seat limit, per TJ).
+    // Confirmed with Mark that TJ's own manual workaround for these techs
+    // is a plain, unassigned calendar entry with the technician's name in
+    // the subject -- purely informational for Mike to read during payroll,
+    // not tied to a BlueFolder user record. Mirrored here: the assignedTo
+    // block is omitted when there's no mapping, instead of skipping the
+    // push. Same UNVERIFIED note as save-tech-availability.js's push
+    // action (same-day fix) -- whether BlueFolder's API actually accepts a
+    // request with no assignedTo hasn't been confirmed live yet.
     const subject = row.note || `${row.reason} - ${row.technicians.name}`;
+    const assignedToXml = bfUserId ? `<assignedTo><userId>${bfUserId}</userId></assignedTo>` : '';
     let addResp;
     try {
       addResp = await bfRequest('appointments/add.aspx', `<request><appointmentAdd>` +
@@ -220,7 +236,7 @@ exports.handler = async () => {
         `<dateTimeStart>${row.day}T00:00:00</dateTimeStart>` +
         `<dateTimeEnd>${row.day}T23:59:59</dateTimeEnd>` +
         `<allDayEvent>true</allDayEvent>` +
-        `<assignedTo><userId>${bfUserId}</userId></assignedTo>` +
+        `${assignedToXml}` +
         `<notifyCustomer>false</notifyCustomer>` +
         `</appointmentAdd></request>`);
     } catch (e) {
@@ -235,7 +251,10 @@ exports.handler = async () => {
         .update({ bluefolder_appt_id: String(apptId) })
         .eq('technician_id', row.technician_id)
         .eq('day', row.day);
-      if (!error) summary.pushed++;
+      if (!error) {
+        summary.pushed++;
+        if (!bfUserId) summary.pushed_unassigned = (summary.pushed_unassigned || 0) + 1;
+      }
     }
   }
 

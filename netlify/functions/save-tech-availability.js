@@ -31,11 +31,15 @@
 //
 // Built for TJ's specific use case: BlueFolder has a hard limit on how many
 // technicians can be added, so this is the standalone way to track
-// vacation/PTO/etc for technicians who don't fit. Confirmed those techs
-// (no bluefolder_user_id set) are silently skipped by the scheduled sync's
-// push step -- entries for them stay Supabase-only; the manual 'push'
-// action below also refuses with a clear message rather than erroring
-// against BlueFolder.
+// vacation/PTO/etc for technicians who don't fit. Those techs (no
+// bluefolder_user_id set) used to be silently skipped by the scheduled
+// sync's push step, and the manual 'push' action below used to refuse them
+// outright -- as of 2026-08-26 both instead create a plain, unassigned
+// BlueFolder entry (technician's name in the subject, same as every other
+// pushed entry), mirroring TJ's own manual workaround for these technicians
+// exactly. See the inline comment in the 'push' action for the open
+// question about whether BlueFolder's API actually accepts a request with
+// no assignedTo -- not yet confirmed live.
 //
 // Env vars required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and
 // BLUEFOLDER_API_TOKEN (all already configured for the existing sync).
@@ -137,25 +141,40 @@ exports.handler = async (event) => {
       return json(200, { ok: true, apptId: existing.bluefolder_appt_id, note: 'Already pushed' });
     }
     const bfUserId = existing.technicians?.bluefolder_user_id;
-    if (!bfUserId) {
-      return json(400, { ok: false, error: `${existing.technicians?.name || 'This technician'} has no BlueFolder user ID on file -- can't push` });
-    }
-
     const techName = existing.technicians?.name || 'Tech';
     const label = BF_REASON_LABEL[existing.reason] || 'OUT';
+
+    // 2026-08-26: previously refused to push here when the technician has no
+    // BlueFolder user ID (BlueFolder has a hard seat limit -- not every
+    // technician fits, per TJ). Confirmed with Mark that TJ's own manual
+    // workaround for these techs is a plain, unassigned calendar entry with
+    // the technician's name folded into the subject -- purely informational,
+    // read visually by Mike during payroll to track/decrement PTO, not tied
+    // to any BlueFolder user record. Mirrored exactly: when there's no
+    // bfUserId, the <assignedTo> block is simply omitted instead of refusing
+    // the push. Subject/description are unchanged either way -- TJ's own
+    // entries don't visually distinguish "has a seat" from "doesn't", so
+    // this doesn't either.
+    // UNVERIFIED: appointments/add.aspx has only ever been called with
+    // assignedTo present before this change. Whether BlueFolder truly
+    // accepts a request with that block missing (vs silently requiring a
+    // default assignee, or rejecting it) is not confirmed against the real
+    // API -- test with one real unmapped technician before relying on this
+    // for anything time-sensitive, and check the created entry actually
+    // shows up on TJ's calendar the way his manual ones do.
     const subject = `${label} - ${techName}`.slice(0, 100);
     const startDT = toBFDateTime(day, 0, 0);
     const endDT = toBFDateTime(day, 23, 59);
+    const assignedToXml = bfUserId
+      ? `\n    <assignedTo>\n      <userId>${bfUserId}</userId>\n    </assignedTo>`
+      : '';
 
     const requestXml = `<request>
   <appointmentAdd>
     <subject>${xmlEscape(subject)}</subject>
     <dateTimeStart>${startDT}</dateTimeStart>
     <dateTimeEnd>${endDT}</dateTimeEnd>
-    <allDayEvent>true</allDayEvent>
-    <assignedTo>
-      <userId>${bfUserId}</userId>
-    </assignedTo>
+    <allDayEvent>true</allDayEvent>${assignedToXml}
     <description>${xmlEscape(existing.note || label)}</description>
   </appointmentAdd>
 </request>`;
