@@ -109,24 +109,29 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: JSON.stringify({ ok: true, apptId: existing.bluefolder_appt_id, note: 'Already pushed' }) };
     }
     const bfUserId = existing.technicians?.bluefolder_user_id;
-    if (!bfUserId) {
-      return { statusCode: 400, body: JSON.stringify({ ok: false, error: `${existing.technicians?.name || 'This technician'} has no BlueFolder user ID on file -- can't push` }) };
-    }
-
     const techName = existing.technicians?.name || 'Tech';
+
+    // 2026-08-26: same fix as save-tech-availability.js's push action
+    // (same day) -- previously refused to push when the technician has no
+    // BlueFolder user ID (hard seat limit, per TJ). Now creates a plain,
+    // unassigned entry instead, mirroring TJ's own manual workaround.
+    // Same UNVERIFIED note applies: whether BlueFolder's API truly accepts
+    // a request with assignedTo omitted hasn't been confirmed live before
+    // this change -- Randy Thomas's Saturday on-call push is the actual
+    // real-world first test of this.
     const subject = `ON-CALL - ${state} - ${techName}`.slice(0, 100);
     const startDT = toBFDateTime(day, 8, 0);   // 8:00 AM
     const endDT = toBFDateTime(day, 20, 0);    // 8:00 PM -- matches Saturday monitoring hours
+    const assignedToXml = bfUserId
+      ? `\n    <assignedTo>\n      <userId>${bfUserId}</userId>\n    </assignedTo>`
+      : '';
 
     const requestXml = `<request>
   <appointmentAdd>
     <subject>${xmlEscape(subject)}</subject>
     <dateTimeStart>${startDT}</dateTimeStart>
     <dateTimeEnd>${endDT}</dateTimeEnd>
-    <allDayEvent>false</allDayEvent>
-    <assignedTo>
-      <userId>${bfUserId}</userId>
-    </assignedTo>
+    <allDayEvent>false</allDayEvent>${assignedToXml}
     <description>${xmlEscape(`Saturday on-call rotation -- ${state}`)}</description>
   </appointmentAdd>
 </request>`;
