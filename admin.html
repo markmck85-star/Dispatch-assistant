@@ -137,7 +137,6 @@
                     <option value="SB">SB — Surfboard (700 forms)</option>
                     <option value="BK">BK — Big Kahuna / Cash Side (800 forms)</option>
                     <option value="BH">BH — Big Hoku 7000 (4 printers)</option>
-                    <option value="OTHER">Other — testing/OTC, no restock cycle</option>
                 </select>
                 <div class="checkbox-row" style="margin-top:4px;">
                     <input type="checkbox" id="locRemote">
@@ -340,7 +339,6 @@
     <option value="OR">OR — Oregon</option>
     <option value="CO">CO — Colorado</option>
     <option value="ID">ID — Idaho</option>
-    <option value="AL">AL — Alabama</option>
   </select>
 
   <!-- Step 1: Geocode addresses (one-time, idempotent) -->
@@ -380,10 +378,6 @@
   <div class="dm-row">
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
-  <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-top:4px;">
-    <input type="checkbox" id="dmForceFullRebuild">
-    Force full rebuild (ignore existing data -- use only if site coordinates changed, not for adding new sites)
-  </label>
 
   <div id="dm-status" class="dm-status">Ready.</div>
 </div>
@@ -409,22 +403,12 @@
 
   window.dmBuildSiteMatrix = async function () {
     const state = dmState();
-    const forceFullRebuild = document.getElementById('dmForceFullRebuild').checked;
     const n = DM_SITE_COUNT_HINTS[state];
     const pairs = n ? Math.round((n * n) / 2) : null;
-    const costNote = forceFullRebuild
-      ? (pairs
-          ? 'Full rebuild forced -- roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
-          : 'Full rebuild forced -- cost scales with site count squared.')
-      : 'Incremental -- if this state already has a matrix, only pairs touching sites added since the last build will be fetched (likely far cheaper than a full rebuild).';
-    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
-
-    // Second password specifically for this paid action (2026-08-18) --
-    // deliberately separate from the regular admin login, so it stays
-    // gated even once other admin-role logins exist. Entered once per
-    // build, reused across every chunked call below (not stored anywhere).
-    const adminSecret = prompt('Enter the distance-matrix admin password to confirm this paid build:');
-    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+    const costNote = pairs
+      ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
+      : 'Cost scales with site count squared.';
+    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
 
     let offset = 0;
     let done = false;
@@ -435,28 +419,17 @@
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, offset, adminSecret, fullRebuild: forceFullRebuild }),
+          body: JSON.stringify({ state, offset }),
         });
         const data = await res.json();
-        if (res.status === 409 && data.resumeOffset != null) {
-          // A previous build for this state got interrupted and left real,
-          // already-billed progress behind -- resume it instead of quietly
-          // re-fetching (re-billing) pairs it already paid for.
-          if (!confirm(data.error + '\n\nResume from where it left off?')) { dmSetStatus('Cancelled.'); return; }
-          offset = data.resumeOffset;
-          continue;
-        }
         if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
         lastResult = data;
         done = data.done;
         if (!done) offset = data.nextOffset;
       }
       dmSetStatus(
-        '✅ Site-to-site matrix built for ' + state + (lastResult.incremental ? ' (incremental)' : ' (full rebuild)') + '.\n' +
-        (lastResult.incremental
-          ? lastResult.newSiteCount + ' new site(s) detected -- only pairs touching them were fetched.\n'
-          : '') +
-        lastResult.siteCount + ' total sites, ' + lastResult.newEntryCount + ' pair(s) computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
+        '✅ Site-to-site matrix built for ' + state + '.\n' +
+        lastResult.siteCount + ' sites, ' + lastResult.newEntryCount + ' pairs computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
         'Total matrix now has ' + lastResult.totalEntryCount + ' entries (tech-to-site + site-to-site combined).' +
         (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '')
       );
@@ -512,18 +485,13 @@
   window.dmBuildMatrix = async function (mode) {
     const state = dmState();
     const label = mode === 'driving' ? 'drive-time (calls Google Maps API — confirm intent)' : 'straight-line haversine';
-    let adminSecret = '';
-    if (mode === 'driving') {
-      if (!confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
-      adminSecret = prompt('Enter the distance-matrix admin password to confirm this paid build:');
-      if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
-    }
+    if (mode === 'driving' && !confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
     dmSetStatus('Building ' + label + ' matrix for ' + state + '…');
     try {
       const res = await fetch('/.netlify/functions/compute-distance-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, mode, adminSecret }),
+        body: JSON.stringify({ state, mode }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -748,7 +716,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID', 'AL']
+                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID']
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');
@@ -1153,7 +1121,7 @@
                     '<div class="card-detail">' + esc(loc.address) + '</div>' +
                     '<div class="card-detail">State: ' + esc(loc.state || currentState) + ' | Primary: ' + esc(loc.primaryTech || loc.defaultTech || '—') + (loc.fallbackTech ? ' | Fallback: ' + esc(loc.fallbackTech) : '') + '</div>' +
                     (loc.contractorOverride ? '<div class="card-detail">Contractor: ' + esc(loc.contractorName) + '</div>' : '') +
-                    (loc.machineType === 'SB' ? '<div class="card-detail" style="color:#f0a500;">🏄 Surfboard (SB)</div>' : loc.machineType === 'BK' ? '<div class="card-detail" style="color:#17a2b8;">💰 Big Kahuna / Cash Side (BK)</div>' : loc.machineType === 'BH' ? '<div class="card-detail" style="color:#9b59b6;">🏛️ Big Hoku 7000 (BH)</div>' : loc.machineType === 'OTHER' ? '<div class="card-detail" style="color:#888;">🅾️ Other / no restock cycle</div>' : '') +
+                    (loc.machineType === 'SB' ? '<div class="card-detail" style="color:#f0a500;">🏄 Surfboard (SB)</div>' : loc.machineType === 'BK' ? '<div class="card-detail" style="color:#17a2b8;">💰 Big Kahuna / Cash Side (BK)</div>' : loc.machineType === 'BH' ? '<div class="card-detail" style="color:#9b59b6;">🏛️ Big Hoku 7000 (BH)</div>' : '') +
                     '<div class="card-actions">' +
                     '<button class="edit-btn" onclick="editLocation(\'' + escAttr(code) + '\')">Edit</button>' +
                     '<button class="del-btn" onclick="deleteLocation(\'' + escAttr(code) + '\', \'' + locCardId + '\')">Delete</button>' +
@@ -2087,42 +2055,61 @@
         }
 
         async function editNotifRecipient(index) {
-            const recipients = await getNotifRecipients();
-            const r = recipients[index];
-            if (!r) return;
-            document.getElementById('notifName').value = r.name;
-            document.getElementById('notifPhone').value = r.address.split('@')[0] || '';
-            document.getElementById('notifAddress').value = r.address;
-            // Try to match carrier
-            const carriers = ['@vtext.com','@tmomail.net','@txt.att.net','@messaging.sprintpcs.com'];
-            const carrier = carriers.find(c => r.address.endsWith(c));
-            if (carrier) document.getElementById('notifCarrier').value = carrier;
-            // Set state checkboxes
-            document.querySelectorAll('.notif-state-cb').forEach(cb => cb.checked = false);
-            if (r.states && r.states.includes('ALL')) {
-                document.getElementById('notifStateAll').checked = true;
-                document.querySelectorAll('.notif-state-individual').forEach(cb => cb.checked = true);
-            } else if (r.states) {
-                r.states.forEach(s => {
-                    const cb = document.querySelector(`.notif-state-cb[value="${s}"]`);
-                    if (cb) cb.checked = true;
-                });
+            try {
+                const recipients = await getNotifRecipients();
+                const r = recipients[index];
+                if (!r) {
+                    // 2026-08-26: previously just `return`ed here with zero
+                    // feedback -- from the user's side this looks identical
+                    // to a working click that happened to find nothing,
+                    // when it's actually recipients[index] being undefined
+                    // (stale index, array changed since the list was last
+                    // rendered, or a shape mismatch in the stored blob).
+                    console.error('[editNotifRecipient] no recipient at index', index, 'recipients:', recipients);
+                    alert(`Could not load that recipient's info (index ${index} not found in ${recipients.length} loaded recipients). Check the console for details, and try refreshing the Notifications tab first.`);
+                    return;
+                }
+                document.getElementById('notifName').value = r.name || '';
+                document.getElementById('notifPhone').value = (r.address || '').split('@')[0] || '';
+                document.getElementById('notifAddress').value = r.address || '';
+                // Try to match carrier
+                const carriers = ['@vtext.com','@tmomail.net','@txt.att.net','@messaging.sprintpcs.com'];
+                const carrier = carriers.find(c => (r.address || '').endsWith(c));
+                if (carrier) document.getElementById('notifCarrier').value = carrier;
+                // Set state checkboxes
+                document.querySelectorAll('.notif-state-cb').forEach(cb => cb.checked = false);
+                if (r.states && r.states.includes('ALL')) {
+                    document.getElementById('notifStateAll').checked = true;
+                    document.querySelectorAll('.notif-state-individual').forEach(cb => cb.checked = true);
+                } else if (r.states) {
+                    r.states.forEach(s => {
+                        const cb = document.querySelector(`.notif-state-cb[value="${s}"]`);
+                        if (cb) cb.checked = true;
+                    });
+                }
+                document.getElementById('notifTimezone').value = r.timezone || 'America/New_York';
+                // Restore active hours
+                if (r.hoursStart === null || r.hoursEnd === null) {
+                    document.getElementById('notifHours247').checked = true;
+                    document.getElementById('notifHoursStart').value = '07:00';
+                    document.getElementById('notifHoursEnd').value = '22:00';
+                } else {
+                    document.getElementById('notifHours247').checked = false;
+                    document.getElementById('notifHoursStart').value = r.hoursStart || '07:00';
+                    document.getElementById('notifHoursEnd').value = r.hoursEnd || '22:00';
+                }
+                // Store the index being edited so addNotifRecipient can replace it
+                window._editingNotifIndex = index;
+                document.getElementById('addRecipientBtn').textContent = 'Update Recipient';
+                document.getElementById('adminPanel').scrollTo({ top: document.getElementById('sectionNotifications').offsetTop, behavior: 'smooth' });
+            } catch (err) {
+                // 2026-08-26: this whole function previously had no
+                // try/catch at all -- any thrown error (a missing DOM
+                // element, a malformed field on the stored record) failed
+                // completely silently with no visible symptom whatsoever.
+                console.error('[editNotifRecipient] failed:', err);
+                alert('Error loading recipient for editing: ' + err.message + ' (check console for details)');
             }
-            document.getElementById('notifTimezone').value = r.timezone || 'America/New_York';
-            // Restore active hours
-            if (r.hoursStart === null || r.hoursEnd === null) {
-                document.getElementById('notifHours247').checked = true;
-                document.getElementById('notifHoursStart').value = '07:00';
-                document.getElementById('notifHoursEnd').value = '22:00';
-            } else {
-                document.getElementById('notifHours247').checked = false;
-                document.getElementById('notifHoursStart').value = r.hoursStart || '07:00';
-                document.getElementById('notifHoursEnd').value = r.hoursEnd || '22:00';
-            }
-            // Store the index being edited so addNotifRecipient can replace it
-            window._editingNotifIndex = index;
-            document.getElementById('addRecipientBtn').textContent = 'Update Recipient';
-            document.getElementById('adminPanel').scrollTo({ top: document.getElementById('sectionNotifications').offsetTop, behavior: 'smooth' });
         }
 
         async function getNotifRecipients() {
