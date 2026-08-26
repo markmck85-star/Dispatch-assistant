@@ -3351,6 +3351,31 @@ function distanceMatrixStatus(state) {
                 }
             });
 
+            // 2026-08-26: moved the open-ticket unmatched-site check (see
+            // below) to run BEFORE this early return, not after -- it used to
+            // sit further down, past this "nothing valid to dispatch" bail,
+            // which meant it silently never ran at all on any day a state had
+            // no other valid restock/trouble codes pasted or persisted. Real
+            // impact found live: 23 Michigan "System"-category SOS tickets
+            // (Neumo's own separate category from "Testing Station", never
+            // covered by the original MIT001-009 sweep) sat correctly parsed
+            // and unmatched in the tickets table for over a month, completely
+            // invisible, because Michigan kept hitting this early return on
+            // days with no other MI board activity. The check itself was
+            // always correct (no issue_category filter, catches any
+            // unmatched trouble/maintenance ticket) -- it just never got a
+            // chance to run. Fire-and-forget, same as before: never lets a
+            // fetch failure here block dispatch generation or this early
+            // "nothing to show" message.
+            fetch('/.netlify/functions/get-unmatched-tickets?state=' + CURRENT_STATE, { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && data.unmatched && data.unmatched.length > 0) {
+                        setTimeout(() => showAddLocationPromptQueueForTickets(data.unmatched), 900);
+                    }
+                })
+                .catch(e => console.warn('[dispatch] get-unmatched-tickets check failed (non-fatal):', e.message));
+
             // Now that real DB-backed tickets have had a chance to auto-surface
             // above, this is the real "genuinely nothing to show" check --
             // previously this ran before the auto-surface step and could bail
@@ -3365,20 +3390,8 @@ function distanceMatrixStatus(state) {
             // Trigger add-location prompts for unknown codes alongside valid dispatch
             if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 600);
 
-            // 2026-08-06: also check for open trouble/maintenance tickets that
-            // never matched any site at all (site_id IS NULL) -- these have
-            // no code to even be "unknown" above, they're just sitting
-            // invisible with nowhere to show up. Fire-and-forget: never lets
-            // a fetch failure here block the actual dispatch generation this
-            // function exists to do.
-            fetch('/.netlify/functions/get-unmatched-tickets?state=' + CURRENT_STATE, { cache: 'no-store' })
-                .then(r => r.ok ? r.json() : null)
-                .then(data => {
-                    if (data && data.unmatched && data.unmatched.length > 0) {
-                        setTimeout(() => showAddLocationPromptQueueForTickets(data.unmatched), 900);
-                    }
-                })
-                .catch(e => console.warn('[dispatch] get-unmatched-tickets check failed (non-fatal):', e.message));
+            // (get-unmatched-tickets check now runs earlier, above the
+            // relevant.length===0 early return -- see 2026-08-26 comment there)
 
             // Attach restockBy date and right form flag from parsed form counts
             const today = new Date();
