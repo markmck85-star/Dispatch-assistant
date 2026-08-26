@@ -6180,10 +6180,16 @@ ${content}</body></html>`;
                     if (shown) visiblePoints.push(point);
                 };
 
-                if (route.home && latlngs.length) {
-                    L.polyline([[route.home.lat, route.home.lng], latlngs[0]], {
-                        color: route.color, weight: 2, opacity: 0.55, dashArray: '4,7'
-                    }).addTo(group);
+                // 2026-08-26: dropped the dashed home->first-stop connecting
+                // line (Mark's call) -- the home pin's own house icon is
+                // already visually distinct from the numbered stop pins and
+                // always sits at one end of the route, so the line wasn't
+                // conveying anything the pins themselves don't already show.
+                // It was also never a real driving path (straight-line only,
+                // same as the stop-to-stop lines), and the actual from-home
+                // mileage is already shown in stop 1's own popup text. Home
+                // marker itself stays -- just the connecting line is gone.
+                if (route.home) {
                     L.marker([route.home.lat, route.home.lng], {
                         icon: L.divIcon({
                             className: '',
