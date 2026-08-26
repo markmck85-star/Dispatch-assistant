@@ -6180,16 +6180,25 @@ ${content}</body></html>`;
                     if (shown) visiblePoints.push(point);
                 };
 
-                // 2026-08-26: dropped the dashed home->first-stop connecting
-                // line (Mark's call) -- the home pin's own house icon is
-                // already visually distinct from the numbered stop pins and
-                // always sits at one end of the route, so the line wasn't
-                // conveying anything the pins themselves don't already show.
-                // It was also never a real driving path (straight-line only,
-                // same as the stop-to-stop lines), and the actual from-home
-                // mileage is already shown in stop 1's own popup text. Home
-                // marker itself stays -- just the connecting line is gone.
+                // 2026-08-26: home->first-stop line -- originally dashed/faint
+                // and hard to see, then briefly removed entirely, now restored
+                // matching the same solid full-weight style as the stop-to-stop
+                // lines below (Mark's call -- no reason for this leg to look
+                // visually different from any other leg in the route, dashed
+                // or otherwise). Home marker's house icon still marks which
+                // end of the line is "start." Line itself only draws when
+                // there's an active stop to draw it to -- a tech with only
+                // completed stops left today still gets a home pin, just no
+                // line pointing at nothing.
                 if (route.home) {
+                    if (latlngs.length) {
+                        L.polyline([[route.home.lat, route.home.lng], latlngs[0]], {
+                            color: route.color,
+                            weight: 3.5,
+                            opacity: 0.85,
+                            dashArray: route.dashed ? '9,6' : null
+                        }).addTo(group);
+                    }
                     L.marker([route.home.lat, route.home.lng], {
                         icon: L.divIcon({
                             className: '',
