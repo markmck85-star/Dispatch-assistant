@@ -2931,7 +2931,7 @@ function distanceMatrixStatus(state) {
             }
         }
 
-        function updateContext() {
+        async function updateContext() {
             const selector = document.getElementById('stateSelector');
             if (!selector) return;
 
@@ -2973,16 +2973,31 @@ function distanceMatrixStatus(state) {
             refreshAvailabilityPanel();
             // Start polling for inbound dispatches
             startInboundPolling();
-            // Auto-generate if text is already pasted
-            const codesInput = document.getElementById('locationCodes');
-            if (codesInput && codesInput.value.trim()) {
-                processDispatch();
-            }
-            // Region switch swapped LOCATIONS/TECHS out from under the map, so
-            // re-fit to the stops that belong to the state now being viewed.
-            // processDispatch() above is async and will repaint again when it
-            // finishes; this handles the case where it never runs.
-            if (typeof renderDispatchMap === 'function') renderDispatchMap();
+            // 2026-08-26: previously this only called processDispatch() when
+            // the Location Codes box already had text pasted, then IMMEDIATELY
+            // (without awaiting) called renderDispatchMap() on the same tick --
+            // guaranteed to run against the OLD state's board/tech data crossed
+            // with the NEW state's LOCATIONS/TECHS, since processDispatch()
+            // hadn't had a chance to update window.currentAssignments yet. That
+            // stale render usually got silently overwritten a moment later once
+            // processDispatch() finished -- except when the new state has
+            // nothing dispatched yet (empty paste box, no persisted board),
+            // where _processDispatchCore() bails out on its own early "No valid
+            // codes found" return BEFORE ever reaching the renderReviewBoard()
+            // call that repaints the map -- leaving the map stuck showing
+            // whatever the bad intermediate render (or the previous state) left
+            // on screen, needing a manual drag to find the new region.
+            //
+            // Fixed by always awaiting processDispatch(true) here, the same
+            // auto/persisted-fetch call window.onload uses -- it rebuilds
+            // window.currentAssignments (and window.removedStops) from
+            // Supabase for whatever state/date is now selected regardless of
+            // what's sitting in the paste box, and its own internal call chain
+            // (_processDispatchCore -> renderReviewBoard -> renderDispatchMap)
+            // is what actually repaints the map correctly, every time -- so the
+            // old fire-and-forget call plus manual re-render here is no longer
+            // needed.
+            await processDispatch(true);
         }
 
         function parseInputs(text) {
