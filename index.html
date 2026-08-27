@@ -2585,6 +2585,39 @@ function distanceMatrixStatus(state) {
                 const ta = document.getElementById('locationCodes');
                 if (ta) ta.value = savedText;
             }
+            // 2026-08-27: this state restore (and the updateContext() that
+            // applies it) used to sit at the very BOTTOM of window.onload,
+            // AFTER the await processDispatch(true) below -- so the first
+            // board/map build of every page load ran against the fallback
+            // 'GA' context regardless of which region the dispatcher was
+            // actually working, and the map opened anchored to Georgia even
+            // for an IN/FL/MI user. Restoring the selection FIRST, then
+            // syncing CURRENT_STATE/LOCATIONS/TECHS off it, means the load
+            // build is anchored to the right region from the start.
+            // Restore state if returning from admin panel
+            const returnState = localStorage.getItem('dispatchReturnState');
+            if (returnState) {
+                const sel = document.getElementById('stateSelector');
+                if (sel && sel.querySelector(`option[value="${returnState}"]`)) {
+                    sel.value = returnState;
+                }
+                localStorage.removeItem('dispatchReturnState');
+            } else {
+                // Restore last selected state on normal refresh
+                const savedState = localStorage.getItem('lastSelectedState');
+                if (savedState) {
+                    const sel = document.getElementById('stateSelector');
+                    if (sel && sel.querySelector(`option[value="${savedState}"]`)) {
+                        sel.value = savedState;
+                    }
+                }
+            }
+
+            // Sync CURRENT_STATE / LOCATIONS / TECHS (plus journal threshold and
+            // availability panel) to the restored dropdown value before anything
+            // reads them. Awaited so its own internal rebuild finishes before the
+            // load rebuild below, rather than racing it.
+            await updateContext();
             // 2026-08-23: always call processDispatch() on load, not just when
             // this BROWSER has cached paste text -- previously this whole call
             // sat inside `if (savedText)`, so the auto-rebuild-from-Supabase
@@ -2631,26 +2664,6 @@ function distanceMatrixStatus(state) {
                 };
             }
 
-            // Restore state if returning from admin panel
-            const returnState = localStorage.getItem('dispatchReturnState');
-            if (returnState) {
-                const sel = document.getElementById('stateSelector');
-                if (sel && sel.querySelector(`option[value="${returnState}"]`)) {
-                    sel.value = returnState;
-                }
-                localStorage.removeItem('dispatchReturnState');
-            } else {
-                // Restore last selected state on normal refresh
-                const savedState = localStorage.getItem('lastSelectedState');
-                if (savedState) {
-                    const sel = document.getElementById('stateSelector');
-                    if (sel && sel.querySelector(`option[value="${savedState}"]`)) {
-                        sel.value = savedState;
-                    }
-                }
-            }
-
-            updateContext();
             refreshAvailabilityPanel();
         };
 
