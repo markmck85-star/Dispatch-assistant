@@ -1343,6 +1343,48 @@ exports.handler = async (event) => {
           const stateM = (parsed.accountName || '').match(/^([A-Z]{2})\s*[-–]/);
           const state = stateM ? stateM[1] : null;
 
+          // 2026-08-27: fall back to the same account-name text matching
+          // used for the Salesforce closed-ticket import when the
+          // WO-number/ticket path above didn't resolve a site -- confirmed
+          // live that path alone was only ever hitting ~2% of real RMA
+          // shipments (130 of 132 sat with site_id permanently null),
+          // leaving no way to tell which site a part is for once it's
+          // physically arrived days later, per Mark. account_name is in
+          // the identical "STATE - City/County SiteName" format already
+          // handled there, so this reuses the same tokenize/site_aliases
+          // approach (same style/threshold as the TechWeb site-match a
+          // little further up in this same file) rather than inventing a
+          // new one.
+          if (!siteId && state && parsed.accountName) {
+            const { data: candidateSites } = await supabase
+              .from('sites').select('id, name').eq('state', state);
+            if (candidateSites && candidateSites.length) {
+              const { data: aliasRows } = await supabase.from('site_aliases').select('alias, site_id');
+              const aliasMap = {};
+              for (const a of aliasRows || []) aliasMap[a.alias] = a.site_id;
+              const aliasHit = aliasMap[String(parsed.accountName).trim()];
+              if (aliasHit) {
+                siteId = aliasHit;
+              } else {
+                const RMA_TOKEN_ALIASES = { co: 'county', cnty: 'county', ave: 'avenue', blvd: 'boulevard', dr: 'drive', rd: 'road', st: 'street', mt: 'mount', hwy: 'highway', pkwy: 'parkway' };
+                const rmaTokenize = (s) => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => RMA_TOKEN_ALIASES[t] || t);
+                const nameOnlyM = String(parsed.accountName).trim().match(/^([A-Za-z]{2})\s*-\s*(.+)$/);
+                const nameOnly = nameOnlyM ? nameOnlyM[2] : String(parsed.accountName).trim();
+                const targetTokens = rmaTokenize(nameOnly);
+                let best = null, bestScore = 0;
+                for (const site of candidateSites) {
+                  const siteTokens = rmaTokenize(site.name);
+                  const setA = new Set(targetTokens), setB = new Set(siteTokens);
+                  const intersection = [...setA].filter((t) => setB.has(t)).length;
+                  const smaller = Math.min(setA.size, setB.size);
+                  const score = smaller > 0 ? intersection / smaller : 0;
+                  if (score > bestScore) { bestScore = score; best = site; }
+                }
+                if (best && bestScore >= 0.65) siteId = best.id;
+              }
+            }
+          }
+
           const { error: rmaErr } = await supabase.from('rma_shipments').upsert({
             case_number: parsed.caseNumber || null,
             parent_case_number: parsed.parentCaseNumber || null,
@@ -1363,7 +1405,7 @@ exports.handler = async (event) => {
             updated_at: new Date().toISOString(),
           }, { onConflict: 'case_number' });
           if (rmaErr) console.error('[mailgun-inbound] rma_shipments upsert failed:', rmaErr.message);
-          else console.log(`[mailgun-inbound] rma_shipments: case ${parsed.caseNumber} saved (tech: ${parsed.techName || 'n/a'}, ticket matched: ${!!ticketId})`);
+          else console.log(`[mailgun-inbound] rma_shipments: case ${parsed.caseNumber} saved (tech: ${parsed.techName || 'n/a'}, ticket matched: ${!!ticketId}, site matched: ${!!siteId})`);
         } catch (rmaEx) {
           console.error('[mailgun-inbound] RMA persistence error (non-fatal):', rmaEx.message);
         }
