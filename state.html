@@ -158,6 +158,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <h3 id="siteHistoryTitle" style="margin:0;color:#222;">Visit History</h3>
             <div style="display:flex;align-items:center;gap:12px;">
+                <button onclick="markSiteRestockedFromModal()" style="background:#2e7d32;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">✅ Mark Restocked</button>
                 <button onclick="printSiteHistory()" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">🖨️ Save as PDF</button>
                 <button onclick="closeSiteHistory()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#222;">&times;</button>
             </div>
@@ -168,6 +169,40 @@
 
 <script>
 let importParsedRows = null;
+
+// 2026-08-27: added alongside the state-console "Mark Restocked" button --
+// showSiteHistory(code) sets this immediately (before its fetch, and even
+// on the "no visit history yet" early-return path) so the button always has
+// a site code to act on regardless of whether history happens to be sparse
+// or empty for that site.
+let _currentModalSiteCode = null;
+
+// 2026-08-27: same POST-to-mark-site-restocked.js action already used by
+// restock-tracker.html (site_manual_restock_confirmations table) -- added
+// here too so a dispatcher already looking at a site's history on the
+// state console (e.g. Gina restocking Thompson Bridge opportunistically
+// alongside Jesse Jewell, with no ticket ever generated for it) doesn't
+// need to separately go find Restock Tracker to log it. Doesn't touch the
+// underlying overdue calculation -- same deliberate design as the
+// original feature -- just records a visible manual confirmation.
+async function markSiteRestockedFromModal() {
+    const code = _currentModalSiteCode;
+    if (!code) return;
+    if (!confirm(`Mark ${code} as restocked today?`)) return;
+    const note = prompt('Optional note (e.g. "opportunistic, done alongside GA1011"):', '') || null;
+    try {
+        const res = await fetch('/.netlify/functions/mark-site-restocked', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ site_code: code, note }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        alert(`${code} marked as restocked.`);
+    } catch (err) {
+        alert('Failed to mark restocked: ' + err.message);
+    }
+}
 
 async function autoImport(file) {
   if (!file) return;
@@ -638,6 +673,7 @@ async function loadRestock(state) {
 
 function closeSiteHistory() {
     document.getElementById('siteHistoryOverlay').style.display = 'none';
+    _currentModalSiteCode = null;
 }
 
 // 2026-08-27: ported from index.html (built there 2026-08-25) -- state.html
@@ -845,6 +881,7 @@ async function showSiteHistory(code) {
     const overlay = document.getElementById('siteHistoryOverlay');
     const title = document.getElementById('siteHistoryTitle');
     const body = document.getElementById('siteHistoryBody');
+    _currentModalSiteCode = code;
     title.textContent = 'Visit History — ' + code;
     body.innerHTML = 'Loading…';
     overlay.style.display = 'block';
