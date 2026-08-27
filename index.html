@@ -153,6 +153,7 @@
            can be applied inline -- one shared shape instead of a PNG per colour. */
         .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
+        .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
         .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
         .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
         .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
@@ -401,6 +402,7 @@
                             <input type="checkbox" id="mapShowCompletedToggle" checked onchange="toggleMapShowCompleted(this.checked)">
                             Show completed stops (✓, muted)
                         </label>
+                        <div style="font-size:11px;color:#777;margin:0 0 4px;">&#x1F4C5; dashed pin = pushed to a later date (not part of today's route/mileage)</div>
                         <div id="dispatchMapLegend"></div>
                         <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
                     </div>
@@ -3240,15 +3242,30 @@ function distanceMatrixStatus(state) {
             relevant = relevant.filter(item => {
                 const existing = existingByCode[item.code];
                 if (existing && (existing.status === 'completed' || existing.status === 'removed')) {
-                    window.removedStops.push({
-                        code: item.code,
-                        tech: existing.techName,
-                        reason: existing.status === 'completed' ? 'completed' : 'canceled',
-                        name: (LOCATIONS[item.code] || {}).name || item.code,
-                        snapshot: { code: item.code },
-                        originalIndex: 0,
-                        inQueue: false
-                    });
+                    // 2026-08-27: a 'removed' row that get-assignments.js flags
+                    // movedElsewhere is the origin-day remnant of a push
+                    // (pushToTomorrow/pushToDate), not a real cancellation --
+                    // see that file's comment for why. Confirmed live: without
+                    // this check, reloading the origin day's board resurfaced
+                    // a just-pushed stop under "Completed / Removed Today"
+                    // (Mark clicked Undo on one, since it read as finished/
+                    // canceled when neither had happened). It's genuinely not
+                    // part of today's picture in any sense worth logging here
+                    // -- it's correctly visible on its actual target date's
+                    // board instead -- so it's dropped from the active list
+                    // (still not re-added as an active stop today) without
+                    // being surfaced in the removed/completed log either.
+                    if (!existing.movedElsewhere) {
+                        window.removedStops.push({
+                            code: item.code,
+                            tech: existing.techName,
+                            reason: existing.status === 'completed' ? 'completed' : 'canceled',
+                            name: (LOCATIONS[item.code] || {}).name || item.code,
+                            snapshot: { code: item.code },
+                            originalIndex: 0,
+                            inQueue: false
+                        });
+                    }
                     return false;
                 }
                 return true;
@@ -4295,11 +4312,24 @@ function distanceMatrixStatus(state) {
                 name: (LOCATIONS[item.code] || {}).name || item.code,
                 snapshot: JSON.parse(JSON.stringify(item)),
                 originalIndex: index,
-                inQueue: true,
+                // 2026-08-27: changed from inQueue:true -- keeping the item
+                // in place (just relabeled isSameDay) left it rendering as a
+                // completely normal, undisturbed board card, identical to
+                // every other tomorrow-bucket stop, with nothing indicating
+                // it had actually been pushed further out to a specific
+                // date. Confirmed live: Mark pushed two stops to Saturday
+                // and neither showed any visual difference on the board list
+                // (the map's dashed-pin treatment from earlier tonight only
+                // covers the map, not this list). Splicing it out instead --
+                // same as removeStop()/pushToTomorrow's own established
+                // pattern -- so it only appears in the "Pushed to Tomorrow
+                // This Session" log below with its real target-date label,
+                // no confusing duplicate-looking active card left behind.
+                inQueue: false,
                 targetDateLabel,
+                targetDateStr,
             });
-            item.isSameDay = false;
-            item.urgent = false;
+            assignments[tech].splice(index, 1);
 
             if (todayStr) {
                 syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr });
@@ -4324,6 +4354,11 @@ function distanceMatrixStatus(state) {
                 snapshot: JSON.parse(JSON.stringify(item)),
                 originalIndex: index,
                 inQueue: true
+                // Note: targetDateStr intentionally omitted here -- computed
+                // a few lines below (nextDateStr) after this push, then
+                // attached separately so undoStop() can clean up the
+                // target-date row too. See the 2026-08-27 comment on
+                // undoStop() for why this matters.
             });
             item.isSameDay = false;
             item.urgent = false;
@@ -4345,6 +4380,14 @@ function distanceMatrixStatus(state) {
                 const nextDateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,'0')}-${String(nextDate.getDate()).padStart(2,'0')}`;
                 syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr });
                 syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: nextDateStr });
+                // 2026-08-27: attach the target date to the entry just
+                // pushed above, so undoStop() can also clean up this
+                // target-date row (not just restore the original day's) --
+                // see undoStop()'s own comment for why this matters.
+                const justPushed = window.removedStops[window.removedStops.length - 1];
+                if (justPushed && justPushed.code === item.code && justPushed.tech === tech) {
+                    justPushed.targetDateStr = nextDateStr;
+                }
             }
             renderReviewBoard(true);
         }
@@ -4377,6 +4420,17 @@ function distanceMatrixStatus(state) {
             // everything syncAssignmentToSupabase needs to properly restore
             // the persisted status back to 'planned'.
             syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual');
+            // 2026-08-27: a pushed-to-date entry (pushToTomorrow/pushToDate)
+            // creates TWO rows -- the original day's (now 'removed', just
+            // restored to 'planned' above) and a separate 'planned' row on
+            // the target date. Undoing only ever fixed the first one, silently
+            // leaving the target-date row behind as an orphaned duplicate --
+            // exactly the same class of bug as the wider duplicate-assignment
+            // cleanup done earlier tonight, just freshly created instead of
+            // historical. Clean it up here too when a target date was recorded.
+            if (entry.targetDateStr) {
+                syncAssignmentToSupabase(entry.tech, entry.snapshot, 'removed', 'manual', { dispatchDateOverride: entry.targetDateStr });
+            }
             window.removedStops.splice(removedIndex, 1);
             renderReviewBoard(true);
         }
@@ -6225,12 +6279,34 @@ ${content}</body></html>`;
             const allTechNames = new Set([...Object.keys(assignments), ...Object.keys(completedByTech)]);
 
             dispatchMapTechOrder(assignments, allTechNames).forEach((tech, techIndex) => {
+                // 2026-08-27: split same-day stops from anything pushed to a
+                // later date (tomorrow, or a specific date via the new
+                // 📅 picker) -- previously every item still sitting in
+                // assignments[tech] got connected into ONE route/mileage
+                // total regardless of date, so a stop pushed days out
+                // visually looked like part of today's actual drive (Mark
+                // flagged this directly after using the new date-picker
+                // feature). isSameDay is the same flag the board's own
+                // Today/Tomorrow section split already uses elsewhere in
+                // this file, so this covers BOTH a manually-pushed stop and
+                // an ordinary naturally-tomorrow stop the same way -- not
+                // just the new picker's own case.
                 const pts = [];
+                const futurePts = [];
                 let prevCode = null;
                 (assignments[tech] || []).forEach(item => {
                     const loc = LOCATIONS[item.code];
                     if (!loc || loc.lat == null || loc.lng == null) {
                         unmappedCodes.push(item.code);
+                        return;
+                    }
+                    if (item.isSameDay === false) {
+                        // Not part of today's real route -- no leg computed
+                        // (same reasoning as completedPts below: connecting
+                        // it into today's chain, or today's mileage total,
+                        // would imply a drive that isn't actually happening
+                        // today), but still plotted so it isn't invisible.
+                        futurePts.push({ lat: Number(loc.lat), lng: Number(loc.lng), item: item, loc: loc });
                         return;
                     }
                     // Same cached matrix/haversine numbers the cards show; wrapped
@@ -6249,7 +6325,7 @@ ${content}</body></html>`;
                     completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code: r.code, loc: loc });
                 });
 
-                if (!pts.length && !completedPts.length) return;
+                if (!pts.length && !completedPts.length && !futurePts.length) return;
 
                 const info = TECHS[tech] || {};
                 const home = (info.lat != null && info.lng != null)
@@ -6262,6 +6338,7 @@ ${content}</body></html>`;
                     // are drawn dashed to stay distinguishable.
                     dashed: techIndex >= MAP_ROUTE_COLORS.length,
                     pts: pts,
+                    futurePts: futurePts,
                     completedPts: completedPts,
                     home: home
                 });
@@ -6399,6 +6476,33 @@ ${content}</body></html>`;
                         collect([p.lat, p.lng]);
                     });
                 }
+
+                // Future-pushed stops (tomorrow, or pushed to a specific later
+                // date) -- own dashed pin style with a 📅 icon rather than a
+                // number, since they're not part of today's sequenced route.
+                // Shown together with the tech's other layers (no separate
+                // show/hide toggle yet -- can add one matching the completed-
+                // stops pattern above if this turns out to want hiding too).
+                route.futurePts.forEach(p => {
+                    const pushedLabel = p.item.restockBy ? ('by ' + p.item.restockBy) : '';
+                    L.marker([p.lat, p.lng], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: '<div class="map-stop-pin map-stop-pin-future" style="background:' + route.color + ';">&#x1F4C5;</div>',
+                            iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                        }),
+                        title: 'Not today — ' + p.item.code + ' (' + route.tech + ')'
+                    }).bindPopup(
+                        '<div class="map-pop-code">&#x1F4C5; Not today — ' + escapeAiHtml(p.item.code) + '</div>'
+                        + '<div>' + escapeAiHtml(p.loc.name || '') + '</div>'
+                        + (p.loc.address ? '<div style="color:#666;">' + escapeAiHtml(p.loc.address) + '</div>' : '')
+                        + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;'
+                        + 'border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>'
+                        + escapeAiHtml(route.tech) + '</div>'
+                        + (pushedLabel ? '<div style="color:#666;">' + escapeAiHtml(pushedLabel) + '</div>' : '')
+                    ).addTo(group);
+                    collect([p.lat, p.lng]);
+                });
 
                 _dispatchMapLayers[route.tech] = group;
                 if (shown) group.addTo(map);
