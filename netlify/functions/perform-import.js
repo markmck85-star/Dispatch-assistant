@@ -158,6 +158,15 @@ async function performImport(supabase, rows) {
 
   const incomingApptNumbers = rows.map((r) => r.appointmentNumber).filter(Boolean);
   const existingSet = new Set();
+  // 2026-08-23: also capture site_id/started_at for already-imported rows,
+  // not just the appointment_number used for the skip check below -- the
+  // new site+date completion pass needs to re-evaluate EVERY row on every
+  // re-import (same reason as the 2026-08-12 ticket_id fix a few lines
+  // down: a row already sitting in site_visits from a past import must
+  // still get a chance to complete its assignment, not just brand-new
+  // rows). Re-using the site_id already resolved and stored on that past
+  // insert is both simpler and more correct than re-running matchSite().
+  const existingRowInfo = new Map();
   // Chunk the "already imported?" lookup -- a full scraped report can be
   // ~3,000 appointment numbers in one go (state.html only ever sends 250 at
   // a time), and a single .in() filter that large risks an oversized query.
@@ -165,10 +174,13 @@ async function performImport(supabase, rows) {
     const chunk = incomingApptNumbers.slice(i, i + 500);
     const { data: existing, error: existingErr } = await supabase
       .from('site_visits')
-      .select('appointment_number')
+      .select('appointment_number, site_id, started_at')
       .in('appointment_number', chunk);
     if (existingErr) throw new Error('existing lookup failed: ' + existingErr.message);
-    for (const r of existing || []) existingSet.add(r.appointment_number);
+    for (const r of existing || []) {
+      existingSet.add(r.appointment_number);
+      existingRowInfo.set(r.appointment_number, { site_id: r.site_id, started_at: r.started_at });
+    }
   }
 
   const incomingWoNumbers = rows.map((r) => r.woNumber).filter(Boolean);
@@ -261,7 +273,20 @@ async function performImport(supabase, rows) {
       appointmentToTicketId.push({ appointment_number: r.appointmentNumber, ticket_id: linkedTicket.id });
     }
 
-    if (existingSet.has(r.appointmentNumber)) continue;
+    // 2026-08-23: reaches the actual backlog -- a row already imported on
+    // a past sync (before this completion pass existed) still needs a
+    // chance to complete its assignment on THIS re-import. Use its
+    // already-stored site_id/started_at directly rather than falling
+    // through to the fresh-match logic below, which only runs for rows
+    // that make it past the skip on the next line.
+    if (existingSet.has(r.appointmentNumber)) {
+      const info = existingRowInfo.get(r.appointmentNumber);
+      if (info && info.site_id && info.started_at) {
+        const visitDate = easternDateOnly(info.started_at);
+        if (visitDate) siteDateCompletions.push({ site_id: info.site_id, visit_date: visitDate });
+      }
+      continue;
+    }
 
     // 2026-08-04: prefer a WO-number-matched ticket's already-resolved
     // site_id over fuzzy text matching whenever available. This is the
@@ -297,10 +322,12 @@ async function performImport(supabase, rows) {
     }
 
     const startedAtIso = parseSalesforceDate(r.actualStart);
-    // 2026-08-23: only queue a site+date completion candidate when this
-    // row actually resolved to a real site and has a usable completion
-    // date -- an unmatched site (needs_review) or a missing/unparseable
-    // actualStart must never produce a phantom match below.
+    // 2026-08-23: this is the NEW-row half of the site+date completion
+    // candidate list -- the already-imported half is pushed above, before
+    // the existingSet skip. Only queue a candidate when this row actually
+    // resolved to a real site and has a usable completion date -- an
+    // unmatched site (needs_review) or a missing/unparseable actualStart
+    // must never produce a phantom match.
     if (matched && siteId && startedAtIso) {
       const visitDate = easternDateOnly(startedAtIso);
       if (visitDate) siteDateCompletions.push({ site_id: siteId, visit_date: visitDate });
@@ -434,35 +461,83 @@ async function performImport(supabase, rows) {
     }
   }
 
-  // 2026-08-23: second, independent auto-complete pass covering the
-  // no-ticket bulk-restock case -- see the siteDateCompletions comment
-  // above for why this exists and why an exact date match is safe. Kept
-  // as a fully separate pass from the ticket_id block above (rather than
-  // merged into one query) since Postgres/Supabase can't express "match
-  // ANY of these (site_id, date) pairs" in a single .in()-style filter the
-  // way it can for a flat list of ticket ids -- same row-by-row shape
-  // already used for the ticket_id backfill above. A row already
-  // completed via the ticket_id pass above is a no-op here (its status is
-  // no longer 'planned', so the .eq('status','planned') filter below
-  // simply matches nothing for it) -- safe to run unconditionally for
-  // every matched row rather than needing to exclude ticket-linked ones.
+  // 2026-08-23, REVISED 2026-08-27: second, independent auto-complete pass
+  // covering the no-ticket bulk-restock case -- see the siteDateCompletions
+  // comment above for why this exists.
+  //
+  // The original 2026-08-23 version required an EXACT match between a
+  // planned assignment's dispatch_date and the real visit's Eastern
+  // calendar date. Reconfirmed live 2026-08-26 that this almost never
+  // fires: pulling real (dispatch_date, started_at) pairs for GA showed
+  // the gap between a site being dispatched and the tech actually doing
+  // the restock is routinely 1-5+ days (route backlog/bunching), not
+  // same-day -- e.g. GA1077 dispatched 8/6 -> completed 8/11 (5-day gap),
+  // dispatched 8/24 -> completed 8/25 (1-day gap). An exact match only
+  // ever caught the rare same-day case, so the vast majority of real
+  // bulk-restock completions kept sitting "planned" forever, exactly the
+  // original bug this pass was meant to fix.
+  //
+  // New approach: FIFO per site. A site's planned dispatches queue up in
+  // order, and its real completions also happen in roughly that same
+  // order (oldest dispatched restock gets done first) -- so for each
+  // site, sort its still-planned assignments by dispatch_date ascending,
+  // sort this batch's real completion dates for that site ascending, and
+  // walk both lists together: the oldest planned assignment is completed
+  // by the earliest available real visit that happened ON OR AFTER it
+  // (a visit can't complete a dispatch that hasn't happened yet), each
+  // visit consumed at most once. Any planned assignment left over when
+  // the visits run out (dispatch_date newer than every available
+  // completion) is correctly left open rather than force-matched.
   let assignmentsCompletedBySiteDate = 0;
-  const uniqueSiteDatePairs = new Map();
+  const visitDatesBySite = new Map();
   for (const { site_id, visit_date } of siteDateCompletions) {
-    uniqueSiteDatePairs.set(`${site_id}|${visit_date}`, { site_id, visit_date });
+    if (!visitDatesBySite.has(site_id)) visitDatesBySite.set(site_id, new Set());
+    visitDatesBySite.get(site_id).add(visit_date);
   }
-  for (const { site_id, visit_date } of uniqueSiteDatePairs.values()) {
-    const { error: siteDateErr, count: siteDateCount } = await supabase
+  const siteIdsWithVisits = [...visitDatesBySite.keys()];
+  for (let i = 0; i < siteIdsWithVisits.length; i += 200) {
+    const chunk = siteIdsWithVisits.slice(i, i + 200);
+    const { data: plannedRows, error: plannedErr } = await supabase
       .from('assignments')
-      .update({ status: 'completed' })
-      .eq('site_id', site_id)
-      .eq('dispatch_date', visit_date)
+      .select('id, site_id, dispatch_date')
+      .in('site_id', chunk)
       .eq('status', 'planned')
-      .select('id', { count: 'exact', head: true });
-    if (siteDateErr) {
-      console.error(`[perform-import] site/date auto-complete failed for ${site_id} ${visit_date}:`, siteDateErr.message);
-    } else {
-      assignmentsCompletedBySiteDate += siteDateCount || 0;
+      .order('dispatch_date', { ascending: true });
+    if (plannedErr) {
+      console.error('[perform-import] site/date auto-complete: planned-assignment lookup failed:', plannedErr.message);
+      continue;
+    }
+    const plannedBySite = new Map();
+    for (const row of plannedRows || []) {
+      if (!plannedBySite.has(row.site_id)) plannedBySite.set(row.site_id, []);
+      plannedBySite.get(row.site_id).push(row);
+    }
+    const idsToComplete = [];
+    for (const site_id of chunk) {
+      const visitDates = [...(visitDatesBySite.get(site_id) || [])].sort();
+      const plannedList = plannedBySite.get(site_id) || [];
+      let visitPtr = 0;
+      for (const assignment of plannedList) {
+        while (visitPtr < visitDates.length && visitDates[visitPtr] < assignment.dispatch_date) {
+          visitPtr++;
+        }
+        if (visitPtr >= visitDates.length) break; // no more real completions available for this site in this batch
+        idsToComplete.push(assignment.id);
+        visitPtr++; // this visit is now consumed, can't also close a later assignment
+      }
+    }
+    if (idsToComplete.length) {
+      const { error: siteDateErr, count: siteDateCount } = await supabase
+        .from('assignments')
+        .update({ status: 'completed' })
+        .in('id', idsToComplete)
+        .eq('status', 'planned')
+        .select('id', { count: 'exact', head: true });
+      if (siteDateErr) {
+        console.error('[perform-import] site/date auto-complete update failed:', siteDateErr.message);
+      } else {
+        assignmentsCompletedBySiteDate += siteDateCount || 0;
+      }
     }
   }
   assignmentsCompleted += assignmentsCompletedBySiteDate;
