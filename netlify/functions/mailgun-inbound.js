@@ -1273,8 +1273,60 @@ exports.handler = async (event) => {
                 .eq('site_id', siteId)
                 .maybeSingle();
 
+              // 2026-08-27: found via a real live discrepancy Mark spotted --
+              // the board showing far more "still open" GA restocks today
+              // than the actual field schedule/Dispatch Summary did. Root
+              // cause: this whole existingAssignment check above is scoped
+              // to dispatchDateStr (today, or a maintenance ticket's own due
+              // date) ONLY -- it has no way to see a still-'planned' row for
+              // the SAME SITE sitting open on an OLDER date. When a restock
+              // first misses its due date and Neumo later sends a real
+              // individual ticket for the same site (today), that ticket's
+              // dispatchDateStr (today) never matches the old row's
+              // dispatch_date, so the check below finds nothing and inserts
+              // a brand new row -- leaving the original stuck forever with
+              // no ticket_id and nothing that will ever complete it. Live
+              // examples confirmed same day: GA1011 (stuck 8/23 alongside a
+              // real 8/27 ticket), GA1026 (stuck 8/23 alongside 8/27),
+              // GA1034 (stuck 8/18 alongside 8/27). Fix: before inserting a
+              // new row, check for any OTHER still-'planned' row at this
+              // site that's already overdue (dispatch_date strictly before
+              // today's real date -- never a genuinely future-dated one,
+              // which could be a distinct, legitimately-scheduled later
+              // restock this should never touch) and move THAT row forward
+              // to today with the new ticket attached, instead of creating a
+              // second row. Scoped to 'planned' only -- a completed/removed
+              // row for an older date is real history, not a stuck stop, and
+              // is correctly left alone (same as always).
+              const realTodayStr = todayStrForSiteCode(rawSiteCode);
+              let staleOpenAssignment = null;
+              if (!existingAssignment) {
+                const { data: staleRows, error: staleErr } = await supabase
+                  .from('assignments')
+                  .select('id, dispatch_date')
+                  .eq('site_id', siteId)
+                  .eq('status', 'planned')
+                  .lt('dispatch_date', realTodayStr)
+                  .order('dispatch_date', { ascending: true })
+                  .limit(1);
+                if (staleErr) console.error('[mailgun-inbound] stale-open-assignment lookup failed:', staleErr.message);
+                else if (staleRows && staleRows.length) staleOpenAssignment = staleRows[0];
+              }
+
               if (existingAssignErr) {
                 console.error('[mailgun-inbound] existing-assignment lookup for auto-add failed:', existingAssignErr.message);
+              } else if (!existingAssignment && staleOpenAssignment) {
+                const { error: absorbErr } = await supabase
+                  .from('assignments')
+                  .update({
+                    dispatch_date: dispatchDateStr,
+                    ticket_id: newTicketId,
+                    assigned_by: 'auto',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', staleOpenAssignment.id);
+                if (absorbErr) console.error('[mailgun-inbound] absorb-stale-assignment failed:', absorbErr.message);
+                else console.log(`[mailgun-inbound] Moved stale planned entry from ${staleOpenAssignment.dispatch_date} to ${dispatchDateStr} for new ticket ${parsed.woNum} instead of creating a duplicate`);
               } else if (!existingAssignment) {
                 const { error: insertErr } = await supabase
                   .from('assignments')
