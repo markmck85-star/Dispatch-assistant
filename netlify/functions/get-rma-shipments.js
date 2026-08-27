@@ -1,5 +1,24 @@
 /**
  * get-rma-shipments.js — v1 — added 2026-07-22
+ * v2 — 2026-08-27: expose the source email(s) so shipments.html can offer
+ * a clickable link to read the original dispatch/ticket email (where the
+ * part was actually requested) -- the real motivation, per Mark: a part
+ * often arrives well after the fact, and whoever unpacks it has no easy
+ * way to recall which site/job it belongs to without digging through
+ * email manually. Two different emails can exist here and either can be
+ * missing independently, so both are returned and the frontend picks:
+ *   - dispatchInboundEmailId: the ORIGINAL ticket's email (via
+ *     rma_shipments.ticket_id -> tickets.inbound_email_id) -- this is the
+ *     one that actually describes the service call/part need, so it's
+ *     preferred when present.
+ *   - shipmentInboundEmailId: rma_shipments' own inbound_email_id --
+ *     Neumo's shipping-notification email itself, used as a fallback when
+ *     no ticket link exists (e.g. a proactive stock-up shipment with no
+ *     specific ticket behind it).
+ * Not resolved via Supabase's embedded-relation syntax (tickets(...))
+ * since that depends on a declared FK Supabase can introspect -- a plain
+ * second query + JS-side map sidesteps that assumption entirely, same
+ * pattern as perform-import.js's ticketByWo lookup.
  *
  * Read-only listing of rma_shipments, joined to technician name and site
  * code for display. Supports filtering by state, technician, site, and a
@@ -17,7 +36,8 @@
  * -> { shipments: [ { id, caseNumber, parentCaseNumber, woNumber, ticketId,
  *        siteId, siteCode, accountName, state, warehouseName, technicianId,
  *        technicianName, outboundTracking, inboundTracking, transferId,
- *        requestDetails, returnBrokenPart, returnedAt, receivedAt } ],
+ *        requestDetails, returnBrokenPart, returnedAt, receivedAt,
+ *        dispatchInboundEmailId, shipmentInboundEmailId } ],
  *      technicians: [ { id, name, state } ] }  -- full active roster,
  *        independent of which techs already have a shipment row; `state`
  *        is the tech's home state, so a consumer can narrow the roster to
@@ -55,7 +75,7 @@ exports.handler = async (event) => {
 
     let query = supabase
       .from('rma_shipments')
-      .select('id, case_number, parent_case_number, wo_number, ticket_id, site_id, account_name, state, warehouse_name, technician_id, outbound_tracking, inbound_tracking, transfer_id, request_details, return_broken_part, returned_at, received_at, technicians(name), sites(site_code)')
+      .select('id, case_number, parent_case_number, wo_number, ticket_id, site_id, account_name, state, warehouse_name, technician_id, outbound_tracking, inbound_tracking, transfer_id, request_details, return_broken_part, returned_at, received_at, inbound_email_id, technicians(name), sites(site_code)')
       .order('received_at', { ascending: false })
       .limit(limit);
 
@@ -66,6 +86,21 @@ exports.handler = async (event) => {
 
     const { data, error } = await query;
     if (error) return json(500, { error: "Query failed: " + error.message });
+
+    // 2026-08-27: resolve each shipment's linked ticket's inbound_email_id
+    // separately (see file header) -- a plain second query rather than an
+    // embedded-relation select, so this doesn't depend on Supabase having
+    // a declared FK it can introspect for rma_shipments.ticket_id.
+    const ticketIds = [...new Set((data || []).map(r => r.ticket_id).filter(Boolean))];
+    let ticketEmailById = {};
+    if (ticketIds.length) {
+      const { data: ticketRows, error: ticketErr } = await supabase
+        .from('tickets')
+        .select('id, inbound_email_id')
+        .in('id', ticketIds);
+      if (ticketErr) console.error('[get-rma-shipments] ticket email lookup failed (non-fatal):', ticketErr.message);
+      for (const t of ticketRows || []) ticketEmailById[t.id] = t.inbound_email_id;
+    }
 
     const shipments = (data || []).map(row => ({
       id: row.id,
@@ -87,6 +122,8 @@ exports.handler = async (event) => {
       returnBrokenPart: row.return_broken_part,
       returnedAt: row.returned_at,
       receivedAt: row.received_at,
+      dispatchInboundEmailId: row.ticket_id ? (ticketEmailById[row.ticket_id] || null) : null,
+      shipmentInboundEmailId: row.inbound_email_id || null,
     }));
 
     // Full active-technician roster, independent of which techs happen to
