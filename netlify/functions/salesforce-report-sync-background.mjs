@@ -515,7 +515,37 @@ export default async (req, context) => {
           console.log('[salesforce-report-sync] Reload threw (often benign):', e.message);
         }
       }
-      await page.waitForTimeout(12000);
+
+      // 2026-08-27: a recovery reload can occasionally close/crash the page
+      // or browser outright, rather than just throw inside the reload's own
+      // try/catch above -- confirmed live via a real run that failed with
+      // the opaque "Unhandled error: page.waitForTimeout: Target page,
+      // context or browser has been closed." Once that happens, every
+      // subsequent Playwright call in this loop (the waitForTimeout below,
+      // findExportInAllFrames on the next pass) throws that same generic
+      // message, which reads like an unexplained crash to anyone watching
+      // state.html's Refresh Now status -- confusing enough to prompt a
+      // call, even though it's just the known reload flakiness this whole
+      // recovery loop already exists to work around. Check explicitly and
+      // fail with a clear, specific message instead, so a bad run reads as
+      // "known scraper hiccup, just retry" rather than a mystery crash.
+      if (page.isClosed() || !browser.isConnected()) {
+        throw new Error(
+          `Page/browser closed unexpectedly during recovery reload #${reloadCount} of ${MAX_RELOADS} -- ` +
+            `this is a known category of Salesforce/Playwright flakiness (not a new bug). ` +
+            `Just hit Refresh Now again, or wait for the next scheduled sync.`
+        );
+      }
+
+      try {
+        await page.waitForTimeout(12000);
+      } catch (e) {
+        throw new Error(
+          `Page/browser closed unexpectedly while waiting between export-button checks -- ` +
+            `this is a known category of Salesforce/Playwright flakiness (not a new bug). ` +
+            `Just hit Refresh Now again, or wait for the next scheduled sync.`
+        );
+      }
     }
 
     if (!exportLocator) {
