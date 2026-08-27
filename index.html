@@ -3424,7 +3424,25 @@ function distanceMatrixStatus(state) {
             // relevant.length===0 early return -- see 2026-08-26 comment there)
 
             // Attach restockBy date and right form flag from parsed form counts
-            const today = new Date();
+            //
+            // 2026-08-27: this previously compared each item's restockBy date
+            // against new Date() -- the browser's REAL current date -- rather
+            // than dateStr, the Dispatch Date actually being generated/viewed.
+            // Harmless as long as the two happened to be the same (viewing
+            // today's own board), which is why this went unnoticed for a long
+            // time. Confirmed live after tonight's map fix (which relies on
+            // isSameDay to know what's really part of today's drivable
+            // route): generating a board for any date other than the literal
+            // real-world today made isSameDay false for EVERY item, since a
+            // restockBy of e.g. 8/28 can never equal real-today's 8/27 --
+            // Mark saw this as every stop on Friday's board losing its
+            // connecting line and turning into a dashed "not today" pin after
+            // regenerating for Saturday and back. This bug predates tonight's
+            // map work; the map fix just made it visible for the first time,
+            // since nothing previously depended on isSameDay being accurate
+            // for a non-today generated board. Fixed by comparing against the
+            // actual selected dispatch date instead of the real clock.
+            const today = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
             today.setHours(0,0,0,0);
             relevant.forEach(item => {
                 const fc = window.parsedFormCounts[item.code];
