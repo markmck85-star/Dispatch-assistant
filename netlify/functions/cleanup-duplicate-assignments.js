@@ -84,17 +84,31 @@ exports.handler = async (event) => {
   if (!dryRun && staleIdsToRemove.length) {
     for (let i = 0; i < staleIdsToRemove.length; i += 200) {
       const chunk = staleIdsToRemove.slice(i, i + 200);
-      const { error: updateErr, count } = await supabase
+      const { error: updateErr } = await supabase
         .from('assignments')
         .update({ status: 'removed', updated_at: new Date().toISOString() })
         .in('id', chunk)
-        .eq('status', 'planned') // safety: only touch rows still 'planned' at write time
-        .select('id', { count: 'exact', head: true });
+        .eq('status', 'planned'); // safety: only touch rows still 'planned' at write time
       if (updateErr) {
         console.error('[cleanup-duplicate-assignments] update failed for chunk:', updateErr.message);
-      } else {
-        rowsRemoved += count || 0;
+        continue;
       }
+      // 2026-08-27, confirmed live: chaining .select(..., {count:'exact',
+      // head:true}) directly onto this same .update() call reported
+      // rowsRemoved:0 even though the update itself genuinely succeeded
+      // (confirmed by hand against the real rows afterward) -- the
+      // count:exact+head:true combo works fine on a plain SELECT
+      // (see remainingNullCount below, and backfill-rma-site-id.js's
+      // identical use of it), just not reliably chained after an UPDATE in
+      // this environment. Fixed by doing a separate read-after-write count
+      // instead of trusting whatever the update call itself reports.
+      const { count: verifyCount, error: verifyErr } = await supabase
+        .from('assignments')
+        .select('id', { count: 'exact', head: true })
+        .in('id', chunk)
+        .eq('status', 'removed');
+      if (verifyErr) console.error('[cleanup-duplicate-assignments] post-update verify failed for chunk:', verifyErr.message);
+      else rowsRemoved += verifyCount || 0;
     }
   }
 

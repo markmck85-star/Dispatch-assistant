@@ -127,6 +127,29 @@ function parseSalesforceDate(val) {
   return new Date(trueUTC).toISOString();
 }
 
+// 2026-08-27: used by the site+date completion FIFO match below to allow a
+// visit that happened up to one calendar day BEFORE its assignment's
+// dispatch_date to still count as satisfying it. Confirmed by Mark this is
+// a routine, intentional pattern, not an edge case: the next day's dispatch
+// list typically arrives in the early afternoon, and if a listed site is
+// near where a technician already is (or on their way home) that
+// afternoon, it's common and sensible for them to knock it out a day early
+// rather than backtrack the next day. The original FIFO match required
+// visit_date >= dispatch_date strictly, which silently discarded exactly
+// this case -- a legitimately-completed early restock could never close
+// its assignment, since no later visit would ever come to satisfy it either
+// (the real work was already done). Capped at exactly one day (not
+// unbounded) since the dispatch list's own one-day-ahead cadence is the
+// only realistic reason a real completion would ever predate its nominal
+// dispatch_date at all -- a wider allowance would risk matching a
+// genuinely unrelated older visit instead.
+function oneDayEarlier(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {Array<object>} rows - already mapped to {accountName, state, woNumber,
@@ -404,19 +427,35 @@ async function performImport(supabase, rows) {
   // row that already exists, where upsert risks silently inserting a
   // malformed new row (missing every other required column) if a match
   // ever unexpectedly fails.
+  // 2026-08-27, confirmed live via cleanup-duplicate-assignments.js: chaining
+  // .select(..., {count:'exact', head:true}) directly onto an .update() call
+  // can report count:0 even when the update itself genuinely succeeds (the
+  // same combo works fine on a plain SELECT -- see remainingNullCount-style
+  // checks elsewhere -- just not reliably chained after an UPDATE here).
+  // None of the counts below are currently surfaced anywhere Mark sees them
+  // (the sync wrapper doesn't display them), so this was silently lurking
+  // rather than actively misleading -- fixed proactively now rather than
+  // leaving it for whenever these numbers do get surfaced or relied on.
+  // Pattern used throughout below: drop .select() from the update itself,
+  // then a separate read-after-write count query.
   let ticketIdsBackfilled = 0;
   for (const { appointment_number, ticket_id } of appointmentToTicketId) {
-    const { error: backfillErr, count: backfillCount } = await supabase
+    const { error: backfillErr } = await supabase
       .from('site_visits')
       .update({ ticket_id })
       .eq('appointment_number', appointment_number)
-      .is('ticket_id', null)
-      .select('id', { count: 'exact', head: true });
+      .is('ticket_id', null);
     if (backfillErr) {
       console.error(`[perform-import] site_visits.ticket_id backfill failed for ${appointment_number}:`, backfillErr.message);
-    } else {
-      ticketIdsBackfilled += backfillCount || 0;
+      continue;
     }
+    const { count: verifyCount, error: verifyErr } = await supabase
+      .from('site_visits')
+      .select('id', { count: 'exact', head: true })
+      .eq('appointment_number', appointment_number)
+      .eq('ticket_id', ticket_id);
+    if (verifyErr) console.error(`[perform-import] backfill verify failed for ${appointment_number}:`, verifyErr.message);
+    else ticketIdsBackfilled += verifyCount || 0;
   }
 
   let ticketsClosed = 0;
@@ -436,28 +475,38 @@ async function performImport(supabase, rows) {
     // flipped to 'completed' the same way clicking "Done" would --
     // without needing anyone to notice and click through it by hand.
     const ticketIdList = [...ticketIdsToClose];
-    const { error: ticketCloseErr, count: ticketCloseCount } = await supabase
+    const { error: ticketCloseErr } = await supabase
       .from('tickets')
       .update({ status: 'closed' })
       .in('id', ticketIdList)
-      .neq('status', 'closed')
-      .select('id', { count: 'exact', head: true });
+      .neq('status', 'closed');
     if (ticketCloseErr) {
       console.error('[perform-import] auto-close tickets failed:', ticketCloseErr.message);
     } else {
-      ticketsClosed = ticketCloseCount || 0;
+      const { count: closedCount, error: closedVerifyErr } = await supabase
+        .from('tickets')
+        .select('id', { count: 'exact', head: true })
+        .in('id', ticketIdList)
+        .eq('status', 'closed');
+      if (closedVerifyErr) console.error('[perform-import] ticket-close verify failed:', closedVerifyErr.message);
+      else ticketsClosed = closedCount || 0;
     }
 
-    const { error: assignmentErr, count: assignmentCount } = await supabase
+    const { error: assignmentErr } = await supabase
       .from('assignments')
       .update({ status: 'completed' })
       .in('ticket_id', ticketIdList)
-      .eq('status', 'planned')
-      .select('id', { count: 'exact', head: true });
+      .eq('status', 'planned');
     if (assignmentErr) {
       console.error('[perform-import] auto-complete assignments failed:', assignmentErr.message);
     } else {
-      assignmentsCompleted = assignmentCount || 0;
+      const { count: completedCount, error: completedVerifyErr } = await supabase
+        .from('assignments')
+        .select('id', { count: 'exact', head: true })
+        .in('ticket_id', ticketIdList)
+        .eq('status', 'completed');
+      if (completedVerifyErr) console.error('[perform-import] assignment-complete verify failed:', completedVerifyErr.message);
+      else assignmentsCompleted = completedCount || 0;
     }
   }
 
@@ -518,7 +567,10 @@ async function performImport(supabase, rows) {
       const plannedList = plannedBySite.get(site_id) || [];
       let visitPtr = 0;
       for (const assignment of plannedList) {
-        while (visitPtr < visitDates.length && visitDates[visitPtr] < assignment.dispatch_date) {
+        // 2026-08-27: allow a visit up to 1 day before dispatch_date to
+        // count -- see oneDayEarlier() above for why.
+        const earliestAllowedDate = oneDayEarlier(assignment.dispatch_date);
+        while (visitPtr < visitDates.length && visitDates[visitPtr] < earliestAllowedDate) {
           visitPtr++;
         }
         if (visitPtr >= visitDates.length) break; // no more real completions available for this site in this batch
@@ -527,16 +579,21 @@ async function performImport(supabase, rows) {
       }
     }
     if (idsToComplete.length) {
-      const { error: siteDateErr, count: siteDateCount } = await supabase
+      const { error: siteDateErr } = await supabase
         .from('assignments')
         .update({ status: 'completed' })
         .in('id', idsToComplete)
-        .eq('status', 'planned')
-        .select('id', { count: 'exact', head: true });
+        .eq('status', 'planned');
       if (siteDateErr) {
         console.error('[perform-import] site/date auto-complete update failed:', siteDateErr.message);
       } else {
-        assignmentsCompletedBySiteDate += siteDateCount || 0;
+        const { count: verifyCount, error: verifyErr } = await supabase
+          .from('assignments')
+          .select('id', { count: 'exact', head: true })
+          .in('id', idsToComplete)
+          .eq('status', 'completed');
+        if (verifyErr) console.error('[perform-import] site/date auto-complete verify failed:', verifyErr.message);
+        else assignmentsCompletedBySiteDate += verifyCount || 0;
       }
     }
   }
@@ -569,4 +626,4 @@ async function performImport(supabase, rows) {
   };
 }
 
-module.exports = { performImport, matchSite, tokenize, stripStatePrefix, parseSalesforceDate, easternDateOnly };
+module.exports = { performImport, matchSite, tokenize, stripStatePrefix, parseSalesforceDate, easternDateOnly, oneDayEarlier };
