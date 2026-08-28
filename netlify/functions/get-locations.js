@@ -11,6 +11,17 @@
  * { code, state, name, address, primaryTech, fallbackTech, defaultTech,
  *   contractorOverride, contractorName, machineType, remote, lat, lng }.
  *
+ * v3 (2026-08-28): also resolves code-style site_aliases (e.g. a site
+ * whose site_code is GA1083 but that Neumo's own dispatch-list digest
+ * still labels under an old code like GA1018) as additional keys pointing
+ * at the same location object -- so a pasted/parsed dispatch-list code
+ * that no longer has its own `sites` row still resolves correctly instead
+ * of silently failing to match or (worse) recreating a duplicate site.
+ * Only aliases matching the site-code pattern (e.g. GA1018) are used this
+ * way; free-text name aliases are left alone since they're not something
+ * index.html ever looks up as a key. A real site_code always wins if it's
+ * still live -- alias keys never overwrite an existing entry.
+ *
  * Known gap: `cluster` (used for remote-cluster grouping) isn't in the
  * `sites` table and has no current write path anywhere in the app (checked
  * admin.html and every Supabase-writing function -- nothing sets it). Not
@@ -22,6 +33,8 @@
 
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
+
+const SITE_CODE_PATTERN = /^[A-Z]{2}\d+$/;
 
 function getDispatchStore() {
   return getStore("dispatch");
@@ -56,7 +69,7 @@ exports.handler = async (event) => {
 
       const { data: sites, error: sitesErr } = await supabase
         .from("sites")
-        .select("site_code, state, name, address, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id")
+        .select("id, site_code, state, name, address, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id")
         .eq("state", state);
 
       if (sitesErr) throw sitesErr;
@@ -77,10 +90,11 @@ exports.handler = async (event) => {
       }
 
       const result = {};
+      const siteIdById = {};
       for (const s of (sites || [])) {
         const primaryTech = techNameById[s.primary_tech_id] || "";
         const fallbackTech = techNameById[s.fallback_tech_id] || "";
-        result[s.site_code] = {
+        const record = {
           code: s.site_code,
           state: s.state,
           name: s.name || s.site_code,
@@ -94,6 +108,28 @@ exports.handler = async (event) => {
           remote: !!s.remote,
           ...(s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : {}),
         };
+        result[s.site_code] = record;
+        siteIdById[s.id] = record;
+      }
+
+      // Fold in code-style site_aliases (e.g. an old/alternate code Neumo's
+      // dispatch-list digest still uses) as additional keys pointing at the
+      // same record, without ever overwriting a live site_code entry.
+      const siteIds = Object.keys(siteIdById);
+      if (siteIds.length > 0) {
+        const { data: aliases, error: aliasErr } = await supabase
+          .from("site_aliases")
+          .select("site_id, alias")
+          .in("site_id", siteIds);
+        if (aliasErr) throw aliasErr;
+
+        for (const a of (aliases || [])) {
+          const alias = (a.alias || "").trim().toUpperCase();
+          if (!SITE_CODE_PATTERN.test(alias)) continue; // skip free-text name aliases
+          if (result[alias]) continue; // never clobber a real, still-live site_code
+          const record = siteIdById[a.site_id];
+          if (record) result[alias] = record;
+        }
       }
 
       return {
