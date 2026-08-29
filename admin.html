@@ -2023,7 +2023,14 @@
             if (!list) return;
             list.innerHTML = '<p style="color:#888;font-size:13px;">Loading...</p>';
             try {
-                const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS');
+                // 2026-08-29 fix: added cache: 'no-store' -- same stale-GET-
+                // cache class of bug already found and fixed in
+                // get-state-console.js. Without it, a checkbox toggle could
+                // genuinely save correctly server-side while this reload
+                // (fired on tab switch) kept showing the old cached state,
+                // making it look like the toggle "didn't stick" unless you
+                // went through the full Edit -> Update Recipient flow.
+                const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS', { cache: 'no-store' });
                 const data = await resp.json();
                 const s = data.settings || {};
                 const recipients = (s.settings && s.settings.recipients) || s.recipients || [];
@@ -2113,7 +2120,10 @@
         }
 
         async function getNotifRecipients() {
-            const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS');
+            // 2026-08-29 fix: see the matching comment in loadNotifRecipients --
+            // same stale-GET-cache risk applies here, since this is the read
+            // half of the toggle-checkbox save itself.
+            const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS', { cache: 'no-store' });
             const data = await resp.json();
             // save-settings stores {settings:{recipients:[]}} so get-settings returns
             // data.settings = {settings:{recipients:[]}, updatedAt:...}
@@ -2180,7 +2190,15 @@
 
         async function toggleNotifRecipient(index, enabled) {
             const recipients = await getNotifRecipients();
-            if (recipients[index]) { recipients[index].enabled = enabled; await saveNotifRecipients(recipients); }
+            if (recipients[index]) {
+                recipients[index].enabled = enabled;
+                await saveNotifRecipients(recipients);
+                // Confirm what actually got saved rather than trusting the
+                // raw checkbox click -- cheap given no-store above already
+                // guarantees a fresh read, and it's the same safety net
+                // addNotifRecipient already applies after its own save.
+                setTimeout(() => loadNotifRecipients(), 500);
+            }
         }
 
         async function removeNotifRecipient(index) {
