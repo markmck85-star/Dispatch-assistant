@@ -352,7 +352,7 @@
                     </div>
                 </div>
                 
-                <!-- SESSION TOGGLES: Drive Time + DCO -->
+                <!-- SESSION TOGGLES: Drive Time + DCO + Trouble Only -->
                 <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
                     <button id="driveTimeToggleBtn" onclick="toggleDriveTime()"
                         style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
@@ -361,6 +361,11 @@
                     <button id="dcoToggleBtn" onclick="toggleDCO()"
                         style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
                         🔔 DCO: OFF
+                    </button>
+                    <button id="troubleOnlyToggleBtn" onclick="toggleTroubleOnly()"
+                        title="Show only trouble tickets + anything else due today -- hides restock/maintenance stops due a later day. Defaults on when the Dispatch Date is a Saturday."
+                        style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
+                        🚨 Trouble Only: OFF
                     </button>
                 </div>
 
@@ -3249,6 +3254,8 @@ function distanceMatrixStatus(state) {
             // Build unavailability set from comp days + manual flags
             const dateInput = document.getElementById('dispatchDate');
             const dateStr = dateInput && dateInput.value ? dateInput.value : '';
+            syncTroubleOnlyDefault(dateStr); // auto-on for Saturdays unless manually overridden this session
+
 
             // Phase 2 Stage 2b: respect already-persisted dispatcher decisions for
             // this date instead of re-running auto-assignment blind. Completed/
@@ -3811,7 +3818,7 @@ function distanceMatrixStatus(state) {
 
                 let cardHtml = `<div class="tech-card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                        <strong>${techNumber != null ? `<span style="color:#7ec8e3;">#${techNumber}</span> ` : ''}${tech} (${items.length})</strong>
+                        <strong>${techNumber != null ? `<span style="color:#7ec8e3;">#${techNumber}</span> ` : ''}${tech} (${window.troubleOnlyFilter ? items.filter(isStopVisible).length + ' of ' + items.length : items.length})</strong>
                         <div>
                             <button class="control-btn" style="background:#17a2b8; color:white;" onclick="openTechRoute('${techKey}')">🗺️ Route</button>
                             <button class="control-btn" style="background:#d68910; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
@@ -3822,6 +3829,12 @@ function distanceMatrixStatus(state) {
                     <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0; margin-bottom:4px;"></div>`;
                 
                 items.forEach((item, index) => {
+                    // 2026-08-29: trouble-only filter -- skip building HTML for a
+                    // hidden stop, but keep `index` as its real position in the
+                    // underlying array (we don't remove it), since every action
+                    // button (Done/Cancel/Reassign/Push/Move) below is wired to
+                    // this exact index against window.currentAssignments[tech].
+                    if (!isStopVisible(item)) return;
                     const loc = LOCATIONS[item.code];
                     const prevItemCode = index > 0 ? items[index - 1].code : null;
                     const leg = getCachedLegInfo(tech, prevItemCode, item.code);
@@ -3891,12 +3904,22 @@ function distanceMatrixStatus(state) {
                 return cardHtml;
             }
 
+            // 2026-08-29: trouble-only filter helper. isSameDay/urgent items are
+            // always visible regardless of the filter; it only ever hides a
+            // plain restock/maintenance stop that isn't due today. Declared here
+            // (function hoisting) so both renderTechCard and the bucket
+            // computations below can use it.
+            function isStopVisible(item) {
+                return !window.troubleOnlyFilter || item.urgent || item.isSameDay;
+            }
+
             // Split techs into same-day and tomorrow buckets based on their stops
             const techsSameDay = Object.keys(assignments).sort().filter(t => 
                 assignments[t].length > 0 && assignments[t].some(i => i.isSameDay)
             );
             const techsTomorrow = Object.keys(assignments).sort().filter(t => 
-                assignments[t].length > 0 && !assignments[t].some(i => i.isSameDay)
+                assignments[t].length > 0 && !assignments[t].some(i => i.isSameDay) &&
+                assignments[t].some(i => isStopVisible(i)) // drop all-restock techs entirely when filtered
             );
             // Techs with mixed today/tomorrow stops go in same-day section
             const allTechsOrdered = [...new Set([...techsSameDay, ...techsTomorrow])];
@@ -4133,6 +4156,41 @@ function distanceMatrixStatus(state) {
                 btn.style.borderColor = window.dcoEnabled ? '#ffa500' : '#555';
                 btn.textContent = window.dcoEnabled ? '🔔 DCO: ON' : '🔔 DCO: OFF';
             }
+        }
+
+        // ── TROUBLE ONLY TOGGLE ─────────────────────────────────────────────
+        // 2026-08-29: session toggle (same pattern as Drive Time/DCO above) to
+        // hide restock/maintenance stops that aren't due today, so a dispatcher
+        // -- especially one covering an unfamiliar state's Saturday on-call --
+        // can see just the trouble tickets (+ anything else genuinely due
+        // today) without Monday's restock clutter in the way. Auto-defaults on
+        // whenever the selected Dispatch Date is a Saturday, but a manual
+        // toggle this session always wins over that default (see
+        // _processDispatchCore's call to syncTroubleOnlyDefault()).
+        function setTroubleOnlyButtonUI() {
+            const btn = document.getElementById('troubleOnlyToggleBtn');
+            if (!btn) return;
+            btn.style.background = window.troubleOnlyFilter ? '#3a1414' : '#2a2a3e';
+            btn.style.color = window.troubleOnlyFilter ? '#ff6b6b' : '#888';
+            btn.style.borderColor = window.troubleOnlyFilter ? '#ff6b6b' : '#555';
+            btn.textContent = window.troubleOnlyFilter ? '🚨 Trouble Only: ON' : '🚨 Trouble Only: OFF';
+        }
+
+        function toggleTroubleOnly() {
+            window.troubleOnlyFilter = !window.troubleOnlyFilter;
+            window.troubleOnlyManuallySet = true; // stop the Saturday auto-default from overriding this session
+            setTroubleOnlyButtonUI();
+            if (window.currentAssignments) renderReviewBoard(true);
+        }
+
+        // Called once per dispatch generation with the date actually being
+        // generated/viewed -- applies the Saturday auto-default UNLESS the
+        // dispatcher has already explicitly toggled it this session.
+        function syncTroubleOnlyDefault(dateStr) {
+            if (window.troubleOnlyManuallySet) return;
+            const d = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
+            window.troubleOnlyFilter = d.getDay() === 6; // Saturday
+            setTroubleOnlyButtonUI();
         }
 
         // ── DRIVE TIME FETCH (per tech, diagonal Distance Matrix) ─────────────
