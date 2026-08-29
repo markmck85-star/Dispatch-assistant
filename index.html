@@ -1473,10 +1473,6 @@
             getCompDaysForDate(dateStr).forEach(c => unavailable.add(c.tech));
             const bfDay = (window.bfUnavailable && window.bfUnavailable[dateStr]) || {};
             Object.keys(bfDay).forEach(tech => unavailable.add(tech));
-            Object.entries(window.manualUnavailable).forEach(([tech, isOut]) => {
-                if (isOut) unavailable.add(tech);
-                else unavailable.delete(tech); // explicit false = manual override to available, removes comp day etc.
-            });
             // On Saturdays (GA only), mark everyone not on the on-call list as unavailable
             const selectedDate = new Date(dateStr + 'T12:00:00');
             if (selectedDate.getDay() === 6 && CURRENT_STATE === 'GA') {
@@ -1485,6 +1481,17 @@
                     if (!onCall.has(tech)) unavailable.add(tech);
                 });
             }
+            // 2026-08-29 fix: this must run LAST. It previously ran before the
+            // Saturday on-call-only block above, so an explicit "mark available"
+            // override got silently wiped out again by that block re-adding
+            // everyone not on today's on-call list -- the override only ever
+            // looked like it worked for someone who happened to already be
+            // on-call anyway (never actually tested). Applying overrides last
+            // guarantees a manual choice always wins, both ways.
+            Object.entries(window.manualUnavailable).forEach(([tech, isOut]) => {
+                if (isOut) unavailable.add(tech);
+                else unavailable.delete(tech); // explicit false = manual override to available
+            });
             return unavailable;
         }
 
