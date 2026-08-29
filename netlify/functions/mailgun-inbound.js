@@ -945,6 +945,24 @@ exports.handler = async (event) => {
     // tickets. Never removes or blocks the existing Blobs write/SMS send
     // below -- if Supabase is down or a query fails, we log and move on so
     // the pipeline behaves exactly as it did before this stage landed.
+    //
+    // 2026-08-29 fix, corrected: appendedTicketState must be declared HERE,
+    // above the try block, not merely above the isLineItemAddition if-block
+    // inside it (that was the first attempt at this fix, and it didn't
+    // actually work -- see below). The SMS-sending code that reads this
+    // variable sits entirely OUTSIDE this try/catch (it's sibling code
+    // after the catch closes), so a `let` declared anywhere inside the try
+    // -- no matter how early -- still goes out of scope at the try block's
+    // own closing brace, throwing the exact same "ReferenceError:
+    // appendedTicketState is not defined" at the SMS block regardless.
+    // Confirmed live 2026-08-29 (Ponce De Leon WO 00151065 forward test):
+    // the first fix attempt genuinely deployed correctly (verified via
+    // GitHub raw file + Netlify deploy log) and still crashed at the same
+    // spot, which is what exposed this deeper scope boundary. Declaring it
+    // out here, before the try even opens, is the only place both the
+    // isLineItemAddition write (deep inside the try) and the SMS-block read
+    // (after the try/catch closes) can both actually see it.
+    let appendedTicketState = null;
     try {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -1072,23 +1090,9 @@ exports.handler = async (event) => {
       // `tickets` -- bulk dispatch lists are a separate, not-yet-built path
       // (see handoff doc). fromSubject-fallback trouble tickets are
       // included since they carry a real WO number even without a matched
-      // site code.
-      //
-      // 2026-08-29 fix: declared here (rather than with its own `let`
-      // ~50 lines down, inside the isLineItemAddition branch below) so the
-      // SMS-sending block further down in this function can actually see
-      // it. The inner `let` was block-scoped to the isLineItemAddition
-      // logic and went out of scope by the time the SMS code tried to read
-      // it, throwing "ReferenceError: appendedTicketState is not defined"
-      // on every single trouble ticket since this was added 2026-08-26 --
-      // an uncaught exception that killed the whole function invocation
-      // before it ever reached the recipient-loading/SMS-send code below.
-      // Ticket creation and board auto-add happen earlier in this function
-      // and were unaffected, which is why tickets kept appearing correctly
-      // on the board/state console the whole time despite zero texts going
-      // out. Confirmed via live Netlify function logs (send-sms/
-      // mailgun-inbound), four separate crashes, identical stack trace.
-      let appendedTicketState = null;
+      // site code. (appendedTicketState, read/written a bit further down
+      // in this block, is declared above the surrounding try -- see the
+      // 2026-08-29 comment there.)
       if ((dispatchType === 'trouble' || dispatchType === 'maintenance') && parsed && parsed.woNum) {
         const rawSiteCode = parsed.siteCode || (parsed.site && (parsed.site.match(/\b([A-Z]{2}\d{3,5})\b/) || [])[1]) || null;
         let siteId = null;
