@@ -1483,6 +1483,25 @@
             return unavailable;
         }
 
+        // 2026-08-29: shared helper so both the dispatch-generation assignment
+        // loop and the fallback-assignment modal derive a stop's real target
+        // date the same way -- from its own restockBy field (M/D/YYYY), falling
+        // back to whatever date is passed in when absent/unparsable. Used to
+        // avoid checking a Monday-pushed stop's tech availability against a
+        // Saturday's on-call-only roster (see getUnavailableTechsForDate).
+        function getItemEffectiveDateStr(item, fallbackDateStr) {
+            if (item && item.restockBy) {
+                const parts = item.restockBy.split('/');
+                if (parts.length === 3) {
+                    const mm = parseInt(parts[0]), dd = parseInt(parts[1]), yyyy = parseInt(parts[2]);
+                    if (!isNaN(mm) && !isNaN(dd) && !isNaN(yyyy)) {
+                        return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+                    }
+                }
+            }
+            return fallbackDateStr;
+        }
+
         // --- FORM COUNT PARSER ---
         function parseFormCounts(text) {
             // Handles both single-line (tab-separated) and multi-line (one cell per line)
@@ -3472,6 +3491,37 @@ function distanceMatrixStatus(state) {
                 ? sortTechsByDistance(_availRaw, _refCode, CURRENT_STATE).map(x => x.name)
                 : _availRaw;
 
+            // 2026-08-29 fix: availability was being checked against the single
+            // globally-selected Dispatch Date for every stop, even stops already
+            // correctly flagged isSameDay=false because their real restockBy date
+            // is a different day (e.g. a Monday restock generated/viewed on a
+            // Saturday board). On a Saturday, getUnavailableTechsForDate() only
+            // returns the on-call pair for GA -- so a Monday stop's normal,
+            // fully-available weekday primary tech looked "unavailable" and every
+            // such stop wrongly triggered the no-fallback prompt. Fix: derive
+            // each item's effective date from its own restockBy (falling back to
+            // the selected Dispatch Date when absent/unparsable) and check
+            // availability against THAT date instead of the global one. Cached
+            // per date since many stops typically share the same restockBy.
+            const _unavailByDate = new Map();
+            const _availTechsByDate = new Map();
+            function unavailableForDate(ds) {
+                if (!ds || ds === dateStr) return unavailable;
+                if (!_unavailByDate.has(ds)) _unavailByDate.set(ds, getUnavailableTechsForDate(ds));
+                return _unavailByDate.get(ds);
+            }
+            function availableTechsForDate(ds) {
+                if (!ds || ds === dateStr) return availableTechs;
+                if (!_availTechsByDate.has(ds)) {
+                    const raw = allTechNames.filter(t => !unavailableForDate(ds).has(t));
+                    const sorted = _refCode
+                        ? sortTechsByDistance(raw, _refCode, CURRENT_STATE).map(x => x.name)
+                        : raw;
+                    _availTechsByDate.set(ds, sorted);
+                }
+                return _availTechsByDate.get(ds);
+            }
+
             // HARD-CODED CONTRACTOR ASSIGNMENTS - These ALWAYS go to specific contractors
             const CONTRACTOR_ASSIGNMENTS = {
                 'FL1049': 'TechSpot',      // Santa Rosa County Publix - Navarre
@@ -3492,6 +3542,12 @@ function distanceMatrixStatus(state) {
                 // which was the actual bug behind "re-enabled Robert but reprocessing
                 // still leaves it on his backup," found 2026-07-21.
                 const isManualOverride = existing && existing.status === 'planned' && existing.assignedBy === 'manual';
+
+                // Check this item's OWN effective date, not the globally-selected
+                // Dispatch Date -- see getItemEffectiveDateStr() above.
+                const _itemDs = getItemEffectiveDateStr(item, dateStr);
+                const unavailable = unavailableForDate(_itemDs);
+                const availableTechs = availableTechsForDate(_itemDs);
 
                 if (isManualOverride && !unavailable.has(existing.techName)) {
                     // Honor the dispatcher's explicit reassignment, as long as that
@@ -4582,9 +4638,14 @@ function distanceMatrixStatus(state) {
             var existing = document.getElementById('fallback-assign-prompt');
             if (existing) existing.remove();
 
-            // Rebuild available techs from CURRENT availability state (not dispatch-time snapshot)
+            // Rebuild available techs from CURRENT availability state (not dispatch-time
+            // snapshot), checked against THIS stop's own real target date (restockBy)
+            // rather than whatever's currently in the Dispatch Date field -- otherwise a
+            // Monday-pushed stop viewed on a Saturday board would incorrectly check
+            // against Saturday's on-call-only roster. See getItemEffectiveDateStr().
             const dateInput = document.getElementById('dispatchDate');
-            const dateStr = dateInput && dateInput.value ? dateInput.value : '';
+            const boardDateStr = dateInput && dateInput.value ? dateInput.value : '';
+            const dateStr = getItemEffectiveDateStr(item, boardDateStr);
             const currentUnavailable = dateStr ? getUnavailableTechsForDate(dateStr) : new Set(
                 Object.entries(window.manualUnavailable).filter(([,v]) => v).map(([k]) => k)
             );
