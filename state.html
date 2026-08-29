@@ -450,7 +450,7 @@ async function loadAll() {
   loadRestock(state);
 }
 
-async function loadConsole(state) {
+async function loadConsole(state, isRetry) {
   const techStatus = document.getElementById('techStatus');
   const techGrid = document.getElementById('techGrid');
   const ticketStatus = document.getElementById('ticketStatus');
@@ -611,6 +611,19 @@ async function loadConsole(state) {
       }).join('');
     }
   } catch (e) {
+    // 2026-08-29: retry once, silently, before showing an error -- found
+    // via a real case where get-state-console's Supabase auth failed with
+    // a transient "JWT issued at future" clock-skew error that cleared up
+    // on a plain page refresh. Dispatchers other than Mark shouldn't need
+    // to know a manual refresh is even a thing; a lot of these look like
+    // one-off blips that resolve themselves a moment later. If the retry
+    // ALSO fails, it's presumably a real, persistent problem worth
+    // actually surfacing rather than silently retrying forever.
+    if (!isRetry) {
+      techStatus.textContent = 'Loading…';
+      setTimeout(() => loadConsole(state, true), 1500);
+      return;
+    }
     techStatus.textContent = '';
     ticketStatus.textContent = '';
     techGrid.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
