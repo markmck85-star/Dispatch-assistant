@@ -1073,6 +1073,22 @@ exports.handler = async (event) => {
       // (see handoff doc). fromSubject-fallback trouble tickets are
       // included since they carry a real WO number even without a matched
       // site code.
+      //
+      // 2026-08-29 fix: declared here (rather than with its own `let`
+      // ~50 lines down, inside the isLineItemAddition branch below) so the
+      // SMS-sending block further down in this function can actually see
+      // it. The inner `let` was block-scoped to the isLineItemAddition
+      // logic and went out of scope by the time the SMS code tried to read
+      // it, throwing "ReferenceError: appendedTicketState is not defined"
+      // on every single trouble ticket since this was added 2026-08-26 --
+      // an uncaught exception that killed the whole function invocation
+      // before it ever reached the recipient-loading/SMS-send code below.
+      // Ticket creation and board auto-add happen earlier in this function
+      // and were unaffected, which is why tickets kept appearing correctly
+      // on the board/state console the whole time despite zero texts going
+      // out. Confirmed via live Netlify function logs (send-sms/
+      // mailgun-inbound), four separate crashes, identical stack trace.
+      let appendedTicketState = null;
       if ((dispatchType === 'trouble' || dispatchType === 'maintenance') && parsed && parsed.woNum) {
         const rawSiteCode = parsed.siteCode || (parsed.site && (parsed.site.match(/\b([A-Z]{2}\d{3,5})\b/) || [])[1]) || null;
         let siteId = null;
@@ -1129,7 +1145,8 @@ exports.handler = async (event) => {
         // entire ticket category. Fixed by looking up the real state from
         // the ticket's own already-matched site instead of trying to
         // detect it fresh from an email that was never going to contain it.
-        let appendedTicketState = null;
+        // (appendedTicketState itself is declared above, outside this
+        // block -- see the 2026-08-29 comment there.)
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
             .from('tickets').select('id, description, ticket_kind, site_id, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
