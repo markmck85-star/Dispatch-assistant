@@ -4,11 +4,11 @@
 // Gina's Claude custom connectors. GA/NC/SC scope for v1.
 //
 // This wraps existing, already-public read-only Netlify functions
-// (get-restock-schedule.js, get-state-console.js, get-watchdog-log.js) by
-// calling their handlers directly in-process rather than round-tripping
-// over HTTP to ourselves. Those underlying endpoints stay exactly as they
-// are -- public GET, no auth -- this function is the only thing that
-// checks the shared secret.
+// (get-restock-schedule.js, get-state-console.js, get-watchdog-log.js,
+// get-emails.js) by calling their handlers directly in-process rather than
+// round-tripping over HTTP to ourselves. Those underlying endpoints stay
+// exactly as they are -- public GET, no auth -- this function is the only
+// thing that checks the shared secret.
 //
 // Auth: shared secret, checked two ways so it works both from curl/testing
 // (an 'x-mcr-secret' header) and from Claude's custom-connector UI, which
@@ -27,6 +27,7 @@
 const getRestockSchedule = require('./get-restock-schedule.js');
 const getStateConsole = require('./get-state-console.js');
 const getWatchdogLog = require('./get-watchdog-log.js');
+const getEmails = require('./get-emails.js');
 
 const SERVER_NAME = 'mcr-dispatch';
 const SERVER_VERSION = '0.1.0';
@@ -134,10 +135,15 @@ const TOOLS = [
   {
     name: 'search_emails',
     description:
-      'NOT YET IMPLEMENTED. Will full-text search inbound_emails (~3,020 emails since May 16) with quoted-reply/signature/disclaimer stripping.',
+      'Full-text-style search over inbound_emails (every email mailgun-inbound.js has received via itiservice@mcrtechservice.com, since May 16 2026) -- searches subject, sender, and body. Every word in the query must appear somewhere in one of those fields. Use this to check whether a specific ticket/WO/site email actually arrived and how it was classified (trouble/maintenance/dispatch_list/rma_shipping/closing_note_email/reply/unknown) and parsed (parsed/failed/ignored) -- independent of whether it made it into the tickets table. Bodies are returned cleaned (quoted replies, forwarded-message chains, and common signature/disclaimer boilerplate stripped).',
     inputSchema: {
       type: 'object',
-      properties: { query: { type: 'string' } },
+      properties: {
+        query: { type: 'string', description: 'Keywords -- e.g. a WO number, a site name, or a couple of distinguishing words. All words must match.' },
+        limit: { type: 'number', description: 'Max results, default 15, capped at 50.' },
+        since: { type: 'string', description: 'YYYY-MM-DD, optional -- only emails received on/after this date' },
+        until: { type: 'string', description: 'YYYY-MM-DD, optional -- only emails received on/before this date' },
+      },
       required: ['query'],
     },
   },
@@ -197,8 +203,17 @@ async function callTool(name, args) {
       if (statusCode !== 200) return toolError(body.error || 'get_watchdog_log failed');
       return toolText({ state: v.state, entries: body.entries });
     }
-    case 'search_emails':
-      return toolError('search_emails is not implemented yet -- coming in the next build pass.');
+    case 'search_emails': {
+      const query = args && args.query;
+      if (!query || !String(query).trim()) return toolError('query is required');
+      const qs = { query: String(query).trim() };
+      if (args && args.limit) qs.limit = String(args.limit);
+      if (args && args.since) qs.since = args.since;
+      if (args && args.until) qs.until = args.until;
+      const { statusCode, body } = await callHandler(getEmails, qs);
+      if (statusCode !== 200) return toolError(body.error || 'search_emails failed');
+      return toolText(body);
+    }
     case 'opportunistic_restock_near':
       return toolError('opportunistic_restock_near is not implemented yet -- design still open (see restock-threshold-analysis).');
     default:
