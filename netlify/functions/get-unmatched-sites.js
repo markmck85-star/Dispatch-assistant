@@ -1,12 +1,43 @@
-// get-unmatched-sites.js
+// get-unmatched-sites.js — v2 — updated 2026-08-30
 //
 // Powers the "Unmatched Sites" review tool. 3,452 needs_review site_visits
 // rows collapse down to only ~179 distinct (state, account_name_raw)
 // groups -- reviewing and fixing per GROUP rather than per row is what
-// makes this tractable at all. Reuses the same tokenize/overlap scoring as
-// rematch-site-visits.js to suggest a likely site for each group (even
-// below that function's 0.65 auto-match threshold), so most groups can be
-// confirmed with one tap instead of a manual search. Read-only.
+// makes this tractable at all. Read-only.
+//
+// v2 changes, all driven by the same root cause: plain token-overlap
+// scoring treats every shared word as equally meaningful, but generic
+// words like "bmv"/"dmv"/"sos"/"county" appear in dozens of site names
+// per state and drown out the one word that actually distinguishes a
+// location (the town/street name). Confirmed live 2026-08-30: 21 BMV-
+// named sites in Indiana alone meant every "___ BMV" unmatched name tied
+// at the same score against all 21, so the tool just showed whichever
+// happened to come first -- consistently wrong (e.g. "Midtown BMV"
+// suggested "Bluffton BMV", a real site 100+ miles away, while the
+// actual matches -- Midtown AND Midtown 2, two separate Big Hoku units
+// genuinely both at that address -- never surfaced at all).
+//
+//  1. IDF-style down-weighting: a token's weight is inverse to how many
+//     site names in that state contain it, computed per-state from the
+//     sites list itself (no hardcoded stopword list to maintain).
+//  2. Multi-unit siblings ("Carmel", "Carmel 2", "Carmel 3" -- a real,
+//     widespread Indiana pattern of separate Big Hoku units at one busy
+//     address) are meant to score identically against an unnumbered raw
+//     name, not be treated as a meaningful mismatch -- bare numeric
+//     tokens are dropped before scoring so they group as intended siblings
+//     instead of being penalized as an extra unmatched word.
+//  3. Ties are surfaced, not silently resolved: every site scoring at (or
+//     within a small margin of) the top score comes back as a candidate,
+//     not just one arbitrary pick presented with false confidence. When
+//     the raw name carries no unit number itself, the base (unnumbered)
+//     sibling is marked primary among the tied candidates.
+//  4. Ticket-address crossover: many of these same raw names also show up
+//     in email tickets, which (unlike this Salesforce-report data) often
+//     carry a captured street address. When one exists and it matches a
+//     candidate site's address, that becomes a high-confidence
+//     "address-confirmed" result that overrides the name-only guess
+//     entirely, using the same address-normalization approach validated
+//     against mailgun-inbound.js's own matching the same day.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -26,7 +57,13 @@ function tokenize(s) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
-    .map((t) => TOKEN_ALIASES[t] || t);
+    .map((t) => TOKEN_ALIASES[t] || t)
+    // Bare numeric tokens are either an internal reference number ("205",
+    // "376") or a multi-unit suffix ("2", "3", "4") -- neither is a
+    // meaningful distinguishing word for scoring purposes. Dropping both
+    // lets "Carmel" and "Carmel 2" tokenize identically, so they correctly
+    // tie as siblings instead of scoring as a partial mismatch.
+    .filter((t) => !/^\d+$/.test(t));
 }
 
 function stripStatePrefix(accountName) {
@@ -34,43 +71,169 @@ function stripStatePrefix(accountName) {
   return m ? m[2] : String(accountName || '').trim();
 }
 
-function overlapScore(tokensA, tokensB) {
-  const setA = new Set(tokensA);
-  const setB = new Set(tokensB);
-  const intersection = [...setA].filter((t) => setB.has(t)).length;
-  const smaller = Math.min(setA.size, setB.size);
-  return smaller > 0 ? intersection / smaller : 0;
+// Per-state inverse-document-frequency weights, computed from how many
+// site names in that state contain each token. A token in every site's
+// name (weight -> near 0) contributes almost nothing to the score; a
+// token unique to one or two sites (weight -> near 1) carries real
+// distinguishing power. log-based so the falloff is gradual rather than
+// all-or-nothing.
+function buildTokenWeights(sitesForState) {
+  const docFreq = {};
+  for (const site of sitesForState) {
+    const seen = new Set(tokenize(site.name));
+    for (const t of seen) docFreq[t] = (docFreq[t] || 0) + 1;
+  }
+  const n = Math.max(sitesForState.length, 1);
+  const weights = {};
+  for (const [t, df] of Object.entries(docFreq)) {
+    weights[t] = Math.log((n + 1) / df);
+  }
+  return weights;
 }
 
-function bestGuess(accountName, sitesForState) {
+function weightedOverlapScore(targetTokens, siteTokens, weights) {
+  const setB = new Set(siteTokens);
+  const targetWeightTotal = targetTokens.reduce((sum, t) => sum + (weights[t] ?? 1), 0);
+  if (targetWeightTotal === 0) return 0;
+  const sharedWeight = targetTokens
+    .filter((t) => setB.has(t))
+    .reduce((sum, t) => sum + (weights[t] ?? 1), 0);
+  return sharedWeight / targetWeightTotal;
+}
+
+// Returns every site within TIE_MARGIN of the top score, not just the
+// single best -- genuine ties (multi-unit siblings, or two otherwise
+// equally-plausible guesses) need a human to see all the options, not
+// one arbitrary pick.
+const TIE_MARGIN = 0.02;
+function rankedCandidates(accountName, sitesForState, weights) {
   const nameOnly = stripStatePrefix(accountName);
   const targetTokens = tokenize(nameOnly);
-  let best = null;
-  let bestScore = 0;
-  for (const site of sitesForState) {
-    const score = overlapScore(targetTokens, tokenize(site.name));
-    if (score > bestScore) {
-      bestScore = score;
-      best = site;
-    }
+  const scored = sitesForState
+    .map((site) => ({ site, score: weightedOverlapScore(targetTokens, tokenize(site.name), weights) }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!scored.length) return [];
+  const topScore = scored[0].score;
+  const tied = scored.filter((s) => s.score >= topScore - TIE_MARGIN);
+
+  // If the raw name itself carries no digit (no explicit unit number),
+  // and the tied set includes both a base (unnumbered) site and numbered
+  // siblings, prefer the base one as primary -- it's the more likely
+  // intended match for a generic historical reference, with the numbered
+  // siblings still listed as alternates rather than hidden.
+  const rawHasDigit = /\d/.test(nameOnly);
+  if (!rawHasDigit && tied.length > 1) {
+    const baseFirst = [...tied].sort((a, b) => {
+      const aHasNum = /\d/.test(a.site.name) ? 1 : 0;
+      const bHasNum = /\d/.test(b.site.name) ? 1 : 0;
+      return aHasNum - bHasNum;
+    });
+    return baseFirst;
   }
-  return best ? { site_id: best.id, site_code: best.site_code, name: best.name, score: bestScore } : null;
+  return tied;
+}
+
+// ── Address-based matching (mirrors mailgun-inbound.js's approach) ───────
+const ORDINAL_WORDS = {
+  first: '1st', second: '2nd', third: '3rd', fourth: '4th', fifth: '5th',
+  sixth: '6th', seventh: '7th', eighth: '8th', ninth: '9th', tenth: '10th',
+};
+const STREET_TYPE_WORDS = {
+  street: 'st', avenue: 'ave', road: 'rd', boulevard: 'blvd', drive: 'dr',
+  lane: 'ln', highway: 'hwy', circle: 'cir', court: 'ct', place: 'pl',
+  parkway: 'pkwy', trail: 'trl', terrace: 'ter', square: 'sq',
+};
+const DIRECTION_WORDS = {
+  northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw',
+  north: 'n', south: 's', east: 'e', west: 'w',
+};
+
+function levenshtein(a, b) {
+  a = a || ''; b = b || '';
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+function normalizeStreetLine(line) {
+  let s = (line || '').toLowerCase();
+  const applyWordMap = (map) => {
+    for (const [word, abbr] of Object.entries(map)) {
+      s = s.replace(new RegExp('\\b' + word + '\\b', 'g'), abbr);
+    }
+  };
+  applyWordMap(ORDINAL_WORDS);
+  applyWordMap(DIRECTION_WORDS);
+  applyWordMap(STREET_TYPE_WORDS);
+  s = s.replace(/\b(suite|ste|unit|apt)\b\s*#?\s*\w*/g, ' ');
+  s = s.replace(/[.,#]/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+function extractStreetSignature(fullAddress) {
+  if (!fullAddress) return null;
+  const firstLine = String(fullAddress).split('\n')[0].split(',')[0];
+  const norm = normalizeStreetLine(firstLine);
+  const m = norm.match(/^(\d+)\s+(.*)$/);
+  if (!m || !m[2]) return null;
+  let rest = m[2].trim();
+  let direction = null;
+  const dirMatch = rest.match(/^(ne|nw|se|sw|n|s|e|w)\s+(.*)$/);
+  if (dirMatch) { direction = dirMatch[1]; rest = dirMatch[2]; }
+  return { number: m[1], direction, street: rest };
+}
+
+function addressesLooselyMatch(addrA, addrB) {
+  const a = extractStreetSignature(addrA);
+  const b = extractStreetSignature(addrB);
+  if (!a || !b) return false;
+  if (a.number !== b.number) return false;
+  if ((a.direction || null) !== (b.direction || null)) return false;
+  if (a.street === b.street) return true;
+  const dist = levenshtein(a.street, b.street);
+  const maxLen = Math.max(a.street.length, b.street.length);
+  return maxLen > 0 && dist <= 2 && dist / maxLen < 0.3;
 }
 
 exports.handler = async () => {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  const [{ data: sites, error: sitesErr }, { data: rows, error: rowsErr }] = await Promise.all([
-    supabase.from('sites').select('id, site_code, name, state'),
+  const [{ data: sites, error: sitesErr }, { data: rows, error: rowsErr }, { data: ticketRows, error: ticketErr }] = await Promise.all([
+    supabase.from('sites').select('id, site_code, name, state, address'),
     supabase.from('site_visits').select('state, account_name_raw').eq('needs_review', true),
+    supabase.from('tickets').select('site_text, address').not('address', 'is', null),
   ]);
   if (sitesErr) return json(500, { ok: false, error: 'sites fetch failed: ' + sitesErr.message });
   if (rowsErr) return json(500, { ok: false, error: 'site_visits fetch failed: ' + rowsErr.message });
+  if (ticketErr) return json(500, { ok: false, error: 'tickets fetch failed: ' + ticketErr.message });
 
   const sitesByState = {};
   for (const s of sites) {
     if (!sitesByState[s.state]) sitesByState[s.state] = [];
     sitesByState[s.state].push(s);
+  }
+  const weightsByState = {};
+  for (const [state, list] of Object.entries(sitesByState)) weightsByState[state] = buildTokenWeights(list);
+
+  // Address lookup keyed by normalized raw name (state-prefix stripped,
+  // lowercased) -- first captured address wins for a given name.
+  const addressByName = {};
+  for (const t of ticketRows) {
+    if (!t.site_text || !t.address) continue;
+    const key = stripStatePrefix(t.site_text).toLowerCase().trim();
+    if (!addressByName[key]) addressByName[key] = t.address;
   }
 
   const groups = {};
@@ -80,9 +243,37 @@ exports.handler = async () => {
     groups[key].row_count++;
   }
 
-  const results = Object.values(groups)
-    .map(g => ({ ...g, suggested: bestGuess(g.account_name_raw, sitesByState[g.state] || []) }))
-    .sort((a, b) => b.row_count - a.row_count);
+  const results = Object.values(groups).map((g) => {
+    const sitesForState = sitesByState[g.state] || [];
+    const weights = weightsByState[g.state] || {};
+    const candidates = rankedCandidates(g.account_name_raw, sitesForState, weights);
+
+    // Address crossover: if a ticket shares this exact raw name and has an
+    // address, and that address matches exactly one candidate (or any site
+    // in the state, even one that didn't score well on name alone), that's
+    // far more reliable than token overlap -- surface it as the confirmed
+    // answer instead of a name-only guess.
+    const key = stripStatePrefix(g.account_name_raw).toLowerCase().trim();
+    const knownAddress = addressByName[key];
+    let addressConfirmed = null;
+    if (knownAddress) {
+      const addressMatch = sitesForState.find((s) => addressesLooselyMatch(knownAddress, s.address));
+      if (addressMatch) {
+        addressConfirmed = { site_id: addressMatch.id, site_code: addressMatch.site_code, name: addressMatch.name };
+      }
+    }
+
+    const candidateList = candidates.map((c) => ({
+      site_id: c.site.id, site_code: c.site.site_code, name: c.site.name, score: c.score,
+    }));
+
+    return {
+      ...g,
+      suggested: candidateList[0] || null,
+      alternates: candidateList.slice(1),
+      addressConfirmed,
+    };
+  }).sort((a, b) => b.row_count - a.row_count);
 
   return json(200, { ok: true, totalRows: rows.length, totalGroups: results.length, groups: results });
 };
