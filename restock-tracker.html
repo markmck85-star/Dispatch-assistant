@@ -894,9 +894,30 @@ async function fetchLiveState(state, since, until) {
 // across the merged states, not the newest -- so if one sub-state's sync
 // has stalled, the banner reflects that rather than being masked by a
 // fresher sibling state.
+// Reads the same global sync-health record state.html's "Refresh Now"
+// panel shows ("Automated sync last ran: Xm ago") -- one shared record
+// covering every state per run, not per-state. This is the correct signal
+// for "is the pipeline actually working," which is a different question
+// from "when did this state's data last change" (a quiet state can go
+// days between real restocks with the sync running perfectly the whole
+// time -- conflating the two produced the false 26-day-old reading).
+async function fetchSyncStatus() {
+  try {
+    const res = await fetch(`${DISPATCH_API_BASE}/.netlify/functions/get-report-sync-status`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.lastSuccess || null; // { at: ISOString, ... } -- shape per get-report-sync-status.js
+  } catch (e) {
+    return null;
+  }
+}
+
 async function fetchLiveRegion(region, since, until) {
   const states = statesForRegion(region);
-  const results = await Promise.allSettled(states.map(s => fetchLiveState(s, since, until)));
+  const [results, syncStatus] = await Promise.all([
+    Promise.allSettled(states.map(s => fetchLiveState(s, since, until))),
+    fetchSyncStatus(),
+  ]);
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   if (ok.length === 0) throw (results[0].reason || new Error('All state fetches failed'));
 
@@ -910,6 +931,10 @@ async function fetchLiveRegion(region, since, until) {
   });
 
   const minDates = ok.map(d => d.minDate).filter(Boolean);
+  // maxDate here is purely descriptive now ("most recent restock recorded")
+  // -- takes the newest across merged states, since a quiet sibling state
+  // shouldn't make the whole region's data-as-of date look older than it
+  // actually is. Pipeline health is judged separately via syncStatus below.
   const maxDates = ok.map(d => d.maxDate).filter(Boolean);
   const failedStates = states.filter((s, i) => results[i].status === 'rejected');
 
@@ -920,8 +945,10 @@ async function fetchLiveRegion(region, since, until) {
     locs,
     totalRestocks: ok.reduce((sum, d) => sum + d.totalRestocks, 0),
     minDate: minDates.length ? new Date(Math.min(...minDates.map(d => d.getTime()))) : null,
-    maxDate: maxDates.length ? new Date(Math.min(...maxDates.map(d => d.getTime()))) : null,
+    maxDate: maxDates.length ? new Date(Math.max(...maxDates.map(d => d.getTime()))) : null,
     techRestockMap: {},
+    isLive: true,
+    syncStatus,
   };
 }
 
@@ -1210,9 +1237,40 @@ function renderDashboard(d) {
   document.getElementById('dashTitle').textContent = `${state} Restock Frequency & Projections`;
   document.getElementById('dashSubtitle').textContent = `MCR Technical Service — ${fileName} — data ${dateRange}`;
 
-  // Data freshness banner
+  // Data freshness banner. Two different questions get asked here depending
+  // on the source:
+  //  - Manual file upload: "is this file I grabbed getting stale?" -- the
+  //    original day-based escalation still applies, since nothing refreshes
+  //    it automatically.
+  //  - Live shared data: "is the automated sync actually working?" -- a
+  //    quiet state can legitimately go days without a new restock while the
+  //    sync runs perfectly every 20 minutes, so that's NOT shown as a
+  //    warning. Only a genuinely stalled sync (no successful run recently)
+  //    gets flagged, using the same last-success record state.html's
+  //    Refresh Now panel reads.
   const freshnessBanner = document.getElementById('freshnessBanner');
-  if (maxDate) {
+  if (d.isLive) {
+    const dataAsOf = maxDate ? maxDate.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'unknown';
+    if (d.syncStatus && d.syncStatus.at) {
+      const minsAgo = Math.round((Date.now() - new Date(d.syncStatus.at).getTime()) / 60000);
+      const agoStr = minsAgo < 60 ? `${minsAgo}m ago` : `${Math.round(minsAgo / 60)}h ago`;
+      // check-report-sync-health.js alerts past 60 min with no successful
+      // run -- mirror that same threshold here rather than inventing a
+      // different one.
+      if (minsAgo <= 60) {
+        freshnessBanner.style.display = 'block';
+        freshnessBanner.innerHTML = `<div style="border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:var(--muted);">✓ Synced with closed-ticket database — last successful sync ${agoStr}. Most recent restock on record: ${dataAsOf}.</div>`;
+      } else {
+        freshnessBanner.style.display = 'block';
+        freshnessBanner.innerHTML = `<div style="background:#3d0000;border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:#ff6b6b;">⚠️ Automated sync hasn't succeeded in ${agoStr} — this may be a stalled pipeline, not just a quiet day. Check state.html's Refresh Now panel.</div>`;
+      }
+    } else {
+      // Couldn't reach sync-status at all -- don't imply anything's wrong,
+      // just say what we know.
+      freshnessBanner.style.display = 'block';
+      freshnessBanner.innerHTML = `<div style="border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:var(--muted);">Synced with closed-ticket database. Most recent restock on record: ${dataAsOf}.</div>`;
+    }
+  } else if (maxDate) {
     const today = new Date();
     today.setHours(0,0,0,0);
     const reportDate = new Date(maxDate);
