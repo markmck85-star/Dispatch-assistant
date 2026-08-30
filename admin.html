@@ -909,11 +909,30 @@
             var html = '';
             usGroups.forEach(function(g, i) {
                 var sugg = g.suggested;
+                var confirmed = g.addressConfirmed;
+                var confirmedHtml = confirmed
+                    ? '<div style="margin-top:6px;font-size:13px;background:#173a1e;border:1px solid #2e7d32;border-radius:5px;padding:6px 8px;">✓ Confirmed by ticket address: <strong>' + esc(confirmed.site_code) + ' — ' + esc(confirmed.name) + '</strong>' +
+                      ' <button onclick="usApply(' + i + ', \'' + confirmed.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>'
+                    : '';
                 var suggHtml = sugg
                     ? '<div style="margin-top:6px;font-size:13px;">Suggested: <strong>' + esc(sugg.site_code) + ' — ' + esc(sugg.name) + '</strong>' +
                       ' <span style="color:#999;">(' + Math.round(sugg.score * 100) + '% match)</span> ' +
                       '<button onclick="usApply(' + i + ', \'' + sugg.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>'
-                    : '<div style="margin-top:6px;font-size:13px;color:#999;">No suggested match.</div>';
+                    : (confirmed ? '' : '<div style="margin-top:6px;font-size:13px;color:#999;">No suggested match.</div>');
+                // Alternates: sites that tied with the top suggestion (e.g.
+                // multi-unit siblings like "Midtown"/"Midtown 2") -- surfaced
+                // rather than silently discarded, since picking the wrong one
+                // of a genuine tie is exactly the failure this was built to
+                // avoid. Skipped when a ticket-address match already gave a
+                // confirmed answer.
+                var altHtml = (!confirmed && g.alternates && g.alternates.length)
+                    ? '<div style="margin-top:4px;font-size:12px;color:#bbb;">Also matches (tied): ' +
+                      g.alternates.map(function(a) {
+                          return esc(a.site_code) + ' — ' + esc(a.name) +
+                              ' <button onclick="usApply(' + i + ', \'' + a.site_id + '\')" style="margin-left:2px;background:#3a3a3a;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">Apply</button>';
+                      }).join(' &nbsp;·&nbsp; ') +
+                      '</div>'
+                    : '';
                 var saHtml = (g.saNumbers && g.saNumbers.length)
                     ? '<div style="margin-top:6px;font-size:12px;color:#999;">SA#: ' +
                       g.saNumbers.map(function(sa) { return '<span style="color:#6cb2ff;">' + esc(sa) + '</span>'; }).join(', ') +
@@ -923,7 +942,9 @@
                     '<div class="card-title">' + esc(g.state) + ' — "' + esc(g.account_name_raw) + '"</div>' +
                     '<div class="card-detail">' + g.row_count + ' row(s)</div>' +
                     saHtml +
+                    confirmedHtml +
                     suggHtml +
+                    altHtml +
                     '<div id="usGeo' + i + '">' +
                     '<button onclick="usLocate(' + i + ')" style="margin-top:6px;background:#6f42c1;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">📍 Locate via Maps</button>' +
                     '</div>' +
