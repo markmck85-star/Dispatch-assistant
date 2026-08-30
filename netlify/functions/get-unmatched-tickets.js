@@ -132,6 +132,7 @@ exports.handler = async (event) => {
         suggestedName,
         suggestedCode,
         autoSuggested,
+        isTestingStation,
         suggestedAddress: t.address || "",
         issueCategory: t.issue_category,
         issueDetail: t.issue_detail,
