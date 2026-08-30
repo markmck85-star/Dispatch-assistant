@@ -768,6 +768,130 @@ function parseEmailBody(text, receivedAt, subject) {
   return null;
 }
 
+
+// ── Address-fallback site matching ────────────────────────────────────────
+// Added 2026-08-30. rawSiteCode-based matching (above) only works when
+// Neumo's own ticket text embeds a real site code -- site_survey/install
+// tickets never do, and some trouble/maintenance tickets that reference a
+// site purely by name/address (no embedded code) don't either, even when
+// that exact site already exists in `sites`. Confirmed live the same day:
+// four "System - State Integration" tickets and one "Testing Station"
+// ticket all sat unmatched despite genuine address matches already on
+// file, one of which was missed even by simple exact-string comparison
+// over a one-letter spelling difference ("Kraft Rd" vs "Krafft Rd").
+//
+// This normalizes both sides enough to survive the variation actually
+// seen in practice (ordinal words vs numerals, spelled-out vs abbreviated
+// street types and directionals, suite/unit noise) plus a small edit-
+// distance tolerance for genuine typos, while still requiring an EXACT
+// street-number match -- that's the cheap, low-false-positive anchor the
+// rest of the comparison hangs off of.
+const ORDINAL_WORDS = {
+  first: '1st', second: '2nd', third: '3rd', fourth: '4th', fifth: '5th',
+  sixth: '6th', seventh: '7th', eighth: '8th', ninth: '9th', tenth: '10th',
+  eleventh: '11th', twelfth: '12th', thirteenth: '13th', fourteenth: '14th',
+  fifteenth: '15th', sixteenth: '16th', seventeenth: '17th', eighteenth: '18th',
+  nineteenth: '19th', twentieth: '20th',
+};
+const STREET_TYPE_WORDS = {
+  street: 'st', avenue: 'ave', road: 'rd', boulevard: 'blvd', drive: 'dr',
+  lane: 'ln', highway: 'hwy', circle: 'cir', court: 'ct', place: 'pl',
+  parkway: 'pkwy', trail: 'trl', terrace: 'ter', square: 'sq',
+};
+const DIRECTION_WORDS = {
+  northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw',
+  north: 'n', south: 's', east: 'e', west: 'w',
+};
+
+function levenshtein(a, b) {
+  a = a || ''; b = b || '';
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+function normalizeStreetLine(line) {
+  let s = (line || '').toLowerCase();
+  const applyWordMap = (map) => {
+    for (const [word, abbr] of Object.entries(map)) {
+      s = s.replace(new RegExp('\\b' + word + '\\b', 'g'), abbr);
+    }
+  };
+  applyWordMap(ORDINAL_WORDS);
+  applyWordMap(DIRECTION_WORDS);
+  applyWordMap(STREET_TYPE_WORDS);
+  s = s.replace(/\b(suite|ste|unit|apt)\b\s*#?\s*\w*/g, ' ');
+  s = s.replace(/[.,#]/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+// Pulls { number, direction, street } from the first line of a possibly
+// multi-line address. `direction` (a leading N/S/E/W/NE/NW/SE/SW token) is
+// tracked separately from `street` and compared for an EXACT match below
+// -- a one-character direction difference ("123 N Main St" vs "123 S Main
+// St") must never fall under the typo-tolerance applied to the rest of
+// the street name, since it's a materially different address, not a
+// misspelling.
+function extractStreetSignature(fullAddress) {
+  if (!fullAddress) return null;
+  const firstLine = String(fullAddress).split('\n')[0].split(',')[0];
+  const norm = normalizeStreetLine(firstLine);
+  const m = norm.match(/^(\d+)\s+(.*)$/);
+  if (!m || !m[2]) return null;
+  let rest = m[2].trim();
+  let direction = null;
+  const dirMatch = rest.match(/^(ne|nw|se|sw|n|s|e|w)\s+(.*)$/);
+  if (dirMatch) { direction = dirMatch[1]; rest = dirMatch[2]; }
+  return { number: m[1], direction, street: rest };
+}
+
+// Exact street number AND exact leading direction (if either address has
+// one) required; the remaining street name allowed a small edit-distance
+// tolerance after normalization -- catches genuine typos/spelling variants
+// (e.g. "Kraft"/"Krafft", distance 1) without being loose enough to match
+// two genuinely different streets, or two different sides of the same
+// street name, that happen to share a number.
+function addressesLooselyMatch(addrA, addrB) {
+  const a = extractStreetSignature(addrA);
+  const b = extractStreetSignature(addrB);
+  if (!a || !b) return false;
+  if (a.number !== b.number) return false;
+  if ((a.direction || null) !== (b.direction || null)) return false;
+  if (a.street === b.street) return true;
+  const dist = levenshtein(a.street, b.street);
+  const maxLen = Math.max(a.street.length, b.street.length);
+  return maxLen > 0 && dist <= 2 && dist / maxLen < 0.3;
+}
+
+// Looks for an existing site in the same state whose address matches, when
+// the ticket's own text had no embedded site code to look up directly.
+// Scoped to one state's sites (cheap, and state is reliably known from the
+// ticket's own Location field even without a code) rather than scanning
+// every site in the database.
+async function findSiteByAddress(supabase, address, stateHint) {
+  if (!address || !stateHint) return null;
+  const { data: candidates, error } = await supabase
+    .from('sites')
+    .select('id, site_code, address')
+    .eq('state', stateHint);
+  if (error || !candidates) return null;
+  for (const c of candidates) {
+    if (addressesLooselyMatch(address, c.address)) return c;
+  }
+  return null;
+}
+
 // ── Twilio SMS (optional — only fires if env vars are set) ───────────────────
 
 /**
@@ -1106,6 +1230,40 @@ exports.handler = async (event) => {
           else if (siteRow) siteId = siteRow.id;
         }
 
+        // Address-fallback match -- covers every ticket with no embedded
+        // code at all (site_survey/install always; some trouble/maintenance
+        // tickets too) plus the case where a code WAS embedded but somehow
+        // didn't match (rare, but no reason not to still try by address).
+        // One deliberate carve-out: a vague "System / State Integration"
+        // ticket ("convert from ISP to the state's network") gives no clue
+        // which physical device it's about, and kiosks essentially never
+        // sit on a building ISP that would need converting (Neumo-supplied
+        // wireless handles that) -- confirmed live 2026-08-30 that three of
+        // these auto-matched straight to a real kiosk's address when they
+        // almost certainly meant a separate testing-station/OTC device at
+        // the same building. So for this one ambiguous category, only
+        // accept an address match against an already-known T/TMP-coded
+        // site -- matching a plain numeric (kiosk) code is left unmatched
+        // instead, surfacing the toast for a human call rather than
+        // guessing wrong silently. Every other ticket category still
+        // matches confidently against any site type the address resolves to.
+        let matchedByAddress = null;
+        if (!siteId && parsed.address) {
+          const candidate = await findSiteByAddress(supabase, parsed.address, parsed.state);
+          if (candidate) {
+            const isAmbiguousSystemIntegration = parsed.issueCategory === 'System'
+              && /state integration/i.test(parsed.issueDetail || '');
+            const candidateIsPlainKiosk = /^[A-Z]{2}\d+$/.test(candidate.site_code);
+            if (isAmbiguousSystemIntegration && candidateIsPlainKiosk) {
+              console.log(`[mailgun-inbound] Address matched ${candidate.site_code} but category is ambiguous System/State-Integration against a plain kiosk code -- leaving unmatched for manual review (WO ${parsed.woNum})`);
+            } else {
+              siteId = candidate.id;
+              matchedByAddress = candidate;
+              console.log(`[mailgun-inbound] Address-matched WO ${parsed.woNum} to existing site ${candidate.site_code} (no embedded code in ticket text)`);
+            }
+          }
+        }
+
         // Add-Line-Item follow-up: check for an existing ticket on this WO
         // first. If found, append the new line item to its description
         // (visible on the board) rather than letting the normal
@@ -1220,6 +1378,34 @@ exports.handler = async (event) => {
           .upsert(ticketRow, { onConflict: 'wo_number', ignoreDuplicates: true });
         if (ticketErr) console.error('[mailgun-inbound] tickets upsert failed:', ticketErr.message);
         else console.log(`[mailgun-inbound] Supabase: ticket ${parsed.woNum} written (site_id: ${siteId || 'unmatched, needs_review'})`);
+
+        // Address-based sibling sweep -- mirrors link-ticket-to-site.js's
+        // existing rawSiteCode-based sweep, but for the address-match case:
+        // a building with a testing station AND an OTC printer (or several
+        // testing PCs) sharing one address can have multiple still-open
+        // tickets land close together, only one of which happens to be the
+        // one that got matched just now. Sweeps them onto the same site
+        // rather than leaving each to trigger its own separate toast.
+        if (matchedByAddress) {
+          try {
+            const { data: siblings } = await supabase
+              .from('tickets')
+              .select('id, address')
+              .is('site_id', null)
+              .neq('wo_number', parsed.woNum)
+              .eq('status', 'open');
+            const siblingIds = (siblings || [])
+              .filter((s) => addressesLooselyMatch(s.address, matchedByAddress.address))
+              .map((s) => s.id);
+            if (siblingIds.length) {
+              const { error: sweepErr } = await supabase
+                .from('tickets').update({ site_id: matchedByAddress.id }).in('id', siblingIds);
+              if (!sweepErr) console.log(`[mailgun-inbound] Address-sweep linked ${siblingIds.length} sibling ticket(s) to ${matchedByAddress.site_code}`);
+            }
+          } catch (e) {
+            console.error('[mailgun-inbound] Address-based sibling sweep failed:', e.message);
+          }
+        }
 
         // Auto-add to the dispatch board -- trouble AND maintenance tickets
         // (not install/site-survey, which stay manual per their lower
