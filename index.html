@@ -4930,14 +4930,18 @@ function distanceMatrixStatus(state) {
         //
         // Differs from showAddLocationPrompt in one key way: that flow
         // starts from a CODE the dispatcher already typed (just unrecognized),
-        // so it only needs name/address. Here there's no code at all yet --
-        // the ticket is just a raw text description -- so this asks the
-        // dispatcher to choose/confirm the new site's code themselves,
-        // deliberately NOT auto-generating one. Given tonight's whole
-        // session was largely about site codes silently colliding with
-        // existing ones, auto-picking a "next available" number here would
-        // risk creating the exact same class of bug -- a human choosing the
-        // code, informed by the ticket's own text, is safer.
+        // so it only needs name/address. Here there's typically no code at
+        // all yet -- the ticket is just a raw text description.
+        //
+        // 2026-08-30: get-unmatched-tickets.js now auto-suggests the next
+        // sequential T-code (e.g. MIT033) specifically for office-type
+        // testing-station tickets (BMV/DMV/SOS/MV in the name, not an
+        // Install) -- ticket.autoSuggested flags this case. That's a safe
+        // narrow exception to the earlier "never auto-generate" stance:
+        // T-codes are MCR's own invented namespace with no upstream Neumo
+        // numbering to collide with, unlike normal numeric site codes. The
+        // code is still just a pre-filled suggestion, not committed until
+        // the dispatcher hits Save -- fully editable/overridable either way.
         function showAddLocationPromptQueueForTickets(ticketList) {
             if (!ticketList || ticketList.length === 0) return;
             const [first, ...rest] = ticketList;
@@ -4970,16 +4974,18 @@ function distanceMatrixStatus(state) {
                 <input id="alp-code" value="${(ticket.suggestedCode || '').replace(/"/g, '&quot;')}" placeholder="Site code (e.g. ${state}1150)" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;text-transform:uppercase;">
                 <input id="alp-name" value="${(ticket.suggestedName || '').replace(/"/g, '&quot;')}" placeholder="Location name" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                 <input id="alp-address" value="${(ticket.suggestedAddress || '').replace(/"/g, '&quot;')}" placeholder="Full address" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
-                ${(ticket.suggestedCode || ticket.suggestedAddress) ? '<div style="font-size:11px;color:#8ab;margin:-4px 0 8px;">Pre-filled from the ticket — please verify before saving.</div>' : ''}
+                ${ticket.autoSuggested
+                    ? '<div style="font-size:11px;color:#ffa500;margin:-4px 0 8px;">Site code auto-suggested (next in MCR\'s own numbering) — verify no collision before saving.</div>'
+                    : ((ticket.suggestedCode || ticket.suggestedAddress) ? '<div style="font-size:11px;color:#8ab;margin:-4px 0 8px;">Pre-filled from the ticket — please verify before saving.</div>' : '')}
                 <select id="alp-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                     <option value="">-- Primary tech (optional) --</option>
                     ${techOptions}
                 </select>
                 <select id="alp-machinetype" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:12px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
-                    <option value="SK">SK — Small Kahuna (default)</option>
+                    <option value="SK" ${!ticket.isTestingStation ? 'selected' : ''}>SK — Small Kahuna (default)</option>
                     <option value="SB">SB — Surfboard</option>
                     <option value="BK">BK — Big Kahuna (cash)</option>
-                    <option value="OTHER">Other — testing/OTC, no restock cycle</option>
+                    <option value="OTHER" ${ticket.isTestingStation ? 'selected' : ''}>Other — testing/OTC, no restock cycle</option>
                 </select>
                 <div style="display:flex;gap:10px;">
                     <button id="alp-save" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Save &amp; reprocess</button>
