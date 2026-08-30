@@ -4958,6 +4958,67 @@ function distanceMatrixStatus(state) {
             });
         }
 
+        // Live distance preview for the "new location from ticket" modal --
+        // added 2026-08-30. The site doesn't exist yet at this point (no
+        // site_id, not in LOCATIONS, not in the precomputed distance
+        // matrix), so buildTechOptions' normal locCode-based lookup always
+        // comes back empty for it -- that's why the dropdown showed no
+        // mileage at all. This geocodes the address on its own via the new
+        // read-only geocode-one function (no DB writes -- there's nothing
+        // to write to yet) and computes straight-line (haversine) distance
+        // against each tech's already-loaded home coordinates, the same
+        // fallback getTechDistance() uses when the precomputed matrix
+        // doesn't have an entry. Re-run on blur of the address field too,
+        // in case the dispatcher corrects the pre-filled address.
+        async function refreshTechDistancesForNewLocation(address) {
+            var statusEl = document.getElementById('alp-tech-status');
+            var selectEl = document.getElementById('alp-tech');
+            if (!selectEl) return; // modal already closed
+            var addr = (address || '').trim();
+            if (addr.length < 8) { if (statusEl) statusEl.textContent = ''; return; }
+            if (statusEl) statusEl.textContent = 'Estimating distances…';
+            try {
+                var res = await fetch('/.netlify/functions/geocode-one', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: addr })
+                });
+                var data = await res.json();
+                selectEl = document.getElementById('alp-tech'); // re-check -- modal may have closed mid-fetch
+                statusEl = document.getElementById('alp-tech-status');
+                if (!selectEl) return;
+                if (!data.ok) {
+                    if (statusEl) statusEl.textContent = 'Could not estimate distances (' + (data.error || 'geocode failed') + ') — techs shown unsorted.';
+                    return;
+                }
+                var currentVal = selectEl.value;
+                var techNames = Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false);
+                var pairs = techNames.map(function(name) {
+                    var t = TECHS[name] || {};
+                    var dist = null;
+                    if (t.lat && t.lng) {
+                        var mi = haversineDistance(t.lat, t.lng, data.lat, data.lng);
+                        var rounded = Math.round(mi * 10) / 10;
+                        dist = { distanceMi: rounded, label: '~' + rounded + ' mi' };
+                    }
+                    return { name: name, dist: dist };
+                });
+                var withDist = pairs.filter(function(p) { return p.dist !== null; })
+                    .sort(function(a, b) { return a.dist.distanceMi - b.dist.distanceMi; });
+                var noDist = pairs.filter(function(p) { return p.dist === null; });
+                var sorted = withDist.concat(noDist);
+                var optionsHtml = sorted.map(function(p) {
+                    var selected = p.name === currentVal ? ' selected' : '';
+                    var distLabel = p.dist ? ' — ' + p.dist.label : '';
+                    return '<option value="' + p.name + '"' + selected + '>' + p.name + distLabel + '</option>';
+                }).join('');
+                selectEl.innerHTML = '<option value="">-- Primary tech (optional) --</option>' + optionsHtml;
+                if (statusEl) statusEl.textContent = 'Straight-line distances (est.) from geocoded address.';
+            } catch (e) {
+                if (statusEl) statusEl.textContent = 'Could not estimate distances — techs shown unsorted.';
+            }
+        }
+
         function showAddLocationPromptForTicket(ticket, onComplete) {
             var existing = document.getElementById('add-location-prompt');
             if (existing) existing.remove();
@@ -4977,10 +5038,11 @@ function distanceMatrixStatus(state) {
                 ${ticket.autoSuggested
                     ? '<div style="font-size:11px;color:#ffa500;margin:-4px 0 8px;">Site code auto-suggested (next in MCR\'s own numbering) — verify no collision before saving.</div>'
                     : ((ticket.suggestedCode || ticket.suggestedAddress) ? '<div style="font-size:11px;color:#8ab;margin:-4px 0 8px;">Pre-filled from the ticket — please verify before saving.</div>' : '')}
-                <select id="alp-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <select id="alp-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:4px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                     <option value="">-- Primary tech (optional) --</option>
                     ${techOptions}
                 </select>
+                <div id="alp-tech-status" style="font-size:11px;color:#8ab;margin:0 0 8px;min-height:14px;"></div>
                 <select id="alp-machinetype" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:12px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                     <option value="SK" ${!ticket.isTestingStation ? 'selected' : ''}>SK — Small Kahuna (default)</option>
                     <option value="SB">SB — Surfboard</option>
@@ -4993,6 +5055,10 @@ function distanceMatrixStatus(state) {
                 </div>
                 <div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
             document.body.appendChild(div);
+            refreshTechDistancesForNewLocation(ticket.suggestedAddress);
+            document.getElementById('alp-address').addEventListener('blur', function() {
+                refreshTechDistancesForNewLocation(this.value);
+            });
 
             document.getElementById('alp-skip').onclick = function() { div.remove(); if (onComplete) onComplete(); };
             document.getElementById('alp-save').onclick = function() {
