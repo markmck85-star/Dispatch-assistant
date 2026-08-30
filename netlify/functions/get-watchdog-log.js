@@ -77,10 +77,17 @@ exports.handler = async (event) => {
     // 'trouble', which is the parse-template that produces all three
     // kinds). site_id is intentionally NOT filtered on -- matched and
     // unmatched tickets both belong here.
+    //
+    // needs_review = true is included as a separate OR branch: a line item
+    // added to an existing restock/maintenance ticket never changes that
+    // ticket's ticket_kind (mailgun-inbound.js only sets needs_review on
+    // it), so without this branch those tickets -- exactly the ones with
+    // possible SLA impact that prompted this page -- would never appear
+    // here no matter what SMS notification hours are configured.
     const { data, error } = await supabase
       .from("tickets")
-      .select("id, wo_number, site_text, site_id, ticket_kind, issue_category, issue_detail, description, address, due_at, sla_ends_at, received_at, status")
-      .in("ticket_kind", ["trouble", "install", "site_survey"])
+      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, received_at, status")
+      .or("ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true")
       .eq("status", "open")
       .order("received_at", { ascending: false });
 
@@ -113,6 +120,7 @@ exports.handler = async (event) => {
         woNumber: t.wo_number,
         siteText: t.site_text,
         ticketKind: t.ticket_kind,
+        needsReview: !!t.needs_review,
         matched: !!t.site_id,
         issueCategory: t.issue_category,
         issueDetail: t.issue_detail,
