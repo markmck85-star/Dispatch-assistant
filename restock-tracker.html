@@ -622,6 +622,7 @@ const RESTOCK_TYPE = 'Preventative Maintenance';
 
 let rawData = null;
 let currentState = null;
+let currentIsLive = false;
 let chartInstance = null;
 let currentFileName = '';
 let cachedDashboard = null;
@@ -763,7 +764,20 @@ function showStateScreen() {
   const grid = document.getElementById('stateGrid');
   grid.innerHTML = '';
 
-  if (rawData) {
+  if (currentIsLive) {
+    // Live shared-data mode has no "all states in this file" list to read --
+    // offer the same fixed region list the main dispatch app's selector
+    // uses instead, and re-fetch live on pick rather than depending on any
+    // locally cached file.
+    const LIVE_REGIONS = ['GA','FL','MI','IN','OH','NV','IL','CO','ID','AL','MN','WV','OR'];
+    for (const r of LIVE_REGIONS) {
+      const btn = document.createElement('button');
+      btn.className = 'state-btn';
+      btn.textContent = labelForRegion(r);
+      btn.onclick = () => switchLiveRegion(r, btn);
+      grid.appendChild(btn);
+    }
+  } else if (rawData) {
     const stateCol = rawData[0].hasOwnProperty('Jurisdiction') ? 'Jurisdiction' : 'State__c';
     const MIN_TICKETS = 8;
   const states = [...new Set(rawData.map(r => String(r[stateCol] || '').trim()).filter(Boolean))]
@@ -820,6 +834,20 @@ function resetToUpload() {
 function backToStates() {
   document.getElementById('cachedBanner').style.display = 'none';
   showStateScreen();
+}
+
+async function switchLiveRegion(region, btnEl) {
+  const original = btnEl ? btnEl.textContent : '';
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Loading…'; }
+  try {
+    const { since, until } = resolveLiveRange('nov1');
+    const dashboard = await fetchLiveRegion(region, since, until);
+    localStorage.setItem('mcr_restock_last_region', region);
+    renderDashboard(dashboard);
+  } catch (e) {
+    alert(`Could not load ${labelForRegion(region)}: ${e.message}`);
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = original; }
+  }
 }
 
 // ── Dashboard building ─────────────────────────────────────────────────────
@@ -1216,6 +1244,7 @@ function renderDashboard(d) {
   const { state, fileName, locs, totalRestocks, minDate, maxDate } = d;
   currentState = state;
   currentFileName = fileName;
+  currentIsLive = !!d.isLive;
 
   document.getElementById('upload-screen').style.display = 'none';
   document.getElementById('state-screen').style.display = 'none';
