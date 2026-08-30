@@ -106,6 +106,19 @@ function weightedOverlapScore(targetTokens, siteTokens, weights) {
 // equally-plausible guesses) need a human to see all the options, not
 // one arbitrary pick.
 const TIE_MARGIN = 0.02;
+// Every real multi-unit sibling pattern seen in practice (Carmel 2/3/4,
+// Mishawaka Hoku 1-4, Indy North/South/East/West 2/3/4) tops out at a
+// handful of units at one address. A tied group far larger than that
+// isn't a genuine multi-way ambiguity -- it means the ONLY thing shared
+// between the raw name and every candidate is a generic category word
+// ("Kroger", "BMV"), with nothing distinctive matching at all (e.g. a
+// town name -- "Lambertville" -- that doesn't exist in any site name for
+// that state, because the location genuinely isn't in the database yet).
+// Confirmed live 2026-08-30: "MI - Lambertville Kroger" tied with every
+// single Kroger-named site in Michigan at the same score. Past this cap,
+// treat it as no confident match rather than surfacing dozens of
+// unrelated alternates.
+const MAX_TIE_GROUP = 6;
 function rankedCandidates(accountName, sitesForState, weights) {
   const nameOnly = stripStatePrefix(accountName);
   const targetTokens = tokenize(nameOnly);
@@ -116,6 +129,7 @@ function rankedCandidates(accountName, sitesForState, weights) {
   if (!scored.length) return [];
   const topScore = scored[0].score;
   const tied = scored.filter((s) => s.score >= topScore - TIE_MARGIN);
+  if (tied.length > MAX_TIE_GROUP) return [];
 
   // If the raw name itself carries no digit (no explicit unit number),
   // and the tied set includes both a base (unnumbered) site and numbered
