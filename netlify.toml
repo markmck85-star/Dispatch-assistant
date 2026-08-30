@@ -10,3 +10,6 @@
 
 [functions."check-report-sync-health"]
   schedule = "15,35,55 * * * *"
+
+[functions."send-notification-digests"]
+  schedule = "*/15 * * * *"
