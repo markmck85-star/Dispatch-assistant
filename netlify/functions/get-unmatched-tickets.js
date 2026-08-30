@@ -67,7 +67,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("tickets")
-      .select("id, wo_number, site_text, ticket_kind, issue_category, issue_detail, address, attributes, received_at")
+      .select("id, wo_number, site_text, ticket_kind, issue_category, issue_detail, address, attributes, received_at, inbound_emails(subject)")
       .is("site_id", null)
       .in("ticket_kind", ["trouble", "maintenance"])
       .eq("status", "open")
@@ -75,36 +75,69 @@ exports.handler = async (event) => {
 
     if (error) return json(500, { error: error.message });
 
-    const unmatched = (data || [])
-      .filter((t) => t.site_text && t.site_text.slice(0, 2).toUpperCase() === state)
-      .map((t) => {
-        // site_text is either "CO - Fremont County Canon City MV" (state
-        // name prefix) or "FL1123 – Hillsborough County US 301 Publix" (a
-        // site code that didn't actually match anything) -- strip
-        // whichever prefix style is present so the toast's name field
-        // starts clean instead of repeating the state/code.
-        const suggestedName = t.site_text
-          .replace(/^[A-Z]{2}\d{3,5}\s*[-\u2013]\s*/, "")
-          .replace(/^[A-Z]{2}\s*[-\u2013]\s*/, "")
-          .trim();
-        // rawSiteCode is Neumo's own PC Name/code for this ticket -- present
-        // for nearly every real trouble/maintenance ticket. site_id is null
-        // not because no code was found, but because that code doesn't
-        // match any EXISTING site yet (a genuinely new location Neumo has
-        // already assigned a number to, that MCR just hasn't onboarded).
-        const suggestedCode = (t.attributes && t.attributes.rawSiteCode) || "";
-        return {
-          ticketId: t.id,
-          woNumber: t.wo_number,
-          siteText: t.site_text,
-          suggestedName,
-          suggestedCode,
-          suggestedAddress: t.address || "",
-          issueCategory: t.issue_category,
-          issueDetail: t.issue_detail,
-          receivedAt: t.received_at,
-        };
+    // Auto-suggest the next sequential T-code (STATE+T+NNN, e.g. MIT033) for
+    // testing-station tickets, added 2026-08-30. Neumo's own dispatch email
+    // subject line carries a clean asset-type token distinguishing these:
+    // "Tech Dispatch - K2D - ..." for testing stations, vs. "SST" for real
+    // kiosk installs and "OTC" for over-the-counter/state-office consumable
+    // service -- confirmed against every K2D-subject ticket on file (30/30,
+    // matched or not) mapping to a genuine testing-station site, with zero
+    // false positives on real kiosk installs at BMV/SOS offices (which show
+    // "SST" instead). An earlier version of this guessed from the site NAME
+    // containing BMV/DMV/SOS/MV instead -- wrong, since real numbered kiosk
+    // sites also sit at those same offices (e.g. MI1009 Taylor SOS); the
+    // subject-line token is the actual ground truth Mark uses to tell them
+    // apart. T is MCR's own invented namespace (Neumo has no equivalent
+    // numbering for these at all), so there's no risk of colliding with a
+    // real upstream code the way there would be for normal numeric codes.
+    const HAS_REAL_CODE = /^[A-Z]{2}\d{3,5}/;
+    let nextTNum = null; // lazy-loaded only if this state actually has a candidate this run
+
+    const unmatched = [];
+    for (const t of (data || [])) {
+      if (!t.site_text || t.site_text.slice(0, 2).toUpperCase() !== state) continue;
+
+      const suggestedName = t.site_text
+        .replace(/^[A-Z]{2}\d{3,5}\s*[-\u2013]\s*/, "")
+        .replace(/^[A-Z]{2}\s*[-\u2013]\s*/, "")
+        .trim();
+      const rawSiteCode = (t.attributes && t.attributes.rawSiteCode) || "";
+      const subject = (t.inbound_emails && t.inbound_emails.subject) || "";
+      const isTestingStation = /\bK2D\b/i.test(subject);
+
+      let suggestedCode = rawSiteCode;
+      let autoSuggested = false;
+      if (!suggestedCode && !HAS_REAL_CODE.test(t.site_text) && isTestingStation) {
+        if (nextTNum === null) {
+          const { data: tCodes } = await supabase
+            .from("sites")
+            .select("site_code")
+            .ilike("site_code", `${state}T%`);
+          let maxN = 0;
+          for (const s of (tCodes || [])) {
+            const m = s.site_code.match(new RegExp(`^${state}T(\\d+)$`));
+            if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+          }
+          nextTNum = maxN;
+        }
+        nextTNum += 1;
+        suggestedCode = `${state}T${String(nextTNum).padStart(3, "0")}`;
+        autoSuggested = true;
+      }
+
+      unmatched.push({
+        ticketId: t.id,
+        woNumber: t.wo_number,
+        siteText: t.site_text,
+        suggestedName,
+        suggestedCode,
+        autoSuggested,
+        suggestedAddress: t.address || "",
+        issueCategory: t.issue_category,
+        issueDetail: t.issue_detail,
+        receivedAt: t.received_at,
       });
+    }
 
     return json(200, { unmatched });
   } catch (e) {
