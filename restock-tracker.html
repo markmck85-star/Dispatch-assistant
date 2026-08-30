@@ -1,0 +1,1768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCR Restock Dashboard</title>
+<style>
+:root {
+  --bg: #f5f3ef;
+  --surface: #eceae5;
+  --card: #ffffff;
+  --text: #2c2c2a;
+  --muted: #73726c;
+  --hint: #6b6b65;
+  --border: rgba(0,0,0,0.09);
+  --border-strong: rgba(0,0,0,0.18);
+  --bar: #BA7517;
+  --accent: #EF9F27;
+  --ok-bg: #eaf3de; --ok-tc: #3B6D11; --ok-br: #639922;
+  --warn-bg: #fef3db; --warn-tc: #854F0B; --warn-br: #BA7517;
+  --danger-bg: #fdeaea; --danger-tc: #A32D2D; --danger-br: #E24B4A;
+  --info-bg: #e6f1fb; --info-tc: #185FA5; --info-br: #378ADD;
+  --radius: 8px;
+  --mono: 'Courier New', Courier, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a18; --surface: #242420; --card: #2c2c28;
+    --text: #e4e2dc; --muted: #888780; --hint: #a8a8a2;
+    --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.18);
+    --bar: #FAC775; --accent: #FAC775;
+    --ok-bg: #173404; --ok-tc: #C0DD97; --ok-br: #639922;
+    --warn-bg: #2e1a04; --warn-tc: #FAC775; --warn-br: #BA7517;
+    --danger-bg: #2d0f0f; --danger-tc: #F7C1C1; --danger-br: #E24B4A;
+    --info-bg: #042c53; --info-tc: #B5D4F4; --info-br: #378ADD;
+  }
+}
+.badge-overdue-visited {
+  background: #3D1A00; color: #F0A060;
+}
+@media (prefers-color-scheme: light) {
+  .badge-overdue-visited { background: #FDE8D0; color: #9A3D00; }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  font-size: 14px; line-height: 1.5;
+  padding: 24px 20px 48px;
+  max-width: 980px; margin: 0 auto;
+}
+
+/* ── Upload screen ── */
+#upload-screen {
+  min-height: 80vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 24px;
+}
+.logo { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; color: var(--accent); text-transform: uppercase; }
+.upload-title { font-size: 22px; font-weight: 600; text-align: center; }
+.upload-sub { font-size: 13px; color: var(--muted); text-align: center; max-width: 380px; }
+.drop-zone {
+  width: 100%; max-width: 440px;
+  border: 2px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.drop-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.5; }
+.drop-label { font-size: 14px; color: var(--muted); }
+.drop-label strong { color: var(--text); }
+.file-btn {
+  display: inline-block; margin-top: 12px;
+  padding: 8px 20px; border-radius: 6px;
+  background: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  border: none; font-family: inherit;
+}
+#fileInput { display: none; }
+
+/* ── State picker ── */
+#state-screen {
+  display: none; min-height: 60vh;
+  flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+}
+.state-title { font-size: 18px; font-weight: 600; }
+.state-grid {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  justify-content: center; max-width: 500px;
+}
+.state-btn {
+  padding: 10px 20px; border-radius: 6px;
+  background: var(--card); border: 0.5px solid var(--border-strong);
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  color: var(--text); font-family: inherit;
+  transition: background 0.12s;
+}
+.state-btn:hover { background: var(--surface); border-color: var(--accent); }
+.file-note { font-size: 12px; color: var(--muted); }
+.back-btn {
+  font-size: 12px; color: var(--muted); cursor: pointer;
+  background: none; border: none; font-family: inherit;
+  text-decoration: underline;
+}
+
+/* ── Dashboard ── */
+#dashboard { display: none; }
+header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px;
+  margin-bottom: 24px; padding-bottom: 14px;
+  border-bottom: 0.5px solid var(--border-strong);
+}
+header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+header span { font-size: 12px; color: var(--muted); }
+.header-actions { display: flex; gap: 10px; align-items: center; }
+.reload-btn {
+  font-size: 11px; padding: 5px 12px; border-radius: 5px;
+  background: var(--surface); border: 0.5px solid var(--border-strong);
+  color: var(--muted); cursor: pointer; font-family: inherit;
+}
+.reload-btn:hover { color: var(--text); }
+.cards {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px; margin-bottom: 28px;
+}
+.card { background: var(--card); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.card-label { font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.card-value { font-size: 22px; font-weight: 600; font-family: var(--mono); }
+.card-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.card-big { font-size: 14px; font-weight: 600; margin-top: 2px; }
+.section-label {
+  font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+}
+.chart-wrap {
+  background: var(--card); border: 0.5px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+  margin-bottom: 28px; position: relative; width: 100%;
+}
+.chart-scroll {
+  overflow-y: auto; max-height: 520px;
+  position: relative;
+}
+.table-wrap {
+  background: var(--card); border: 0.5px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; margin-bottom: 16px;
+}
+.footnote { font-size: 11px; color: var(--hint); line-height: 1.7; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  background: var(--surface); padding: 9px 10px;
+  font-weight: 500; color: var(--text);
+  text-align: center; border-bottom: 0.5px solid var(--border-strong);
+  white-space: nowrap;
+  position: sticky; top: 0; z-index: 2;
+}
+thead th:first-child { text-align: left; }
+tbody td {
+  padding: 7px 10px; border-bottom: 0.5px solid var(--border);
+  vertical-align: middle; text-align: center;
+}
+tbody td:first-child { text-align: left; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--surface); }
+.group-header td {
+  background: var(--surface); padding: 8px 10px 4px;
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--hint); border-top: 0.5px solid var(--border-strong); border-bottom: none;
+}
+.badge {
+  display: inline-block; padding: 2px 9px; border-radius: 12px;
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+}
+.badge-ok              { background: var(--ok-bg);     color: var(--ok-tc); }
+.badge-soon            { background: var(--warn-bg);    color: var(--warn-tc); }
+.badge-overdue         { background: var(--danger-bg);  color: var(--danger-tc); }
+.badge-overdue-visited { background: #FDE8D0;           color: #9A3D00; }
+.badge-info            { background: var(--info-bg);    color: var(--info-tc); }
+.row-overdue         { border-left: 3px solid var(--danger-br); }
+.row-overdue-visited { border-left: 3px solid var(--warn-br); }
+.row-soon            { border-left: 3px solid var(--warn-br); }
+.row-ok              { border-left: 3px solid transparent; }
+.row-info            { border-left: 3px solid var(--info-br); }
+.mono { font-family: var(--mono); }
+.dim  { color: var(--hint); }
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { color: var(--text); background: var(--card); }
+thead th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
+thead th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+thead th.sort-asc, thead th.sort-desc { color: var(--text); }
+.err { color: var(--danger-tc); font-size: 13px; text-align: center; padding: 20px; }
+.table-scroll { overflow-x: auto; overflow-y: auto; max-height: 70vh; -webkit-overflow-scrolling: touch; }
+@media (max-width: 640px) {
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .table-scroll { border-radius: var(--radius); }
+}
+.cached-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--info-bg); color: var(--info-tc);
+  border-radius: var(--radius); padding: 10px 14px;
+  font-size: 12px; margin-bottom: 16px;
+}
+.cached-banner button {
+  background: none; border: none; color: var(--info-tc);
+  font-size: 11px; cursor: pointer; text-decoration: underline;
+  font-family: inherit; padding: 0;
+}
+a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: inline-block; margin: 10px 0 0 10px; }
+</style>
+</head>
+<body>
+
+<a class="back-link" href="/">← Back to Dispatch Tool</a>
+
+<!-- Upload screen -->
+<div id="upload-screen">
+  <div class="logo">MCR Technical Service</div>
+  <div class="upload-title">Restock Dashboard</div>
+
+  <div style="margin-top:8px; padding:14px 16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:8px; width:100%; max-width:380px;">
+    <div style="font-size:13px; font-weight:600; margin-bottom:8px;">📡 Load from Dispatch Platform (shared data)</div>
+    <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Pulls the same closed-ticket data already imported into the dispatch app's database. Not a live Salesforce feed — freshness reflects whenever that report was last imported there.</div>
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input id="liveState" type="text" placeholder="State (e.g. GA)" maxlength="2"
+        style="flex:1; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:inherit; text-transform:uppercase;">
+    </div>
+    <select id="liveRangePreset" onchange="onLiveRangePresetChange()"
+      style="width:100%; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:inherit; margin-bottom:8px;">
+      <option value="all">All available history</option>
+      <option value="ytd">Year to date</option>
+      <option value="nov1" selected>Since Nov 1 (prior year) to present</option>
+      <option value="custom">Custom range…</option>
+    </select>
+    <div id="liveCustomRange" style="display:none; gap:8px; margin-bottom:8px;">
+      <input id="liveSince" type="date" style="flex:1; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:inherit;">
+      <input id="liveUntil" type="date" style="flex:1; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:inherit;">
+    </div>
+    <button class="file-btn" style="width:100%;" onclick="loadLiveDashboard()">Load shared data</button>
+    <p id="liveLoadingMsg" style="display:none; margin-top:8px; font-size:12px; color:var(--muted);"></p>
+  </div>
+
+  <p class="upload-sub" style="margin-top:16px;">Or upload the Salesforce field report directly to generate a restock frequency analysis and projection for any state.</p>
+  <div class="drop-zone" id="dropZone">
+    <div class="drop-icon">📂</div>
+    <div class="drop-label"><strong>Drop your field report here</strong><br>or</div>
+    <button class="file-btn" onclick="document.getElementById('fileInput').click()">Choose File</button>
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
+    <p id="loadingMsg" style="display:none; margin-top:12px; font-size:12px; color:var(--muted);">Reading file, please wait...</p>
+  </div>
+  <p class="upload-sub" style="font-size:11px;">Accepts the raw Salesforce Excel export (.xlsx). Nothing is uploaded — all processing happens locally in your browser.</p>
+  <div style="margin-top:16px; padding:12px 16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:8px; text-align:center;">
+    <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Need a fresh report?</div>
+    <a href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru"
+       target="_blank"
+       style="display:inline-block; padding:9px 20px; background:#0070d2; color:white; border-radius:6px; font-size:13px; font-weight:600; text-decoration:none;">
+      🔗 Open Salesforce Report
+    </a>
+    <div style="font-size:11px; color:var(--muted); margin-top:8px;">Log in to Salesforce, then export the report as Excel (.xlsx) and upload it above.</div>
+  </div>
+</div>
+
+<!-- State picker -->
+<div id="state-screen">
+  <div class="state-title">Select a state</div>
+  <p class="file-note" id="fileName"></p>
+  <div id="stateScreenFreshness" style="display:none;"></div>
+  <div class="state-grid" id="stateGrid"></div>
+  <button class="back-btn" onclick="resetToUpload()">Load a new report</button>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+  <header>
+    <div>
+      <h1 id="dashTitle">Restock Frequency &amp; Projections</h1>
+      <span id="dashSubtitle"></span>
+    </div>
+    <div class="header-actions">
+      <button class="reload-btn" onclick="resetToUpload()">Load new report</button>
+      <button class="reload-btn" onclick="backToStates()">Change state</button>
+    </div>
+  </header>
+
+  <div class="cards" id="summaryCards"></div>
+  <div id="freshnessBanner" style="display:none;"></div>
+
+  <div class="section-label" id="chartLabel"></div>
+  <div class="chart-wrap">
+    <div class="chart-scroll" id="chartWrap">
+      <canvas id="restockChart" role="img" aria-label="Horizontal bar chart of restock counts by location"></canvas>
+    </div>
+  </div>
+
+  <div id="cachedBanner" style="display:none;" class="cached-banner">
+    <span id="cachedMsg"></span>
+    <button onclick="clearCache()">Clear &amp; upload new report</button>
+    <a href="https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru"
+       target="_blank"
+       style="display:inline-block; padding:6px 14px; background:#0070d2; color:white; border-radius:5px; font-size:12px; font-weight:600; text-decoration:none; margin-left:6px;">
+      🔗 Salesforce Report
+    </a>
+  </div>
+  <div style="margin-bottom: 8px; display: flex; gap: 10px; align-items: center; flex-wrap:wrap;">
+    <label style="font-size:12px; color:var(--muted); white-space:nowrap;">Cluster:</label>
+    <select id="clusterSelect" onchange="applyClusterFilter()"
+      style="flex:1; padding:8px 12px; border-radius:var(--radius); border:0.5px solid var(--border-strong);
+      background:var(--card); color:var(--text); font-size:13px; font-family:inherit; outline:none; cursor:pointer;">
+      <option value="">— All locations —</option>
+      <optgroup label="Georgia – Remote Clusters">
+        <option value="augusta">Augusta area (GA1017, GA1050, GA1102, GA1108, GA1112)</option>
+        <option value="fayette clayton">Fayette / Clayton corridor (south Atlanta)</option>
+        <option value="savannah pooler">Savannah / Pooler area</option>
+      </optgroup>
+      <optgroup label="North Carolina">
+        <option value="charlotte harris teeter">Charlotte NC</option>
+      </optgroup>
+      <optgroup label="Pending – confirm with Gina">
+        <option value="columbus">Columbus GA area</option>
+        <option value="albany">Albany GA area</option>
+      </optgroup>
+    </select>
+    <button onclick="document.getElementById('clusterSelect').value=''; document.getElementById('locationSearch').value=''; filterTable('');"
+      style="padding:8px 12px; border-radius:var(--radius); border:0.5px solid var(--border-strong);
+      background:var(--surface); color:var(--muted); font-size:12px; font-family:inherit; cursor:pointer; white-space:nowrap;">
+      Clear all
+    </button>
+    <button id="sharedDatesBtn" onclick="toggleSharedDates()"
+      style="padding:8px 12px; border-radius:var(--radius); border:0.5px solid var(--border-strong);
+      background:var(--surface); color:var(--muted); font-size:12px; font-family:inherit; cursor:pointer; white-space:nowrap;">
+      📅 Shared dates
+    </button>
+  </div>
+  <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+    <input type="text" id="locationSearch" placeholder="Filter by location or county..." 
+      style="flex: 1; padding: 8px 12px; border-radius: var(--radius); border: 0.5px solid var(--border-strong); 
+      background: var(--card); color: var(--text); font-size: 13px; font-family: inherit; outline: none;"
+      oninput="onSearchInput(this.value)">
+    <button onclick="document.getElementById('locationSearch').value=''; document.getElementById('clusterSelect').value=''; filterTable('');"
+      style="padding: 8px 12px; border-radius: var(--radius); border: 0.5px solid var(--border-strong);
+      background: var(--surface); color: var(--muted); font-size: 12px; font-family: inherit; cursor: pointer; white-space: nowrap;">
+      Clear
+    </button>
+  </div>
+  <div class="section-label">projected restock schedule — sorted by urgency</div>
+  <div class="table-wrap">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:190px; text-align:left;">location</th>
+          <th style="width:82px;">status</th>
+          <th class="sortable" data-col="n1" style="width:76px;" onclick="handleSort('n1')" title="Estimated next restock date">est. next</th>
+          <th class="sortable" data-col="last" style="width:82px;" onclick="handleSort('last')" title="Date of most recent restock">last restock</th>
+          <th style="width:82px;">last visit</th>
+          <th class="sortable" data-col="daysSince" style="width:58px;" onclick="handleSort('daysSince')" title="Days since last restock">days ago</th>
+          <th class="sortable" data-col="avg" style="width:68px;" onclick="handleSort('avg')" title="Average days between restocks">avg days</th>
+          <th class="sortable" data-col="count" style="width:58px;" onclick="handleSort('count')" title="Number of restocks on record">visits</th>
+        </tr>
+      </thead>
+      <tbody id="projBody"></tbody>
+    </table>
+  </div>
+  </div>
+  <p class="footnote" id="dashFootnote"></p>
+
+  <!-- Cluster Recommendations -->
+  <div id="clusterRecSection" style="display:none; margin-top:24px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+      <div class="section-label" style="margin-bottom:0;">suggested clusters — based on shared route patterns</div>
+      <button id="clusterRecBtn" onclick="toggleClusterRecs()"
+        style="padding:7px 14px; border-radius:var(--radius); border:0.5px solid var(--border-strong);
+        background:var(--surface); color:var(--muted); font-size:12px; font-family:inherit; cursor:pointer; white-space:nowrap;">
+        🔍 Analyze routes
+      </button>
+    </div>
+    <div id="clusterRecResults"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const CACHE_KEY = 'mcr_restock_dashboard';
+const CACHE_META = 'mcr_restock_meta';
+const CACHE_RAW  = 'mcr_restock_rawslim';
+const LEGACY_KEYS = ['mcr_restock_data'];
+
+const SLIM_COLS = ['Jurisdiction', 'State__c', 'Remediation', 'Account Name', 'Actual Start', 'Service Resource: Name', 'Appointment Number'];
+
+function slimRows(rows) {
+  return rows.map(r => {
+    const o = {};
+    for (const c of SLIM_COLS) if (c in r) o[c] = r[c];
+    return o;
+  });
+}
+
+function saveToCache(dashboard, fileName, state, allStates, rawSlim) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(dashboard));
+    localStorage.setItem(CACHE_META, JSON.stringify({ fileName, state, allStates, savedAt: new Date().toISOString() }));
+  } catch(e) { /* storage full or unavailable */ }
+  if (rawSlim) {
+    try {
+      localStorage.setItem(CACHE_RAW, JSON.stringify(rawSlim));
+    } catch(e) {
+      // Slim rows too big for localStorage quota; fall back to single-state cache.
+      localStorage.removeItem(CACHE_RAW);
+    }
+  }
+}
+
+function loadFromCache() {
+  try {
+    const dashboard = localStorage.getItem(CACHE_KEY);
+    const meta = localStorage.getItem(CACHE_META);
+    const raw = localStorage.getItem(CACHE_RAW);
+    if (dashboard && meta) {
+      return {
+        dashboard: JSON.parse(dashboard),
+        meta: JSON.parse(meta),
+        rawSlim: raw ? JSON.parse(raw) : null,
+      };
+    }
+  } catch(e) {}
+  return null;
+}
+
+function clearCache() {
+  localStorage.removeItem(CACHE_KEY);
+  localStorage.removeItem(CACHE_META);
+  localStorage.removeItem(CACHE_RAW);
+  for (const k of LEGACY_KEYS) localStorage.removeItem(k);
+  resetToUpload();
+}
+
+function showCachedBanner(meta) {
+  const banner = document.getElementById('cachedBanner');
+  const msg = document.getElementById('cachedMsg');
+  const d = new Date(meta.savedAt);
+  const when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  msg.textContent = `Showing cached data from ${meta.fileName} (${meta.state}) — loaded ${when}`;
+  banner.style.display = 'flex';
+}
+
+// Cluster definitions — keywords matched against location text in the table
+const CLUSTERS = {
+  'augusta':              ['richmond county', 'augusta', 'ga1017', 'ga1050', 'ga1102', 'ga1108', 'ga1112'],
+  'fayette clayton':      ['fayette', 'clayton', 'banks crossing', 'tara blvd', 'hwy 85', 'riverdale', 'jonesboro', 'peachtree city', 'griffin', 'spalding'],
+  'savannah pooler':      ['chatham', 'savannah', 'pooler'],
+  'charlotte harris teeter': ['charlotte', 'harris teeter', 'nc1'],
+  'columbus':             ['columbus', 'muscogee'],
+  'albany':               ['albany', 'dougherty'],
+};
+
+// Which cluster keys to show per state
+const CLUSTER_STATES = {
+  'GA': ['augusta', 'fayette clayton', 'savannah pooler', 'columbus', 'albany'],
+  'NC': ['charlotte harris teeter'],
+  'FL': [],
+  'SC': [],
+};
+
+function updateClusterDropdown(state) {
+  const sel = document.getElementById('clusterSelect');
+  if (!sel) return;
+  const allowed = new Set(CLUSTER_STATES[state] || Object.keys(CLUSTERS));
+  // Show/hide optgroups and options
+  sel.querySelectorAll('option:not([value=""])').forEach(opt => {
+    const key = opt.value;
+    opt.style.display = (!key || allowed.has(key)) ? '' : 'none';
+  });
+  sel.querySelectorAll('optgroup').forEach(grp => {
+    const visible = [...grp.querySelectorAll('option')].some(o => o.style.display !== 'none');
+    grp.style.display = visible ? '' : 'none';
+  });
+  // Reset selection if current value no longer applies
+  if (sel.value && !allowed.has(sel.value)) {
+    sel.value = '';
+    filterTable('');
+  }
+}
+
+function applyClusterFilter() {
+  const clusterVal = document.getElementById('clusterSelect').value;
+  document.getElementById('locationSearch').value = '';
+  if (!clusterVal) { filterTable(''); return; }
+  const keywords = CLUSTERS[clusterVal] || [clusterVal.split(' ')];
+  filterTableByKeywords(keywords);
+}
+
+function onSearchInput(val) {
+  document.getElementById('clusterSelect').value = '';
+  filterTable(val);
+}
+
+function filterTableByKeywords(keywords) {
+  const rows = document.querySelectorAll('#projBody tr');
+  let lastGroupHeader = null;
+  let groupHasVisible = false;
+  rows.forEach(row => {
+    if (row.classList.contains('group-header')) {
+      if (lastGroupHeader) lastGroupHeader.style.display = groupHasVisible ? '' : 'none';
+      lastGroupHeader = row;
+      groupHasVisible = false;
+    } else {
+      const text = row.textContent.toLowerCase();
+      const visible = keywords.some(k => text.includes(k));
+      row.style.display = visible ? '' : 'none';
+      if (visible) groupHasVisible = true;
+    }
+  });
+  if (lastGroupHeader) lastGroupHeader.style.display = groupHasVisible ? '' : 'none';
+}
+
+function filterTable(query) {
+  const q = query.toLowerCase().trim();
+  const rows = document.querySelectorAll('#projBody tr');
+  let lastGroupHeader = null;
+  let groupHasVisible = false;
+
+  rows.forEach(row => {
+    if (row.classList.contains('group-header')) {
+      if (lastGroupHeader) {
+        lastGroupHeader.style.display = groupHasVisible ? '' : 'none';
+      }
+      lastGroupHeader = row;
+      groupHasVisible = false;
+    } else {
+      const text = row.textContent.toLowerCase();
+      const visible = !q || text.includes(q);
+      row.style.display = visible ? '' : 'none';
+      if (visible) groupHasVisible = true;
+    }
+  });
+  if (lastGroupHeader) {
+    lastGroupHeader.style.display = groupHasVisible ? '' : 'none';
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  // Drop legacy raw-row cache from older versions
+  for (const k of LEGACY_KEYS) localStorage.removeItem(k);
+
+  // Primary flow: auto-load shared data from the Dispatch Platform on open,
+  // using the region passed via ?state= (set by the main dispatch app's
+  // link -- e.g. restock-tracker.html?state=GA) or, failing that, whichever
+  // region was last successfully loaded here. No button press needed. Only
+  // falls through to the cached-file / manual-upload path below if this
+  // fetch fails outright (platform unreachable, sync down, etc.) -- that
+  // path stays available specifically for that case.
+  const requestedRegion = new URLSearchParams(window.location.search).get('state');
+  const region = (requestedRegion || localStorage.getItem('mcr_restock_last_region') || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(region)) {
+    const msg = document.getElementById('liveLoadingMsg');
+    msg.style.display = 'block';
+    msg.textContent = `Loading ${labelForRegion(region)} shared data from Dispatch Platform…`;
+    try {
+      const { since, until } = resolveLiveRange('nov1');
+      const dashboard = await fetchLiveRegion(region, since, until);
+      localStorage.setItem('mcr_restock_last_region', region);
+      msg.style.display = 'none';
+      renderDashboard(dashboard);
+      return;
+    } catch (e) {
+      msg.style.display = 'none';
+      console.warn('Auto-load of shared data failed, falling back to cached file / manual upload:', e.message);
+      // fall through to cached-file / upload-screen path below
+    }
+  }
+
+  try {
+    const cached = loadFromCache();
+    if (cached) {
+      currentFileName = cached.meta.fileName;
+      currentState = cached.meta.state;
+      updateClusterDropdown(currentState);
+      cachedDashboard = reviveDashboard(cached.dashboard);
+      cachedMeta = cached.meta;
+      if (cached.rawSlim && cached.rawSlim.length) rawData = cached.rawSlim;
+
+      // ?state=CO in the URL jumps straight to that state's report instead of
+      // landing on the state-picker screen -- only works against whatever
+      // report is already cached locally (can't fetch a new report on its
+      // own). Falls through to the normal picker if the param's missing or
+      // the requested state isn't in the cached data.
+      const requestedState = new URLSearchParams(window.location.search).get('state');
+      if (requestedState && rawData && rawData.length) {
+        const stateCol = rawData[0].hasOwnProperty('Jurisdiction') ? 'Jurisdiction' : 'State__c';
+        const wanted = requestedState.trim().toUpperCase();
+        const match = rawData.some(r => String(r[stateCol] || '').trim().toUpperCase() === wanted);
+        if (match) {
+          buildDashboard(wanted, stateCol);
+          return;
+        }
+      }
+
+      showStateScreen();
+    }
+  } catch(e) {
+    localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem(CACHE_META);
+    localStorage.removeItem(CACHE_RAW);
+    console.warn('Cache load failed, cleared:', e);
+  }
+});
+
+const TROUBLE_TYPES = new Set([
+  'Hardware Troubleshooting',
+  'Connectivity Troubleshooting',
+  'Software Troubleshooting',
+]);
+const RESTOCK_TYPE = 'Preventative Maintenance';
+
+let rawData = null;
+let currentState = null;
+let chartInstance = null;
+let currentFileName = '';
+let cachedDashboard = null;
+let cachedMeta = null;
+let pendingState = null;
+let currentDashboardData = null;
+let sortCol = null;
+let sortDir = 'asc';
+let sharedDatesMode = false;
+
+// ── File handling ──────────────────────────────────────────────────────────
+
+function parseDate(s) {
+  if (!s && s !== 0) return null;
+  // Excel serial date number
+  if (typeof s === 'number') {
+    const d = XLSX.SSF.parse_date_code(s);
+    if (d) return new Date(d.y, d.m - 1, d.d);
+  }
+  const str = String(s).split(',')[0].trim();
+  const fmts = [
+    [/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/, (m) => new Date(+m[3], +m[1]-1, +m[2])],
+    [/^(\d{4})-(\d{2})-(\d{2})$/, (m) => new Date(+m[1], +m[2]-1, +m[3])],
+  ];
+  for (const [re, fn] of fmts) {
+    const m = str.match(re);
+    if (m) { const d = fn(m); if (!isNaN(d)) return d; }
+  }
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+function readFile(file) {
+  if (!file) return;
+  currentFileName = file.name;
+  const loadMsg = document.getElementById('loadingMsg');
+  loadMsg.style.display = 'block';
+  loadMsg.textContent = `Reading ${file.name} (${(file.size/1024/1024).toFixed(1)} MB)...`;
+
+  setTimeout(() => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        document.getElementById('loadingMsg').textContent = 'Parsing spreadsheet...';
+        const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+        document.getElementById('loadingMsg').textContent = `Found ${wb.SheetNames.length} sheet(s): ${wb.SheetNames[0]}`;
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+        document.getElementById('loadingMsg').textContent = `Read ${rows.length} rows, checking columns...`;
+        if (!rows.length) { alert('No data found in file.'); return; }
+
+        const norm = rows.map(r => {
+          const out = {};
+          for (const k of Object.keys(r)) out[k.trim()] = r[k];
+          return out;
+        });
+
+        const sample = norm[0];
+        const cols = Object.keys(sample).join(', ');
+        if (!('Jurisdiction' in sample) && !('State__c' in sample)) {
+          alert('Could not find Jurisdiction column.\n\nColumns found: ' + cols.substring(0, 200));
+          document.getElementById('loadingMsg').style.display = 'none';
+          return;
+        }
+
+        rawData = norm;
+        document.getElementById('loadingMsg').style.display = 'none';
+
+        if (pendingState) {
+          const stateCol = norm[0].hasOwnProperty('Jurisdiction') ? 'Jurisdiction' : 'State__c';
+          const hasState = norm.some(r => String(r[stateCol] || '').trim() === pendingState);
+          const target = pendingState;
+          pendingState = null;
+          if (hasState) {
+            buildDashboard(target, stateCol);
+            return;
+          }
+        }
+        showStateScreen();
+      } catch(err) {
+        document.getElementById('loadingMsg').style.display = 'none';
+        alert('Error at parse stage: ' + err.message + '\n' + (err.stack || '').substring(0, 200));
+      }
+    };
+    reader.onerror = () => {
+      document.getElementById('loadingMsg').style.display = 'none';
+      alert('FileReader error — could not read file. Size: ' + file.size + ' bytes');
+    };
+    reader.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const pct = Math.round(e.loaded / e.total * 100);
+        document.getElementById('loadingMsg').textContent = `Loading file... ${pct}%`;
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }, 150);
+}
+
+// ── Screens ────────────────────────────────────────────────────────────────
+
+function showStateScreen() {
+  document.getElementById('upload-screen').style.display = 'none';
+  document.getElementById('state-screen').style.display = 'flex';
+  document.getElementById('dashboard').style.display = 'none';
+
+  document.getElementById('fileName').textContent = currentFileName;
+
+  // Show global data freshness on state screen
+  const stateScreenFreshness = document.getElementById('stateScreenFreshness');
+  if (stateScreenFreshness && rawData && rawData.length) {
+    const dateCol = rawData[0].hasOwnProperty('Actual Start') ? 'Actual Start' : 'Actual End';
+    const allDates = rawData.map(r => {
+      const v = r[dateCol]; if (!v) return null;
+      const d = new Date(v); return isNaN(d) ? null : d;
+    }).filter(Boolean);
+    if (allDates.length) {
+      const globalMaxRaw = new Date(Math.max(...allDates));
+      const globalMax = new Date(globalMaxRaw);
+      const today = new Date(); today.setHours(0,0,0,0);
+      globalMax.setHours(0,0,0,0);
+      const daysOld = Math.round((today - globalMax) / 86400000);
+      const fmtFull = d => d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+      let color, icon, msg;
+      if (daysOld <= 2) {
+        color = '#888'; icon = '✓';
+        msg = `Report data current through ${fmtFull(globalMaxRaw)}`;
+      } else if (daysOld <= 7) {
+        color = '#f0a500'; icon = '⚠️';
+        msg = `Report is ${daysOld} days old — data through ${fmtFull(globalMaxRaw)}`;
+      } else {
+        color = '#ff6b6b'; icon = '⚠️';
+        msg = `Report is ${daysOld} days old — load a current report for accurate projections`;
+      }
+      stateScreenFreshness.innerHTML = `<div style="font-size:12px;color:${color};margin-bottom:12px;">${icon} ${msg}</div>`;
+      stateScreenFreshness.style.display = 'block';
+    }
+  }
+
+  const grid = document.getElementById('stateGrid');
+  grid.innerHTML = '';
+
+  if (rawData) {
+    const stateCol = rawData[0].hasOwnProperty('Jurisdiction') ? 'Jurisdiction' : 'State__c';
+    const MIN_TICKETS = 8;
+  const states = [...new Set(rawData.map(r => String(r[stateCol] || '').trim()).filter(Boolean))]
+    .filter(s => rawData.filter(r => String(r[stateCol] || '').trim() === s).length >= MIN_TICKETS)
+    .sort();
+    for (const s of states) {
+      const count = rawData.filter(r => String(r[stateCol] || '').trim() === s).length;
+      const btn = document.createElement('button');
+      btn.className = 'state-btn';
+      btn.textContent = `${s}  (${count})`;
+      btn.onclick = () => buildDashboard(s, stateCol);
+      grid.appendChild(btn);
+    }
+  } else if (cachedDashboard && cachedMeta) {
+    const allStates = Array.isArray(cachedMeta.allStates) && cachedMeta.allStates.length
+      ? cachedMeta.allStates
+      : [{ state: cachedMeta.state, count: null }];
+    for (const s of allStates) {
+      const btn = document.createElement('button');
+      btn.className = 'state-btn';
+      const isCached = s.state === cachedMeta.state;
+      const countLabel = s.count != null ? `  (${s.count})` : '';
+      btn.textContent = isCached ? `${s.state}${countLabel} — cached` : `${s.state}${countLabel}`;
+      btn.onclick = () => {
+        if (isCached) {
+          renderDashboard(cachedDashboard);
+          showCachedBanner(cachedMeta);
+        } else {
+          promptReuploadFor(s.state);
+        }
+      };
+      grid.appendChild(btn);
+    }
+  }
+}
+
+function promptReuploadFor(state) {
+  pendingState = state;
+  alert(`To view ${state}, please load the report file again. (Only ${cachedMeta && cachedMeta.state} is cached locally.)`);
+  document.getElementById('fileInput').click();
+}
+
+function resetToUpload() {
+  rawData = null; currentState = null;
+  cachedDashboard = null; cachedMeta = null;
+  pendingState = null;
+  document.getElementById('upload-screen').style.display = 'flex';
+  document.getElementById('state-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('cachedBanner').style.display = 'none';
+  document.getElementById('fileInput').value = '';
+}
+
+function backToStates() {
+  document.getElementById('cachedBanner').style.display = 'none';
+  showStateScreen();
+}
+
+// ── Dashboard building ─────────────────────────────────────────────────────
+
+function buildDashboard(state, stateCol) {
+  currentState = state;
+  updateClusterDropdown(state);
+  const dashboard = computeDashboard(state, stateCol);
+  const allStates = [...new Set(rawData.map(r => String(r[stateCol] || '').trim()).filter(Boolean))]
+    .sort()
+    .map(s => ({ state: s, count: rawData.filter(r => String(r[stateCol] || '').trim() === s).length }));
+  saveToCache(dashboard, currentFileName, state, allStates, slimRows(rawData));
+  document.getElementById('cachedBanner').style.display = 'none';
+  renderDashboard(dashboard);
+}
+
+// ── Live data from Dispatch Platform (Supabase-backed, shared source) ─────
+// Calls the dispatch app's get-restock-schedule function directly (cross-
+// origin, since this is a separate Netlify site) instead of requiring a
+// manually re-exported/re-uploaded Salesforce xlsx. Both apps then read
+// from the same underlying closed-ticket data, updated in one place.
+const DISPATCH_API_BASE = 'https://mcrdispatch.net';
+
+// Mirrors the region grouping used elsewhere in the dispatch platform
+// (stateSelector on the main board, the Watchdog log's "Georgia / NC / SC"
+// option) -- GA is a combined region covering three real states; every
+// other region maps to itself. Keeps this page's ?state= link consistent
+// with what the rest of the app calls that region.
+const REGION_STATES = { GA: ['GA', 'NC', 'SC'] };
+const REGION_LABELS = { GA: 'Georgia / NC / SC' };
+function statesForRegion(region) { return REGION_STATES[region] || [region]; }
+function labelForRegion(region) { return REGION_LABELS[region] || region; }
+
+function onLiveRangePresetChange() {
+  const preset = document.getElementById('liveRangePreset').value;
+  document.getElementById('liveCustomRange').style.display = (preset === 'custom') ? 'flex' : 'none';
+}
+
+// Computes {since, until} strings (YYYY-MM-DD) for a preset, or null for "all".
+function resolveLiveRange(preset) {
+  const pad = n => String(n).padStart(2, '0');
+  const toStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const today = new Date();
+  if (preset === 'all') return { since: null, until: null };
+  if (preset === 'ytd') return { since: `${today.getFullYear()}-01-01`, until: null };
+  if (preset === 'nov1') return { since: `${today.getFullYear() - 1}-11-01`, until: null };
+  if (preset === 'custom') {
+    const since = document.getElementById('liveSince').value || null;
+    const until = document.getElementById('liveUntil').value || null;
+    return { since, until };
+  }
+  return { since: null, until: null };
+}
+
+// Fetches + adapts one real state's shared data. Throws on any failure --
+// callers decide how to handle it (single-state UI shows an alert; the
+// region auto-loader below treats a failed sub-state as partial data).
+async function fetchLiveState(state, since, until) {
+  const qs = new URLSearchParams({ state });
+  if (since) qs.set('since', since);
+  if (until) qs.set('until', until);
+  const res = await fetch(`${DISPATCH_API_BASE}/.netlify/functions/get-restock-schedule?${qs.toString()}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Unknown error from get-restock-schedule');
+  return adaptLiveResponse(data, state);
+}
+
+// Fetches every real state in a region in parallel and merges them into one
+// dashboard. A region of one state (the common case) is just that single
+// fetch. Freshness (maxDate) intentionally takes the OLDEST lastImportedAt
+// across the merged states, not the newest -- so if one sub-state's sync
+// has stalled, the banner reflects that rather than being masked by a
+// fresher sibling state.
+async function fetchLiveRegion(region, since, until) {
+  const states = statesForRegion(region);
+  const results = await Promise.allSettled(states.map(s => fetchLiveState(s, since, until)));
+  const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+  if (ok.length === 0) throw (results[0].reason || new Error('All state fetches failed'));
+
+  const statusOrder = { overdue: 0, soon: 1, anomalous: 2, ok: 3, single: 4, nodata: 5 };
+  const locs = ok.flatMap(d => d.locs);
+  locs.sort((a, b) => {
+    if (statusOrder[a.status] !== statusOrder[b.status]) return statusOrder[a.status] - statusOrder[b.status];
+    const an1 = a.n1 ? a.n1.getTime() : Infinity;
+    const bn1 = b.n1 ? b.n1.getTime() : Infinity;
+    return an1 - bn1;
+  });
+
+  const minDates = ok.map(d => d.minDate).filter(Boolean);
+  const maxDates = ok.map(d => d.maxDate).filter(Boolean);
+  const failedStates = states.filter((s, i) => results[i].status === 'rejected');
+
+  return {
+    state: region,
+    fileName: `Dispatch Platform shared data (${ok[0].fileName.match(/\(([^)]+)\)/)?.[1] || 'range unknown'})`
+      + (failedStates.length ? ` -- ${failedStates.join(', ')} unavailable` : ''),
+    locs,
+    totalRestocks: ok.reduce((sum, d) => sum + d.totalRestocks, 0),
+    minDate: minDates.length ? new Date(Math.min(...minDates.map(d => d.getTime()))) : null,
+    maxDate: maxDates.length ? new Date(Math.min(...maxDates.map(d => d.getTime()))) : null,
+    techRestockMap: {},
+  };
+}
+
+async function loadLiveDashboard() {
+  const state = document.getElementById('liveState').value.trim().toUpperCase();
+  const msg = document.getElementById('liveLoadingMsg');
+  if (!/^[A-Z]{2}$/.test(state)) {
+    alert('Enter a valid 2-letter state code (e.g. GA).');
+    return;
+  }
+  const preset = document.getElementById('liveRangePreset').value;
+  const { since, until } = resolveLiveRange(preset);
+
+  msg.style.display = 'block';
+  msg.textContent = 'Loading shared data from Dispatch Platform…';
+
+  try {
+    const dashboard = await fetchLiveRegion(state, since, until);
+    localStorage.setItem('mcr_restock_last_region', state);
+    msg.style.display = 'none';
+    renderDashboard(dashboard);
+  } catch (err) {
+    msg.style.display = 'none';
+    alert('Could not load live data: ' + err.message + '\n\nYou can still use the manual file upload below.');
+  }
+}
+
+// Maps get-restock-schedule.js's response shape into the same `locs` shape
+// computeDashboard() produces locally, so renderDashboard() and everything
+// downstream of it (chart, cards, freshness banner) works unchanged.
+function adaptLiveResponse(data, state) {
+  const toDate = s => s ? new Date(s) : null;
+  const locs = (data.locations || []).map(item => ({
+    loc: `${item.site_code} — ${item.name}`,
+    shortName: item.name,
+    count: item.count,
+    avg: item.avg,
+    last: toDate(item.last),
+    daysSince: item.daysSince,
+    intervals: [], // not returned by the API; only used internally to compute avg/anomalous, which are already computed server-side
+    anomalous: item.anomalous,
+    status: item.status,
+    n1: toDate(item.next1),
+    n2: toDate(item.next2),
+    n3: toDate(item.next3),
+    lastVisit: toDate(item.lastVisit),
+    visitedSinceRestock: item.visitedSinceRestock,
+    lastVisitAppt: item.lastVisitAppt,
+    lastVisitTech: item.lastVisitTech,
+    lastRestockTech: item.lastRestockTech,
+    lastRestockAppt: item.lastRestockAppt,
+    techs: [], // per-tech restock history isn't returned by this endpoint; route-cluster analysis (already shelved) won't have data to show
+  }));
+
+  const statusOrder = { overdue: 0, soon: 1, anomalous: 2, ok: 3, single: 4, nodata: 5 };
+  locs.sort((a, b) => {
+    if (statusOrder[a.status] !== statusOrder[b.status]) return statusOrder[a.status] - statusOrder[b.status];
+    const an1 = a.n1 ? a.n1.getTime() : Infinity;
+    const bn1 = b.n1 ? b.n1.getTime() : Infinity;
+    return an1 - bn1;
+  });
+
+  const totalRestocks = locs.reduce((sum, l) => sum + (l.count || 0), 0);
+
+  // minDate reflects the requested window start (or the earliest restock
+  // found, if "all history" was requested); maxDate is "now" since this is
+  // a live query, not a stale export -- the freshness banner will correctly
+  // read as current every time.
+  const rangeSince = data.range && data.range.since ? new Date(data.range.since + 'T00:00:00') : null;
+  const earliestFound = locs.reduce((min, l) => {
+    const candidates = [l.last, l.lastVisit].filter(Boolean);
+    for (const c of candidates) { if (!min || c < min) min = c; }
+    return min;
+  }, null);
+  const minDate = rangeSince || earliestFound;
+  // Freshness reflects when the underlying Salesforce report was actually
+  // last imported into Supabase (via the dispatch app's closed-ticket
+  // import), not the moment this query ran -- this is a periodically
+  // refreshed shared dataset, not a live feed.
+  const maxDate = data.lastImportedAt ? new Date(data.lastImportedAt) : null;
+
+  const rangeLabel = data.range && (data.range.since || data.range.until)
+    ? `range ${data.range.since || 'earliest'} to ${data.range.until || 'present'}`
+    : 'all available history';
+
+  return {
+    state,
+    fileName: `Dispatch Platform shared data (${rangeLabel})`,
+    locs,
+    totalRestocks,
+    minDate,
+    maxDate,
+    techRestockMap: {},
+  };
+}
+
+function computeDashboard(state, stateCol) {
+  const stateRows = rawData.filter(r => String(r[stateCol] || '').trim() === state);
+
+  // Separate tickets and restocks
+  const remCol = 'Remediation';
+  const locCol = 'Account Name';
+  const dateCol = 'Actual Start';
+  const techCol = 'Service Resource: Name';
+  const apptCol = 'Appointment Number';
+
+  const tickets  = stateRows.filter(r => TROUBLE_TYPES.has(String(r[remCol] || '').trim()));
+  const restocks = stateRows.filter(r => String(r[remCol] || '').trim() === RESTOCK_TYPE);
+
+  // Build restock history per location
+  const locationMap = {};
+  for (const row of restocks) {
+    const loc = String(row[locCol] || '').trim();
+    const d = parseDate(row[dateCol]);
+    if (!loc || !d) continue;
+    if (!locationMap[loc]) locationMap[loc] = { dates: [], techs: new Set(), lastRestockTech: null, lastRestockAppt: null, lastRestockDate: null };
+    locationMap[loc].dates.push(d);
+    const tech = String(row[techCol] || '').trim();
+    if (tech) locationMap[loc].techs.add(tech);
+    // Track most recent restock's tech + appt
+    if (!locationMap[loc].lastRestockDate || d > locationMap[loc].lastRestockDate) {
+      locationMap[loc].lastRestockDate = d;
+      locationMap[loc].lastRestockTech = tech || null;
+      locationMap[loc].lastRestockAppt = String(row[apptCol] || '').trim() || null;
+    }
+  }
+
+  // Also add trouble-ticket-only locations
+  for (const row of tickets) {
+    const loc = String(row[locCol] || '').trim();
+    if (!loc) continue;
+    if (!locationMap[loc]) locationMap[loc] = { dates: [], techs: new Set(), ticketsOnly: true };
+  }
+
+  // Build last site visit (any visit type) per location
+  const lastVisitMap = {};
+  const lastVisitApptMap = {};
+  const lastVisitTechMap = {};
+  for (const row of stateRows) {
+    const loc = String(row[locCol] || "").trim();
+    const d = parseDate(row[dateCol]);
+    if (!loc || !d) continue;
+    if (!lastVisitMap[loc] || d > lastVisitMap[loc]) {
+      lastVisitMap[loc] = d;
+      lastVisitApptMap[loc] = String(row[apptCol] || '').trim() || null;
+      lastVisitTechMap[loc] = String(row[techCol] || '').trim() || null;
+    }
+  }
+
+  const TODAY = new Date();
+  TODAY.setHours(0,0,0,0);
+
+  // Compute stats per location
+  const locs = [];
+  for (const [loc, data] of Object.entries(locationMap)) {
+    const dates = data.dates.sort((a, b) => a - b);
+    const count = dates.length;
+    const last = dates[dates.length - 1] || null;
+    const daysSince = last ? Math.round((TODAY - last) / 86400000) : null;
+
+    let avg = null;
+    let intervals = [];
+    let anomalous = false;
+
+    if (count >= 2) {
+      intervals = [];
+      for (let i = 1; i < dates.length; i++) {
+        intervals.push(Math.round((dates[i] - dates[i-1]) / 86400000));
+      }
+
+      // Filter outlier gaps > 2x the median interval (likely outages or phantom gaps)
+      const sorted = [...intervals].sort((a, b) => a - b);
+      const median = sorted.length % 2 === 0
+        ? (sorted[sorted.length/2 - 1] + sorted[sorted.length/2]) / 2
+        : sorted[Math.floor(sorted.length/2)];
+      const filteredIntervals = intervals.filter(v => v <= median * 2);
+      const useIntervals = filteredIntervals.length >= 1 ? filteredIntervals : intervals;
+      avg = useIntervals.reduce((a,b) => a+b, 0) / useIntervals.length;
+
+      // Flag anomalous if max/min ratio > 10 and count < 5
+      const maxI = Math.max(...intervals);
+      const minI = Math.min(...intervals);
+      if (count <= 5 && minI > 0 && maxI / minI > 10) anomalous = true;
+    }
+
+    // Status
+    let status = 'ok';
+    if (count === 0 || data.ticketsOnly) {
+      status = 'nodata';
+    } else if (count === 1) {
+      status = 'single';
+    } else if (anomalous) {
+      status = 'anomalous';
+    } else {
+      const daysUntil = avg - daysSince;
+      if (daysUntil < -7) status = 'overdue';
+      else if (daysUntil <= 7) status = 'soon';
+      else status = 'ok';
+    }
+
+    // Projections
+    const n1 = avg && last ? addDays(last, avg) : null;
+    const n2 = avg && last ? addDays(last, avg * 2) : null;
+    const n3 = avg && last ? addDays(last, avg * 3) : null;
+
+    // Shorten location name — strip state prefix
+    const shortName = loc.replace(/^[A-Z]{2}\s*-\s*/i, '').trim();
+
+    const lastVisit = lastVisitMap[loc] || null;
+    // Two-tier overdue: if a non-restock visit occurred AFTER the last restock,
+    // the machine may have been topped up informally — lower confidence signal.
+    const visitedSinceRestock = !!(lastVisit && last && lastVisit > last);
+    locs.push({ loc, shortName, count, avg, last, daysSince, intervals, anomalous, status, n1, n2, n3, lastVisit, visitedSinceRestock, lastVisitAppt: lastVisitApptMap[loc] || null, lastVisitTech: lastVisitTechMap[loc] || null, lastRestockTech: data.lastRestockTech || null, lastRestockAppt: data.lastRestockAppt || null, techs: [...data.techs] });
+  }
+
+  // Sort by urgency
+  const statusOrder = { overdue: 0, soon: 1, anomalous: 2, ok: 3, single: 4, nodata: 5 };
+  locs.sort((a, b) => {
+    if (statusOrder[a.status] !== statusOrder[b.status]) return statusOrder[a.status] - statusOrder[b.status];
+    // Within same status group, sort by est. next restock date ascending
+    const an1 = a.n1 ? a.n1.getTime() : Infinity;
+    const bn1 = b.n1 ? b.n1.getTime() : Infinity;
+    return an1 - bn1;
+  });
+
+  // Date range
+  const allDates = restocks.map(r => parseDate(r[dateCol])).filter(Boolean);
+  const minDate = allDates.length ? new Date(Math.min(...allDates)) : null;
+  const maxDate = allDates.length ? new Date(Math.max(...allDates)) : null;
+
+  // Build per-tech restock history for cluster analysis
+  const techRestockMap = {};
+  for (const row of restocks) {
+    const loc = String(row[locCol] || '').trim();
+    const d = parseDate(row[dateCol]);
+    const tech = String(row[techCol] || '').trim();
+    if (!loc || !d || !tech) continue;
+    if (!techRestockMap[tech]) techRestockMap[tech] = [];
+    techRestockMap[tech].push({ loc, date: d });
+  }
+
+  return { state, fileName: currentFileName, locs, totalRestocks: restocks.length, minDate, maxDate, techRestockMap };
+}
+
+// Convert ISO date strings back to Date objects after JSON round-trip
+function reviveDashboard(d) {
+  const toDate = (s) => s ? new Date(s) : null;
+  return {
+    ...d,
+    minDate: toDate(d.minDate),
+    maxDate: toDate(d.maxDate),
+    locs: d.locs.map(l => ({
+      ...l,
+      last: toDate(l.last),
+      n1: toDate(l.n1),
+      n2: toDate(l.n2),
+      n3: toDate(l.n3),
+      lastVisit: toDate(l.lastVisit),
+      lastVisit: toDate(l.lastVisit),
+    })),
+  };
+}
+
+function renderDashboard(d) {
+  const { state, fileName, locs, totalRestocks, minDate, maxDate } = d;
+  currentState = state;
+  currentFileName = fileName;
+
+  document.getElementById('upload-screen').style.display = 'none';
+  document.getElementById('state-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  const TODAY = new Date();
+  TODAY.setHours(0,0,0,0);
+
+  const fmtFull = d => d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const dateRange = minDate && maxDate
+    ? `${fmtShort(minDate)} – ${fmtFull(maxDate)}`
+    : 'unknown date range';
+
+  // Summary stats
+  const overdueLocs = locs.filter(l => l.status === 'overdue');
+  const mostFrequent = [...locs].filter(l => l.count > 0).sort((a,b) => b.count - a.count)[0];
+
+  // Render header
+  document.getElementById('dashTitle').textContent = `${state} Restock Frequency & Projections`;
+  document.getElementById('dashSubtitle').textContent = `MCR Technical Service — ${fileName} — data ${dateRange}`;
+
+  // Data freshness banner
+  const freshnessBanner = document.getElementById('freshnessBanner');
+  if (maxDate) {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const reportDate = new Date(maxDate);
+    reportDate.setHours(0,0,0,0);
+    const daysOld = Math.round((today - reportDate) / 86400000);
+    const exactTime = maxDate.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit' });
+    let bg, color, icon, msg;
+    if (daysOld <= 2) {
+      bg = 'transparent'; color = 'var(--muted)'; icon = '✓';
+      msg = `Report data is current — most recent entry ${daysOld === 0 ? 'today' : daysOld === 1 ? 'yesterday' : '2 days ago'} at ${exactTime}.`;
+    } else if (daysOld <= 7) {
+      bg = '#3d2f00'; color = '#f0a500'; icon = '⚠️';
+      msg = `Report is ${daysOld} days old — recent restocks may not be reflected. Overdue flags may be unreliable.`;
+    } else {
+      bg = '#3d0000'; color = '#ff6b6b'; icon = '⚠️';
+      msg = `Report is ${daysOld} days old — restock projections and overdue status are likely inaccurate. Load a current report.`;
+    }
+    freshnessBanner.style.display = 'block';
+    freshnessBanner.innerHTML = `<div style="background:${bg};border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:${color};">${icon} ${msg}</div>`;
+  } else {
+    freshnessBanner.style.display = 'none';
+  }
+
+  // Summary cards
+  const cards = document.getElementById('summaryCards');
+  cards.innerHTML = `
+    <div class="card">
+      <div class="card-label">locations tracked</div>
+      <div class="card-value">${locs.filter(l => l.count > 0).length}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">total restocks on record</div>
+      <div class="card-value">${totalRestocks}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">overdue</div>
+      <div class="card-value" style="${overdueLocs.length > 0 ? 'color:#A32D2D;' : ''}">${overdueLocs.length}</div>
+      <div class="card-sub">${overdueLocs.length ? overdueLocs.map(l => l.shortName).join(', ') : 'all on track'}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">highest frequency</div>
+      ${mostFrequent ? `<div class="card-big">${mostFrequent.shortName}</div><div class="card-sub">${mostFrequent.count} restocks${mostFrequent.avg ? ` &bull; ~${Math.round(mostFrequent.avg)}-day cycle` : ''}</div>` : '<div class="card-sub">—</div>'}
+    </div>
+  `;
+
+  // Chart
+  const chartLocs = [...locs].filter(l => l.count > 0).sort((a,b) => b.count - a.count);
+  const isMobile = window.innerWidth < 640;
+  const chartHeight = Math.max(300, chartLocs.length * 32 + 60);
+  document.getElementById('chartLabel').textContent = `restocks per location, ${dateRange}`;
+  const chartWrap = document.getElementById('chartWrap');
+  chartWrap.style.height = chartHeight + 'px';
+  if (isMobile && chartLocs.length > 10) chartWrap.style.overflowY = 'auto';
+
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const textColor = dark ? '#888780' : '#73726c';
+  const gridColor = dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+
+  // Per-bar color based on status -- encodes urgency visually alongside volume
+  const getBarColor = (loc) => {
+    if (loc.status === 'overdue') {
+      return loc.visitedSinceRestock
+        ? (dark ? '#F09040' : '#D45F0A')  // orange -- overdue but visited since last restock
+        : (dark ? '#F08080' : '#CC2222'); // red -- genuinely overdue, no recent visit
+    }
+    if (loc.status === 'soon') return dark ? '#F0D060' : '#B8960A'; // yellow -- due soon
+    return dark ? '#7BBD5E' : '#4E8A2D'; // green -- on track
+  };
+  const barColors = chartLocs.map(getBarColor);
+
+  // Chart legend
+  const legendItems = [
+    { color: dark ? '#F08080' : '#CC2222', label: 'Overdue' },
+    { color: dark ? '#F09040' : '#D45F0A', label: 'Overdue (visited since restock)' },
+    { color: dark ? '#F0D060' : '#B8960A', label: 'Due soon' },
+    { color: dark ? '#7BBD5E' : '#4E8A2D', label: 'On track' },
+  ];
+  const legendHtml = legendItems.map(item =>
+    `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:11px;color:var(--muted);">
+      <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${item.color};flex-shrink:0;"></span>${item.label}
+    </span>`
+  ).join('');
+  const existingLegend = document.getElementById('chartLegend');
+  if (existingLegend) existingLegend.innerHTML = legendHtml;
+  else {
+    const legendEl = document.createElement('div');
+    legendEl.id = 'chartLegend';
+    legendEl.style.cssText = 'margin-bottom:10px;display:flex;flex-wrap:wrap;gap:4px;';
+    legendEl.innerHTML = legendHtml;
+    document.getElementById('chartWrap').parentNode.insertBefore(legendEl, document.getElementById('chartWrap'));
+  }
+
+  chartInstance = new Chart(document.getElementById('restockChart'), {
+    type: 'bar',
+    indexAxis: 'y',
+    data: {
+      labels: chartLocs.map(l => l.shortName),
+      datasets: [{
+        label: 'Restocks',
+        data: chartLocs.map(l => l.count),
+        backgroundColor: barColors,
+        borderRadius: 3,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.raw} restock${ctx.raw !== 1 ? 's' : ''}` } }
+      },
+      scales: {
+        x: {
+          ticks: { color: textColor, stepSize: 1, font: { size: 11 } },
+          grid: { color: gridColor }, border: { color: gridColor },
+          title: { display: true, text: 'number of restocks', color: textColor, font: { size: 11 } }
+        },
+        y: {
+          ticks: { color: textColor, font: { size: 11 } },
+          grid: { display: false }, border: { color: gridColor },
+        }
+      }
+    }
+  });
+
+  currentDashboardData = d;
+  sortCol = null;
+  sortDir = 'asc';
+  sharedDatesMode = false;
+  updateSortHeaders();
+
+  // Projection table
+  renderTableRows(locs);
+
+  // Footnote
+  document.getElementById('clusterRecSection').style.display = '';
+  document.getElementById('clusterRecResults').innerHTML = '';
+  document.getElementById('clusterRecBtn').textContent = '🔍 Analyze routes';
+  document.getElementById('clusterRecBtn').style.background = 'var(--surface)';
+  document.getElementById('clusterRecBtn').style.color = 'var(--muted)';
+  document.getElementById('dashFootnote').innerHTML =
+    `** Anomalous interval pattern detected — average may be unreliable, treat with caution.<br>
+     Past projected dates show as — (already missed). Projections assume a constant average interval.<br>
+     Status thresholds: overdue = more than 7 days past estimated next restock; due soon = within 7 days.<br>
+     <strong>Overdue (red)</strong> — no visit since last restock; high confidence the machine is genuinely low.
+     <strong>Overdue (amber)</strong> — a non-restock visit occurred after the last restock; tech may have informally topped up. Treat as lower confidence.<br>
+     Location names have state prefix removed for readability. Hover for full name.`;
+}
+
+// ── Table rendering ────────────────────────────────────────────────────────
+
+function renderTableRows(locs) {
+  const TODAY = new Date();
+  TODAY.setHours(0,0,0,0);
+
+  const statusCfg = {
+    overdue:          { label: 'overdue',           badgeClass: 'badge-overdue',          rowClass: 'row-overdue',          groupLabel: 'Overdue — No Recent Visit' },
+    'overdue-visited':{ label: 'overdue (visited)',  badgeClass: 'badge-overdue-visited',  rowClass: 'row-overdue-visited',  groupLabel: 'Overdue — Visited Since Last Restock' },
+    soon:             { label: 'due soon',           badgeClass: 'badge-soon',             rowClass: 'row-soon',             groupLabel: 'Due Soon' },
+    'soon-visited':   { label: 'due soon (visited)', badgeClass: 'badge-overdue-visited',  rowClass: 'row-overdue-visited',  groupLabel: 'Due Soon — Visited Since Last Restock' },
+    anomalous:        { label: 'see note',           badgeClass: 'badge-info',             rowClass: 'row-info',             groupLabel: 'Anomalous Data' },
+    ok:               { label: 'on track',           badgeClass: 'badge-ok',               rowClass: 'row-ok',               groupLabel: 'On Track' },
+    single:           { label: 'too few',            badgeClass: 'badge-info',             rowClass: 'row-info',             groupLabel: 'Insufficient Data (1 restock)' },
+    nodata:           { label: 'no history',         badgeClass: 'badge-info',             rowClass: 'row-info',             groupLabel: 'No Restock Record' },
+  };
+
+  // Resolve effective display status (split overdue + soon into visited/not-visited tiers)
+  const effectiveStatus = (loc) => {
+    if (loc.status === 'overdue' && loc.visitedSinceRestock) return 'overdue-visited';
+    if (loc.status === 'soon'    && loc.visitedSinceRestock) return 'soon-visited';
+    return loc.status;
+  };
+
+  const tbody = document.getElementById('projBody');
+  tbody.innerHTML = '';
+
+  const fmtCell = (date) => {
+    if (!date) return '<span>—</span>';
+    const past = date < TODAY;
+    if (past) {
+      const daysOver = Math.round((TODAY - date) / 86400000);
+      return `<span style="color:var(--danger-tc);font-weight:600;">-${daysOver}</span>`;
+    }
+    return `<span>${fmt(date)}</span>`;
+  };
+
+  let lastStatus = null;
+  for (const loc of locs) {
+    const es = effectiveStatus(loc);
+    const cfg = statusCfg[es] || statusCfg[loc.status];
+    if (es !== lastStatus) {
+      const sep = document.createElement('tr');
+      sep.className = 'group-header';
+      sep.innerHTML = `<td colspan="8">${cfg.groupLabel}</td>`;
+      tbody.appendChild(sep);
+      lastStatus = es;
+    }
+
+    const avgLabel = loc.avg
+      ? `${Math.round(loc.avg)}d${loc.anomalous ? ' **' : ''}`
+      : '—';
+
+    const lastStr = loc.last
+      ? loc.last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : '—';
+
+    const tr = document.createElement('tr');
+    tr.className = cfg.rowClass;
+    tr.innerHTML = `
+      <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}">${loc.shortName}</td>
+      <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
+      <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
+      <td style="font-weight:600;">${lastStr}</td>
+      <td style="font-weight:600;">${loc.lastVisit ? fmt(loc.lastVisit) : '—'}${loc.lastVisitAppt ? `<br><span style="font-size:10px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>` : ''}</td>
+      <td style="font-weight:600;">${loc.daysSince !== null ? loc.daysSince : '—'}</td>
+      <td style="font-weight:600;">${avgLabel}</td>
+      <td>${loc.count || '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Sorting ────────────────────────────────────────────────────────────────
+
+
+// ── CLUSTER RECOMMENDATION ANALYSIS ────────────────────────────────────────
+
+let clusterRecsVisible = false;
+
+function toggleClusterRecs() {
+  if (clusterRecsVisible) {
+    document.getElementById('clusterRecResults').innerHTML = '';
+    document.getElementById('clusterRecBtn').textContent = '🔍 Analyze routes';
+    document.getElementById('clusterRecBtn').style.background = 'var(--surface)';
+    document.getElementById('clusterRecBtn').style.color = 'var(--muted)';
+    clusterRecsVisible = false;
+    return;
+  }
+  if (!currentDashboardData || !currentDashboardData.techRestockMap) return;
+  clusterRecsVisible = true;
+  document.getElementById('clusterRecBtn').textContent = '✕ Hide analysis';
+  document.getElementById('clusterRecBtn').style.background = 'var(--accent)';
+  document.getElementById('clusterRecBtn').style.color = '#fff';
+  renderClusterRecs(currentDashboardData.techRestockMap);
+}
+
+function renderClusterRecs(techRestockMap) {
+  const WINDOW_DAYS = 3;   // within 3 days = same run
+  const MIN_COOCCUR  = 2;  // must co-occur at least twice to suggest
+
+  // For each tech, find pairs of locations frequently restocked within WINDOW_DAYS
+  const allSuggestions = [];
+
+  for (const [tech, events] of Object.entries(techRestockMap)) {
+    if (events.length < 4) continue; // need enough history
+
+    // Sort events by date
+    events.sort((a, b) => a.date - b.date);
+
+    // Count co-occurrences: pair → count of times within WINDOW_DAYS
+    const pairCount = {};
+    for (let i = 0; i < events.length; i++) {
+      for (let j = i + 1; j < events.length; j++) {
+        const gap = Math.abs(events[j].date - events[i].date) / 86400000;
+        if (gap > WINDOW_DAYS) continue;
+        if (events[i].loc === events[j].loc) continue;
+        const key = [events[i].loc, events[j].loc].sort().join('|||');
+        pairCount[key] = (pairCount[key] || 0) + 1;
+      }
+    }
+
+    // Find strong pairs (>= MIN_COOCCUR)
+    const strongPairs = Object.entries(pairCount)
+      .filter(([, c]) => c >= MIN_COOCCUR)
+      .map(([key, count]) => ({ locs: key.split('|||'), count }));
+
+    if (strongPairs.length === 0) continue;
+
+    // Build clusters via union-find on strong pairs
+    const parent = {};
+    const find = (x) => { if (parent[x] === undefined) parent[x] = x; return parent[x] === x ? x : (parent[x] = find(parent[x])); };
+    const union = (a, b) => { parent[find(a)] = find(b); };
+    strongPairs.forEach(p => union(p.locs[0], p.locs[1]));
+
+    // Group locations by root
+    const clusterMap = {};
+    for (const { locs } of strongPairs) {
+      locs.forEach(loc => {
+        const root = find(loc);
+        if (!clusterMap[root]) clusterMap[root] = new Set();
+        clusterMap[root].add(loc);
+      });
+    }
+
+    // For each cluster, compute avg co-occurrence strength
+    for (const [root, locSet] of Object.entries(clusterMap)) {
+      if (locSet.size < 2) continue;
+      const members = [...locSet];
+      // Find max co-occurrence count among pairs in this cluster
+      let maxCount = 0;
+      strongPairs.forEach(p => {
+        if (locSet.has(p.locs[0]) && locSet.has(p.locs[1])) maxCount = Math.max(maxCount, p.count);
+      });
+      // Strip state prefix from names
+      const shortNames = members.map(l => l.replace(/^[A-Z]{2}\s*-\s*/i, '').trim());
+      allSuggestions.push({ tech, members, shortNames, maxCount });
+    }
+  }
+
+  // Sort by tech, then by size desc
+  allSuggestions.sort((a, b) => {
+    if (a.tech !== b.tech) return a.tech.localeCompare(b.tech);
+    return b.members.length - a.members.length;
+  });
+
+  const container = document.getElementById('clusterRecResults');
+  if (allSuggestions.length === 0) {
+    container.innerHTML = '<p style="color:var(--muted);font-size:13px;padding:12px 0;">No recurring route patterns found — more restock history may be needed.</p>';
+    return;
+  }
+
+  let html = '';
+  let lastTech = null;
+  for (const s of allSuggestions) {
+    if (s.tech !== lastTech) {
+      if (lastTech !== null) html += '</div>';
+      html += `<div style="margin-bottom:20px;">
+        <div style="font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;padding-bottom:4px;border-bottom:0.5px solid var(--border);">
+          ${s.tech}
+        </div>`;
+      lastTech = s.tech;
+    }
+    html += `
+      <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">
+          <span style="font-size:13px;font-weight:600;color:var(--text);">
+            ${s.shortNames.length} locations — co-restocked ${s.maxCount}× within ${WINDOW_DAYS} days
+          </span>
+        </div>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--text);line-height:1.8;">
+          ${s.shortNames.map(n => `<li>${n}</li>`).join('')}
+        </ul>
+        <div style="margin-top:8px;font-size:11px;color:var(--muted);">
+          Assign these sites to a shared cluster in the dispatch tool to enable preemptive restock suggestions.
+        </div>
+      </div>`;
+  }
+  if (lastTech !== null) html += '</div>';
+  container.innerHTML = html;
+}
+
+function toggleSharedDates() {
+  sharedDatesMode = !sharedDatesMode;
+  const btn = document.getElementById('sharedDatesBtn');
+  if (btn) {
+    btn.style.background = sharedDatesMode ? 'var(--accent)' : 'var(--surface)';
+    btn.style.color = sharedDatesMode ? '#fff' : 'var(--muted)';
+    btn.style.borderColor = sharedDatesMode ? 'var(--accent)' : 'var(--border-strong)';
+    btn.textContent = sharedDatesMode ? '📅 Shared dates: ON' : '📅 Shared dates';
+  }
+  if (!currentDashboardData) return;
+  if (sharedDatesMode) {
+    renderSharedDates(currentDashboardData.locs);
+  } else {
+    // Restore normal urgency view
+    const locs = sortCol
+      ? sortLocsWithinGroups(currentDashboardData.locs, sortCol, sortDir)
+      : currentDashboardData.locs;
+    renderTableRows(locs);
+    const q = document.getElementById('locationSearch').value;
+    const c = document.getElementById('clusterSelect').value;
+    if (c) applyClusterFilter();
+    else if (q) filterTable(q);
+  }
+}
+
+function renderSharedDates(locs) {
+  const TODAY = new Date();
+  TODAY.setHours(0,0,0,0);
+
+  // Group by last restock tech + date; skip locations with no last restock
+  const groups = {};
+  for (const loc of locs) {
+    if (!loc.last) continue;
+    const dateStr = loc.last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const tech = loc.lastRestockTech || 'Unknown Tech';
+    const key = tech + '|' + dateStr;
+    if (!groups[key]) groups[key] = { date: loc.last, tech, locs: [] };
+    groups[key].locs.push(loc);
+  }
+
+  // Only keep groups with 2+ locations, sorted by date descending (most recent first)
+  const sharedGroups = Object.values(groups)
+    .filter(g => g.locs.length >= 2)
+    .sort((a, b) => b.date - a.date);
+
+  const tbody = document.getElementById('projBody');
+  tbody.innerHTML = '';
+
+  if (sharedGroups.length === 0) {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td colspan="8" style="text-align:center;color:var(--muted);padding:20px;">No shared restock dates found.</td>';
+    tbody.appendChild(row);
+    return;
+  }
+
+  const fmtCell = (date) => {
+    if (!date) return '<span>—</span>';
+    const past = date < TODAY;
+    if (past) {
+      const daysOver = Math.round((TODAY - date) / 86400000);
+      return `<span style="color:var(--danger-tc);font-weight:600;">-${daysOver}</span>`;
+    }
+    return `<span>${fmt(date)}</span>`;
+  };
+
+  const statusCfg = {
+    overdue:   { label: 'overdue',    badgeClass: 'badge-overdue', rowClass: 'row-overdue' },
+    soon:      { label: 'due soon',   badgeClass: 'badge-soon',    rowClass: 'row-soon'    },
+    anomalous: { label: 'see note',   badgeClass: 'badge-info',    rowClass: 'row-info'    },
+    ok:        { label: 'on track',   badgeClass: 'badge-ok',      rowClass: 'row-ok'      },
+    single:    { label: 'too few',    badgeClass: 'badge-info',    rowClass: 'row-info'    },
+    nodata:    { label: 'no history', badgeClass: 'badge-info',    rowClass: 'row-info'    },
+  };
+
+  for (const group of sharedGroups) {
+    // Group header row
+    const sep = document.createElement('tr');
+    sep.className = 'group-header';
+    sep.innerHTML = `<td colspan="8">📅 ${group.tech} — ${group.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} — ${group.locs.length} locations</td>`;
+    tbody.appendChild(sep);
+
+    for (const loc of group.locs) {
+      const cfg = statusCfg[loc.status] || statusCfg.ok;
+      const avgLabel = loc.avg ? `${Math.round(loc.avg)}d${loc.anomalous ? ' **' : ''}` : '—';
+      const lastStr = loc.last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const tr = document.createElement('tr');
+      tr.className = cfg.rowClass;
+      tr.innerHTML = `
+        <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}">${loc.shortName}</td>
+        <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
+        <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
+        <td style="font-weight:600;">${lastStr}</td>
+        <td style="font-weight:600;">${loc.lastVisit ? fmt(loc.lastVisit) : '—'}${loc.lastVisitAppt ? `<br><span style="font-size:10px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>` : ''}</td>
+        <td style="font-weight:600;">${loc.daysSince !== null ? loc.daysSince : '—'}</td>
+        <td style="font-weight:600;">${avgLabel}</td>
+        <td>${loc.count || '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+}
+
+function handleSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = col;
+    sortDir = 'asc';
+  }
+  updateSortHeaders();
+  if (currentDashboardData) {
+    const sorted = sortLocsWithinGroups(currentDashboardData.locs, sortCol, sortDir);
+    renderTableRows(sorted);
+    const q = document.getElementById('locationSearch').value;
+    const c = document.getElementById('clusterSelect').value;
+    if (c) applyClusterFilter();
+    else if (q) filterTable(q);
+  }
+}
+
+function updateSortHeaders() {
+  document.querySelectorAll('thead th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === sortCol) {
+      th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+  });
+}
+
+function sortLocsWithinGroups(locs, col, dir) {
+  const statusOrder = { overdue: 0, soon: 1, anomalous: 2, ok: 3, single: 4, nodata: 5 };
+  const groups = {};
+  for (const loc of locs) {
+    const es = loc.status === 'overdue' && loc.visitedSinceRestock ? 'overdue-visited'
+             : loc.status === 'soon'    && loc.visitedSinceRestock ? 'soon-visited'
+             : loc.status;
+    if (!groups[es]) groups[es] = [];
+    groups[es].push(loc);
+  }
+  const effectiveOrder = { overdue: 0, 'overdue-visited': 1, soon: 2, anomalous: 3, ok: 4, single: 5, nodata: 6 };
+  const getVal = (loc) => {
+    switch (col) {
+      case 'count':    return loc.count ?? (dir === 'asc' ? Infinity : -Infinity);
+      case 'avg':      return loc.avg ?? (dir === 'asc' ? Infinity : -Infinity);
+      case 'last':     return loc.last ? loc.last.getTime() : (dir === 'asc' ? -Infinity : Infinity);
+      case 'daysSince':return loc.daysSince ?? (dir === 'asc' ? Infinity : -Infinity);
+      case 'n1':       return loc.n1 ? loc.n1.getTime() : (dir === 'asc' ? Infinity : -Infinity);
+      case 'n2':       return loc.n2 ? loc.n2.getTime() : (dir === 'asc' ? Infinity : -Infinity);
+      default: return 0;
+    }
+  };
+  const result = [];
+  for (const status of ['overdue', 'overdue-visited', 'soon', 'soon-visited', 'anomalous', 'ok', 'single', 'nodata']) {
+    if (!groups[status]) continue;
+    const sorted = [...groups[status]].sort((a, b) => {
+      const av = getVal(a), bv = getVal(b);
+      return dir === 'asc' ? av - bv : bv - av;
+    });
+    result.push(...sorted);
+  }
+  return result;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function addDays(d, n) {
+  const r = new Date(d);
+  r.setDate(r.getDate() + Math.round(n));
+  return r;
+}
+function fmt(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function fmtShort(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+// ── Events ─────────────────────────────────────────────────────────────────
+
+function handleFileSelect(e) {
+  const file = e.target.files && e.target.files[0];
+  if (file) readFile(file);
+}
+const fi = document.getElementById('fileInput');
+fi.addEventListener('change', handleFileSelect);
+fi.addEventListener('input', handleFileSelect);
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) readFile(file);
+});
+</script>
+</body>
+</html>

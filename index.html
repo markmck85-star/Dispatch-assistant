@@ -254,7 +254,7 @@
                 <div class="top-row">
                     <div>
                         <label>Region:</label>
-                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink();">
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateRestockLink();">
                             <option value="GA">Georgia / NC / SC</option>
                             <option value="FL">Florida</option>
                             <option value="MI">Michigan</option>
@@ -336,7 +336,7 @@
                     </div>
                 </div>
 
-                <a href="https://restock-tracker.netlify.app" target="_blank" class="restock-tracker-link" style="display:block; background:#2c3e50; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none; margin-top:10px;">📊 Restock Tracker</a>
+                <a id="restockLink" href="restock-tracker.html?state=GA" class="restock-tracker-link" style="display:block; background:#2c3e50; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none; margin-top:10px;">📊 Restock Tracker</a>
                 <a href="calendar.html" class="team-calendar-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🗓️ Team Calendar</a>
                 <a href="shipments.html" class="shipments-link" style="display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📦 RMA Shipments</a>
                 <a href="location-lookup.html" class="location-lookup-link" style="display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🔍 Location Lookup</a>
@@ -2509,10 +2509,20 @@ function distanceMatrixStatus(state) {
             if (sel && link) link.href = '/watchdog/' + sel.value;
         }
 
+        // Same idea for the Restock Tracker link, now that it's an internal
+        // page rather than a separate app -- keeps it scoped to whichever
+        // region is currently selected instead of always asking for GA.
+        function updateRestockLink() {
+            const sel = document.getElementById('stateSelector');
+            const link = document.getElementById('restockLink');
+            if (sel && link) link.href = 'restock-tracker.html?state=' + sel.value;
+        }
+
         window.onload = async function() {
             restoreJournalThreshold();
             restoreControlsState();
             updateWatchdogLink();
+            updateRestockLink();
             // Restore manual availability overrides from Blobs — auto-clears if date doesn't match today
             try {
                 const res = await fetch('/.netlify/functions/get-availability');
@@ -3752,7 +3762,7 @@ function distanceMatrixStatus(state) {
                     const matchedNames = matchedCodes.map(c => (LOCATIONS[c] || {}).name || c).join(', ');
                     clusterBannerHtml += `<div style="background:#1a2a3a;border:1px solid #2a6496;border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#7ec8e3;">
                         📍 <strong>${clusterName} dispatch detected</strong> — ${matchedNames}<br>
-                        <span style="font-size:12px;color:#aaa;">Consider checking the <a href="https://restock-tracker.netlify.app" target="_blank" style="color:#7ec8e3;">Restock Tracker</a> for nearby sites that may benefit from a preemptive restock.</span>
+                        <span style="font-size:12px;color:#aaa;">Consider checking the <a href="restock-tracker.html?state=${CURRENT_STATE}" target="_blank" style="color:#7ec8e3;">Restock Tracker</a> for nearby sites that may benefit from a preemptive restock.</span>
                     </div>`;
                 }
             });
@@ -3771,7 +3781,7 @@ function distanceMatrixStatus(state) {
                 const names = codes.map(c => (LOCATIONS[c] || {}).name || c).join(', ');
                 clusterBannerHtml += `<div style="background:#1a2a3a;border:1px solid #2a6496;border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#7ec8e3;">
                     📍 <strong>${clusterName} dispatch detected</strong> — ${names}<br>
-                    <span style="font-size:12px;color:#aaa;">Consider checking the <a href="https://restock-tracker.netlify.app" target="_blank" style="color:#7ec8e3;">Restock Tracker</a> for nearby sites that may benefit from a preemptive restock.</span>
+                    <span style="font-size:12px;color:#aaa;">Consider checking the <a href="restock-tracker.html?state=${CURRENT_STATE}" target="_blank" style="color:#7ec8e3;">Restock Tracker</a> for nearby sites that may benefit from a preemptive restock.</span>
                 </div>`;
             });
 
@@ -3787,7 +3797,7 @@ function distanceMatrixStatus(state) {
                 const remoteNames = remoteFlagged.map(c => (LOCATIONS[c] || {}).name || c).join(', ');
                 clusterBannerHtml += `<div style="background:#1a2a3a;border:1px solid #2a6496;border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#7ec8e3;">
                     📍 <strong>Remote location dispatch detected</strong> — ${remoteNames}<br>
-                    <span style="font-size:12px;color:#aaa;">Consider checking the <a href="https://restock-tracker.netlify.app" target="_blank" style="color:#7ec8e3;">Restock Tracker</a> for nearby sites that may benefit from a preemptive restock.</span>
+                    <span style="font-size:12px;color:#aaa;">Consider checking the <a href="restock-tracker.html?state=${CURRENT_STATE}" target="_blank" style="color:#7ec8e3;">Restock Tracker</a> for nearby sites that may benefit from a preemptive restock.</span>
                 </div>`;
             }
 
@@ -3980,7 +3990,7 @@ function distanceMatrixStatus(state) {
             html += renderActionSection(closedEntries,   '&#x2713; Completed / Removed Today');
 
             const secondBtn = window.innerWidth >= 960
-                ? `<button class="big-btn" onclick="window.open('https://restock-tracker.netlify.app','_blank')" style="background:#17a2b8; margin-top:0;">📊 Restock Tracker</button>`
+                ? `<button class="big-btn" onclick="window.open('restock-tracker.html?state=' + CURRENT_STATE, '_blank')" style="background:#17a2b8; margin-top:0;">📊 Restock Tracker</button>`
                 : `<button class="big-btn" onclick="generateMobileReport()" style="background:#17a2b8; margin-top:0;">📄 Report</button>`;
             html += `<div style="display:flex; gap:10px; margin-top:20px;">
                         <button class="big-btn" onclick="generateFinalMessages()" style="background:#28a745; margin-top:0;">✅ Messages</button>
