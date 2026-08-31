@@ -102,7 +102,7 @@ exports.handler = async (event) => {
   while (true) {
     let visitsQuery = supabase
       .from('site_visits')
-      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number, inbound_email_id, imported_at')
+      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number, imported_at, tickets(inbound_email_id)')
       .in('site_id', siteIds)
       .not('started_at', 'is', null)
       .order('started_at', { ascending: true })
@@ -129,8 +129,8 @@ exports.handler = async (event) => {
   for (const v of allVisits) {
     if (!bySite[v.site_id]) bySite[v.site_id] = { restocks: [], allVisits: [] };
     const d = new Date(v.started_at);
-    bySite[v.site_id].allVisits.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.inbound_email_id });
-    if (v.is_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.inbound_email_id });
+    bySite[v.site_id].allVisits.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null });
+    if (v.is_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null });
   }
 
   const TODAY = new Date();
