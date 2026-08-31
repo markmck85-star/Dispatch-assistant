@@ -254,7 +254,7 @@
                 <div class="top-row">
                     <div>
                         <label>Region:</label>
-                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateRestockLink();">
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateRestockLink(); updateStateConsoleLink();">
                             <option value="GA">Georgia / NC / SC</option>
                             <option value="FL">Florida</option>
                             <option value="MI">Michigan</option>
@@ -340,7 +340,7 @@
                 <a href="calendar.html" class="team-calendar-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🗓️ Team Calendar</a>
                 <a href="shipments.html" class="shipments-link" style="display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📦 RMA Shipments</a>
                 <a href="location-lookup.html" class="location-lookup-link" style="display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🔍 Location Lookup</a>
-                <a href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
+                <a id="stateConsoleLink" href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
@@ -2518,12 +2518,24 @@ function distanceMatrixStatus(state) {
             if (sel && link) link.href = 'restock-tracker.html?state=' + sel.value;
         }
 
+        // Same idea again for the State Console link -- this one got missed
+        // when watchdog/restock links were fixed to follow the selected
+        // region (2026-08-12/30). Found live 2026-08-31: it stayed a bare
+        // href="state.html" the whole time, so it always opened whatever
+        // state.html's own default landing state is (Georgia), regardless
+        // of which region was actually selected on the board.
+        function updateStateConsoleLink() {
+            const sel = document.getElementById('stateSelector');
+            const link = document.getElementById('stateConsoleLink');
+            if (sel && link) link.href = 'state.html?state=' + sel.value;
+        }
+
         window.onload = async function() {
             restoreJournalThreshold();
             restoreControlsState();
             updateWatchdogLink();
             updateRestockLink();
-
+            updateStateConsoleLink();
             // 2026-08-31: handoff from State Console's "Send to Dispatch Board"
             // button on an open ticket's source-email popup. Reuses this same
             // paste-and-parse pipeline rather than a separate injection path --
@@ -2549,6 +2561,7 @@ function distanceMatrixStatus(state) {
                     }
                     updateWatchdogLink();
                     updateRestockLink();
+                    updateStateConsoleLink();
                     setTimeout(() => processDispatch(), 300);
                 }
             } catch (e) {
@@ -3097,7 +3110,17 @@ function distanceMatrixStatus(state) {
                 'WV': '(WV)', 'OR': '(OR)'
             };
             const validPrefixes = STATE_PREFIXES[CURRENT_STATE] || '([A-Z]{2})';
-            let rawCodes = text.toUpperCase().replace(/,/g, ' ').replace(/\n/g, ' ').split(/\s+/).filter(c => c.match(new RegExp('^' + validPrefixes + '\\d+$')));
+            // 2026-08-31: widened to accept a single optional letter between
+            // the state prefix and digits (e.g. ORT004, MIT037, NVT004) --
+            // the testing-station T-code convention built out 2026-08-30.
+            // Previously only bare STATE+digits matched, so a T-coded
+            // site's own code could never be recognized even if it DID
+            // appear in pasted text. Still just one optional letter, not a
+            // general free-for-all -- doesn't touch the separate TMP+state
+            // prefix convention (TMPGA001 etc.), which is structurally
+            // different enough to need its own handling if that ever comes
+            // up in daily paste text.
+            let rawCodes = text.toUpperCase().replace(/,/g, ' ').replace(/\n/g, ' ').split(/\s+/).filter(c => c.match(new RegExp('^' + validPrefixes + '[A-Z]?\\d+$')));
 
             // NV fallback: if no NV codes found, look for machine numbers ONLY after "NV" state lines
             // (scanning all numbers picks up count values from other states)

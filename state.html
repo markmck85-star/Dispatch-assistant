@@ -446,6 +446,16 @@ function fmtDateOnly(dateKey) {
 
 async function loadAll() {
   const state = document.getElementById('stateSel').value;
+  // 2026-08-31: keeps the URL's ?state= in sync with the dropdown, not just
+  // on arrival -- previously only applyStateFromUrl() (below) ever read
+  // the URL, nothing ever wrote back to it, so picking a different state
+  // from the dropdown after landing here (e.g. from an old bookmark or the
+  // bare state.html link that existed before today) left the URL saying
+  // nothing, and a refresh at that point fell back to whatever the
+  // dropdown's default option is (Georgia) instead of staying put.
+  const url = new URL(window.location.href);
+  url.searchParams.set('state', state);
+  history.replaceState(null, '', url);
   loadConsole(state);
   loadRestock(state);
 }
@@ -603,7 +613,7 @@ async function loadConsole(state, isRetry) {
         }
         return dateHeader + countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
-          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
+          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
           ${shipmentTag}
@@ -707,7 +717,7 @@ function closeSiteHistory() {
 // state/situation) -- opens the device's own mail app with subject/body
 // pre-filled, same as a normal manual forward.
 let sourceEmailForwardData = null;
-async function viewSourceEmail(inboundEmailId) {
+async function viewSourceEmail(inboundEmailId, siteCode) {
     let overlay = document.getElementById('sourceEmailOverlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -727,7 +737,7 @@ async function viewSourceEmail(inboundEmailId) {
         const data = await res.json();
         if (!data.ok) { body.textContent = 'Failed to load email: ' + (data.error || 'unknown error'); return; }
         const dateStr = data.receivedAt ? new Date(data.receivedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
-        sourceEmailForwardData = { subject: data.subject, sender: data.sender, dateStr, bodyText: data.bodyText };
+        sourceEmailForwardData = { subject: data.subject, sender: data.sender, dateStr, bodyText: data.bodyText, siteCode: siteCode || null };
         body.innerHTML = `
             <div style="font-weight:600;font-size:16px;margin-bottom:4px;padding-right:24px;">${escapeHtml(data.subject)}</div>
             <div style="color:#666;font-size:13px;margin-bottom:12px;">${data.sender ? escapeHtml(data.sender) + ' · ' : ''}${dateStr}</div>
@@ -755,12 +765,25 @@ function forwardSourceEmail() {
 // stripping doesn't touch the field labels (Location:, Address:, Line
 // Item Issue Category:, etc.) the parser depends on, so this is safe to
 // hand off as-is.
+// 2026-08-31 fix: the raw Neumo email for a testing-station ticket says
+// "OR - Oakridge DMV", never the MCR-assigned code ("ORT004") -- that
+// mapping only exists in MCR's own database, so no amount of parsing the
+// pasted text alone could ever discover it (confirmed live: nothing
+// showed up on the board even after fixing the parser's code regex to
+// accept T-codes, because there was no code in the text to find in the
+// first place). Since the code is already known here, append it directly
+// as its own guaranteed-parseable line instead of relying on Neumo's text
+// to happen to contain it.
 function sendToDispatchBoard() {
     if (!sourceEmailForwardData) return;
     const state = document.getElementById('stateSel').value;
+    let bodyText = sourceEmailForwardData.bodyText || '';
+    if (sourceEmailForwardData.siteCode) {
+        bodyText += '\n\n' + sourceEmailForwardData.siteCode;
+    }
     sessionStorage.setItem('mcr_pending_dispatch_paste', JSON.stringify({
         state,
-        bodyText: sourceEmailForwardData.bodyText,
+        bodyText,
     }));
     window.location.href = '/';
 }
