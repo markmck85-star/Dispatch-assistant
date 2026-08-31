@@ -81,9 +81,14 @@ exports.handler = async (event) => {
       const verify = await store.get(key, { type: "json" });
       if (verify && JSON.stringify(verify[code]) === JSON.stringify(merged)) {
         // Additive Supabase sync (admin-panel-to-Supabase gap fix). Blobs is
-        // still what the live app reads; this keeps the sites table (used by
-        // save-assignment.js/get-assignments.js/mailgun-inbound.js lookups)
-        // from going stale. Never blocks or fails the Blobs write above.
+        // still the primary WRITE target and the fallback read source, but
+        // get-locations.js (v2, 2026-07-31 / v3, 2026-08-28) now reads
+        // Supabase `sites` as primary -- so this sync is what the live app
+        // actually reads from in the normal case, not just a side mirror.
+        // This keeps the sites table (used by save-assignment.js/
+        // get-assignments.js/mailgun-inbound.js lookups, and the dispatch
+        // board's own location lookups too) from going stale. Never blocks
+        // or fails the Blobs write above.
         if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
           try {
             const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
