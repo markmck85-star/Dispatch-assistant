@@ -1023,8 +1023,8 @@ function lastVisitCell(loc) {
   const dateStr = loc.lastVisit ? fmt(loc.lastVisit) : '—';
   if (!loc.lastVisitAppt) return dateStr;
   const apptHtml = loc.lastVisitEmailId
-    ? `<button onclick="viewSourceEmail('${loc.lastVisitEmailId}')" style="background:none;border:none;padding:0;color:#1a56c4;font-weight:600;text-decoration:underline;cursor:pointer;font-size:10px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
-    : `<span style="font-size:10px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>`;
+    ? `<button onclick="viewSourceEmail('${loc.lastVisitEmailId}')" style="background:none;border:none;padding:0;color:var(--info-tc);font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
+    : `<span style="font-size:12px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>`;
   return `${dateStr}<br>${apptHtml}`;
 }
 
