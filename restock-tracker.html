@@ -229,7 +229,7 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
     <div style="font-size:13px; font-weight:600; margin-bottom:8px;">📡 Load from Dispatch Platform (shared data)</div>
     <div style="font-size:11px; color:var(--muted); margin-bottom:10px;">Pulls the same closed-ticket data already imported into the dispatch app's database. Not a live Salesforce feed — freshness reflects whenever that report was last imported there.</div>
     <div style="display:flex; gap:8px; margin-bottom:8px;">
-      <input id="liveState" type="text" placeholder="State (e.g. GA)" maxlength="2"
+      <input id="liveState" type="text" placeholder="State (e.g. GA) — blank = all" maxlength="2"
         style="flex:1; padding:8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:inherit; text-transform:uppercase;">
     </div>
     <select id="liveRangePreset" onchange="onLiveRangePresetChange()"
@@ -879,7 +879,7 @@ const DISPATCH_API_BASE = 'https://mcrdispatch.net';
 const REGION_STATES = { GA: ['GA', 'NC', 'SC'] };
 const REGION_LABELS = { GA: 'Georgia / NC / SC' };
 function statesForRegion(region) { return REGION_STATES[region] || [region]; }
-function labelForRegion(region) { return REGION_LABELS[region] || region; }
+function labelForRegion(region) { return region ? (REGION_LABELS[region] || region) : 'All States'; }
 
 function onLiveRangePresetChange() {
   const preset = document.getElementById('liveRangePreset').value;
@@ -983,19 +983,22 @@ async function fetchLiveRegion(region, since, until) {
 async function loadLiveDashboard() {
   const state = document.getElementById('liveState').value.trim().toUpperCase();
   const msg = document.getElementById('liveLoadingMsg');
-  if (!/^[A-Z]{2}$/.test(state)) {
-    alert('Enter a valid 2-letter state code (e.g. GA).');
+  // Blank is allowed -- get-restock-schedule.js already treats an omitted
+  // state param as "all states" (`const state = params.state; // optional`),
+  // the manual button just never exposed that until now.
+  if (state && !/^[A-Z]{2}$/.test(state)) {
+    alert('Enter a valid 2-letter state code (e.g. GA), or leave blank to load every state.');
     return;
   }
   const preset = document.getElementById('liveRangePreset').value;
   const { since, until } = resolveLiveRange(preset);
 
   msg.style.display = 'block';
-  msg.textContent = 'Loading shared data from Dispatch Platform…';
+  msg.textContent = state ? 'Loading shared data from Dispatch Platform…' : 'Loading shared data for all states from Dispatch Platform…';
 
   try {
     const dashboard = await fetchLiveRegion(state, since, until);
-    localStorage.setItem('mcr_restock_last_region', state);
+    if (state) localStorage.setItem('mcr_restock_last_region', state);
     msg.style.display = 'none';
     renderDashboard(dashboard);
   } catch (err) {
