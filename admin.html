@@ -713,6 +713,19 @@
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('userInfo').textContent = currentUser.username + ' (' + currentUser.role + ')';
 
+            // Distance Matrix builds can cost real money on a large state
+            // (~$23-45/state for site-to-site, ~$5-6 for driving-mode
+            // tech-to-site) -- restrict the tab to admin-role users only
+            // (currently admin, tj). If a non-admin was left sitting on
+            // this tab from a previous session, bounce them to Locations.
+            var dmTabBtn = document.getElementById('tabDistancematrix');
+            if (dmTabBtn) {
+                dmTabBtn.style.display = (currentUser.role === 'admin') ? '' : 'none';
+                if (currentUser.role !== 'admin' && dmTabBtn.className === 'active') {
+                    switchTab('locations');
+                }
+            }
+
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
@@ -774,6 +787,10 @@
 
         // --- TAB SWITCHING ---
         function switchTab(tab) {
+            if (tab === 'distancematrix' && (!currentUser || currentUser.role !== 'admin')) {
+                showToast('Distance Matrix is restricted to admin users.', 'error');
+                tab = 'locations';
+            }
             var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
