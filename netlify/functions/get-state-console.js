@@ -261,7 +261,7 @@ exports.handler = async (event) => {
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -348,6 +348,7 @@ exports.handler = async (event) => {
         issueDetail: t.issue_detail,
         ticketKind: t.ticket_kind,
         woNumber: t.wo_number,
+        inboundEmailId: t.inbound_email_id,
         receivedAt: t.received_at,
         dueAt,
         status,
@@ -410,7 +411,7 @@ exports.handler = async (event) => {
         issueDetail: null,
         ticketKind: 'maintenance', // reuses the existing 📦 RESTOCK tag/sort/grouping
         woNumber: null,
-        receivedAt: a.updated_at,
+        inboundEmailId: null,
         dueAt: a.dispatch_date,
         status,
         closedOn: status === 'closed' ? a.updated_at : null,
