@@ -102,7 +102,7 @@ exports.handler = async (event) => {
   while (true) {
     let visitsQuery = supabase
       .from('site_visits')
-      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number, imported_at')
+      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number, inbound_email_id, imported_at')
       .in('site_id', siteIds)
       .not('started_at', 'is', null)
       .order('started_at', { ascending: true })
@@ -129,8 +129,8 @@ exports.handler = async (event) => {
   for (const v of allVisits) {
     if (!bySite[v.site_id]) bySite[v.site_id] = { restocks: [], allVisits: [] };
     const d = new Date(v.started_at);
-    bySite[v.site_id].allVisits.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number });
-    if (v.is_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number });
+    bySite[v.site_id].allVisits.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.inbound_email_id });
+    if (v.is_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.inbound_email_id });
   }
 
   const TODAY = new Date();
@@ -225,8 +225,10 @@ exports.handler = async (event) => {
       visitedSinceRestock,
       lastVisitTech: lastVisitEntry ? lastVisitEntry.tech : null,
       lastVisitAppt: lastVisitEntry ? lastVisitEntry.appt : null,
+      lastVisitEmailId: lastVisitEntry ? lastVisitEntry.emailId : null,
       lastRestockTech: lastRestockEntry ? lastRestockEntry.tech : null,
       lastRestockAppt: lastRestockEntry ? lastRestockEntry.appt : null,
+      lastRestockEmailId: lastRestockEntry ? lastRestockEntry.emailId : null,
       scheduledDate: scheduled ? scheduled.date : null,
       scheduledTech: scheduled ? scheduled.tech : null,
       manuallyConfirmedAt: latestConfirmationBySite[siteId] ? latestConfirmationBySite[siteId].confirmed_at : null,
