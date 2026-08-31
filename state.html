@@ -603,7 +603,7 @@ async function loadConsole(state, isRetry) {
         }
         return dateHeader + countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
-          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}</div>
+          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
           ${shipmentTag}
@@ -696,13 +696,24 @@ function closeSiteHistory() {
 // predating the tickets/inbound_emails capture, which only goes back ~2
 // months), but recent visits are at ~97% coverage and climbing, so this is
 // worth having here too, not just on the dispatch board.
+//
+// 2026-08-31: added a Forward button, requested specifically for the case
+// this popup is now also reachable from (a still-OPEN trouble ticket in
+// the Recent Tickets list, not just closed/imported visit history) --
+// forwarding the original dispatch email straight to a dispatcher is more
+// useful there than anywhere else, since that's exactly the moment
+// someone else might need to act on it. Recipient is left blank (a mailto:
+// forward has no way to know who "the dispatcher" is for a given
+// state/situation) -- opens the device's own mail app with subject/body
+// pre-filled, same as a normal manual forward.
+let sourceEmailForwardData = null;
 async function viewSourceEmail(inboundEmailId) {
     let overlay = document.getElementById('sourceEmailOverlay');
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'sourceEmailOverlay';
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
-        overlay.innerHTML = `<div style="background:#fff;border-radius:8px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;">
+        overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:8px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;">
             <button onclick="closeSourceEmail()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#666;">✕</button>
             <div id="sourceEmailBody">Loading…</div>
         </div>`;
@@ -710,19 +721,29 @@ async function viewSourceEmail(inboundEmailId) {
     }
     const body = document.getElementById('sourceEmailBody');
     body.textContent = 'Loading…';
+    sourceEmailForwardData = null;
     try {
         const res = await fetch('/.netlify/functions/get-source-email?id=' + encodeURIComponent(inboundEmailId));
         const data = await res.json();
         if (!data.ok) { body.textContent = 'Failed to load email: ' + (data.error || 'unknown error'); return; }
         const dateStr = data.receivedAt ? new Date(data.receivedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+        sourceEmailForwardData = { subject: data.subject, sender: data.sender, dateStr, bodyText: data.bodyText };
         body.innerHTML = `
             <div style="font-weight:600;font-size:16px;margin-bottom:4px;padding-right:24px;">${escapeHtml(data.subject)}</div>
             <div style="color:#666;font-size:13px;margin-bottom:12px;">${data.sender ? escapeHtml(data.sender) + ' · ' : ''}${dateStr}</div>
+            <button onclick="forwardSourceEmail()" style="background:#2e7d5b;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:13px;cursor:pointer;margin-bottom:12px;">↪ Forward</button>
             <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(data.bodyText) || '<span style="color:#999;">(empty body)</span>'}</div>
         `;
     } catch (e) {
         body.textContent = 'Failed to load email: ' + e.message;
     }
+}
+function forwardSourceEmail() {
+    if (!sourceEmailForwardData) return;
+    const { subject, sender, dateStr, bodyText } = sourceEmailForwardData;
+    const fwdSubject = 'Fwd: ' + (subject || '(no subject)');
+    const fwdBody = `---------- Forwarded message ----------\nFrom: ${sender || '(unknown sender)'}\nDate: ${dateStr}\nSubject: ${subject || '(no subject)'}\n\n${bodyText || ''}`;
+    window.location.href = 'mailto:?subject=' + encodeURIComponent(fwdSubject) + '&body=' + encodeURIComponent(fwdBody);
 }
 
 function closeSourceEmail() {
