@@ -1023,9 +1023,49 @@ function lastVisitCell(loc) {
   const dateStr = loc.lastVisit ? fmt(loc.lastVisit) : '—';
   if (!loc.lastVisitAppt) return dateStr;
   const apptHtml = loc.lastVisitEmailId
-    ? `<button onclick="viewSourceEmail('${loc.lastVisitEmailId}')" style="background:none;border:none;padding:0;color:var(--info-tc);font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
+    ? `<button onclick="openApptAndCopy('${loc.lastVisitEmailId}', '${loc.lastVisitAppt}')" style="background:none;border:none;padding:0;color:var(--info-tc);font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
     : `<span style="font-size:12px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>`;
   return `${dateStr}<br>${apptHtml}`;
+}
+
+// Added 2026-08-30: Gina's workflow (tracking down closing notes in
+// Salesforce for overdue-but-visited sites) needs the SA number on the
+// clipboard to paste into Salesforce's search, but turning it into a link
+// broke Android's tap-to-select-text for copying -- same tension as the
+// Reader Lookup app already solves by copying on tap. Doing both here: one
+// click copies AND still opens the source email, same confirmation toast
+// style as Reader Lookup ("✓ Copied 33139") so it's an already-familiar
+// pattern rather than a new one to learn.
+function showCopyToast(text) {
+  const existing = document.getElementById('apptCopyToast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'apptCopyToast';
+  toast.textContent = '✓ Copied ' + text;
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e7e34;color:#fff;font-weight:600;padding:10px 20px;border-radius:24px;z-index:10001;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 1500);
+}
+function copyApptNumber(appt) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(appt).then(() => showCopyToast(appt)).catch(() => fallbackCopy(appt));
+  } else {
+    fallbackCopy(appt);
+  }
+}
+function fallbackCopy(appt) {
+  const ta = document.createElement('textarea');
+  ta.value = appt;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); showCopyToast(appt); } catch (e) { /* silent -- worst case, just no copy confirmation */ }
+  ta.remove();
+}
+function openApptAndCopy(inboundEmailId, appt) {
+  copyApptNumber(appt);
+  viewSourceEmail(inboundEmailId);
 }
 
 // Mirrors index.html/state.html's source-email viewer exactly, added here
