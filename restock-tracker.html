@@ -1007,6 +1007,61 @@ async function loadLiveDashboard() {
 // Maps get-restock-schedule.js's response shape into the same `locs` shape
 // computeDashboard() produces locally, so renderDashboard() and everything
 // downstream of it (chart, cards, freshness banner) works unchanged.
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Renders the "last visit" cell's date + SA number, matching the plain-text
+// look everywhere already, except the SA number becomes a clickable link
+// to the source email when one's on file (see get-restock-schedule.js --
+// only true for visits tied to an individually-emailed ticket, not the
+// routine bulk-restock majority, which stay plain text same as before).
+function lastVisitCell(loc) {
+  const dateStr = loc.lastVisit ? fmt(loc.lastVisit) : '—';
+  if (!loc.lastVisitAppt) return dateStr;
+  const apptHtml = loc.lastVisitEmailId
+    ? `<button onclick="viewSourceEmail('${loc.lastVisitEmailId}')" style="background:none;border:none;padding:0;color:#1a56c4;font-weight:600;text-decoration:underline;cursor:pointer;font-size:10px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
+    : `<span style="font-size:10px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>`;
+  return `${dateStr}<br>${apptHtml}`;
+}
+
+// Mirrors index.html/state.html's source-email viewer exactly, added here
+// 2026-08-30 now that this page lives on the same domain (mcrdispatch.net)
+// as get-source-email.js, following the same live-data integration that
+// already wired get-restock-schedule.js in.
+function closeSourceEmail() {
+  const el = document.getElementById('sourceEmailOverlay');
+  if (el) el.remove();
+}
+async function viewSourceEmail(inboundEmailId) {
+  let overlay = document.getElementById('sourceEmailOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'sourceEmailOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.innerHTML = `<div style="background:#fff;border-radius:8px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;">
+        <button onclick="closeSourceEmail()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#666;">✕</button>
+        <div id="sourceEmailBody">Loading…</div>
+    </div>`;
+    document.body.appendChild(overlay);
+  }
+  const body = document.getElementById('sourceEmailBody');
+  body.textContent = 'Loading…';
+  try {
+    const res = await fetch('/.netlify/functions/get-source-email?id=' + encodeURIComponent(inboundEmailId));
+    const data = await res.json();
+    if (!data.ok) { body.textContent = 'Failed to load email: ' + (data.error || 'unknown error'); return; }
+    const dateStr = data.receivedAt ? new Date(data.receivedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    body.innerHTML = `
+        <div style="font-weight:600;font-size:16px;margin-bottom:4px;padding-right:24px;">${escapeHtml(data.subject)}</div>
+        <div style="color:#666;font-size:13px;margin-bottom:12px;">${data.sender ? escapeHtml(data.sender) + ' · ' : ''}${dateStr}</div>
+        <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(data.bodyText) || '<span style="color:#999;">(empty body)</span>'}</div>
+    `;
+  } catch (e) {
+    body.textContent = 'Failed to load email: ' + e.message;
+  }
+}
+
 function adaptLiveResponse(data, state) {
   const toDate = s => s ? new Date(s) : null;
   const locs = (data.locations || []).map(item => ({
@@ -1025,9 +1080,11 @@ function adaptLiveResponse(data, state) {
     lastVisit: toDate(item.lastVisit),
     visitedSinceRestock: item.visitedSinceRestock,
     lastVisitAppt: item.lastVisitAppt,
+    lastVisitEmailId: item.lastVisitEmailId,
     lastVisitTech: item.lastVisitTech,
     lastRestockTech: item.lastRestockTech,
     lastRestockAppt: item.lastRestockAppt,
+    lastRestockEmailId: item.lastRestockEmailId,
     techs: [], // per-tech restock history isn't returned by this endpoint; route-cluster analysis (already shelved) won't have data to show
   }));
 
@@ -1516,7 +1573,7 @@ function renderTableRows(locs) {
       <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
       <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
       <td style="font-weight:600;">${lastStr}</td>
-      <td style="font-weight:600;">${loc.lastVisit ? fmt(loc.lastVisit) : '—'}${loc.lastVisitAppt ? `<br><span style="font-size:10px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>` : ''}</td>
+      <td style="font-weight:600;">${lastVisitCell(loc)}</td>
       <td style="font-weight:600;">${loc.daysSince !== null ? loc.daysSince : '—'}</td>
       <td style="font-weight:600;">${avgLabel}</td>
       <td>${loc.count || '—'}</td>
@@ -1746,7 +1803,7 @@ function renderSharedDates(locs) {
         <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
         <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
         <td style="font-weight:600;">${lastStr}</td>
-        <td style="font-weight:600;">${loc.lastVisit ? fmt(loc.lastVisit) : '—'}${loc.lastVisitAppt ? `<br><span style="font-size:10px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>` : ''}</td>
+        <td style="font-weight:600;">${lastVisitCell(loc)}</td>
         <td style="font-weight:600;">${loc.daysSince !== null ? loc.daysSince : '—'}</td>
         <td style="font-weight:600;">${avgLabel}</td>
         <td>${loc.count || '—'}</td>
