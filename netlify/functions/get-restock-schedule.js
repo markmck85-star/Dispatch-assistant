@@ -102,7 +102,7 @@ exports.handler = async (event) => {
   while (true) {
     let visitsQuery = supabase
       .from('site_visits')
-      .select('site_id, started_at, is_restock, tech_name_raw, appointment_number, imported_at, tickets(inbound_email_id)')
+      .select('site_id, started_at, is_restock, included_restock, tech_name_raw, appointment_number, imported_at, tickets(inbound_email_id)')
       .in('site_id', siteIds)
       .not('started_at', 'is', null)
       .order('started_at', { ascending: true })
@@ -130,7 +130,16 @@ exports.handler = async (event) => {
     if (!bySite[v.site_id]) bySite[v.site_id] = { restocks: [], allVisits: [] };
     const d = new Date(v.started_at);
     bySite[v.site_id].allVisits.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null });
-    if (v.is_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null });
+    // included_restock (source: 'inferred', detected from the linked
+    // ticket's own line-item text -- see perform-import.js) catches
+    // restocks bundled into a visit that Salesforce's own single-value
+    // remediation/remediation_detail summary classified as something else
+    // entirely (e.g. "Hardware Troubleshooting"). Confirmed live
+    // 2026-08-30: without this, a real restock quietly riding along on a
+    // trouble-ticket visit was invisible to the cycle math -- the site
+    // just looked "visited, not restocked" and could show a false
+    // overdue flag even though it had, in fact, just been restocked.
+    if (v.is_restock || v.included_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null });
   }
 
   const TODAY = new Date();

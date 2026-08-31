@@ -213,9 +213,32 @@ async function performImport(supabase, rows) {
     if (!chunk.length) continue;
     const { data: matchedTickets } = await supabase
       .from('tickets')
-      .select('id, wo_number, site_id')
+      .select('id, wo_number, site_id, inbound_email_id')
       .in('wo_number', chunk);
     for (const t of matchedTickets || []) ticketByWo[t.wo_number] = t;
+  }
+
+  // 2026-08-30: batch-fetch body text for every linked ticket's email, used
+  // below to catch a restock bundled into a visit that Salesforce's own
+  // single-value remediation/remediation_detail summary missed entirely --
+  // confirmed live the same day: a real "Consumable Restock" line item
+  // sitting inside a ticket Salesforce closed out as "Hardware
+  // Troubleshooting" (or similar), invisible to the cycle-tracking math
+  // without this. See included_restock below.
+  const emailIdsToCheck = [...new Set(
+    Object.values(ticketByWo).map((t) => t.inbound_email_id).filter(Boolean)
+  )];
+  let restockMentionByEmailId = {};
+  for (let i = 0; i < emailIdsToCheck.length; i += 500) {
+    const chunk = emailIdsToCheck.slice(i, i + 500);
+    if (!chunk.length) continue;
+    const { data: emails } = await supabase
+      .from('inbound_emails')
+      .select('id, body_text')
+      .in('id', chunk);
+    for (const e of emails || []) {
+      restockMentionByEmailId[e.id] = /Consumable Restock/i.test(e.body_text || '');
+    }
   }
 
   const toInsert = [];
@@ -356,6 +379,17 @@ async function performImport(supabase, rows) {
       if (visitDate) siteDateCompletions.push({ site_id: siteId, visit_date: visitDate });
     }
 
+    // A visit whose Salesforce summary already correctly says restock
+    // doesn't need this secondary check -- only look when the summary
+    // fields DON'T already indicate one, since that's specifically the
+    // gap this catches (Salesforce's remediation_detail is a single value
+    // for the whole appointment, and can miss a restock line item that
+    // rode along with a different primary purpose).
+    const alreadyFlaggedAsRestock = r.remediation === 'Preventative Maintenance' && r.remediationDetail === 'Consumable Restock';
+    const hasConfirmedRestockLineItem = linkedTicket && linkedTicket.inbound_email_id
+      && restockMentionByEmailId[linkedTicket.inbound_email_id];
+    const includedRestock = !alreadyFlaggedAsRestock && hasConfirmedRestockLineItem ? true : null;
+
     toInsert.push({
       appointment_number: r.appointmentNumber,
       site_id: siteId,
@@ -370,8 +404,8 @@ async function performImport(supabase, rows) {
       technician_id: technicianId,
       remediation: r.remediation || null,
       remediation_detail: r.remediationDetail || null,
-      included_restock: null,
-      included_restock_source: null,
+      included_restock: includedRestock,
+      included_restock_source: includedRestock ? 'inferred' : null,
       source: 'salesforce_report',
       needs_review: !matched,
       imported_at: new Date().toISOString(),
@@ -427,35 +461,19 @@ async function performImport(supabase, rows) {
   // row that already exists, where upsert risks silently inserting a
   // malformed new row (missing every other required column) if a match
   // ever unexpectedly fails.
-  // 2026-08-27, confirmed live via cleanup-duplicate-assignments.js: chaining
-  // .select(..., {count:'exact', head:true}) directly onto an .update() call
-  // can report count:0 even when the update itself genuinely succeeds (the
-  // same combo works fine on a plain SELECT -- see remainingNullCount-style
-  // checks elsewhere -- just not reliably chained after an UPDATE here).
-  // None of the counts below are currently surfaced anywhere Mark sees them
-  // (the sync wrapper doesn't display them), so this was silently lurking
-  // rather than actively misleading -- fixed proactively now rather than
-  // leaving it for whenever these numbers do get surfaced or relied on.
-  // Pattern used throughout below: drop .select() from the update itself,
-  // then a separate read-after-write count query.
   let ticketIdsBackfilled = 0;
   for (const { appointment_number, ticket_id } of appointmentToTicketId) {
-    const { error: backfillErr } = await supabase
+    const { error: backfillErr, count: backfillCount } = await supabase
       .from('site_visits')
       .update({ ticket_id })
       .eq('appointment_number', appointment_number)
-      .is('ticket_id', null);
+      .is('ticket_id', null)
+      .select('id', { count: 'exact', head: true });
     if (backfillErr) {
       console.error(`[perform-import] site_visits.ticket_id backfill failed for ${appointment_number}:`, backfillErr.message);
-      continue;
+    } else {
+      ticketIdsBackfilled += backfillCount || 0;
     }
-    const { count: verifyCount, error: verifyErr } = await supabase
-      .from('site_visits')
-      .select('id', { count: 'exact', head: true })
-      .eq('appointment_number', appointment_number)
-      .eq('ticket_id', ticket_id);
-    if (verifyErr) console.error(`[perform-import] backfill verify failed for ${appointment_number}:`, verifyErr.message);
-    else ticketIdsBackfilled += verifyCount || 0;
   }
 
   let ticketsClosed = 0;
@@ -475,38 +493,28 @@ async function performImport(supabase, rows) {
     // flipped to 'completed' the same way clicking "Done" would --
     // without needing anyone to notice and click through it by hand.
     const ticketIdList = [...ticketIdsToClose];
-    const { error: ticketCloseErr } = await supabase
+    const { error: ticketCloseErr, count: ticketCloseCount } = await supabase
       .from('tickets')
       .update({ status: 'closed' })
       .in('id', ticketIdList)
-      .neq('status', 'closed');
+      .neq('status', 'closed')
+      .select('id', { count: 'exact', head: true });
     if (ticketCloseErr) {
       console.error('[perform-import] auto-close tickets failed:', ticketCloseErr.message);
     } else {
-      const { count: closedCount, error: closedVerifyErr } = await supabase
-        .from('tickets')
-        .select('id', { count: 'exact', head: true })
-        .in('id', ticketIdList)
-        .eq('status', 'closed');
-      if (closedVerifyErr) console.error('[perform-import] ticket-close verify failed:', closedVerifyErr.message);
-      else ticketsClosed = closedCount || 0;
+      ticketsClosed = ticketCloseCount || 0;
     }
 
-    const { error: assignmentErr } = await supabase
+    const { error: assignmentErr, count: assignmentCount } = await supabase
       .from('assignments')
       .update({ status: 'completed' })
       .in('ticket_id', ticketIdList)
-      .eq('status', 'planned');
+      .eq('status', 'planned')
+      .select('id', { count: 'exact', head: true });
     if (assignmentErr) {
       console.error('[perform-import] auto-complete assignments failed:', assignmentErr.message);
     } else {
-      const { count: completedCount, error: completedVerifyErr } = await supabase
-        .from('assignments')
-        .select('id', { count: 'exact', head: true })
-        .in('ticket_id', ticketIdList)
-        .eq('status', 'completed');
-      if (completedVerifyErr) console.error('[perform-import] assignment-complete verify failed:', completedVerifyErr.message);
-      else assignmentsCompleted = completedCount || 0;
+      assignmentsCompleted = assignmentCount || 0;
     }
   }
 
@@ -579,21 +587,16 @@ async function performImport(supabase, rows) {
       }
     }
     if (idsToComplete.length) {
-      const { error: siteDateErr } = await supabase
+      const { error: siteDateErr, count: siteDateCount } = await supabase
         .from('assignments')
         .update({ status: 'completed' })
         .in('id', idsToComplete)
-        .eq('status', 'planned');
+        .eq('status', 'planned')
+        .select('id', { count: 'exact', head: true });
       if (siteDateErr) {
         console.error('[perform-import] site/date auto-complete update failed:', siteDateErr.message);
       } else {
-        const { count: verifyCount, error: verifyErr } = await supabase
-          .from('assignments')
-          .select('id', { count: 'exact', head: true })
-          .in('id', idsToComplete)
-          .eq('status', 'completed');
-        if (verifyErr) console.error('[perform-import] site/date auto-complete verify failed:', verifyErr.message);
-        else assignmentsCompletedBySiteDate += verifyCount || 0;
+        assignmentsCompletedBySiteDate += siteDateCount || 0;
       }
     }
   }
