@@ -2523,6 +2523,37 @@ function distanceMatrixStatus(state) {
             restoreControlsState();
             updateWatchdogLink();
             updateRestockLink();
+
+            // 2026-08-31: handoff from State Console's "Send to Dispatch Board"
+            // button on an open ticket's source-email popup. Reuses this same
+            // paste-and-parse pipeline rather than a separate injection path --
+            // see sendToDispatchBoard() in state.html. Read+clear immediately
+            // so a stray reload never re-triggers it. Appends rather than
+            // overwrites in case Mark already has other pasted text in
+            // progress in this browser -- an unexpected board full of extra
+            // stops is a much smaller problem than silently losing unsaved
+            // work.
+            try {
+                const pending = sessionStorage.getItem('mcr_pending_dispatch_paste');
+                if (pending) {
+                    sessionStorage.removeItem('mcr_pending_dispatch_paste');
+                    const data = JSON.parse(pending);
+                    if (data.state) {
+                        const sel = document.getElementById('stateSelector');
+                        if (sel) { sel.value = data.state; await updateContext(); }
+                    }
+                    const codesInput = document.getElementById('locationCodes');
+                    if (codesInput && data.bodyText) {
+                        const existing = codesInput.value.trim();
+                        codesInput.value = existing ? existing + '\n\n' + data.bodyText : data.bodyText;
+                    }
+                    updateWatchdogLink();
+                    updateRestockLink();
+                    setTimeout(() => processDispatch(), 300);
+                }
+            } catch (e) {
+                console.warn('[dispatch] Pending dispatch-board handoff failed:', e.message);
+            }
             // Restore manual availability overrides from Blobs — auto-clears if date doesn't match today
             try {
                 const res = await fetch('/.netlify/functions/get-availability');

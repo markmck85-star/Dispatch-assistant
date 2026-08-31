@@ -732,6 +732,7 @@ async function viewSourceEmail(inboundEmailId) {
             <div style="font-weight:600;font-size:16px;margin-bottom:4px;padding-right:24px;">${escapeHtml(data.subject)}</div>
             <div style="color:#666;font-size:13px;margin-bottom:12px;">${data.sender ? escapeHtml(data.sender) + ' · ' : ''}${dateStr}</div>
             <button onclick="forwardSourceEmail()" style="background:#2e7d5b;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:13px;cursor:pointer;margin-bottom:12px;">↪ Forward</button>
+            <button onclick="sendToDispatchBoard()" style="background:#2a5b9e;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:13px;cursor:pointer;margin-bottom:12px;margin-left:8px;">📋 Send to Dispatch Board</button>
             <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(data.bodyText) || '<span style="color:#999;">(empty body)</span>'}</div>
         `;
     } catch (e) {
@@ -744,6 +745,24 @@ function forwardSourceEmail() {
     const fwdSubject = 'Fwd: ' + (subject || '(no subject)');
     const fwdBody = `---------- Forwarded message ----------\nFrom: ${sender || '(unknown sender)'}\nDate: ${dateStr}\nSubject: ${subject || '(no subject)'}\n\n${bodyText || ''}`;
     window.location.href = 'mailto:?subject=' + encodeURIComponent(fwdSubject) + '&body=' + encodeURIComponent(fwdBody);
+}
+// 2026-08-31: reuses the dispatch board's OWN paste-and-parse pipeline
+// (the same Location Codes textarea + Generate Dispatches button that
+// already parses real Neumo dispatch-list emails every day) instead of
+// building a second, parallel way to turn an email into a board stop --
+// less code, and guaranteed to parse identically to how this exact same
+// text would be handled if pasted by hand. cleanBody()'s reply-chain
+// stripping doesn't touch the field labels (Location:, Address:, Line
+// Item Issue Category:, etc.) the parser depends on, so this is safe to
+// hand off as-is.
+function sendToDispatchBoard() {
+    if (!sourceEmailForwardData) return;
+    const state = document.getElementById('stateSel').value;
+    sessionStorage.setItem('mcr_pending_dispatch_paste', JSON.stringify({
+        state,
+        bodyText: sourceEmailForwardData.bodyText,
+    }));
+    window.location.href = '/';
 }
 
 function closeSourceEmail() {
