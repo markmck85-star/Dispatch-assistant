@@ -287,13 +287,11 @@
                     </div>
                     <div>
                         <label>Heavy-Day Trigger:</label>
-                        <select id="heavyDayTriggerSelector" onchange="setHeavyDayTrigger(this.value)" title="Ratio of adjusted workload to adjusted tech capacity above which a day is flagged heavy. Placeholder default -- tune per state as real heavy days are observed.">
-                            <option value="1.1">1.1x</option>
-                            <option value="1.2">1.2x</option>
-                            <option value="1.3" selected>1.3x</option>
-                            <option value="1.4">1.4x</option>
-                            <option value="1.5">1.5x</option>
-                            <option value="1.6">1.6x</option>
+                        <select id="heavyDayTriggerSelector" onchange="setHeavyDayTrigger(this.value)" title="How much above normal tech capacity a day has to be before it's flagged heavy. Placeholder default -- tune per state as real heavy days are observed.">
+                            <option value="1.1">Normal</option>
+                            <option value="1.2">Busy</option>
+                            <option value="1.3" selected>Very Busy</option>
+                            <option value="1.5">Slammed</option>
                         </select>
                     </div>
                 </div>
@@ -1998,8 +1996,11 @@ function distanceMatrixStatus(state) {
         // Heavy-Day Trigger ratio -- per-state configurable multiplier used by the
         // (not yet built) heavy-day detection function: adjusted workload / adjusted
         // tech capacity above this ratio flags a day as heavy. Placeholder default
-        // (1.3x) until real per-state calibration happens -- see design doc.
+        // (1.3x, "Very Busy") until real per-state calibration happens -- see design doc.
+        // Dropdown shows plain-English labels (Mark's call, 2026-09-01) rather than raw
+        // ratios, since "1.5x" isn't self-explanatory the way a Journal form count is.
         let HEAVY_DAY_TRIGGER_RATIO = 1.3;
+        const HEAVY_DAY_LABELS = { '1.1': 'Normal', '1.2': 'Busy', '1.3': 'Very Busy', '1.5': 'Slammed' };
 
         function setHeavyDayTrigger(val) {
             HEAVY_DAY_TRIGGER_RATIO = parseFloat(val);
@@ -2017,6 +2018,7 @@ function distanceMatrixStatus(state) {
                 'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
             const stateLabel = STATE_LABELS[CURRENT_STATE] || CURRENT_STATE;
+            const heavyLabel = HEAVY_DAY_LABELS[val] || `${parseFloat(val).toFixed(1)}x`;
             const toast = document.createElement('div');
             toast.id = 'heavyDayTriggerToast';
             toast.style.cssText = `
@@ -2028,7 +2030,7 @@ function distanceMatrixStatus(state) {
             `;
             toast.innerHTML = `
                 <div style="margin-bottom:10px;">
-                    📈 Save <strong>${parseFloat(val).toFixed(1)}x</strong> as the permanent heavy-day trigger ratio for all <strong>${stateLabel}</strong> users?
+                    📈 Save <strong>${heavyLabel}</strong> as the permanent heavy-day trigger for all <strong>${stateLabel}</strong> users?
                 </div>
                 <div style="display:flex;gap:10px;justify-content:center;">
                     <button onclick="saveHeavyDayTriggerPermanently('${val}')"
@@ -2054,6 +2056,7 @@ function distanceMatrixStatus(state) {
                 'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
             const stateLabel = STATE_LABELS[CURRENT_STATE] || CURRENT_STATE;
+            const heavyLabel = HEAVY_DAY_LABELS[val] || `${parseFloat(val).toFixed(1)}x`;
             try {
                 const res = await fetch('/.netlify/functions/save-settings', {
                     method: 'POST',
@@ -2061,12 +2064,12 @@ function distanceMatrixStatus(state) {
                     body: JSON.stringify({ state: CURRENT_STATE, heavyDayTriggerRatio: parseFloat(val) })
                 });
                 if (res.ok) {
-                    showToast(`✅ Heavy-day trigger ratio saved permanently as ${parseFloat(val).toFixed(1)}x for ${stateLabel}`);
+                    showToast(`✅ Heavy-day trigger saved permanently as "${heavyLabel}" for ${stateLabel}`);
                 } else {
-                    showToast('⚠️ Could not save permanently — trigger ratio set for this session only.');
+                    showToast('⚠️ Could not save permanently — trigger set for this session only.');
                 }
             } catch {
-                showToast('⚠️ Could not save permanently — trigger ratio set for this session only.');
+                showToast('⚠️ Could not save permanently — trigger set for this session only.');
             }
         }
 
