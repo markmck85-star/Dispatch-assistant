@@ -106,8 +106,50 @@ exports.handler = async (event) => {
   if (!requiredSecret) {
     return json(500, { error: "DISTANCE_MATRIX_ADMIN_PASSWORD is not configured -- refusing to run a paid build until it is set." });
   }
-  if (String(payload.adminSecret || "") !== requiredSecret) {
-    return json(401, { error: "Incorrect or missing admin secret for this paid operation." });
+
+  // Brute-force lockout (2026-09-02) -- shared with compute-distance-matrix.js
+  // via the same Blobs key, since both functions check the same password.
+  // A few wrong guesses locks out ALL driving-mode builds (both functions)
+  // for 24h, so guessing against this endpoint instead of the other one
+  // doesn't dodge the limit. Only checked when STARTING a build (offset===0)
+  // -- a resume call already passed this gate on its first request.
+  const authStore = getStore("dispatch");
+  const failKey = "distance-matrix-failed-attempts";
+  const MAX_FAILED_ATTEMPTS = 5;
+  const LOCKOUT_HOURS = 24;
+  if (offset === 0) {
+    const failData = (await authStore.get(failKey, { type: "json" })) || { count: 0, lockedUntil: null };
+
+    if (failData.lockedUntil && Date.now() < new Date(failData.lockedUntil).getTime()) {
+      const minsLeft = Math.ceil((new Date(failData.lockedUntil).getTime() - Date.now()) / 60000);
+      return json(429, {
+        error: `Too many incorrect admin-secret attempts -- locked out for ${minsLeft} more minute(s) (shared lockout across both distance-matrix build functions).`,
+      });
+    }
+
+    if (String(payload.adminSecret || "") !== requiredSecret) {
+      const newCount = (failData.count || 0) + 1;
+      const update = { count: newCount, lockedUntil: null };
+      let msg;
+      if (newCount >= MAX_FAILED_ATTEMPTS) {
+        update.lockedUntil = new Date(Date.now() + LOCKOUT_HOURS * 3600 * 1000).toISOString();
+        update.count = 0;
+        msg = `Incorrect admin secret. Too many failed attempts -- locked out for ${LOCKOUT_HOURS} hours.`;
+      } else {
+        msg = `Incorrect admin secret. ${MAX_FAILED_ATTEMPTS - newCount} attempt(s) remaining before a ${LOCKOUT_HOURS}-hour lockout.`;
+      }
+      await authStore.setJSON(failKey, update);
+      return json(401, { error: msg });
+    }
+
+    if (failData.count) await authStore.setJSON(failKey, { count: 0, lockedUntil: null });
+  } else {
+    // Resume call (offset > 0) -- still must present the correct password
+    // on every request (this function is stateless per-call), just skipped
+    // the lockout bookkeeping above since it already passed on offset===0.
+    if (String(payload.adminSecret || "") !== requiredSecret) {
+      return json(401, { error: "Incorrect or missing admin secret for this paid operation." });
+    }
   }
 
   // Cooldown (2026-08-18) -- these are one-time-per-state builds in normal
