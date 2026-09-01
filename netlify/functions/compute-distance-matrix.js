@@ -312,17 +312,30 @@ exports.handler = async (event) => {
     const techMap = new Map(techEntries);
     const locMap = new Map(locEntries);
 
-    // Carry over every existing pair whose tech AND site both still exist
-    // and are still active -- this is what quietly drops a departed tech
-    // (or a removed/renamed site) at zero cost, no API call needed.
+    // Carry over an existing pair ONLY if it's a real, successfully-priced
+    // driving result AND its tech/site both still exist and are active.
+    // Bug found 2026-09-02: originally this carried over ANY existing entry
+    // regardless of type, so a pair already in the matrix from a free
+    // haversine (straight-line) build looked "already covered" and additive
+    // mode would never actually query it for real drive time -- meaning
+    // once a state had ever had a free full build run, additive driving
+    // mode would silently keep reusing those straight-line estimates
+    // forever and never price anyone for real. haversine and
+    // haversine-fallback entries are now treated as needing a real query,
+    // same as a pair that's fully missing. A tech/site that no longer
+    // exists or is inactive is still dropped for free either way.
     let prunedCount = 0;
     for (const [key, val] of Object.entries(existingMatrix)) {
       const [techKey, locCode] = key.split("|");
-      if (techMap.has(techKey) && locMap.has(locCode)) {
-        matrix[key] = val;
-      } else {
+      if (!techMap.has(techKey) || !locMap.has(locCode)) {
         prunedCount++;
+        continue;
       }
+      if (val.type === "driving") {
+        matrix[key] = val;
+      }
+      // else: haversine / haversine-fallback -- leave out of `matrix` so it
+      // falls into the "missing" set below and gets a real driving query.
     }
 
     // Find every pair that SHOULD exist but doesn't yet (new tech, new
