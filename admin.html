@@ -361,11 +361,17 @@
   <!-- Step 2: Build matrix -->
   <p style="color:#aaa;font-size:12px;margin:8px 0 6px 0;">
     <strong style="color:#f0f0f0;">Step 2</strong> — Build the distance matrix.
-    Haversine is free and instant. Drive-time uses Google Maps API (~$5–6 per GA+FL refresh).
+    Haversine is free and instant. Drive-time uses Google Maps API (~$5–6 per GA+FL full refresh).
   </p>
+  <div style="margin:0 0 8px 0;">
+    <label style="color:#ccc;font-size:12px;cursor:pointer;">
+      <input type="checkbox" id="dm-additive" checked style="margin-right:5px;">
+      Additive (only price/query new techs or new sites — much cheaper. Uncheck to force a full paid rebuild of every pair.)
+    </label>
+  </div>
   <div class="dm-row">
     <button class="dm-btn green" onclick="dmBuildMatrix('haversine')">📐 Build (Straight-Line, Free)</button>
-    <button class="dm-btn orange" onclick="dmBuildMatrix('driving')">🚗 Build (Drive-Time, ~$6)</button>
+    <button class="dm-btn orange" onclick="dmBuildMatrix('driving')">🚗 Build (Drive-Time)</button>
   </div>
 
   <!-- Step 3: Site-to-site matrix (for route ordering, not tech-to-site assignment) -->
@@ -409,6 +415,8 @@
       ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
       : 'Cost scales with site count squared.';
     if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
+    const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
     let offset = 0;
     let done = false;
@@ -419,7 +427,7 @@
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, offset }),
+          body: JSON.stringify({ state, offset, adminSecret }),
         });
         const data = await res.json();
         if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
@@ -484,21 +492,38 @@
 
   window.dmBuildMatrix = async function (mode) {
     const state = dmState();
-    const label = mode === 'driving' ? 'drive-time (calls Google Maps API — confirm intent)' : 'straight-line haversine';
-    if (mode === 'driving' && !confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
+    const additive = mode === 'driving' && document.getElementById('dm-additive').checked;
+    const label = mode === 'driving'
+      ? (additive ? 'drive-time (additive -- only new tech/site pairs)' : 'drive-time (FULL rebuild -- every pair, full cost)')
+      : 'straight-line haversine';
+
+    let adminSecret = '';
+    if (mode === 'driving') {
+      const confirmMsg = additive
+        ? 'Build ADDITIVE drive-time matrix for ' + state + '?\nOnly queries pairs for new/changed techs or sites since the last build -- existing pairs are reused free, and any pair for a now-inactive tech or removed site is dropped at no cost. Should cost well under $1 for a typical single-tech or single-site addition.'
+        : 'Build a FULL drive-time matrix for ' + state + '?\nThis re-queries and re-bills EVERY tech x site pair, not just new ones (~$3–6 per state). Use this only when you want to force-refresh pairs that already exist (e.g. a tech moved, an address was corrected).';
+      if (!confirm(confirmMsg)) return;
+      adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+      if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+    }
+
     dmSetStatus('Building ' + label + ' matrix for ' + state + '…');
     try {
       const res = await fetch('/.netlify/functions/compute-distance-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, mode }),
+        body: JSON.stringify({ state, mode, additive, adminSecret }),
       });
       const data = await res.json();
       if (data.ok) {
         const { meta } = data;
+        const additiveLine = meta.additive
+          ? '\n' + meta.addedCount + ' new pairs queried, ' + meta.reusedCount + ' reused free, ' + meta.prunedCount + ' dropped (inactive tech/removed site)'
+          : '';
         dmSetStatus(
-          '✅ Matrix built for ' + state + ' (' + mode + ').\n' +
-          data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations\n' +
+          '✅ Matrix built for ' + state + ' (' + mode + (meta.additive ? ', additive' : '') + ').\n' +
+          data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations' +
+          additiveLine + '\n' +
           'Computed: ' + meta.computedAt +
           (meta.failedPairs?.length ? '\n⚠️ ' + meta.failedPairs.length + ' failed pairs (haversine fallback used)' : '')
         );
