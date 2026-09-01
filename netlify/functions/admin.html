@@ -361,11 +361,17 @@
   <!-- Step 2: Build matrix -->
   <p style="color:#aaa;font-size:12px;margin:8px 0 6px 0;">
     <strong style="color:#f0f0f0;">Step 2</strong> — Build the distance matrix.
-    Haversine is free and instant. Drive-time uses Google Maps API (~$5–6 per GA+FL refresh).
+    Haversine is free and instant. Drive-time uses Google Maps API (~$5–6 per GA+FL full refresh).
   </p>
+  <div style="margin:0 0 8px 0;">
+    <label style="color:#ccc;font-size:12px;cursor:pointer;">
+      <input type="checkbox" id="dm-additive" checked style="margin-right:5px;">
+      Additive (only price/query new techs or new sites — much cheaper. Uncheck to force a full paid rebuild of every pair.)
+    </label>
+  </div>
   <div class="dm-row">
     <button class="dm-btn green" onclick="dmBuildMatrix('haversine')">📐 Build (Straight-Line, Free)</button>
-    <button class="dm-btn orange" onclick="dmBuildMatrix('driving')">🚗 Build (Drive-Time, ~$6)</button>
+    <button class="dm-btn orange" onclick="dmBuildMatrix('driving')">🚗 Build (Drive-Time)</button>
   </div>
 
   <!-- Step 3: Site-to-site matrix (for route ordering, not tech-to-site assignment) -->
@@ -409,6 +415,8 @@
       ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
       : 'Cost scales with site count squared.';
     if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
+    const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
     let offset = 0;
     let done = false;
@@ -419,7 +427,7 @@
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, offset }),
+          body: JSON.stringify({ state, offset, adminSecret }),
         });
         const data = await res.json();
         if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
@@ -484,21 +492,66 @@
 
   window.dmBuildMatrix = async function (mode) {
     const state = dmState();
-    const label = mode === 'driving' ? 'drive-time (calls Google Maps API — confirm intent)' : 'straight-line haversine';
-    if (mode === 'driving' && !confirm('Build drive-time matrix for ' + state + '?\nThis will call the Google Maps Distance Matrix API (~$3–6 per state).')) return;
+    const additive = mode === 'driving' && document.getElementById('dm-additive').checked;
+    const label = mode === 'driving'
+      ? (additive ? 'drive-time (additive -- only new tech/site pairs)' : 'drive-time (FULL rebuild -- every pair, full cost)')
+      : 'straight-line haversine';
+
+    let adminSecret = '';
+    if (mode === 'driving') {
+      // Get an exact, real cost preview before showing the confirm dialog --
+      // free, no password needed, no API call to Google, nothing written.
+      dmSetStatus('Checking exact cost for ' + state + '…');
+      let preview;
+      try {
+        const previewRes = await fetch('/.netlify/functions/compute-distance-matrix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, mode, additive, dryRun: true }),
+        });
+        preview = await previewRes.json();
+        if (!preview.ok) { dmSetStatus('❌ ' + (preview.error || 'Could not preview cost')); return; }
+      } catch (e) {
+        dmSetStatus('❌ Network error checking cost: ' + e.message);
+        return;
+      }
+
+      const costLine = preview.estimatedCost > 0
+        ? '$' + preview.estimatedCost.toFixed(2) + ' (' + preview.billableElements + ' billable elements after ' + preview.freeElementsRemainingThisMonth + ' free-tier elements remaining this month)'
+        : '$0.00 (fully covered by this month\'s remaining free tier)';
+      const confirmMsg = additive
+        ? 'Build ADDITIVE drive-time matrix for ' + state + '?\n' +
+          preview.elementCount + ' elements will be queried (new/changed techs or sites since the last real driving build).\n' +
+          'Estimated cost: ' + costLine
+        : 'Build a FULL drive-time matrix for ' + state + '?\n' +
+          'This re-queries and re-bills EVERY tech x site pair (' + preview.elementCount + ' elements), not just new ones.\n' +
+          'Estimated cost: ' + costLine + '\n' +
+          'Use this only when you want to force-refresh pairs that already exist (e.g. a tech moved, an address was corrected).';
+      if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
+      adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+      if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+    }
+
     dmSetStatus('Building ' + label + ' matrix for ' + state + '…');
     try {
       const res = await fetch('/.netlify/functions/compute-distance-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, mode }),
+        body: JSON.stringify({ state, mode, additive, adminSecret }),
       });
       const data = await res.json();
       if (data.ok) {
         const { meta } = data;
+        const additiveLine = meta.additive
+          ? '\n' + meta.addedCount + ' new pairs queried, ' + meta.reusedCount + ' reused free, ' + meta.prunedCount + ' dropped (inactive tech/removed site)'
+          : '';
+        const costLine = meta.elementsBilledThisRun
+          ? '\n' + meta.elementsBilledThisRun + ' elements billed this run, ' + meta.monthlyElementsUsedTotal + ' total used this month'
+          : '';
         dmSetStatus(
-          '✅ Matrix built for ' + state + ' (' + mode + ').\n' +
-          data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations\n' +
+          '✅ Matrix built for ' + state + ' (' + mode + (meta.additive ? ', additive' : '') + ').\n' +
+          data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations' +
+          additiveLine + costLine + '\n' +
           'Computed: ' + meta.computedAt +
           (meta.failedPairs?.length ? '\n⚠️ ' + meta.failedPairs.length + ' failed pairs (haversine fallback used)' : '')
         );
@@ -713,6 +766,19 @@
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('userInfo').textContent = currentUser.username + ' (' + currentUser.role + ')';
 
+            // Distance Matrix builds can cost real money on a large state
+            // (~$23-45/state for site-to-site, ~$5-6 for driving-mode
+            // tech-to-site) -- restrict the tab to admin-role users only
+            // (currently admin, tj). If a non-admin was left sitting on
+            // this tab from a previous session, bounce them to Locations.
+            var dmTabBtn = document.getElementById('tabDistancematrix');
+            if (dmTabBtn) {
+                dmTabBtn.style.display = (currentUser.role === 'admin') ? '' : 'none';
+                if (currentUser.role !== 'admin' && dmTabBtn.className === 'active') {
+                    switchTab('locations');
+                }
+            }
+
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
@@ -774,6 +840,10 @@
 
         // --- TAB SWITCHING ---
         function switchTab(tab) {
+            if (tab === 'distancematrix' && (!currentUser || currentUser.role !== 'admin')) {
+                showToast('Distance Matrix is restricted to admin users.', 'error');
+                tab = 'locations';
+            }
             var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
@@ -909,11 +979,30 @@
             var html = '';
             usGroups.forEach(function(g, i) {
                 var sugg = g.suggested;
+                var confirmed = g.addressConfirmed;
+                var confirmedHtml = confirmed
+                    ? '<div style="margin-top:6px;font-size:13px;background:#173a1e;border:1px solid #2e7d32;border-radius:5px;padding:6px 8px;">✓ Confirmed by ticket address: <strong>' + esc(confirmed.site_code) + ' — ' + esc(confirmed.name) + '</strong>' +
+                      ' <button onclick="usApply(' + i + ', \'' + confirmed.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>'
+                    : '';
                 var suggHtml = sugg
                     ? '<div style="margin-top:6px;font-size:13px;">Suggested: <strong>' + esc(sugg.site_code) + ' — ' + esc(sugg.name) + '</strong>' +
                       ' <span style="color:#999;">(' + Math.round(sugg.score * 100) + '% match)</span> ' +
                       '<button onclick="usApply(' + i + ', \'' + sugg.site_id + '\')" style="margin-left:6px;background:#28a745;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">Apply</button></div>'
-                    : '<div style="margin-top:6px;font-size:13px;color:#999;">No suggested match.</div>';
+                    : (confirmed ? '' : '<div style="margin-top:6px;font-size:13px;color:#999;">No suggested match.</div>');
+                // Alternates: sites that tied with the top suggestion (e.g.
+                // multi-unit siblings like "Midtown"/"Midtown 2") -- surfaced
+                // rather than silently discarded, since picking the wrong one
+                // of a genuine tie is exactly the failure this was built to
+                // avoid. Skipped when a ticket-address match already gave a
+                // confirmed answer.
+                var altHtml = (!confirmed && g.alternates && g.alternates.length)
+                    ? '<div style="margin-top:4px;font-size:12px;color:#bbb;">Also matches (tied): ' +
+                      g.alternates.map(function(a) {
+                          return esc(a.site_code) + ' — ' + esc(a.name) +
+                              ' <button onclick="usApply(' + i + ', \'' + a.site_id + '\')" style="margin-left:2px;background:#3a3a3a;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">Apply</button>';
+                      }).join(' &nbsp;·&nbsp; ') +
+                      '</div>'
+                    : '';
                 var saHtml = (g.saNumbers && g.saNumbers.length)
                     ? '<div style="margin-top:6px;font-size:12px;color:#999;">SA#: ' +
                       g.saNumbers.map(function(sa) { return '<span style="color:#6cb2ff;">' + esc(sa) + '</span>'; }).join(', ') +
@@ -923,7 +1012,9 @@
                     '<div class="card-title">' + esc(g.state) + ' — "' + esc(g.account_name_raw) + '"</div>' +
                     '<div class="card-detail">' + g.row_count + ' row(s)</div>' +
                     saHtml +
+                    confirmedHtml +
                     suggHtml +
+                    altHtml +
                     '<div id="usGeo' + i + '">' +
                     '<button onclick="usLocate(' + i + ')" style="margin-top:6px;background:#6f42c1;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:12px;cursor:pointer;">📍 Locate via Maps</button>' +
                     '</div>' +
@@ -2023,7 +2114,14 @@
             if (!list) return;
             list.innerHTML = '<p style="color:#888;font-size:13px;">Loading...</p>';
             try {
-                const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS');
+                // 2026-08-29 fix: added cache: 'no-store' -- same stale-GET-
+                // cache class of bug already found and fixed in
+                // get-state-console.js. Without it, a checkbox toggle could
+                // genuinely save correctly server-side while this reload
+                // (fired on tab switch) kept showing the old cached state,
+                // making it look like the toggle "didn't stick" unless you
+                // went through the full Edit -> Update Recipient flow.
+                const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS', { cache: 'no-store' });
                 const data = await resp.json();
                 const s = data.settings || {};
                 const recipients = (s.settings && s.settings.recipients) || s.recipients || [];
@@ -2055,46 +2153,68 @@
         }
 
         async function editNotifRecipient(index) {
-            const recipients = await getNotifRecipients();
-            const r = recipients[index];
-            if (!r) return;
-            document.getElementById('notifName').value = r.name;
-            document.getElementById('notifPhone').value = r.address.split('@')[0] || '';
-            document.getElementById('notifAddress').value = r.address;
-            // Try to match carrier
-            const carriers = ['@vtext.com','@tmomail.net','@txt.att.net','@messaging.sprintpcs.com'];
-            const carrier = carriers.find(c => r.address.endsWith(c));
-            if (carrier) document.getElementById('notifCarrier').value = carrier;
-            // Set state checkboxes
-            document.querySelectorAll('.notif-state-cb').forEach(cb => cb.checked = false);
-            if (r.states && r.states.includes('ALL')) {
-                document.getElementById('notifStateAll').checked = true;
-                document.querySelectorAll('.notif-state-individual').forEach(cb => cb.checked = true);
-            } else if (r.states) {
-                r.states.forEach(s => {
-                    const cb = document.querySelector(`.notif-state-cb[value="${s}"]`);
-                    if (cb) cb.checked = true;
-                });
+            try {
+                const recipients = await getNotifRecipients();
+                const r = recipients[index];
+                if (!r) {
+                    // 2026-08-26: previously just `return`ed here with zero
+                    // feedback -- from the user's side this looks identical
+                    // to a working click that happened to find nothing,
+                    // when it's actually recipients[index] being undefined
+                    // (stale index, array changed since the list was last
+                    // rendered, or a shape mismatch in the stored blob).
+                    console.error('[editNotifRecipient] no recipient at index', index, 'recipients:', recipients);
+                    alert(`Could not load that recipient's info (index ${index} not found in ${recipients.length} loaded recipients). Check the console for details, and try refreshing the Notifications tab first.`);
+                    return;
+                }
+                document.getElementById('notifName').value = r.name || '';
+                document.getElementById('notifPhone').value = (r.address || '').split('@')[0] || '';
+                document.getElementById('notifAddress').value = r.address || '';
+                // Try to match carrier
+                const carriers = ['@vtext.com','@tmomail.net','@txt.att.net','@messaging.sprintpcs.com'];
+                const carrier = carriers.find(c => (r.address || '').endsWith(c));
+                if (carrier) document.getElementById('notifCarrier').value = carrier;
+                // Set state checkboxes
+                document.querySelectorAll('.notif-state-cb').forEach(cb => cb.checked = false);
+                if (r.states && r.states.includes('ALL')) {
+                    document.getElementById('notifStateAll').checked = true;
+                    document.querySelectorAll('.notif-state-individual').forEach(cb => cb.checked = true);
+                } else if (r.states) {
+                    r.states.forEach(s => {
+                        const cb = document.querySelector(`.notif-state-cb[value="${s}"]`);
+                        if (cb) cb.checked = true;
+                    });
+                }
+                document.getElementById('notifTimezone').value = r.timezone || 'America/New_York';
+                // Restore active hours
+                if (r.hoursStart === null || r.hoursEnd === null) {
+                    document.getElementById('notifHours247').checked = true;
+                    document.getElementById('notifHoursStart').value = '07:00';
+                    document.getElementById('notifHoursEnd').value = '22:00';
+                } else {
+                    document.getElementById('notifHours247').checked = false;
+                    document.getElementById('notifHoursStart').value = r.hoursStart || '07:00';
+                    document.getElementById('notifHoursEnd').value = r.hoursEnd || '22:00';
+                }
+                // Store the index being edited so addNotifRecipient can replace it
+                window._editingNotifIndex = index;
+                document.getElementById('addRecipientBtn').textContent = 'Update Recipient';
+                document.getElementById('adminPanel').scrollTo({ top: document.getElementById('sectionNotifications').offsetTop, behavior: 'smooth' });
+            } catch (err) {
+                // 2026-08-26: this whole function previously had no
+                // try/catch at all -- any thrown error (a missing DOM
+                // element, a malformed field on the stored record) failed
+                // completely silently with no visible symptom whatsoever.
+                console.error('[editNotifRecipient] failed:', err);
+                alert('Error loading recipient for editing: ' + err.message + ' (check console for details)');
             }
-            document.getElementById('notifTimezone').value = r.timezone || 'America/New_York';
-            // Restore active hours
-            if (r.hoursStart === null || r.hoursEnd === null) {
-                document.getElementById('notifHours247').checked = true;
-                document.getElementById('notifHoursStart').value = '07:00';
-                document.getElementById('notifHoursEnd').value = '22:00';
-            } else {
-                document.getElementById('notifHours247').checked = false;
-                document.getElementById('notifHoursStart').value = r.hoursStart || '07:00';
-                document.getElementById('notifHoursEnd').value = r.hoursEnd || '22:00';
-            }
-            // Store the index being edited so addNotifRecipient can replace it
-            window._editingNotifIndex = index;
-            document.getElementById('addRecipientBtn').textContent = 'Update Recipient';
-            document.getElementById('adminPanel').scrollTo({ top: document.getElementById('sectionNotifications').offsetTop, behavior: 'smooth' });
         }
 
         async function getNotifRecipients() {
-            const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS');
+            // 2026-08-29 fix: see the matching comment in loadNotifRecipients --
+            // same stale-GET-cache risk applies here, since this is the read
+            // half of the toggle-checkbox save itself.
+            const resp = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS', { cache: 'no-store' });
             const data = await resp.json();
             // save-settings stores {settings:{recipients:[]}} so get-settings returns
             // data.settings = {settings:{recipients:[]}, updatedAt:...}
@@ -2161,7 +2281,15 @@
 
         async function toggleNotifRecipient(index, enabled) {
             const recipients = await getNotifRecipients();
-            if (recipients[index]) { recipients[index].enabled = enabled; await saveNotifRecipients(recipients); }
+            if (recipients[index]) {
+                recipients[index].enabled = enabled;
+                await saveNotifRecipients(recipients);
+                // Confirm what actually got saved rather than trusting the
+                // raw checkbox click -- cheap given no-store above already
+                // guarantees a fresh read, and it's the same safety net
+                // addNotifRecipient already applies after its own save.
+                setTimeout(() => loadNotifRecipients(), 500);
+            }
         }
 
         async function removeNotifRecipient(index) {
