@@ -499,10 +499,35 @@
 
     let adminSecret = '';
     if (mode === 'driving') {
+      // Get an exact, real cost preview before showing the confirm dialog --
+      // free, no password needed, no API call to Google, nothing written.
+      dmSetStatus('Checking exact cost for ' + state + '…');
+      let preview;
+      try {
+        const previewRes = await fetch('/.netlify/functions/compute-distance-matrix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, mode, additive, dryRun: true }),
+        });
+        preview = await previewRes.json();
+        if (!preview.ok) { dmSetStatus('❌ ' + (preview.error || 'Could not preview cost')); return; }
+      } catch (e) {
+        dmSetStatus('❌ Network error checking cost: ' + e.message);
+        return;
+      }
+
+      const costLine = preview.estimatedCost > 0
+        ? '$' + preview.estimatedCost.toFixed(2) + ' (' + preview.billableElements + ' billable elements after ' + preview.freeElementsRemainingThisMonth + ' free-tier elements remaining this month)'
+        : '$0.00 (fully covered by this month\'s remaining free tier)';
       const confirmMsg = additive
-        ? 'Build ADDITIVE drive-time matrix for ' + state + '?\nOnly queries pairs for new/changed techs or sites since the last build -- existing pairs are reused free, and any pair for a now-inactive tech or removed site is dropped at no cost. Should cost well under $1 for a typical single-tech or single-site addition.'
-        : 'Build a FULL drive-time matrix for ' + state + '?\nThis re-queries and re-bills EVERY tech x site pair, not just new ones (~$3–6 per state). Use this only when you want to force-refresh pairs that already exist (e.g. a tech moved, an address was corrected).';
-      if (!confirm(confirmMsg)) return;
+        ? 'Build ADDITIVE drive-time matrix for ' + state + '?\n' +
+          preview.elementCount + ' elements will be queried (new/changed techs or sites since the last real driving build).\n' +
+          'Estimated cost: ' + costLine
+        : 'Build a FULL drive-time matrix for ' + state + '?\n' +
+          'This re-queries and re-bills EVERY tech x site pair (' + preview.elementCount + ' elements), not just new ones.\n' +
+          'Estimated cost: ' + costLine + '\n' +
+          'Use this only when you want to force-refresh pairs that already exist (e.g. a tech moved, an address was corrected).';
+      if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
       adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
       if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
     }
@@ -520,10 +545,13 @@
         const additiveLine = meta.additive
           ? '\n' + meta.addedCount + ' new pairs queried, ' + meta.reusedCount + ' reused free, ' + meta.prunedCount + ' dropped (inactive tech/removed site)'
           : '';
+        const costLine = meta.elementsBilledThisRun
+          ? '\n' + meta.elementsBilledThisRun + ' elements billed this run, ' + meta.monthlyElementsUsedTotal + ' total used this month'
+          : '';
         dmSetStatus(
           '✅ Matrix built for ' + state + ' (' + mode + (meta.additive ? ', additive' : '') + ').\n' +
           data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations' +
-          additiveLine + '\n' +
+          additiveLine + costLine + '\n' +
           'Computed: ' + meta.computedAt +
           (meta.failedPairs?.length ? '\n⚠️ ' + meta.failedPairs.length + ' failed pairs (haversine fallback used)' : '')
         );

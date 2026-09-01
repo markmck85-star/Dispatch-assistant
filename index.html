@@ -361,12 +361,14 @@
                     </div>
                 </div>
                 
-                <!-- SESSION TOGGLES: Drive Time + DCO + Trouble Only -->
+                <!-- SESSION TOGGLES: DCO + Trouble Only -->
+                <!-- Drive Time toggle removed 2026-09-02: called Google's Distance
+                     Matrix API live from the browser with no password/cooldown/rate
+                     limit of any kind, and used live-traffic pricing (Pro tier,
+                     $10/1k elements -- double the Essentials rate the admin-side
+                     distance matrix builder uses), auto-firing on every board
+                     regeneration. Removed rather than gated, per Mark's call. -->
                 <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                    <button id="driveTimeToggleBtn" onclick="toggleDriveTime()"
-                        style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
-                        🕐 Drive Time: OFF
-                    </button>
                     <button id="dcoToggleBtn" onclick="toggleDCO()"
                         style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
                         🔔 DCO: OFF
@@ -504,9 +506,7 @@
         const BF_REASON_LABELS = { vacation: 'Vacation', personal: 'Personal', comp_day: 'Comp Day', pto: 'PTO' };
         window.ticketMeta = {};
 
-        // ── DRIVE TIME & DCO SESSION STATE ──
-        window.driveTimeEnabled = false;
-        window.driveTimeData = {};
+        // ── DCO SESSION STATE ── (Drive Time state removed 2026-09-02, see toggle removal note above)
         window.dcoEnabled = false;
         // Day-of-week flags for push/label logic
         const _todayDow = new Date().getDay();
@@ -3289,7 +3289,6 @@ function distanceMatrixStatus(state) {
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">📏 ${legLabel}${index === 0 ? ' from home' : ' from prev. stop'}</div>
                                     ${ticketInfoStr}
-                                    ${window.driveTimeEnabled ? `<div id="dt-${techKey}-${index}" style="font-size:11px;color:#5bc8af;margin-top:2px;">🕐 —</div>` : ''}
                                 </div>
                                 <div style="margin-left:auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
                                     <select class="control-btn" onchange="reassignStop('${tech}', ${index}, this.value)" style="padding:2px;">
@@ -3397,12 +3396,6 @@ function distanceMatrixStatus(state) {
             }
             // Keep printable report in sync with board state
             if (window._lastDateStr) buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
-            // Auto-populate drive times if enabled
-            if (window.driveTimeEnabled) {
-                Object.keys(window.currentAssignments).forEach(tech => {
-                    if ((window.currentAssignments[tech] || []).length > 0) fetchDriveTimesForTech(tech);
-                });
-            }
             // Auto-populate distance to first stop for all techs
             Object.keys(window.currentAssignments).forEach(tech => {
                 if ((window.currentAssignments[tech] || []).length > 0) {
@@ -3416,8 +3409,6 @@ function distanceMatrixStatus(state) {
             // the tiles without each of those callers knowing the map exists.
             if (typeof renderDispatchMap === 'function') renderDispatchMap();
         }
-
-        // ── DRIVE TIME TOGGLE ────────────────────────────────────────────
 
         // ── INBOUND DISPATCH BANNER ─────────────────────────────────────────
         let _lastInboundKey = localStorage.getItem('lastSeenInboundKey') || null;
@@ -3532,28 +3523,6 @@ function distanceMatrixStatus(state) {
             _pendingInboundBody = null;
         }
 
-        function toggleDriveTime() {
-            window.driveTimeEnabled = !window.driveTimeEnabled;
-            const btn = document.getElementById('driveTimeToggleBtn');
-            if (btn) {
-                btn.style.background = window.driveTimeEnabled ? '#1a3a1a' : '#2a2a3e';
-                btn.style.color = window.driveTimeEnabled ? '#5bc8af' : '#888';
-                btn.style.borderColor = window.driveTimeEnabled ? '#5bc8af' : '#555';
-                btn.textContent = window.driveTimeEnabled ? '🕐 Drive Time: ON' : '🕐 Drive Time: OFF';
-            }
-            // If board is already showing, immediately fetch (or clear) times
-            if (window.currentAssignments && Object.keys(window.currentAssignments).some(t => (window.currentAssignments[t]||[]).length > 0)) {
-                if (window.driveTimeEnabled) {
-                    Object.keys(window.currentAssignments).forEach(tech => {
-                        if ((window.currentAssignments[tech]||[]).length > 0) fetchDriveTimesForTech(tech);
-                    });
-                } else {
-                    window.driveTimeData = {};
-                    renderReviewBoard(true);
-                }
-            }
-        }
-
         // ── DCO TOGGLE ───────────────────────────────────────────────────────
         function toggleDCO() {
             window.dcoEnabled = !window.dcoEnabled;
@@ -3599,68 +3568,6 @@ function distanceMatrixStatus(state) {
             const d = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
             window.troubleOnlyFilter = d.getDay() === 6; // Saturday
             setTroubleOnlyButtonUI();
-        }
-
-        // ── DRIVE TIME FETCH (per tech, diagonal Distance Matrix) ─────────────
-        function fetchDriveTimesForTech(tech) {
-            if (!window.google || !window.google.maps) return;
-            const items = window.currentAssignments[tech] || [];
-            if (items.length === 0) return;
-
-            const techKey = tech.replace(/\s+/g, '-');
-            const techInfo = TECHS[tech];
-            if (!techInfo) return;
-
-            // Build parallel origin/destination arrays for diagonal route legs
-            // Leg i: origins[i] → destinations[i]
-            const startLoc = techInfo.startLocation || '';
-            const addrs = items.map(i => (LOCATIONS[i.code] || {}).address || '');
-            const origins = [startLoc, ...addrs.slice(0, -1)];   // start + all but last stop
-            const destinations = addrs;                            // all stops
-
-            if (destinations.some(a => !a)) return; // skip if any address missing
-
-            // Show loading indicators
-            items.forEach((_, idx) => {
-                const el = document.getElementById('dt-' + techKey + '-' + idx);
-                if (el) el.innerHTML = '🕐 ...';
-            });
-
-            const service = new google.maps.DistanceMatrixService();
-            service.getDistanceMatrix({
-                origins,
-                destinations,
-                travelMode: 'DRIVING',
-                unitSystem: google.maps.UnitSystem.IMPERIAL,
-                drivingOptions: { departureTime: new Date(), trafficModel: 'bestguess' }
-            }, (response, status) => {
-                if (status !== 'OK') {
-                    items.forEach((_, idx) => {
-                        const el = document.getElementById('dt-' + techKey + '-' + idx);
-                        if (el) el.innerHTML = '🕐 —';
-                    });
-                    return;
-                }
-                const legs = [];
-                items.forEach((_, idx) => {
-                    const row = response.rows[idx];
-                    const el2 = row && row.elements[idx];
-                    if (el2 && el2.status === 'OK') {
-                        const dur = el2.duration_in_traffic ? el2.duration_in_traffic.text : el2.duration.text;
-                        const dist = el2.distance.text;
-                        legs.push({ duration: dur, distance: dist });
-                        const domEl = document.getElementById('dt-' + techKey + '-' + idx);
-                        if (domEl) domEl.innerHTML = '🕐 ' + dur + ' (' + dist + ')';
-                    } else {
-                        legs.push(null);
-                        const domEl = document.getElementById('dt-' + techKey + '-' + idx);
-                        if (domEl) domEl.innerHTML = '🕐 —';
-                    }
-                });
-                window.driveTimeData[techKey] = legs;
-                // Refresh print report with new data
-                if (window._lastDateStr) buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
-            });
         }
 
         function checkTrafficForTech(tech) {
@@ -4938,10 +4845,6 @@ function distanceMatrixStatus(state) {
                     }
 
                     const reassignNote = stop.reassignedFrom ? ` <span style="font-size:11px;color:#856404;font-weight:bold;">(covering for ${stop.reassignedFrom.split(' ')[0]})</span>` : '';
-                    const techKey2 = techName ? techName.replace(/\s+/g, '-') : '';
-                    const dtLegs = (window.driveTimeData[techKey2] || []);
-                    const dtLeg = dtLegs[index];
-                    const dtStr = dtLeg ? `<div style="font-size:11px;color:#2e7d32;margin-top:1px;">🕐 ${dtLeg.duration} (${dtLeg.distance})</div>` : '';
                     const ticketInfoStr = stop.fromTicket
                         ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${stop.ticketWo || '—'}${stop.ticketIssue ? ' – ' + stop.ticketIssue : ''}${stop.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(stop.ticketSlaEnd, code)}</strong>` : ''}</div>`
                         : '';
@@ -4949,7 +4852,6 @@ function distanceMatrixStatus(state) {
                     return `<div class="print-stop">
                         <div class="print-stop-name">${index + 1}. ${code} – ${name}${urgentBadge}${todayBadge}${rfBadge}${reassignNote}${dateStr}</div>
                         <div class="print-stop-addr">${addr}</div>
-                        ${dtStr}
                         ${ticketInfoStr}
                         ${consumDetail}
                     </div>`;
