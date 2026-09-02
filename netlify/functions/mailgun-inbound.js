@@ -208,6 +208,227 @@ function nextWorkDayStrForSiteCode(siteCode) {
   return `${scratch.getUTCFullYear()}-${String(scratch.getUTCMonth()+1).padStart(2,'0')}-${String(scratch.getUTCDate()).padStart(2,'0')}`;
 }
 
+// Shared by both the primary ticket-ingestion path and the address-sweep
+// sibling-linking path below (2026-09-02) -- previously this whole block
+// only ran once, inline, for the ticket that triggered the current
+// webhook call. A sibling ticket whose site match gets resolved LATER via
+// the address sweep never got a board push at all, even after it became
+// fully matched and visible on the state console/watchdog -- real cases:
+// GA1044 (WO 00151328), GA1084 (WO 00151329), both had to be added to the
+// board manually. Extracting this so the sweep can call it too, once per
+// swept sibling, right after that sibling's site_id is corrected.
+async function autoAddTicketToBoard({
+  supabase, siteId, ticketKind, dueDateRaw, rawSiteCode, woNum, newTicketId,
+  receivedAtIso, issueCategory, issueDetail, description,
+}) {
+        // (not install/site-survey, which stay manual per their lower
+        // volume and frequent lack of a real site code). Assigned to the
+        // site's primary tech with no availability check -- a known,
+        // agreed limitation; reassign manually if they're out. Deliberately
+        // non-destructive: only inserts if the site has no assignment row
+        // at all yet on that date (DO NOTHING on conflict) -- never
+        // overwrites an existing planned/completed/reassigned entry, even a
+        // cancelled one from earlier that day. A second ticket at an
+        // already-touched site+date needs manual adding, same as the
+        // status quo. Trouble tickets always target today (they're urgent
+        // by nature); maintenance tickets target their own parsed due date
+        // when one was found, falling back to today when the free-text
+        // description didn't yield a confident date (agreed with Mark
+        // 2026-07-21 -- best-guess placement beats losing it silently).
+        if (['trouble', 'maintenance'].includes(ticketKind || 'trouble') && siteId) {
+          try {
+            const { data: siteDetail, error: siteDetailErr } = await supabase
+              .from('sites').select('primary_tech_id').eq('id', siteId).maybeSingle();
+            if (siteDetailErr) console.error('[mailgun-inbound] site detail lookup failed:', siteDetailErr.message);
+            else if (siteDetail && siteDetail.primary_tech_id) {
+              let dispatchDateStr;
+              if ((ticketKind || 'trouble') === 'maintenance' && dueDateRaw) {
+                const dd = new Date(dueDateRaw);
+                dispatchDateStr = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
+              } else if ((ticketKind || 'trouble') === 'maintenance' && rawSiteCode) {
+                // This ticket's own free-text description didn't yield a
+                // confident date -- check the most recently cached Dispatch
+                // List for this site's own "Restock By" date before falling
+                // all the way back to today.
+                let cachedDate = null;
+                try {
+                  const dlStore = getDispatchStore();
+                  const cache = await dlStore.get('dispatch-list/latest-dates', { type: 'json' });
+                  if (cache && cache.dates && cache.dates[rawSiteCode]) cachedDate = cache.dates[rawSiteCode];
+                } catch (dlReadEx) {
+                  console.error('[mailgun-inbound] dispatch-list cache read failed:', dlReadEx.message);
+                }
+                if (cachedDate) {
+                  dispatchDateStr = cachedDate;
+                  console.log(`[mailgun-inbound] Used cached dispatch-list date for ${rawSiteCode}: ${cachedDate}`);
+                } else {
+                  dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
+                }
+              } else {
+                dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
+              }
+
+              // 2026-08-25 fix: the plain upsert here used to be
+              // ignoreDuplicates on (dispatch_date, site_id) -- meaning a
+              // genuinely separate, later ticket arriving at a site that
+              // ALREADY had a board entry today (even a completed one from
+              // an earlier stop) silently got no board visibility at all,
+              // logged only as "skipped, site already had an entry today".
+              // Real case: GA1043 (Steve Reynolds) -- a new same-day trouble
+              // ticket never showed up because that morning's restock stop
+              // had already been marked completed. Now explicitly checks
+              // what's there first: a genuinely different ticket on a
+              // completed/removed row reopens that row as a fresh planned
+              // stop (a real second visit is needed today); a still-planned
+              // row is left untouched exactly as before, since that's an
+              // active dispatcher decision this should never overwrite.
+              const { data: existingAssignment, error: existingAssignErr } = await supabase
+                .from('assignments')
+                .select('id, status, ticket_id')
+                .eq('dispatch_date', dispatchDateStr)
+                .eq('site_id', siteId)
+                .maybeSingle();
+
+              // 2026-08-27: found via a real live discrepancy Mark spotted --
+              // the board showing far more "still open" GA restocks today
+              // than the actual field schedule/Dispatch Summary did. Root
+              // cause: this whole existingAssignment check above is scoped
+              // to dispatchDateStr (today, or a maintenance ticket's own due
+              // date) ONLY -- it has no way to see a still-'planned' row for
+              // the SAME SITE sitting open on an OLDER date. When a restock
+              // first misses its due date and Neumo later sends a real
+              // individual ticket for the same site (today), that ticket's
+              // dispatchDateStr (today) never matches the old row's
+              // dispatch_date, so the check below finds nothing and inserts
+              // a brand new row -- leaving the original stuck forever with
+              // no ticket_id and nothing that will ever complete it. Live
+              // examples confirmed same day: GA1011 (stuck 8/23 alongside a
+              // real 8/27 ticket), GA1026 (stuck 8/23 alongside 8/27),
+              // GA1034 (stuck 8/18 alongside 8/27). Fix: before inserting a
+              // new row, check for any OTHER still-'planned' row at this
+              // site that's already overdue (dispatch_date strictly before
+              // today's real date -- never a genuinely future-dated one,
+              // which could be a distinct, legitimately-scheduled later
+              // restock this should never touch) and move THAT row forward
+              // to today with the new ticket attached, instead of creating a
+              // second row. Scoped to 'planned' only -- a completed/removed
+              // row for an older date is real history, not a stuck stop, and
+              // is correctly left alone (same as always).
+              const realTodayStr = todayStrForSiteCode(rawSiteCode);
+              let staleOpenAssignment = null;
+              if (!existingAssignment) {
+                const { data: staleRows, error: staleErr } = await supabase
+                  .from('assignments')
+                  .select('id, dispatch_date')
+                  .eq('site_id', siteId)
+                  .eq('status', 'planned')
+                  .lt('dispatch_date', realTodayStr)
+                  .order('dispatch_date', { ascending: true })
+                  .limit(1);
+                if (staleErr) console.error('[mailgun-inbound] stale-open-assignment lookup failed:', staleErr.message);
+                else if (staleRows && staleRows.length) staleOpenAssignment = staleRows[0];
+              }
+
+              if (existingAssignErr) {
+                console.error('[mailgun-inbound] existing-assignment lookup for auto-add failed:', existingAssignErr.message);
+              } else if (!existingAssignment && staleOpenAssignment) {
+                const { error: absorbErr } = await supabase
+                  .from('assignments')
+                  .update({
+                    dispatch_date: dispatchDateStr,
+                    ticket_id: newTicketId,
+                    assigned_by: 'auto',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', staleOpenAssignment.id);
+                if (absorbErr) console.error('[mailgun-inbound] absorb-stale-assignment failed:', absorbErr.message);
+                else console.log(`[mailgun-inbound] Moved stale planned entry from ${staleOpenAssignment.dispatch_date} to ${dispatchDateStr} for new ticket ${woNum} instead of creating a duplicate`);
+              } else if (!existingAssignment) {
+                const { error: insertErr } = await supabase
+                  .from('assignments')
+                  .insert({
+                    dispatch_date: dispatchDateStr,
+                    site_id: siteId,
+                    technician_id: siteDetail.primary_tech_id,
+                    assigned_by: 'auto',
+                    status: 'planned',
+                    ticket_id: newTicketId,
+                  });
+                if (insertErr) console.error('[mailgun-inbound] auto-add to board failed:', insertErr.message);
+                else console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: added`);
+              } else if (
+                (existingAssignment.status === 'completed' || existingAssignment.status === 'removed')
+                && newTicketId
+                && existingAssignment.ticket_id !== newTicketId
+              ) {
+                const { error: reopenErr } = await supabase
+                  .from('assignments')
+                  .update({
+                    status: 'planned',
+                    ticket_id: newTicketId,
+                    assigned_by: 'auto',
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', existingAssignment.id);
+                if (reopenErr) console.error('[mailgun-inbound] auto-reopen for new ticket failed:', reopenErr.message);
+                else console.log(`[mailgun-inbound] Reopened ${dispatchDateStr} board entry for a new ticket (${woNum}) at an already-${existingAssignment.status} site`);
+              } else if (
+                existingAssignment.status === 'planned'
+                && newTicketId
+                && existingAssignment.ticket_id
+                && existingAssignment.ticket_id !== newTicketId
+              ) {
+                // 2026-09-02 fix: a second, distinct ticket arriving at a
+                // site that already has an ACTIVE (still-planned) board
+                // entry today used to fall straight into the plain skip
+                // branch below -- the existing entry was left untouched
+                // and the new ticket got zero board visibility, with
+                // nothing telling the dispatcher a second issue exists.
+                // Real case: FL1033 (WO 00151325) never appeared on the
+                // board while an earlier ticket's stop there was still
+                // planned. Fix: append the new ticket's summary onto the
+                // EXISTING linked ticket's description (same append
+                // pattern used for same-WO line-item follow-ups above)
+                // and flag needs_review, rather than silently swapping
+                // which ticket the board entry points to (that would just
+                // lose visibility of the FIRST ticket instead).
+                try {
+                  const { data: existingTicketRow, error: existingTicketErr } = await supabase
+                    .from('tickets')
+                    .select('id, description')
+                    .eq('id', existingAssignment.ticket_id)
+                    .maybeSingle();
+                  if (existingTicketErr) {
+                    console.error('[mailgun-inbound] lookup of existing linked ticket for second-ticket append failed:', existingTicketErr.message);
+                  } else if (existingTicketRow) {
+                    const stamp = receivedAtIso.slice(0, 10);
+                    const summary = (issueCategory || issueDetail)
+                      ? `${issueCategory || ''}${issueDetail ? ' - ' + issueDetail : ''}`
+                      : (description || 'See ticket for details');
+                    const noteLine = `⚠️ SECOND TICKET TODAY [WO ${woNum}, ${stamp}]: ${summary}`;
+                    const newDescription = (existingTicketRow.description ? existingTicketRow.description + '\n\n' : '') + noteLine;
+                    const { error: appendErr } = await supabase
+                      .from('tickets')
+                      .update({ description: newDescription, needs_review: true })
+                      .eq('id', existingTicketRow.id);
+                    if (appendErr) console.error('[mailgun-inbound] second-ticket append failed:', appendErr.message);
+                    else console.log(`[mailgun-inbound] Site already had a planned entry today -- appended new ticket ${woNum} as a note on the existing linked ticket + flagged needs_review instead of dropping it silently`);
+                  }
+                } catch (appendEx) {
+                  console.error('[mailgun-inbound] Second-ticket append error (non-fatal):', appendEx.message);
+                }
+              } else {
+                console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: skipped, site already had a ${existingAssignment.status} entry today`);
+              }
+            } else {
+              console.log(`[mailgun-inbound] Skipped auto-add for ${woNum}: no primary tech configured for site`);
+            }
+          } catch (boardEx) {
+            console.error('[mailgun-inbound] Auto-add to board error (non-fatal):', boardEx.message);
+          }
+        }
+}
+
 function calculateSlaDeadline(receivedAt, timezone, stateCode) {
   let remaining = 240; // 4 hours in minutes
   const tz = timezone || 'America/New_York';
@@ -1390,17 +1611,47 @@ exports.handler = async (event) => {
           try {
             const { data: siblings } = await supabase
               .from('tickets')
-              .select('id, address')
+              .select('id, address, wo_number, ticket_kind, due_at, issue_category, issue_detail, description, received_at')
               .is('site_id', null)
               .neq('wo_number', parsed.woNum)
               .eq('status', 'open');
-            const siblingIds = (siblings || [])
-              .filter((s) => addressesLooselyMatch(s.address, matchedByAddress.address))
-              .map((s) => s.id);
+            const matchedSiblings = (siblings || [])
+              .filter((s) => addressesLooselyMatch(s.address, matchedByAddress.address));
+            const siblingIds = matchedSiblings.map((s) => s.id);
             if (siblingIds.length) {
               const { error: sweepErr } = await supabase
                 .from('tickets').update({ site_id: matchedByAddress.id }).in('id', siblingIds);
-              if (!sweepErr) console.log(`[mailgun-inbound] Address-sweep linked ${siblingIds.length} sibling ticket(s) to ${matchedByAddress.site_code}`);
+              if (!sweepErr) {
+                console.log(`[mailgun-inbound] Address-sweep linked ${siblingIds.length} sibling ticket(s) to ${matchedByAddress.site_code}`);
+                // 2026-09-02: previously the sweep stopped at linking
+                // site_id -- a swept sibling then showed correctly on the
+                // state console/watchdog (both read live site_id) but
+                // never got a board push, since the auto-add step only
+                // ever ran once, at that sibling's OWN original ingestion
+                // time, when it had no site match yet. Real cases: GA1044
+                // (WO 00151328), GA1084 (WO 00151329). Now runs the same
+                // auto-add function per swept sibling right here.
+                for (const sib of matchedSiblings) {
+                  if (!['trouble', 'maintenance'].includes(sib.ticket_kind || 'trouble')) continue;
+                  try {
+                    await autoAddTicketToBoard({
+                      supabase,
+                      siteId: matchedByAddress.id,
+                      ticketKind: sib.ticket_kind,
+                      dueDateRaw: sib.due_at,
+                      rawSiteCode: null, // swept siblings never had an embedded site code -- that's why they needed the address sweep in the first place
+                      woNum: sib.wo_number,
+                      newTicketId: sib.id,
+                      receivedAtIso: sib.received_at,
+                      issueCategory: sib.issue_category,
+                      issueDetail: sib.issue_detail,
+                      description: sib.description,
+                    });
+                  } catch (sibBoardEx) {
+                    console.error(`[mailgun-inbound] Auto-add-to-board for swept sibling ${sib.wo_number} failed (non-fatal):`, sibBoardEx.message);
+                  }
+                }
+              }
             }
           } catch (e) {
             console.error('[mailgun-inbound] Address-based sibling sweep failed:', e.message);
@@ -1408,170 +1659,27 @@ exports.handler = async (event) => {
         }
 
         // Auto-add to the dispatch board -- trouble AND maintenance tickets
-        // (not install/site-survey, which stay manual per their lower
-        // volume and frequent lack of a real site code). Assigned to the
-        // site's primary tech with no availability check -- a known,
-        // agreed limitation; reassign manually if they're out. Deliberately
-        // non-destructive: only inserts if the site has no assignment row
-        // at all yet on that date (DO NOTHING on conflict) -- never
-        // overwrites an existing planned/completed/reassigned entry, even a
-        // cancelled one from earlier that day. A second ticket at an
-        // already-touched site+date needs manual adding, same as the
-        // status quo. Trouble tickets always target today (they're urgent
-        // by nature); maintenance tickets target their own parsed due date
-        // when one was found, falling back to today when the free-text
-        // description didn't yield a confident date (agreed with Mark
-        // 2026-07-21 -- best-guess placement beats losing it silently).
+        // (not install/site-survey). Logic lives in autoAddTicketToBoard()
+        // (2026-09-02 extraction) so the address-sweep sibling path further
+        // up can call the exact same code once a swept sibling's site_id
+        // is corrected, instead of that ticket silently never getting a
+        // board push at all.
         if (['trouble', 'maintenance'].includes(parsed.ticketKind || 'trouble') && siteId) {
-          try {
-            const { data: siteDetail, error: siteDetailErr } = await supabase
-              .from('sites').select('primary_tech_id').eq('id', siteId).maybeSingle();
-            if (siteDetailErr) console.error('[mailgun-inbound] site detail lookup failed:', siteDetailErr.message);
-            else if (siteDetail && siteDetail.primary_tech_id) {
-              const { data: ticketRowFetched } = await supabase
-                .from('tickets').select('id').eq('wo_number', parsed.woNum).maybeSingle();
-              const newTicketId = ticketRowFetched ? ticketRowFetched.id : null;
-
-              let dispatchDateStr;
-              if ((parsed.ticketKind || 'trouble') === 'maintenance' && parsed.dueDateRaw) {
-                const dd = new Date(parsed.dueDateRaw);
-                dispatchDateStr = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
-              } else if ((parsed.ticketKind || 'trouble') === 'maintenance' && rawSiteCode) {
-                // This ticket's own free-text description didn't yield a
-                // confident date -- check the most recently cached Dispatch
-                // List for this site's own "Restock By" date before falling
-                // all the way back to today.
-                let cachedDate = null;
-                try {
-                  const dlStore = getDispatchStore();
-                  const cache = await dlStore.get('dispatch-list/latest-dates', { type: 'json' });
-                  if (cache && cache.dates && cache.dates[rawSiteCode]) cachedDate = cache.dates[rawSiteCode];
-                } catch (dlReadEx) {
-                  console.error('[mailgun-inbound] dispatch-list cache read failed:', dlReadEx.message);
-                }
-                if (cachedDate) {
-                  dispatchDateStr = cachedDate;
-                  console.log(`[mailgun-inbound] Used cached dispatch-list date for ${rawSiteCode}: ${cachedDate}`);
-                } else {
-                  dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
-                }
-              } else {
-                dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
-              }
-
-              // 2026-08-25 fix: the plain upsert here used to be
-              // ignoreDuplicates on (dispatch_date, site_id) -- meaning a
-              // genuinely separate, later ticket arriving at a site that
-              // ALREADY had a board entry today (even a completed one from
-              // an earlier stop) silently got no board visibility at all,
-              // logged only as "skipped, site already had an entry today".
-              // Real case: GA1043 (Steve Reynolds) -- a new same-day trouble
-              // ticket never showed up because that morning's restock stop
-              // had already been marked completed. Now explicitly checks
-              // what's there first: a genuinely different ticket on a
-              // completed/removed row reopens that row as a fresh planned
-              // stop (a real second visit is needed today); a still-planned
-              // row is left untouched exactly as before, since that's an
-              // active dispatcher decision this should never overwrite.
-              const { data: existingAssignment, error: existingAssignErr } = await supabase
-                .from('assignments')
-                .select('id, status, ticket_id')
-                .eq('dispatch_date', dispatchDateStr)
-                .eq('site_id', siteId)
-                .maybeSingle();
-
-              // 2026-08-27: found via a real live discrepancy Mark spotted --
-              // the board showing far more "still open" GA restocks today
-              // than the actual field schedule/Dispatch Summary did. Root
-              // cause: this whole existingAssignment check above is scoped
-              // to dispatchDateStr (today, or a maintenance ticket's own due
-              // date) ONLY -- it has no way to see a still-'planned' row for
-              // the SAME SITE sitting open on an OLDER date. When a restock
-              // first misses its due date and Neumo later sends a real
-              // individual ticket for the same site (today), that ticket's
-              // dispatchDateStr (today) never matches the old row's
-              // dispatch_date, so the check below finds nothing and inserts
-              // a brand new row -- leaving the original stuck forever with
-              // no ticket_id and nothing that will ever complete it. Live
-              // examples confirmed same day: GA1011 (stuck 8/23 alongside a
-              // real 8/27 ticket), GA1026 (stuck 8/23 alongside 8/27),
-              // GA1034 (stuck 8/18 alongside 8/27). Fix: before inserting a
-              // new row, check for any OTHER still-'planned' row at this
-              // site that's already overdue (dispatch_date strictly before
-              // today's real date -- never a genuinely future-dated one,
-              // which could be a distinct, legitimately-scheduled later
-              // restock this should never touch) and move THAT row forward
-              // to today with the new ticket attached, instead of creating a
-              // second row. Scoped to 'planned' only -- a completed/removed
-              // row for an older date is real history, not a stuck stop, and
-              // is correctly left alone (same as always).
-              const realTodayStr = todayStrForSiteCode(rawSiteCode);
-              let staleOpenAssignment = null;
-              if (!existingAssignment) {
-                const { data: staleRows, error: staleErr } = await supabase
-                  .from('assignments')
-                  .select('id, dispatch_date')
-                  .eq('site_id', siteId)
-                  .eq('status', 'planned')
-                  .lt('dispatch_date', realTodayStr)
-                  .order('dispatch_date', { ascending: true })
-                  .limit(1);
-                if (staleErr) console.error('[mailgun-inbound] stale-open-assignment lookup failed:', staleErr.message);
-                else if (staleRows && staleRows.length) staleOpenAssignment = staleRows[0];
-              }
-
-              if (existingAssignErr) {
-                console.error('[mailgun-inbound] existing-assignment lookup for auto-add failed:', existingAssignErr.message);
-              } else if (!existingAssignment && staleOpenAssignment) {
-                const { error: absorbErr } = await supabase
-                  .from('assignments')
-                  .update({
-                    dispatch_date: dispatchDateStr,
-                    ticket_id: newTicketId,
-                    assigned_by: 'auto',
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', staleOpenAssignment.id);
-                if (absorbErr) console.error('[mailgun-inbound] absorb-stale-assignment failed:', absorbErr.message);
-                else console.log(`[mailgun-inbound] Moved stale planned entry from ${staleOpenAssignment.dispatch_date} to ${dispatchDateStr} for new ticket ${parsed.woNum} instead of creating a duplicate`);
-              } else if (!existingAssignment) {
-                const { error: insertErr } = await supabase
-                  .from('assignments')
-                  .insert({
-                    dispatch_date: dispatchDateStr,
-                    site_id: siteId,
-                    technician_id: siteDetail.primary_tech_id,
-                    assigned_by: 'auto',
-                    status: 'planned',
-                    ticket_id: newTicketId,
-                  });
-                if (insertErr) console.error('[mailgun-inbound] auto-add to board failed:', insertErr.message);
-                else console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: added`);
-              } else if (
-                (existingAssignment.status === 'completed' || existingAssignment.status === 'removed')
-                && newTicketId
-                && existingAssignment.ticket_id !== newTicketId
-              ) {
-                const { error: reopenErr } = await supabase
-                  .from('assignments')
-                  .update({
-                    status: 'planned',
-                    ticket_id: newTicketId,
-                    assigned_by: 'auto',
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', existingAssignment.id);
-                if (reopenErr) console.error('[mailgun-inbound] auto-reopen for new ticket failed:', reopenErr.message);
-                else console.log(`[mailgun-inbound] Reopened ${dispatchDateStr} board entry for a new ticket (${parsed.woNum}) at an already-${existingAssignment.status} site`);
-              } else {
-                console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: skipped, site already had a ${existingAssignment.status} entry today`);
-              }
-            } else {
-              console.log(`[mailgun-inbound] Skipped auto-add for ${parsed.woNum}: no primary tech configured for site`);
-            }
-          } catch (boardEx) {
-            console.error('[mailgun-inbound] Auto-add to board error (non-fatal):', boardEx.message);
-          }
+          const { data: ticketRowFetched } = await supabase
+            .from('tickets').select('id').eq('wo_number', parsed.woNum).maybeSingle();
+          await autoAddTicketToBoard({
+            supabase,
+            siteId,
+            ticketKind: parsed.ticketKind,
+            dueDateRaw: parsed.dueDateRaw,
+            rawSiteCode,
+            woNum: parsed.woNum,
+            newTicketId: ticketRowFetched ? ticketRowFetched.id : null,
+            receivedAtIso: receivedAt.toISOString(),
+            issueCategory: parsed.issueCategory,
+            issueDetail: parsed.issueDetail,
+            description: parsed.description,
+          });
         }
         } // end if (!appendedToExisting)
       }
