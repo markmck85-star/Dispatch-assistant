@@ -258,6 +258,48 @@ exports.handler = async () => {
     }
   }
 
+  // ---- PUSH: company-wide events ----
+  // 2026-09-04: same safety-net reasoning as the technician PUSH above --
+  // save-company-event.js's 'push' action lets Mark push immediately from
+  // the UI, but anything saved via the default 'add' action (no explicit
+  // push) sits with bluefolder_appt_id null until this scheduled sync
+  // picks it up. Always unassigned in BlueFolder (no single technician to
+  // tie a company-wide event to), same pattern as save-company-event.js's
+  // own push action.
+  const { data: unpushedEvents, error: unpushedEventsErr } = await supabase
+    .from('company_events')
+    .select('id, day, label, note')
+    .is('bluefolder_appt_id', null);
+  if (unpushedEventsErr) {
+    summary.errors.push(`fetching unpushed company_events: ${unpushedEventsErr.message}`);
+  } else {
+    for (const row of unpushedEvents || []) {
+      const subject = String(row.label || 'Company Event').slice(0, 100);
+      let addResp;
+      try {
+        addResp = await bfRequest('appointments/add.aspx', `<request><appointmentAdd>` +
+          `<subject>${escapeXml(subject)}</subject>` +
+          `<dateTimeStart>${row.day}T00:00:00</dateTimeStart>` +
+          `<dateTimeEnd>${row.day}T23:59:59</dateTimeEnd>` +
+          `<allDayEvent>true</allDayEvent>` +
+          `<description>${escapeXml(row.note || row.label || '')}</description>` +
+          `<notifyCustomer>false</notifyCustomer>` +
+          `</appointmentAdd></request>`);
+      } catch (e) {
+        summary.errors.push(`push for company event "${row.label}" on ${row.day}: ${e.message}`);
+        continue;
+      }
+      const apptId = addResp?.apptId;
+      if (apptId) {
+        const { error } = await supabase
+          .from('company_events')
+          .update({ bluefolder_appt_id: String(apptId) })
+          .eq('id', row.id);
+        if (!error) summary.pushed_company_events = (summary.pushed_company_events || 0) + 1;
+      }
+    }
+  }
+
   console.log('BlueFolder sync summary:', JSON.stringify(summary, null, 2));
   return { statusCode: 200, body: JSON.stringify(summary) };
 };
