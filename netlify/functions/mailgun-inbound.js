@@ -1574,7 +1574,31 @@ exports.handler = async (event) => {
         if (!appendedToExisting) {
 
         const earliestStartAt = parseLooseDate(parsed.earliestStartRaw);
-        const dueAt = parseLooseDate(parsed.dueDateRaw);
+        // 2026-09-04: for maintenance/restock tickets, parsed.dueDateRaw only
+        // exists when the ticket's own free-text description had a
+        // confident, explicitly-typed "by <date>" phrase (rare -- Mark
+        // confirmed restocks are expected same-day-as-dispatched, which is
+        // usually the next covered work day after receipt, occasionally
+        // same-day when Neumo/the description actually says so). When
+        // there's no explicit date, this used to leave due_at null, which
+        // made the state console's due-date display silently fall back to
+        // received_at -- showing "received today" where "expected tomorrow"
+        // was the real, already-computed answer (the board-placement logic
+        // just above already works this out via nextWorkDayStrForSiteCode,
+        // it just never got written back onto the ticket itself). Mirrored
+        // here so the console shows the same expected day the board uses.
+        let dueAt = parseLooseDate(parsed.dueDateRaw);
+        if (!dueAt && (parsed.ticketKind || dispatchType) === 'maintenance') {
+          const expectedDayStr = nextWorkDayStrForSiteCode(rawSiteCode);
+          if (expectedDayStr) {
+            // Noon UTC anchor, not a naive local-time string -- same fix
+            // already applied elsewhere in this file (see
+            // parseMaintenanceDueDate above) to avoid the date rolling back
+            // to the previous evening once displayed in Eastern time.
+            const [ey, em, ed] = expectedDayStr.split('-').map(Number);
+            dueAt = new Date(Date.UTC(ey, em - 1, ed, 12, 0, 0));
+          }
+        }
 
         const ticketRow = {
           wo_number: parsed.woNum,
