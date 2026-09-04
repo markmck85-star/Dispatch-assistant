@@ -87,6 +87,20 @@
   .day-block.reason-install { background: #1a5c2e; }
   .day-block.reason-on_call { background: #0a6e5c; border: 1px solid #14a085; }
 
+  /* Company-wide events (holidays, closures) -- not tied to any one
+     technician, so rendered as a full-width banner above the per-tech
+     blocks instead of one more block in the stack, to visually separate
+     "the whole company" from "this one person". */
+  .company-banner {
+    display: block; border-radius: 4px; padding: 3px 5px; margin-bottom: 3px;
+    font-size: 10.5px; font-weight: 700; line-height: 1.3; color: #1a1400;
+    background: #f0a500; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: default;
+  }
+  .day-detail-entry.company-event { background: #f0a500; color: #1a1400; }
+  .day-detail-entry.company-event .entry-name,
+  .day-detail-entry.company-event .entry-type { color: #1a1400; }
+
   .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 30px 10px; color: #666; }
   .error-state { color: #e57373; }
 
@@ -154,6 +168,7 @@
       <button class="today-btn" id="todayBtn">Today</button>
       <button class="btn-primary" id="openAddModalBtn">+ Add Entry</button>
       <button class="btn-primary" id="openOnCallModalBtn" style="background:#0a6e5c;">+ Set On-Call</button>
+      <button class="btn-primary" id="openCompanyEventModalBtn" style="background:#f0a500; color:#1a1400;">+ Company Event</button>
       <select id="stateFilter"><option value="">All states</option></select>
     </div>
 
@@ -170,6 +185,7 @@
       <div class="legend-item"><span class="legend-dot" style="background:#7a1a4a"></span>Site Survey</div>
       <div class="legend-item"><span class="legend-dot" style="background:#1a5c2e"></span>Install</div>
       <div class="legend-item"><span class="legend-dot" style="background:#0a6e5c"></span>Saturday On-Call</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f0a500"></span>Company Event</div>
     </div>
   </div>
 </div>
@@ -248,6 +264,30 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="companyEventModal">
+  <div class="modal">
+    <h2 id="companyEventModalTitle">Add Company Event</h2>
+    <form id="companyEventForm">
+      <div class="form-group">
+        <label for="companyEventDate">Date</label>
+        <input type="date" id="companyEventDate" required>
+      </div>
+      <div class="form-group">
+        <label for="companyEventLabel">Label</label>
+        <input type="text" id="companyEventLabel" required placeholder="e.g. Company Holiday, Office Closed" maxlength="100">
+      </div>
+      <div class="form-group">
+        <label for="companyEventNote">Note / Details (Optional)</label>
+        <textarea id="companyEventNote" rows="2" placeholder="e.g. Labor Day - no service"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="closeCompanyEventModalBtn">Cancel</button>
+        <button type="submit" class="btn-primary" id="companyEventModalSubmitBtn" style="background:#f0a500; color:#1a1400;">Save Event</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
@@ -261,6 +301,7 @@ let viewDate = new Date();
 viewDate.setDate(1);
 let currentByDay = new Map();
 let currentOnCallByDay = new Map();
+let currentCompanyByDay = new Map();
 let saturdayStates = [];
 
 function monthLabel(d) {
@@ -368,12 +409,29 @@ async function loadMonth() {
     }
   }
 
+  // Company-wide events -- not filtered by state, since they apply to
+  // everyone regardless of which state view is selected.
+  const { data: companyData, error: companyError } = await sb
+    .from('company_events')
+    .select('id, day, label, note, bluefolder_appt_id')
+    .gte('day', monthStart)
+    .lte('day', monthEnd)
+    .order('day', { ascending: true });
+  const companyByDay = new Map();
+  if (!companyError) {
+    for (const row of (companyData || [])) {
+      if (!companyByDay.has(row.day)) companyByDay.set(row.day, []);
+      companyByDay.get(row.day).push(row);
+    }
+  }
+
   currentByDay = byDay;
   currentOnCallByDay = onCallByDay;
-  renderMonthGrid(year, month, byDay, onCallByDay);
+  currentCompanyByDay = companyByDay;
+  renderMonthGrid(year, month, byDay, onCallByDay, companyByDay);
 }
 
-function renderMonthGrid(year, month, byDay, onCallByDay) {
+function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
   const body = document.getElementById('calendarBody');
   const todayStr = isoLocal(new Date());
 
@@ -406,6 +464,11 @@ function renderMonthGrid(year, month, byDay, onCallByDay) {
 
     let cellClass = 'day-cell' + (otherMonth ? ' other-month' : '') + (isToday ? ' is-today' : '');
     html += `<div class="${cellClass}" data-day="${dayStr}"><div class="cell-date">${dayNum}</div>`;
+    const companyRows = companyByDay.get(dayStr) || [];
+    for (const row of companyRows) {
+      const titleAttr = `${row.label}${row.note ? ': ' + row.note : ''}`;
+      html += `<span class="company-banner" title="${escapeHtml(titleAttr)}">&#9733; ${escapeHtml(row.label)}</span>`;
+    }
     for (const row of rows) {
       const reason = row.reason || 'other';
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
@@ -497,6 +560,34 @@ function openOnCallModal(prefill) {
 document.getElementById('openOnCallModalBtn').addEventListener('click', () => openOnCallModal(null));
 document.getElementById('closeOnCallBtn').addEventListener('click', () => onCallModal.classList.remove('active'));
 
+// Company Event Modal
+const companyEventModal = document.getElementById('companyEventModal');
+const companyEventModalTitle = document.getElementById('companyEventModalTitle');
+const companyEventModalSubmitBtn = document.getElementById('companyEventModalSubmitBtn');
+let editingCompanyEventId = null; // set when editing, null when adding fresh
+
+function openCompanyEventModal(prefill) {
+  if (prefill) {
+    editingCompanyEventId = prefill.id;
+    companyEventModalTitle.textContent = 'Edit Company Event';
+    companyEventModalSubmitBtn.textContent = 'Update Event';
+    document.getElementById('companyEventDate').value = prefill.day;
+    document.getElementById('companyEventLabel').value = prefill.label || '';
+    document.getElementById('companyEventNote').value = prefill.note || '';
+  } else {
+    editingCompanyEventId = null;
+    companyEventModalTitle.textContent = 'Add Company Event';
+    companyEventModalSubmitBtn.textContent = 'Save Event';
+    document.getElementById('companyEventDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('companyEventLabel').value = '';
+    document.getElementById('companyEventNote').value = '';
+  }
+  companyEventModal.classList.add('active');
+}
+document.getElementById('openCompanyEventModalBtn').addEventListener('click', () => openCompanyEventModal(null));
+document.getElementById('closeCompanyEventModalBtn').addEventListener('click', () => companyEventModal.classList.remove('active'));
+companyEventModal.addEventListener('click', (e) => { if (e.target === companyEventModal) companyEventModal.classList.remove('active'); });
+
 // Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
 // themselves) opens a bigger view of just that day, since the inline
 // cards on a busy day don't have room to show every note in full.
@@ -512,11 +603,36 @@ function formatDayHeading(dayStr) {
 function openDayDetail(dayStr) {
   const rows = currentByDay.get(dayStr) || [];
   const onCallRows = currentOnCallByDay.get(dayStr) || [];
+  const companyRows = currentCompanyByDay.get(dayStr) || [];
   dayDetailTitle.textContent = formatDayHeading(dayStr);
+  dayDetailList.dataset.day = dayStr;
 
-  if (rows.length === 0 && onCallRows.length === 0) {
+  if (rows.length === 0 && onCallRows.length === 0 && companyRows.length === 0) {
     dayDetailList.innerHTML = '<div class="day-detail-empty">No entries for this day.</div>';
   } else {
+    const companyHtml = companyRows.map((row) => {
+      const noteHtml = row.note ? `<div class="entry-note">${escapeHtml(row.note)}</div>` : '';
+      const pushControl = row.bluefolder_appt_id
+        ? `<span class="synced" title="Synced to BlueFolder (appt #${escapeHtml(row.bluefolder_appt_id)})">&#128279; Synced to BlueFolder</span>`
+        : `<button type="button" class="entry-remove" data-company-push data-id="${escapeHtml(row.id)}">
+            Push to BlueFolder
+          </button>`;
+      return `<div class="day-detail-entry company-event">
+        <div class="entry-name">&#9733; ${escapeHtml(row.label)}</div>
+        <div class="entry-type">Company Event</div>
+        ${noteHtml}
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          ${pushControl}
+          <button type="button" class="entry-remove" data-company-edit data-id="${escapeHtml(row.id)}">
+            Edit
+          </button>
+          <button type="button" class="entry-remove" data-company-remove data-id="${escapeHtml(row.id)}">
+            Remove
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+
     const availabilityHtml = rows.map((row) => {
       const reason = row.reason || 'other';
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
@@ -569,12 +685,75 @@ function openDayDetail(dayStr) {
       </div>`;
     }).join('');
 
-    dayDetailList.innerHTML = availabilityHtml + onCallHtml;
+    dayDetailList.innerHTML = companyHtml + availabilityHtml + onCallHtml;
   }
   dayDetailModal.classList.add('active');
 }
 
 dayDetailList.addEventListener('click', async (e) => {
+  const companyEditBtn = e.target.closest('[data-company-edit]');
+  if (companyEditBtn) {
+    const { id } = companyEditBtn.dataset;
+    let row = null;
+    for (const list of currentCompanyByDay.values()) {
+      const found = list.find(r => String(r.id) === id);
+      if (found) { row = found; break; }
+    }
+    if (!row) { alert('Could not find that entry to edit.'); return; }
+    dayDetailModal.classList.remove('active');
+    openCompanyEventModal(row);
+    return;
+  }
+
+  const companyPushBtn = e.target.closest('[data-company-push]');
+  if (companyPushBtn) {
+    const { id } = companyPushBtn.dataset;
+    companyPushBtn.disabled = true;
+    companyPushBtn.textContent = 'Pushing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-company-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'push' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      const day = dayDetailList.dataset.day;
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error pushing to BlueFolder: ' + err.message);
+      companyPushBtn.disabled = false;
+      companyPushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
+  const companyRemoveBtn = e.target.closest('[data-company-remove]');
+  if (companyRemoveBtn) {
+    const { id } = companyRemoveBtn.dataset;
+    if (!confirm('Remove this company event?')) return;
+    companyRemoveBtn.disabled = true;
+    companyRemoveBtn.textContent = 'Removing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-company-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'delete' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      const day = dayDetailList.dataset.day;
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error removing entry: ' + err.message);
+      companyRemoveBtn.disabled = false;
+      companyRemoveBtn.textContent = 'Remove';
+    }
+    return;
+  }
+
   const availEditBtn = e.target.closest('[data-avail-edit]');
   if (availEditBtn) {
     const { tech, day } = availEditBtn.dataset;
@@ -792,6 +971,32 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
     loadMonth();
   } catch (err) {
     alert('Error saving on-call entry: ' + err.message);
+  }
+});
+
+// Company Event form submission -- goes through save-company-event.js
+// (service-role key, server-side), same reasoning as the other two forms:
+// company_events' write RLS requires an authenticated admin/dispatcher
+// session, and this page only ever has the anon key.
+document.getElementById('companyEventForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const day = document.getElementById('companyEventDate').value;
+  const label = document.getElementById('companyEventLabel').value;
+  const note = document.getElementById('companyEventNote').value;
+
+  try {
+    const res = await fetch('/.netlify/functions/save-company-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingCompanyEventId, day, label, note })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    companyEventModal.classList.remove('active');
+    editingCompanyEventId = null;
+    loadMonth();
+  } catch (err) {
+    alert('Error saving company event: ' + err.message);
   }
 });
 
