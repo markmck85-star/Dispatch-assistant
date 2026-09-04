@@ -949,9 +949,15 @@ function parseEmailBody(text, receivedAt, subject) {
       : ([pcName, account].filter(Boolean).join(' – ') || locationField || 'Unknown Site');
     const isInstallCategory = /^install$/i.test(issueCategory || '');
     const isSiteSurvey = isInstallCategory && /site survey/i.test(issueDetail || '');
-    const statedDueDate = isInstallCategory ? parseLooseDate(dueDateRaw) : null;
+    // 2026-09-04: previously used Neumo's own stated Due Date verbatim as
+    // the SLA deadline for Install-category tickets (statedDueDate ||
+    // calculateSlaDeadline(...)). Mark confirmed Neumo's Due Date field is
+    // boilerplate on every ticket regardless of real urgency -- same as
+    // Priority always reading "Low" -- so it carries no real signal and
+    // should never be trusted, install tickets included. Always use the
+    // app's own business-hours/Saturday-coverage-aware calculation instead.
     const ticketTz = getTimezoneForSiteCode(siteCode);
-    const slaEnd = statedDueDate || calculateSlaDeadline(receivedAt, ticketTz, siteCode.substring(0,2));
+    const slaEnd = calculateSlaDeadline(receivedAt, ticketTz, siteCode.substring(0,2));
     const slaStr = formatSlaDeadline(slaEnd, ticketTz);
     const siteTrunc = site.length > 40 ? site.substring(0, 38) + '…' : site;
 
@@ -968,7 +974,9 @@ function parseEmailBody(text, receivedAt, subject) {
 
     let alertBody = `🚨 WO: ${woNum}\nSite: ${siteTrunc}`;
     if (issue && issue !== 'See email for details') alertBody += `\nIssue: ${issue}`;
-    alertBody += statedDueDate ? `\nDue: ${slaStr}` : `\nSLA ends: ${slaStr}`;
+    // Always our own calculated SLA now (see note above) -- no more branching
+    // on whether Neumo supplied a Due Date, since that's never trusted.
+    alertBody += `\nSLA ends: ${slaStr}`;
 
     return {
       type: 'trouble',
