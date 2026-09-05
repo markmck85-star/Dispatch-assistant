@@ -2441,8 +2441,22 @@ function distanceMatrixStatus(state) {
             const urgencySelector = document.getElementById('urgencySelector');
             const isUrgent = urgencySelector && urgencySelector.value === 'urgent';
             // Accept codes matching current state prefix (GA also accepts NC/SC)
+            // 2026-09-04: NC and SC previously had no entry of their own here
+            // at all -- meaning if CURRENT_STATE ever literally became 'NC'
+            // or 'SC' (e.g. via the state-console "Send to Dispatch Board"
+            // handoff, which passes through whatever the console's own
+            // dropdown said), the lookup fell through to the unrestricted
+            // '([A-Z]{2})' default -- accepting every state's codes as
+            // "valid input" with no filtering at all. Combined with the
+            // Location Codes box still holding that morning's full national
+            // dispatch-list text, this is what caused a flood of false
+            // "add this site" prompts for real, already-onboarded sites in
+            // totally unrelated states (confirmed live: MI1052, an existing
+            // active site, flagged as new while nominally processing NC).
+            // NC and SC mirror GA's own entry since they're dispatched as
+            // one combined territory, not separate boards.
             const STATE_PREFIXES = {
-                'GA': '(GA|NC|SC)', 'FL': '(FL)', 'MI': '(MI)', 'IN': '(IN)',
+                'GA': '(GA|NC|SC)', 'NC': '(GA|NC|SC)', 'SC': '(GA|NC|SC)', 'FL': '(FL)', 'MI': '(MI)', 'IN': '(IN)',
                 'OH': '(OH)', 'NV': '(NV)', 'IL': '(IL)', 'MN': '(MN)', 'CO': '(CO)', 'ID': '(ID)', 'AL': '(AL)',
                 'WV': '(WV)', 'OR': '(OR)'
             };
@@ -2651,8 +2665,26 @@ function distanceMatrixStatus(state) {
             const resultsDiv = document.getElementById('results');
 
             let items = parseInputs(codesInput.value);
+            // 2026-09-04: pasted dispatch-list/ticket text is often the
+            // whole national list at once, but LOCATIONS here only holds
+            // whatever state(s) are currently loaded (e.g. GA/NC/SC
+            // together). Previously any code not found in LOCATIONS was
+            // treated as "unrecognized -- needs to be added", even when it
+            // was a perfectly real, already-onboarded site that simply
+            // belongs to a state that isn't loaded right now. Confirmed
+            // live: MI1052 (an existing, active site) got flagged as new
+            // after the state-console "Send to Dispatch Board" handoff
+            // re-triggered processing on the still-multi-state pasted text.
+            // Now a code only counts as "unrecognized" if its own
+            // two-letter prefix belongs to a state that's actually loaded
+            // into LOCATIONS -- anything whose prefix isn't represented at
+            // all is simply out of scope for this board right now, not a
+            // new site, so it's silently left out rather than prompted for
+            // creation.
+            const loadedStatePrefixes = new Set(Object.keys(LOCATIONS).map(c => c.slice(0, 2).toUpperCase()));
+            const codeInScope = (code) => loadedStatePrefixes.has(String(code).slice(0, 2).toUpperCase());
             let relevant = items.filter(i => LOCATIONS[i.code]);
-            const unknownCodes = [...new Set(items.filter(i => !LOCATIONS[i.code]).map(i => i.code))];
+            const unknownCodes = [...new Set(items.filter(i => !LOCATIONS[i.code] && codeInScope(i.code)).map(i => i.code))];
 
             // Set unknown codes banner for print report
             window.unknownCodesBannerHtml = unknownCodes.length > 0
