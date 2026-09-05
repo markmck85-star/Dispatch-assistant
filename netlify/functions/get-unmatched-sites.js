@@ -71,6 +71,29 @@ function stripStatePrefix(accountName) {
   return m ? m[2] : String(accountName || '').trim();
 }
 
+// Category guard, carried over from the original site-matching cleanup
+// campaign's hard rule: an agency-acronym raw name must never match a
+// retail-chain-named site even on strong incidental word overlap (shared
+// city/county/street name). Token scoring alone can't tell "DMV" and
+// "Kroger" apart if the raw name and the site both happen to mention the
+// same town -- this is a categorical veto, not a score penalty, same as
+// the safety rule already proven out on the closed-ticket import matcher.
+// Returns 'agency', 'retail', or null (uncategorized -- doesn't veto).
+const AGENCY_PATTERNS = [/\bbmv\b/, /\bdmv\b/, /\bsos\b/, /\bsso\b/, /\btc\b/, /\bmv\b/, /\bstate prison\b/];
+const RETAIL_CHAINS = [
+  'kroger', 'meijer', 'publix', 'walmart', 'albertsons', 'safeway', 'raley',
+  'cub foods', 'discount drug', 'harris teeter', 'food lion', 'giant eagle',
+  'save-a-lot', 'weis', 'shoprite', 'winn-dixie', 'h-e-b', 'heb', 'fred meyer',
+  "fry's", 'king soopers', 'ralphs', 'vons', 'pavilions', 'jewel-osco',
+  'stop & shop', 'stop and shop', 'wegmans', "martin's super market",
+];
+function categorizeName(name) {
+  const lower = (name || '').toLowerCase();
+  for (const pat of AGENCY_PATTERNS) if (pat.test(lower)) return 'agency';
+  for (const chain of RETAIL_CHAINS) if (lower.includes(chain)) return 'retail';
+  return null;
+}
+
 // Per-state inverse-document-frequency weights, computed from how many
 // site names in that state contain each token. A token in every site's
 // name (weight -> near 0) contributes almost nothing to the score; a
@@ -91,14 +114,31 @@ function buildTokenWeights(sitesForState) {
   return weights;
 }
 
+// Weighted Jaccard similarity: shared weight over the weight of the
+// COMBINED vocabulary (target ∪ candidate), not just the target's own
+// tokens. The earlier version only measured how much of the target was
+// covered by the candidate, so a candidate with extra unrelated words
+// scored no worse than one without any -- confirmed live 2026-08-30:
+// "Elkhart County Kroger" tied EXACTLY with plain "Elkhart" against a
+// target of "Elkhart BMV", because both equally cover the target's own
+// tokens and the extra "County"/"Kroger" words never counted against the
+// former. Weighted Jaccard fixes this: those extra words add weight to
+// the union (denominator) without adding anything to the intersection
+// (numerator), correctly scoring the plain "Elkhart" match higher since
+// it doesn't carry unrelated extra content the target never mentioned.
 function weightedOverlapScore(targetTokens, siteTokens, weights) {
+  const setA = new Set(targetTokens);
   const setB = new Set(siteTokens);
-  const targetWeightTotal = targetTokens.reduce((sum, t) => sum + (weights[t] ?? 1), 0);
-  if (targetWeightTotal === 0) return 0;
-  const sharedWeight = targetTokens
-    .filter((t) => setB.has(t))
-    .reduce((sum, t) => sum + (weights[t] ?? 1), 0);
-  return sharedWeight / targetWeightTotal;
+  const union = new Set([...setA, ...setB]);
+  if (union.size === 0) return 0;
+  let sharedWeight = 0;
+  let unionWeight = 0;
+  for (const t of union) {
+    const w = weights[t] ?? 1;
+    unionWeight += w;
+    if (setA.has(t) && setB.has(t)) sharedWeight += w;
+  }
+  return unionWeight > 0 ? sharedWeight / unionWeight : 0;
 }
 
 // Returns every site within TIE_MARGIN of the top score, not just the
@@ -122,7 +162,16 @@ const MAX_TIE_GROUP = 6;
 function rankedCandidates(accountName, sitesForState, weights) {
   const nameOnly = stripStatePrefix(accountName);
   const targetTokens = tokenize(nameOnly);
+  const targetCategory = categorizeName(nameOnly);
   const scored = sitesForState
+    // Categorical veto first: an agency name and a retail-chain name are
+    // never the same site, regardless of how well the rest of the words
+    // overlap -- excluded outright, not just scored lower.
+    .filter((site) => {
+      const siteCategory = categorizeName(site.name);
+      if (!targetCategory || !siteCategory) return true;
+      return targetCategory === siteCategory;
+    })
     .map((site) => ({ site, score: weightedOverlapScore(targetTokens, tokenize(site.name), weights) }))
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score);
