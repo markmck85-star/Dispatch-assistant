@@ -1784,8 +1784,24 @@ function distanceMatrixStatus(state) {
                     sessionStorage.removeItem('mcr_pending_dispatch_paste');
                     const data = JSON.parse(pending);
                     if (data.state) {
+                        // 2026-09-04: the state console tracks NC and SC as
+                        // real, independent states of their own (separate
+                        // dropdown options) -- but the dispatch board treats
+                        // them as one combined territory under a single 'GA'
+                        // value (there is no 'NC' or 'SC' option in this
+                        // board's own selector at all). Assigning sel.value
+                        // = 'NC' directly onto a <select> with no matching
+                        // option silently fails to select anything, leaving
+                        // CURRENT_STATE resolved from an effectively-blank
+                        // value -- which (like the unrecognized-code fixes
+                        // just above) falls through to the least-restrictive
+                        // path rather than doing what was intended. Normalize
+                        // here, on the receiving side, since this board is
+                        // the one that knows what its own selector supports.
+                        const HANDOFF_STATE_MAP = { NC: 'GA', SC: 'GA' };
+                        const normalizedState = HANDOFF_STATE_MAP[data.state] || data.state;
                         const sel = document.getElementById('stateSelector');
-                        if (sel) { sel.value = data.state; await updateContext(); }
+                        if (sel) { sel.value = normalizedState; await updateContext(); }
                     }
                     const codesInput = document.getElementById('locationCodes');
                     if (codesInput && data.bodyText) {
