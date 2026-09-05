@@ -49,6 +49,27 @@ function stripStatePrefix(accountName) {
   return m ? m[2] : String(accountName || '').trim();
 }
 
+// Same categorical veto as get-unmatched-sites.js: an agency-acronym raw
+// name must never be paired with a retail-chain-named site, even as the
+// "nearest known site" by pure distance -- a DMV/BMV/SOS/prison and a
+// grocery-chain store are never the same physical site regardless of how
+// close Google's guess happens to land to one. Kept in sync with the
+// same lists used there; update both if the category lists change.
+const AGENCY_PATTERNS = [/\bbmv\b/, /\bdmv\b/, /\bsos\b/, /\bsso\b/, /\btc\b/, /\bmv\b/, /\bstate prison\b/];
+const RETAIL_CHAINS = [
+  'kroger', 'meijer', 'publix', 'walmart', 'albertsons', 'safeway', 'raley',
+  'cub foods', 'discount drug', 'harris teeter', 'food lion', 'giant eagle',
+  'save-a-lot', 'weis', 'shoprite', 'winn-dixie', 'h-e-b', 'heb', 'fred meyer',
+  "fry's", 'king soopers', 'ralphs', 'vons', 'pavilions', 'jewel-osco',
+  'stop & shop', 'stop and shop', 'wegmans', "martin's super market",
+];
+function categorizeName(name) {
+  const lower = (name || '').toLowerCase();
+  for (const pat of AGENCY_PATTERNS) if (pat.test(lower)) return 'agency';
+  for (const chain of RETAIL_CHAINS) if (lower.includes(chain)) return 'retail';
+  return null;
+}
+
 // Haversine distance in miles between two lat/lng points.
 function distanceMiles(lat1, lng1, lat2, lng2) {
   const R = 3958.8;
@@ -105,15 +126,25 @@ exports.handler = async (event) => {
   const geoLat = place.geometry.location.lat;
   const geoLng = place.geometry.location.lng;
 
-  // 2. Find the nearest EXISTING site already in Supabase for this state.
+  // 2. Find the nearest EXISTING site already in Supabase for this state,
+  // excluding any site whose category (agency vs retail-chain) conflicts
+  // with the raw name's own category -- a categorical veto, not just a
+  // distance penalty, same rule as get-unmatched-sites.js.
+  const targetCategory = categorizeName(nameOnly);
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const { data: sites, error: sitesErr } = await supabase
+  const { data: sitesRaw, error: sitesErr } = await supabase
     .from('sites')
     .select('id, site_code, name, address, lat, lng')
     .eq('state', state)
     .not('lat', 'is', null)
     .not('lng', 'is', null);
   if (sitesErr) return json(500, { ok: false, error: 'sites fetch failed: ' + sitesErr.message });
+
+  const sites = (sitesRaw || []).filter((s) => {
+    const siteCategory = categorizeName(s.name);
+    if (!targetCategory || !siteCategory) return true;
+    return targetCategory === siteCategory;
+  });
 
   let nearest = null;
   let nearestDist = Infinity;
