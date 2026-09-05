@@ -662,6 +662,19 @@
                     every row sharing that name gets updated together.
                 </p>
                 <div id="usStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
+                <div id="usBackupBar" style="display:none;margin-bottom:12px;">
+                    <div style="color:#9cc3ff;font-size:12px;font-weight:600;margin-bottom:4px;">💾 Backing up sites/visits/aliases before matching…</div>
+                    <div style="background:#222;border-radius:5px;overflow:hidden;height:8px;">
+                        <div id="usBackupBarFill" style="background:#007bff;height:100%;width:40%;animation:usBackupSlide 1s ease-in-out infinite;"></div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes usBackupSlide {
+                        0%   { margin-left: 0%;   width: 30%; }
+                        50%  { margin-left: 60%;  width: 40%; }
+                        100% { margin-left: 0%;   width: 30%; }
+                    }
+                </style>
                 <button onclick="usLocateAll()" id="usLocateAllBtn" style="margin-bottom:12px;background:#6f42c1;color:#fff;border:none;border-radius:5px;padding:7px 14px;font-size:13px;cursor:pointer;">🌐 Locate All via Maps</button>
                 <div id="usGroups"></div>
             </div>
@@ -1105,6 +1118,34 @@
             }
         }
 
+        // One-time-per-page-load safety snapshot of sites/site_visits/site_aliases,
+        // taken right before the first batch-matching run. Shows the same style of
+        // animated progress bar used for the closed-ticket-report upload on state.html.
+        window.usBackupTaken = false;
+        async function usEnsureBackup() {
+            if (window.usBackupTaken) return;
+            var bar = document.getElementById('usBackupBar');
+            bar.style.display = 'block';
+            try {
+                var res = await fetch('/.netlify/functions/backup-restore?action=snapshot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trigger: 'pre-unmatched-sites-locate' })
+                });
+                var data = await res.json();
+                if (!res.ok || !data.ok) {
+                    console.warn('Pre-locate backup failed (continuing anyway):', data.error || res.status);
+                } else {
+                    window.usBackupTaken = true;
+                    console.log('Backup #' + data.backupId + ' taken:', data.counts);
+                }
+            } catch (e) {
+                console.warn('Pre-locate backup failed (continuing anyway):', e.message);
+            } finally {
+                bar.style.display = 'none';
+            }
+        }
+
         // Runs usLocate across every still-open group, a few at a time so we
         // don't hammer the Places API or risk a Netlify function pile-up.
         async function usLocateAll() {
@@ -1112,6 +1153,7 @@
             var indices = usGroups.map(function(g, i) { return g ? i : null; }).filter(function(i) { return i !== null; });
             if (!indices.length) return;
             btn.disabled = true;
+            await usEnsureBackup();
             var CONCURRENCY = 3;
             var done = 0;
             for (var start = 0; start < indices.length; start += CONCURRENCY) {
