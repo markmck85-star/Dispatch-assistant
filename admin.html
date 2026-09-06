@@ -119,6 +119,9 @@
                 <input type="text" id="locName" placeholder="Location name">
                 <label for="locAddress">Address</label>
                 <input type="text" id="locAddress" placeholder="Full address">
+                <label for="locAliases">Colloquial Names <span style="color:#888;font-size:12px;font-weight:400;">(comma-separated — how dispatchers actually say it, e.g. "Spout Springs Kroger, Hall Spout Springs Kroger")</span></label>
+                <input type="text" id="locAliases" placeholder="e.g. Spout Springs Kroger, Hall Spout Springs Kroger">
+                <div id="locAliasesReadonlyNote" style="font-size:12px;color:#888;margin:-6px 0 10px;"></div>
                 <label for="locPrimaryTech">Primary Technician</label>
                 <select id="locPrimaryTech">
                     <option value="">— Select primary tech —</option>
@@ -1267,6 +1270,8 @@
             document.getElementById('locCode').disabled = false;
             document.getElementById('locName').value = '';
             document.getElementById('locAddress').value = '';
+            document.getElementById('locAliases').value = '';
+            document.getElementById('locAliasesReadonlyNote').textContent = '';
             document.getElementById('locPrimaryTech').value = '';
             document.getElementById('locFallbackTech').value = '';
             document.getElementById('locContractorOverride').checked = false;
@@ -1275,7 +1280,7 @@
             document.getElementById('locFormTitle').textContent = 'Add Location';
         }
 
-        function editLocation(code) {
+        async function editLocation(code) {
             var loc = locationsData[code];
             if (!loc) { console.warn('editLocation: no record for key', code); return; }
             // Normalize: older records may not have code inside the value
@@ -1304,6 +1309,29 @@
             document.getElementById('locRemote').checked = !!loc.remote;
             document.getElementById('locContractorName').value = loc.contractorName || '';
             document.getElementById('locFormTitle').textContent = 'Edit Location — ' + code;
+
+            // Colloquial names: the text field only ever holds/edits the
+            // admin_panel-sourced ones (that's all this save can touch --
+            // see save-site-aliases.js). Names from the spreadsheet-derived
+            // bulk import or auto-detected from tickets/emails show as a
+            // read-only note underneath so the dispatcher knows they're not
+            // starting from zero, without accidentally wiping them.
+            document.getElementById('locAliases').value = '';
+            document.getElementById('locAliasesReadonlyNote').textContent = '';
+            fetch('/.netlify/functions/get-site-aliases?site_code=' + encodeURIComponent(code))
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    var all = (data && data.aliases) || [];
+                    var editable = all.filter(function(a) { return a.source === 'admin_panel'; }).map(function(a) { return a.alias; });
+                    var other = all.filter(function(a) { return a.source !== 'admin_panel'; }).map(function(a) { return a.alias; });
+                    document.getElementById('locAliases').value = editable.join(', ');
+                    if (other.length) {
+                        document.getElementById('locAliasesReadonlyNote').textContent =
+                            'Also known as (from prior data, not editable here): ' + other.join(', ');
+                    }
+                })
+                .catch(function(e) { console.warn('get-site-aliases failed:', e); });
+
             document.getElementById('adminPanel').scrollTo({ top: 0, behavior: 'smooth' });
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -1336,7 +1364,29 @@
                 });
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-                showToast(isEdit ? 'Location updated' : 'Location added', 'success');
+
+                // Save colloquial names as a separate, decoupled call so a
+                // problem here (e.g. a name collision with another site)
+                // never blocks or rolls back the location save that already
+                // succeeded above.
+                var aliasesRaw = document.getElementById('locAliases').value.trim();
+                var aliasList = aliasesRaw ? aliasesRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+                try {
+                    var aliasRes = await fetch('/.netlify/functions/save-site-aliases', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ site_code: code, aliases: aliasList })
+                    });
+                    var aliasData = await aliasRes.json();
+                    if (!aliasRes.ok) {
+                        showToast('Location saved, but colloquial names failed: ' + (aliasData.error || 'unknown error'), 'error');
+                    } else {
+                        showToast(isEdit ? 'Location updated' : 'Location added', 'success');
+                    }
+                } catch (aliasErr) {
+                    showToast('Location saved, but colloquial names failed: ' + aliasErr.message, 'error');
+                }
+
                 clearLocForm();
                 await loadLocations();
             } catch (e) {
