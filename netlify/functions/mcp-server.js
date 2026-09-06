@@ -1,7 +1,10 @@
 // mcp-server.js
 //
 // Remote MCP server for the MCR dispatch platform -- built for Mark's and
-// Gina's Claude custom connectors. GA/NC/SC scope for v1.
+// Gina's Claude custom connectors. Originally scoped to GA/NC/SC only;
+// opened up to any state the app tracks (CO, ID, CA, AL, etc. as they
+// come online) since the GA/NC/SC restriction was an artifact of the
+// app's single-state origin, not a real constraint.
 //
 // This wraps existing, already-public read-only Netlify functions
 // (get-restock-schedule.js, get-state-console.js, get-watchdog-log.js,
@@ -31,7 +34,9 @@ const getEmails = require('./get-emails.js');
 
 const SERVER_NAME = 'mcr-dispatch';
 const SERVER_VERSION = '0.1.0';
-const ALLOWED_STATES = ['GA', 'NC', 'SC'];
+// No longer restricted to a fixed list -- any 2-letter state code the
+// app tracks is valid. Individual wrapped endpoints (get-state-console.js
+// etc.) are the real source of truth on whether a state has data.
 
 function jsonResponse(statusCode, obj) {
   return {
@@ -81,8 +86,8 @@ async function callHandler(fn, queryStringParameters) {
 function validateState(args) {
   const state = (args && args.state || '').toUpperCase();
   if (!state) return { error: 'state is required' };
-  if (!ALLOWED_STATES.includes(state)) {
-    return { error: `state must be one of ${ALLOWED_STATES.join(', ')} (v1 scope)` };
+  if (!/^[A-Z]{2}$/.test(state)) {
+    return { error: 'state must be a 2-letter code, e.g. GA, NC, SC, CO, ID' };
   }
   return { state };
 }
@@ -92,11 +97,11 @@ const TOOLS = [
   {
     name: 'get_restock_status',
     description:
-      'Restock/consumables status per site for GA, NC, or SC -- cycle-based overdue/due-soon/on-track, wrapping get-restock-schedule.js. Omit state for all three.',
+      'Restock/consumables status per site -- cycle-based overdue/due-soon/on-track, wrapping get-restock-schedule.js. Omit state to check every state at once.',
     inputSchema: {
       type: 'object',
       properties: {
-        state: { type: 'string', description: 'GA, NC, or SC. Omit for all three.' },
+        state: { type: 'string', description: '2-letter state code, e.g. GA, NC, SC, CO, ID. Omit for all states.' },
         since: { type: 'string', description: 'YYYY-MM-DD, optional history-window start' },
         until: { type: 'string', description: 'YYYY-MM-DD, optional history-window end' },
       },
@@ -105,30 +110,30 @@ const TOOLS = [
   {
     name: 'get_recent_tickets',
     description:
-      'Recent trouble tickets for one state (GA, NC, or SC), with open/closed status inferred from the closed-ticket import. Wraps the ticket portion of get-state-console.js.',
+      'Recent trouble tickets for one state, with open/closed status inferred from the closed-ticket import. Wraps the ticket portion of get-state-console.js.',
     inputSchema: {
       type: 'object',
-      properties: { state: { type: 'string', description: 'GA, NC, or SC' } },
+      properties: { state: { type: 'string', description: '2-letter state code, e.g. GA, NC, SC, CO, ID' } },
       required: ['state'],
     },
   },
   {
     name: 'get_technician_availability',
     description:
-      "Today's technician availability for one state (GA, NC, or SC). Wraps the technician portion of get-state-console.js.",
+      "Today's technician availability for one state. Wraps the technician portion of get-state-console.js.",
     inputSchema: {
       type: 'object',
-      properties: { state: { type: 'string', description: 'GA, NC, or SC' } },
+      properties: { state: { type: 'string', description: '2-letter state code, e.g. GA, NC, SC, CO, ID' } },
       required: ['state'],
     },
   },
   {
     name: 'get_watchdog_log',
     description:
-      'Open trouble/install/site_survey tickets the SMS watchdog would alert on, for one state (GA, NC, or SC) -- mirrors the watchdog text content. Wraps get-watchdog-log.js.',
+      'Open trouble/install/site_survey tickets the SMS watchdog would alert on, for one state -- mirrors the watchdog text content. Wraps get-watchdog-log.js.',
     inputSchema: {
       type: 'object',
-      properties: { state: { type: 'string', description: 'GA, NC, or SC' } },
+      properties: { state: { type: 'string', description: '2-letter state code, e.g. GA, NC, SC, CO, ID' } },
       required: ['state'],
     },
   },
@@ -166,8 +171,8 @@ async function callTool(name, args) {
   switch (name) {
     case 'get_restock_status': {
       const state = (args && args.state || '').toUpperCase();
-      if (state && !ALLOWED_STATES.includes(state)) {
-        return toolError(`state must be one of ${ALLOWED_STATES.join(', ')} (v1 scope)`);
+      if (state && !/^[A-Z]{2}$/.test(state)) {
+        return toolError('state must be a 2-letter code, e.g. GA, NC, SC, CO, ID');
       }
       const qs = {};
       if (state) qs.state = state;
