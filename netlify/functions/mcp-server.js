@@ -31,6 +31,8 @@ const getRestockSchedule = require('./get-restock-schedule.js');
 const getStateConsole = require('./get-state-console.js');
 const getWatchdogLog = require('./get-watchdog-log.js');
 const getEmails = require('./get-emails.js');
+const getSiteHistory = require('./get-site-history.js');
+const getDistance = require('./get-distance.js');
 
 const SERVER_NAME = 'mcr-dispatch';
 const SERVER_VERSION = '0.1.0';
@@ -153,6 +155,33 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_site_history',
+    description:
+      'Recent visit history for one site -- restocks and trouble/maintenance calls, most recent first, with technician name, duration, remediation notes, WO/SA numbers, and any linked RMA shipment/tracking info. Use this for "who was last at this site" or "what happened on the last visit" questions. Wraps get-site-history.js, the same data powering the dispatch board\'s clickable location history.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        site_code: { type: 'string', description: 'Site code, e.g. GA1022' },
+        offset: { type: 'number', description: 'Pagination offset, default 0. Each page is 15 visits -- pass back offset+15 to see older history if hasMore is true.' },
+      },
+      required: ['site_code'],
+    },
+  },
+  {
+    name: 'get_distance',
+    description:
+      'Driving distance and time between two sites in the same state. Reads the precomputed drive-time matrix where available (fast, no cost); falls back to a straight-line estimate for pairs not yet computed, clearly labeled as such.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', description: '2-letter state code both sites are in, e.g. GA' },
+        from: { type: 'string', description: 'First site code, e.g. GA1067' },
+        to: { type: 'string', description: 'Second site code, e.g. GA1090' },
+      },
+      required: ['state', 'from', 'to'],
+    },
+  },
+  {
     name: 'opportunistic_restock_near',
     description:
       'NOT YET IMPLEMENTED. Will combine the distance matrix with the restock-threshold model to answer what is restock-overdue within N miles of a given site.',
@@ -217,6 +246,25 @@ async function callTool(name, args) {
       if (args && args.until) qs.until = args.until;
       const { statusCode, body } = await callHandler(getEmails, qs);
       if (statusCode !== 200) return toolError(body.error || 'search_emails failed');
+      return toolText(body);
+    }
+    case 'get_site_history': {
+      const siteCode = args && args.site_code;
+      if (!siteCode || !String(siteCode).trim()) return toolError('site_code is required');
+      const qs = { code: String(siteCode).trim().toUpperCase() };
+      if (args && Number.isInteger(args.offset)) qs.offset = String(args.offset);
+      const { statusCode, body } = await callHandler(getSiteHistory, qs);
+      if (statusCode !== 200) return toolError(body.error || 'get_site_history failed');
+      return toolText(body);
+    }
+    case 'get_distance': {
+      const state = (args && args.state || '').toUpperCase();
+      const from = (args && args.from || '').toUpperCase();
+      const to = (args && args.to || '').toUpperCase();
+      if (!state || !/^[A-Z]{2}$/.test(state)) return toolError('state must be a 2-letter code, e.g. GA');
+      if (!from || !to) return toolError('Both from and to site codes are required');
+      const { statusCode, body } = await callHandler(getDistance, { state, from, to });
+      if (statusCode !== 200) return toolError(body.error || 'get_distance failed');
       return toolText(body);
     }
     case 'opportunistic_restock_near':
