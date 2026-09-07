@@ -62,6 +62,8 @@ exports.handler = async (event) => {
   // real HTTP request or the MCP synthetic event -- no more silent,
   // invocation-path-dependent failures.
   let blobsErrorForDebug = null;
+  let matrixKeyCountForDebug = null;
+  let sampleKeysForDebug = null;
   try {
     const siteID = process.env.SITE_ID;
     const token = process.env.NETLIFY_BLOBS_TOKEN;
@@ -71,6 +73,12 @@ exports.handler = async (event) => {
     const store = getStore({ name: 'dispatch', siteID, token });
     const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
     if (matrix) {
+      // TEMPORARY DIAGNOSTIC (2026-09-07) -- checking whether this read is
+      // actually seeing current data. If this count is far below what the
+      // build just reported writing, the read is stale/stuck on an old
+      // snapshot rather than a key-matching problem.
+      matrixKeyCountForDebug = Object.keys(matrix).length;
+      sampleKeysForDebug = Object.keys(matrix).slice(0, 5);
       // BUG FIX (2026-09-07): this used to look up only the alphabetically
       // SORTED key ([from, to].sort().join('|')), but the site-to-site
       // builder (compute-site-distance-matrix.js) always stores keys as
@@ -132,5 +140,7 @@ exports.handler = async (event) => {
     source: 'live-haversine-fallback',
     note: 'Straight-line estimate, not a driving distance -- this pair is not yet in the precomputed matrix for ' + state + '.',
     _debugBlobsError: blobsErrorForDebug,
+    _debugMatrixKeyCount: matrixKeyCountForDebug,
+    _debugSampleKeys: sampleKeysForDebug,
   });
 };
