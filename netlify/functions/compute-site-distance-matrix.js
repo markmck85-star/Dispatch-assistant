@@ -239,11 +239,25 @@ exports.handler = async (event) => {
   // when the caller explicitly passes fullRebuild:true (e.g. site
   // coordinates changed and old pairs need refreshing, not just new ones
   // added).
+  // BUG FIX (2026-09-07): this used to add BOTH sides of every existing
+  // matrix key to knownCodes, but tech-to-site entries use the identical
+  // "{key}|{key}" format (e.g. "robert-medley|GA1001") -- splitting those
+  // put every site code already touched by the (separate, older)
+  // tech-to-site matrix into knownCodes, even though zero site-to-site
+  // pairs had ever actually been computed. Result: newSites came out
+  // empty and the build silently no-op'd every time, reporting success
+  // ("done: true, 0 pairs computed") without doing anything. Only count a
+  // code as "known" when it appears in a genuine SITE-TO-SITE pair -- i.e.
+  // both sides of the key match this state's site-code pattern (state
+  // abbreviation + digits, e.g. "GA1001"), which no tech key ever does.
+  const siteCodePattern = new RegExp("^" + state + "\\d+$");
   const knownCodes = new Set();
   for (const key of Object.keys(existingMatrix)) {
     const [a, b] = key.split("|");
-    knownCodes.add(a);
-    knownCodes.add(b);
+    if (siteCodePattern.test(a) && siteCodePattern.test(b)) {
+      knownCodes.add(a);
+      knownCodes.add(b);
+    }
   }
   const fullRebuild = !!payload.fullRebuild || knownCodes.size === 0;
   const newSites = fullRebuild ? locEntries : locEntries.filter(([code]) => !knownCodes.has(code));
