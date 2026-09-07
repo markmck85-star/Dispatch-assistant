@@ -58,8 +58,19 @@ exports.handler = async (event) => {
     const store = getStore('dispatch');
     const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
     if (matrix) {
-      const key = [from, to].sort().join('|');
-      const entry = matrix[key];
+      // BUG FIX (2026-09-07): this used to look up only the alphabetically
+      // SORTED key ([from, to].sort().join('|')), but the site-to-site
+      // builder (compute-site-distance-matrix.js) always stores keys as
+      // "originCode|destCode" -- whichever order the origin/destination
+      // batching happened to process them in, NOT sorted. That function's
+      // own header comment always documented "lookups should check both
+      // orderings" -- this reader just never actually did that, so roughly
+      // half of every real computed pair (whichever direction didn't
+      // happen to land in alphabetical order) was silently unreachable
+      // here and fell back to a haversine estimate despite the real
+      // driving data already existing, already paid for, sitting in the
+      // matrix under the other key order the whole time.
+      const entry = matrix[from + '|' + to] || matrix[to + '|' + from];
       if (entry) {
         return json(200, {
           from, to,
