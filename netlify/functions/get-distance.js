@@ -18,7 +18,7 @@
 // precomputed matrix itself already uses for its own "haversine-fallback"
 // entries when Google's API didn't have a route for a pair.
 
-const { getStore, connectLambda } = require('@netlify/blobs');
+const { getStore } = require('@netlify/blobs');
 const { createClient } = require('@supabase/supabase-js');
 
 const R_MI = 3958.8;
@@ -47,30 +47,28 @@ exports.handler = async (event) => {
 
   // 1. Try the precomputed matrix first -- free, instant, already-verified data.
   //
-  // BUG FIX (2026-09-07): connectLambda(event) reads event.blobs (base64
-  // decoded) and event.headers['x-nf-deploy-id'/'x-nf-site-id'] -- NEITHER
-  // of which exist on mcp-server.js's callHandler synthetic event
-  // ({httpMethod, queryStringParameters} only). That's not a maybe -- it
-  // throws unconditionally on that path, on its very first line, which
-  // means the ENTIRE Blobs read below it never even ran -- every single
-  // get_distance call made through the Claude connector has been landing
-  // on the live haversine fallback regardless of whether real matrix data
-  // existed, ever since this function was written. connectLambda is only
-  // needed to manually set the Blobs context for cases where Netlify's
-  // runtime doesn't already auto-populate process.env.NETLIFY_BLOBS_CONTEXT
-  // -- on a normal deployed function (real request OR this synthetic one),
-  // that env var is already there, so getStore() below works fine on its
-  // own. Isolating connectLambda's own failure into its own try/catch, so
-  // it no longer gates the real read that follows it.
-  try {
-    connectLambda(event);
-  } catch (e) {
-    // Expected/harmless on the MCP synthetic event path -- getStore()
-    // below still works via the runtime's own auto-injected Blobs context.
-  }
+  // BUG FIX (2026-09-07): confirmed via the real error message ("The
+  // environment has not been configured to use Netlify Blobs") that this
+  // app runs in Netlify's Lambda-compatibility mode, which does NOT
+  // auto-populate Blobs context the way modern Netlify Functions normally
+  // do -- connectLambda(event) is the only auto path, and it requires a
+  // real event.blobs/event.headers that mcp-server.js's synthetic event
+  // never has. Rather than depend on connectLambda at all, pass siteID
+  // (Netlify's own auto-injected process.env.SITE_ID -- no setup needed)
+  // and token (a Netlify Personal Access Token, stored as
+  // NETLIFY_BLOBS_TOKEN -- this one DOES need to be created and added
+  // manually, since Netlify doesn't auto-provide a token this way)
+  // directly to getStore(). This works identically whether called via a
+  // real HTTP request or the MCP synthetic event -- no more silent,
+  // invocation-path-dependent failures.
   let blobsErrorForDebug = null;
   try {
-    const store = getStore('dispatch');
+    const siteID = process.env.SITE_ID;
+    const token = process.env.NETLIFY_BLOBS_TOKEN;
+    if (!siteID || !token) {
+      throw new Error('Missing siteID or NETLIFY_BLOBS_TOKEN env var for manual Blobs config');
+    }
+    const store = getStore({ name: 'dispatch', siteID, token });
     const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
     if (matrix) {
       // BUG FIX (2026-09-07): this used to look up only the alphabetically
