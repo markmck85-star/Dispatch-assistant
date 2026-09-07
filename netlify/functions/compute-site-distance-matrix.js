@@ -55,6 +55,7 @@
 
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
+const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require("./distance-matrix-usage.js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const ORIGIN_BATCH = 8;   // origins per call
@@ -93,6 +94,80 @@ exports.handler = async (event) => {
   const state = String(payload.state || "").trim().toUpperCase();
   if (!state || !/^[A-Z]{2}$/.test(state)) return json(400, { error: "Valid 2-letter state required" });
   const offset = Number.isInteger(payload.offset) ? payload.offset : 0;
+
+  // Dry-run cost preview (2026-09-07) -- Step 3 previously had NO real
+  // preview at all, just a rough client-side estimate from a hardcoded
+  // site-count table (admin.html's DM_SITE_COUNT_HINTS), which is how an
+  // accidental Indiana build went through today instead of the intended
+  // Georgia one with no real-time warning of what was about to be billed.
+  // This mirrors Step 2's dry-run pattern: fully self-contained, runs
+  // BEFORE the password gate/cooldown/orphaned-build guard below since
+  // none of those protect anything a free preview could touch -- only
+  // free Supabase + Blobs reads here, no Google API call, nothing written.
+  // Element count is computed by walking the EXACT same origin/destination
+  // batching grid the real build uses (including the same site-code-based
+  // knownCodes/newSites split), so this is an exact total for the whole
+  // build, not an approximation -- matches what elementsUsed will sum to
+  // once every chunk of a real run completes.
+  if (payload.dryRun === true) {
+    const dryStore = getStore("dispatch");
+    const dryExisting = await dryStore.get("distance-matrix/" + state, { type: "json" });
+    const dryExistingMatrix = (dryExisting && dryExisting.matrix) || {};
+
+    const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const { data: pSites, error: pSitesErr } = await supabasePreview
+      .from("sites")
+      .select("site_code, lat, lng")
+      .eq("state", state);
+    if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
+
+    const pLocEntries = (pSites || [])
+      .filter((s) => s.lat != null && s.lng != null)
+      .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
+
+    const pSiteCodePattern = new RegExp("^" + state + "\\d+$");
+    const pKnownCodes = new Set();
+    for (const key of Object.keys(dryExistingMatrix)) {
+      const [a, b] = key.split("|");
+      if (pSiteCodePattern.test(a) && pSiteCodePattern.test(b)) {
+        pKnownCodes.add(a);
+        pKnownCodes.add(b);
+      }
+    }
+    const pFullRebuild = !!payload.fullRebuild || pKnownCodes.size === 0;
+    const pNewSites = pFullRebuild ? pLocEntries : pLocEntries.filter(([code]) => !pKnownCodes.has(code));
+    const pKnownSites = pFullRebuild ? [] : pLocEntries.filter(([code]) => pKnownCodes.has(code));
+    const pOrdered = [...pNewSites, ...pKnownSites];
+
+    const pOriginStarts = [];
+    for (let oStart = 0; oStart < pNewSites.length; oStart += ORIGIN_BATCH) pOriginStarts.push(oStart);
+
+    let elementCount = 0;
+    for (const oStart of pOriginStarts) {
+      const originBatch = pOrdered.slice(oStart, oStart + ORIGIN_BATCH);
+      const destRange = pOrdered.slice(oStart);
+      for (let dStart = 0; dStart < destRange.length; dStart += DEST_BATCH) {
+        const destBatch = destRange.slice(dStart, dStart + DEST_BATCH);
+        for (const [originCode] of originBatch) {
+          for (const [destCode] of destBatch) {
+            if (originCode !== destCode) elementCount++;
+          }
+        }
+      }
+    }
+
+    const usedThisMonth = await getMonthlyElementsUsed(dryStore);
+    const preview = estimateCost(elementCount, usedThisMonth);
+    return json(200, {
+      ok: true,
+      state,
+      siteCount: pLocEntries.length,
+      newSiteCount: pNewSites.length,
+      incremental: !pFullRebuild,
+      elementCount,
+      ...preview,
+    });
+  }
 
   // Real spend gate (2026-08-18) -- this function previously had NO auth
   // check of any kind; the only thing stopping an unauthenticated call was
@@ -274,6 +349,7 @@ exports.handler = async (event) => {
   const priorFailed = (offset > 0 && existing && existing.meta && existing.meta.siteToSite && existing.meta.siteToSite.failedPairs) || [];
   const failedPairs = [...priorFailed];
   let elementsUsed = (offset > 0 && existing && existing.meta && existing.meta.siteToSite && existing.meta.siteToSite.elementsUsed) || 0;
+  const elementsUsedBeforeThisChunk = elementsUsed; // baseline, to bill only what THIS invocation adds
 
   // Only iterate origins over the NEW portion of orderedEntries -- known x
   // known pairs (everything past newSites.length as an origin) never needed
@@ -340,6 +416,16 @@ exports.handler = async (event) => {
   const nextOffset = offset + chunkStarts.length;
   const done = nextOffset >= originStarts.length;
 
+  // Monthly usage tracking (2026-09-07) -- bill only what THIS invocation
+  // added (elementsUsed carries the running cumulative total across
+  // resumed chunks, so the delta against the pre-chunk baseline is what
+  // actually needs adding to the shared monthly counter this call).
+  const elementsBilledThisChunk = elementsUsed - elementsUsedBeforeThisChunk;
+  let monthlyElementsUsedTotal = null;
+  if (elementsBilledThisChunk > 0) {
+    monthlyElementsUsedTotal = await addMonthlyElementsUsed(store, elementsBilledThisChunk);
+  }
+
   if (done) {
     // Final chunk: merge into the real matrix, drop the partial-progress scratch data.
     const mergedMatrix = { ...existingMatrix, ...matrix };
@@ -360,6 +446,8 @@ exports.handler = async (event) => {
       state,
       siteCount: locEntries.length,
       elementsUsed,
+      elementsBilledThisChunk,
+      monthlyElementsUsedTotal,
       newEntryCount: Object.keys(matrix).length,
       totalEntryCount: Object.keys(mergedMatrix).length,
       failedCount: failedPairs.length,
@@ -390,5 +478,7 @@ exports.handler = async (event) => {
     nextOffset,
     totalBatches: originStarts.length,
     elementsUsed,
+    elementsBilledThisChunk,
+    monthlyElementsUsedTotal,
   });
 };

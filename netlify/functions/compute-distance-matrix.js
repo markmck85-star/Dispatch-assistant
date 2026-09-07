@@ -46,6 +46,7 @@
 
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
+const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require("./distance-matrix-usage.js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const DEST_BATCH = 10; // destinations per Distance Matrix API call (9 techs × 10 = 90 elements, under 100-element limit)
@@ -94,6 +95,51 @@ exports.handler = async (event) => {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (mode === "driving" && !apiKey)
     return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set (required for driving mode)" });
+
+  // Dry-run cost preview (2026-09-07) -- admin.html's Step 2 UI already
+  // called this endpoint with dryRun:true expecting a free, password-free
+  // preview, but that path never actually existed here: without this
+  // early return, a dryRun call fell straight into the password gate
+  // below with no adminSecret attached, silently counting as a WRONG
+  // password attempt against the shared 5-try lockout on every single
+  // preview click. Handled entirely before the password/lockout section --
+  // reading site/tech counts and the existing matrix is free (Supabase +
+  // Blobs reads only), no Google API call, nothing written.
+  if (payload.dryRun === true && mode === "driving") {
+    const dryStore = getStore("dispatch");
+    const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const [{ data: pSites, error: pSitesErr }, { data: pTechs, error: pTechsErr }] = await Promise.all([
+      supabasePreview.from("sites").select("site_code").eq("state", state),
+      supabasePreview.from("technicians").select("slug").eq("home_state", state).eq("active", true),
+    ]);
+    if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
+    if (pTechsErr) return json(500, { ok: false, error: "technicians fetch failed: " + pTechsErr.message });
+
+    const siteCount = (pSites || []).length;
+    const techCount = (pTechs || []).length;
+
+    let elementCount;
+    if (additive) {
+      // Mirror the real additive build's "what's actually missing" count,
+      // without querying Google -- just compares against the existing matrix.
+      const existing = await dryStore.get("distance-matrix/" + state, { type: "json" });
+      const existingMatrix = (existing && existing.matrix) || {};
+      const siteCodes = new Set((pSites || []).map((s) => s.site_code));
+      const techSlugs = new Set((pTechs || []).map((t) => t.slug));
+      let alreadyCovered = 0;
+      for (const [key, val] of Object.entries(existingMatrix)) {
+        const [techKey, locCode] = key.split("|");
+        if (techSlugs.has(techKey) && siteCodes.has(locCode) && val.type === "driving") alreadyCovered++;
+      }
+      elementCount = Math.max(0, techCount * siteCount - alreadyCovered);
+    } else {
+      elementCount = techCount * siteCount;
+    }
+
+    const usedThisMonth = await getMonthlyElementsUsed(dryStore);
+    const preview = estimateCost(elementCount, usedThisMonth);
+    return json(200, { ok: true, state, mode, additive, elementCount, ...preview });
+  }
 
   // Same paid-action gate as compute-site-distance-matrix.js (2026-08-18).
   // Both functions check the same DISTANCE_MATRIX_ADMIN_PASSWORD and share
@@ -407,6 +453,17 @@ exports.handler = async (event) => {
     meta.addedCount = addedCount;
     meta.prunedCount = prunedCount;
     meta.reusedCount = Object.keys(matrix).length - addedCount;
+  }
+
+  // Monthly usage tracking (2026-09-07) -- only real driving-mode builds
+  // bill Google; haversine is free and never touches this counter. Full
+  // rebuild bills every tech x site pair regardless of prior state;
+  // additive only bills addedCount (the pairs actually queried this run).
+  if (mode === "driving") {
+    const elementsBilledThisRun = additive ? meta.addedCount : techEntries.length * locEntries.length;
+    const usageStore = getStore("dispatch");
+    meta.elementsBilledThisRun = elementsBilledThisRun;
+    meta.monthlyElementsUsedTotal = await addMonthlyElementsUsed(usageStore, elementsBilledThisRun);
   }
 
   await store.setJSON("distance-matrix/" + state, { meta, matrix });
