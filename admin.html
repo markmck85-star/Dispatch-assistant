@@ -400,6 +400,7 @@
       Does not call Google -- just adjusts the local counter used for cost previews.
     </p>
     <button class="dm-btn orange" style="font-size:12px;" onclick="dmAdjustUsage()">➕ Add elements to this month's tracked usage</button>
+    <button class="dm-btn orange" style="font-size:12px;margin-top:6px;" onclick="dmClearCooldown()">⏱️ Clear stuck cooldown for this state</button>
   </details>
 
   <div id="dm-status" class="dm-status">Ready.</div>
@@ -509,6 +510,31 @@
         '✅ Usage adjusted for ' + data.monthKey + '.\n' +
         'Was ' + data.before + ', added ' + data.added + ', now ' + data.monthlyElementsUsedTotal + ' total tracked this month.'
       );
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message);
+    }
+  };
+
+  window.dmClearCooldown = async function () {
+    const state = dmState();
+    const kind = confirm('Clear the SITE-TO-SITE (Step 3) cooldown for ' + state + '?\nOK = site-to-site, Cancel = tech-to-site (Step 2) instead.') ? 'site-site' : 'tech-site';
+    if (!confirm('Clear the ' + kind + ' cooldown for ' + state + '? This does not touch billing or tracked usage -- it only lets you run that build again before the normal 24h window ends.')) {
+      dmSetStatus('Cancelled.');
+      return;
+    }
+    const adminSecret = prompt('Distance Matrix admin password:') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+
+    dmSetStatus('Clearing cooldown…');
+    try {
+      const res = await fetch('/.netlify/functions/clear-distance-matrix-cooldown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, kind, adminSecret }),
+      });
+      const data = await res.json();
+      if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error')); return; }
+      dmSetStatus('✅ Cooldown cleared: ' + data.cleared + '. You can run the build again now.');
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message);
     }
