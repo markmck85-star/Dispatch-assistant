@@ -119,6 +119,9 @@
                 <input type="text" id="locName" placeholder="Location name">
                 <label for="locAddress">Address</label>
                 <input type="text" id="locAddress" placeholder="Full address">
+                <label for="locAliases">Colloquial Names <span style="color:#888;font-size:12px;font-weight:400;">(comma-separated — how dispatchers actually say it, e.g. "Spout Springs Kroger, Hall Spout Springs Kroger")</span></label>
+                <input type="text" id="locAliases" placeholder="e.g. Spout Springs Kroger, Hall Spout Springs Kroger">
+                <div id="locAliasesReadonlyNote" style="font-size:12px;color:#888;margin:-6px 0 10px;"></div>
                 <label for="locPrimaryTech">Primary Technician</label>
                 <select id="locPrimaryTech">
                     <option value="">— Select primary tech —</option>
@@ -385,6 +388,21 @@
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
 
+  <!-- Manual usage correction (2026-09-07) -- rare, one-off use only. The
+       monthly usage counter didn't exist until today, so real usage from
+       earlier this same month (e.g. an accidental build) never got
+       recorded. This is the only way to correct that without waiting for
+       next month's counter to reset on its own. -->
+  <details style="margin-top:12px;">
+    <summary style="color:#888;font-size:12px;cursor:pointer;">Advanced: correct this month's tracked usage</summary>
+    <p style="color:#888;font-size:11px;margin:6px 0;">
+      Only needed to backfill real Google usage the tracker missed (e.g. from before this tracker existed).
+      Does not call Google -- just adjusts the local counter used for cost previews.
+    </p>
+    <button class="dm-btn orange" style="font-size:12px;" onclick="dmAdjustUsage()">➕ Add elements to this month's tracked usage</button>
+    <button class="dm-btn orange" style="font-size:12px;margin-top:6px;" onclick="dmClearCooldown()">⏱️ Clear stuck cooldown for this state</button>
+  </details>
+
   <div id="dm-status" class="dm-status">Ready.</div>
 </div>
 
@@ -397,24 +415,41 @@
     document.getElementById('dm-status').textContent = msg;
   }
 
-  // Rough per-state cost estimate shown in the confirm dialog, calibrated
-  // against the existing tech-to-site matrix's own quoted price (GA: 8
-  // techs x 121 sites = 968 elements ~ $3-6) rather than guessing at
-  // Google's pricing separately. See compute-site-distance-matrix.js's
-  // header comment for the full reasoning.
-  const DM_SITE_COUNT_HINTS = {
-    GA: 121, FL: 103, MI: 164, IN: 116, CO: 73, OH: 58, NV: 56,
-    IL: 20, MN: 19, WV: 12, OR: 10, NC: 5, SC: 3,
-  };
-
   window.dmBuildSiteMatrix = async function () {
     const state = dmState();
-    const n = DM_SITE_COUNT_HINTS[state];
-    const pairs = n ? Math.round((n * n) / 2) : null;
-    const costNote = pairs
-      ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
-      : 'Cost scales with site count squared.';
-    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
+
+    // Real dry-run cost preview (2026-09-07) -- replaces the old static
+    // DM_SITE_COUNT_HINTS guess with an exact, real-time preview from the
+    // backend: exact element count for the whole build, exact billable
+    // elements and cost after this month's already-used free tier, same
+    // pattern as Step 2's drive-time preview below. Free, no password
+    // needed, no API call to Google, nothing written.
+    dmSetStatus('Checking exact cost for ' + state + '…');
+    let preview;
+    try {
+      const previewRes = await fetch('/.netlify/functions/compute-site-distance-matrix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, dryRun: true }),
+      });
+      preview = await previewRes.json();
+      if (!preview.ok) { dmSetStatus('❌ ' + (preview.error || 'Could not preview cost')); return; }
+    } catch (e) {
+      dmSetStatus('❌ Network error checking cost: ' + e.message);
+      return;
+    }
+
+    const costLine = preview.estimatedCost > 0
+      ? '$' + preview.estimatedCost.toFixed(2) + ' (' + preview.billableElements + ' billable elements after ' + preview.freeElementsRemainingThisMonth + ' free-tier elements remaining this month)'
+      : '$0.00 (fully covered by this month\'s remaining free tier)';
+    const confirmMsg =
+      '⚠️ BUILD SITE-TO-SITE MATRIX FOR ' + state + ' ⚠️\n\n' +
+      preview.siteCount + ' sites (' + preview.newSiteCount + ' new), ' + preview.elementCount + ' elements will be queried.\n' +
+      'Estimated cost: ' + costLine + '\n\n' +
+      'This calls the Google Maps Distance Matrix API and is a one-time cost per state.\n' +
+      'Runs in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.\n\n' +
+      'DOUBLE-CHECK THE STATE ABOVE IS CORRECT BEFORE CONTINUING.';
+    if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
     const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
     if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
@@ -439,10 +474,70 @@
         '✅ Site-to-site matrix built for ' + state + '.\n' +
         lastResult.siteCount + ' sites, ' + lastResult.newEntryCount + ' pairs computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
         'Total matrix now has ' + lastResult.totalEntryCount + ' entries (tech-to-site + site-to-site combined).' +
-        (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '')
+        (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '') +
+        (lastResult.newSiteCodesForDebug ? '\n[debug] new sites this run: ' + lastResult.newSiteCodesForDebug.join(', ') : '')
       );
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
+    }
+  };
+
+  window.dmAdjustUsage = async function () {
+    const raw = prompt('How many elements to ADD to this month\'s tracked usage?\n(This does not call Google -- it only corrects the local counter used for cost previews. Use this to backfill real usage the tracker missed, e.g. from before it existed.)');
+    if (!raw) return;
+    const elementsToAdd = Number(raw);
+    if (!Number.isFinite(elementsToAdd) || elementsToAdd <= 0) {
+      dmSetStatus('❌ Enter a positive number of elements.');
+      return;
+    }
+    const reason = prompt('Reason (for the record -- e.g. "IN site-to-site build, ran before tracker existed"):') || '';
+    if (!confirm('Add ' + elementsToAdd + ' elements to this month\'s tracked usage?\n' + (reason ? 'Reason: ' + reason : '(no reason given)'))) {
+      dmSetStatus('Cancelled.');
+      return;
+    }
+    const adminSecret = prompt('Distance Matrix admin password:') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+
+    dmSetStatus('Adjusting monthly usage…');
+    try {
+      const res = await fetch('/.netlify/functions/adjust-distance-matrix-usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ elementsToAdd, reason, adminSecret }),
+      });
+      const data = await res.json();
+      if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error')); return; }
+      dmSetStatus(
+        '✅ Usage adjusted for ' + data.monthKey + '.\n' +
+        'Was ' + data.before + ', added ' + data.added + ', now ' + data.monthlyElementsUsedTotal + ' total tracked this month.'
+      );
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message);
+    }
+  };
+
+  window.dmClearCooldown = async function () {
+    const state = dmState();
+    const kind = confirm('Clear the SITE-TO-SITE (Step 3) cooldown for ' + state + '?\nOK = site-to-site, Cancel = tech-to-site (Step 2) instead.') ? 'site-site' : 'tech-site';
+    if (!confirm('Clear the ' + kind + ' cooldown for ' + state + '? This does not touch billing or tracked usage -- it only lets you run that build again before the normal 24h window ends.')) {
+      dmSetStatus('Cancelled.');
+      return;
+    }
+    const adminSecret = prompt('Distance Matrix admin password:') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+
+    dmSetStatus('Clearing cooldown…');
+    try {
+      const res = await fetch('/.netlify/functions/clear-distance-matrix-cooldown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, kind, adminSecret }),
+      });
+      const data = await res.json();
+      if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error')); return; }
+      dmSetStatus('✅ Cooldown cleared: ' + data.cleared + '. You can run the build again now.');
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message);
     }
   };
 })();
@@ -1267,6 +1362,8 @@
             document.getElementById('locCode').disabled = false;
             document.getElementById('locName').value = '';
             document.getElementById('locAddress').value = '';
+            document.getElementById('locAliases').value = '';
+            document.getElementById('locAliasesReadonlyNote').textContent = '';
             document.getElementById('locPrimaryTech').value = '';
             document.getElementById('locFallbackTech').value = '';
             document.getElementById('locContractorOverride').checked = false;
@@ -1275,7 +1372,7 @@
             document.getElementById('locFormTitle').textContent = 'Add Location';
         }
 
-        function editLocation(code) {
+        async function editLocation(code) {
             var loc = locationsData[code];
             if (!loc) { console.warn('editLocation: no record for key', code); return; }
             // Normalize: older records may not have code inside the value
@@ -1304,6 +1401,29 @@
             document.getElementById('locRemote').checked = !!loc.remote;
             document.getElementById('locContractorName').value = loc.contractorName || '';
             document.getElementById('locFormTitle').textContent = 'Edit Location — ' + code;
+
+            // Colloquial names: the text field only ever holds/edits the
+            // admin_panel-sourced ones (that's all this save can touch --
+            // see save-site-aliases.js). Names from the spreadsheet-derived
+            // bulk import or auto-detected from tickets/emails show as a
+            // read-only note underneath so the dispatcher knows they're not
+            // starting from zero, without accidentally wiping them.
+            document.getElementById('locAliases').value = '';
+            document.getElementById('locAliasesReadonlyNote').textContent = '';
+            fetch('/.netlify/functions/get-site-aliases?site_code=' + encodeURIComponent(code))
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    var all = (data && data.aliases) || [];
+                    var editable = all.filter(function(a) { return a.source === 'admin_panel'; }).map(function(a) { return a.alias; });
+                    var other = all.filter(function(a) { return a.source !== 'admin_panel'; }).map(function(a) { return a.alias; });
+                    document.getElementById('locAliases').value = editable.join(', ');
+                    if (other.length) {
+                        document.getElementById('locAliasesReadonlyNote').textContent =
+                            'Also known as (from prior data, not editable here): ' + other.join(', ');
+                    }
+                })
+                .catch(function(e) { console.warn('get-site-aliases failed:', e); });
+
             document.getElementById('adminPanel').scrollTo({ top: 0, behavior: 'smooth' });
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -1336,7 +1456,29 @@
                 });
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-                showToast(isEdit ? 'Location updated' : 'Location added', 'success');
+
+                // Save colloquial names as a separate, decoupled call so a
+                // problem here (e.g. a name collision with another site)
+                // never blocks or rolls back the location save that already
+                // succeeded above.
+                var aliasesRaw = document.getElementById('locAliases').value.trim();
+                var aliasList = aliasesRaw ? aliasesRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+                try {
+                    var aliasRes = await fetch('/.netlify/functions/save-site-aliases', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ site_code: code, aliases: aliasList })
+                    });
+                    var aliasData = await aliasRes.json();
+                    if (!aliasRes.ok) {
+                        showToast('Location saved, but colloquial names failed: ' + (aliasData.error || 'unknown error'), 'error');
+                    } else {
+                        showToast(isEdit ? 'Location updated' : 'Location added', 'success');
+                    }
+                } catch (aliasErr) {
+                    showToast('Location saved, but colloquial names failed: ' + aliasErr.message, 'error');
+                }
+
                 clearLocForm();
                 await loadLocations();
             } catch (e) {
