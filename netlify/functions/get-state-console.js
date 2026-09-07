@@ -29,6 +29,7 @@
 // -> { technicians: [...], recentTickets: [{..., status, closedOn}], lastImportedAt }
 
 const { createClient } = require('@supabase/supabase-js');
+const { computeSlaDeadline } = require('./slaCalculator.js');
 
 // 2026-08-08: ported directly from index.html -- this GA on-call/comp-day
 // schedule lives ONLY as hardcoded client-side JS there, not in any
@@ -261,7 +262,7 @@ exports.handler = async (event) => {
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -340,6 +341,23 @@ exports.handler = async (event) => {
       const dueAt = t.ticket_kind === 'trouble'
         ? (t.sla_ends_at || t.due_at || t.received_at)
         : (t.due_at || t.received_at);
+
+      // computedSlaDeadline (2026-09-07): dueAt above still reflects the
+      // unreliable email-stated deadline for trouble tickets -- left as-is
+      // so nothing already reading dueAt breaks. This is the real 4-hour
+      // SLA (business hours in the site's own local timezone, derived from
+      // its zip via slaCalculator.js) added alongside it. Only trouble
+      // tickets get one -- maintenance/restock and bulk-list entries don't
+      // carry a 4-hour SLA at all.
+      let computedSlaDeadline = null;
+      if (t.ticket_kind === 'trouble' && t.received_at) {
+        try {
+          computedSlaDeadline = computeSlaDeadline(t.received_at, t.address, state);
+        } catch (e) {
+          computedSlaDeadline = null;
+        }
+      }
+
       return {
         siteCode: site ? site.site_code : null,
         siteName: site ? site.name : '(unknown site)',
@@ -351,6 +369,7 @@ exports.handler = async (event) => {
         inboundEmailId: t.inbound_email_id,
         receivedAt: t.received_at,
         dueAt,
+        computedSlaDeadline,
         status,
         closedOn,
         openShipment: openShipmentsBySite[t.site_id] || null,
