@@ -34,6 +34,7 @@ const getEmails = require('./get-emails.js');
 const getSiteHistory = require('./get-site-history.js');
 const getDistance = require('./get-distance.js');
 const getOnCall = require('./get-on-call.js');
+const getCalendar = require('./get-calendar.js');
 
 const SERVER_NAME = 'mcr-dispatch';
 const SERVER_VERSION = '0.1.0';
@@ -196,6 +197,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_team_calendar',
+    description:
+      'Planned technician time off (vacation/sick/personal, with reason and note) and company-wide calendar events (holidays, company notices). Complements get_on_call_schedule and get_technician_availability -- this covers forward-looking planned absences, not on-call rotation or a same-day snapshot.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', description: "2-letter state code, filters by technician's home state. Omit for everyone. Company events are never state-filtered." },
+        since: { type: 'string', description: 'YYYY-MM-DD, optional -- defaults to today' },
+        until: { type: 'string', description: 'YYYY-MM-DD, optional -- defaults to 60 days out' },
+      },
+    },
+  },
+  {
     name: 'opportunistic_restock_near',
     description:
       'NOT YET IMPLEMENTED. Will combine the distance matrix with the restock-threshold model to answer what is restock-overdue within N miles of a given site.',
@@ -288,6 +302,15 @@ async function callTool(name, args) {
       if (args && args.until) qs.until = args.until;
       const { statusCode, body } = await callHandler(getOnCall, qs);
       if (statusCode !== 200) return toolError(body.error || 'get_on_call_schedule failed');
+      return toolText(body);
+    }
+    case 'get_team_calendar': {
+      const qs = {};
+      if (args && args.state) qs.state = String(args.state).toUpperCase();
+      if (args && args.since) qs.since = args.since;
+      if (args && args.until) qs.until = args.until;
+      const { statusCode, body } = await callHandler(getCalendar, qs);
+      if (statusCode !== 200) return toolError(body.error || 'get_team_calendar failed');
       return toolText(body);
     }
     case 'opportunistic_restock_near':
