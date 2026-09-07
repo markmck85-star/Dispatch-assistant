@@ -273,7 +273,7 @@
                     </div>
                     <div>
                         <label>Dispatch Date:</label>
-                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel()">
+                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true);">
                     </div>
                     <div>
                         <label>Journal Low At:</label>
@@ -2801,6 +2801,18 @@ function distanceMatrixStatus(state) {
                     // available signal to tell them apart without needing
                     // another file/field exposed from get-assignments.js.
                     const isGenuineTrouble = existing.ticket.issueCategory !== 'Maintenance';
+                    // BUG FIX (2026-09-07): was always using the ticket's raw
+                    // slaEndsAt (the unreliable email-stated deadline) even
+                    // after get-assignments.js started also returning
+                    // computedSlaDeadline (the real SLA, accounting for
+                    // holidays/weekends/Saturday-coverage -- see
+                    // slaCalculator.js). Confirmed live: a ticket correctly
+                    // pushed to tomorrow's board still showed "Due: Mon
+                    // 12:00 PM" today because this line never looked past
+                    // slaEndsAt. Prefer the computed value; fall back to the
+                    // raw one only for assignment rows created before this
+                    // field existed.
+                    const realSlaEnd = existing.ticket.computedSlaDeadline || existing.ticket.slaEndsAt;
                     const pastedItem = pastedByCode[code];
                     if (pastedItem) {
                         // Site already has a stop (from the pasted/loaded
@@ -2811,7 +2823,7 @@ function distanceMatrixStatus(state) {
                         pastedItem.fromTicket = true;
                         pastedItem.ticketWo = existing.ticket.woNumber;
                         pastedItem.ticketIssue = [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – ');
-                        pastedItem.ticketSlaEnd = existing.ticket.slaEndsAt;
+                        pastedItem.ticketSlaEnd = realSlaEnd;
                         return;
                     }
                     if (!LOCATIONS[code]) {
@@ -2824,7 +2836,7 @@ function distanceMatrixStatus(state) {
                         fromTicket: true,
                         ticketWo: existing.ticket.woNumber,
                         ticketIssue: [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – '),
-                        ticketSlaEnd: existing.ticket.slaEndsAt,
+                        ticketSlaEnd: realSlaEnd,
                     });
                 } else if (existing.status === 'planned' && !existing.ticket) {
                     // 2026-08-23: the ticket-linked branch above already solved
