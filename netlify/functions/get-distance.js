@@ -48,20 +48,32 @@ exports.handler = async (event) => {
   if (from === to) return json(400, { error: 'from and to must be different sites' });
 
   // 1. Try the precomputed matrix first -- free, instant, already-verified data.
-  const store = getStore('dispatch');
-  const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
-  if (matrix) {
-    const key = [from, to].sort().join('|');
-    const entry = matrix[key];
-    if (entry) {
-      return json(200, {
-        from, to,
-        distanceMi: entry.distanceMi,
-        durationMin: entry.durationMin ?? null,
-        durationText: entry.durationText ?? null,
-        source: entry.type === 'haversine-fallback' ? 'precomputed-haversine-fallback' : 'precomputed-driving',
-      });
+  // Wrapped defensively: connectLambda()/getStore() can throw when this
+  // function is invoked via mcp-server.js's callHandler, which builds a
+  // minimal synthetic event ({httpMethod, queryStringParameters} only, no
+  // headers) rather than a real Netlify request event. Any failure here
+  // should degrade to the live haversine fallback below, not crash the
+  // whole request -- a connector caller has no way to retry intelligently
+  // on a bare 500.
+  try {
+    connectLambda(event);
+    const store = getStore('dispatch');
+    const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
+    if (matrix) {
+      const key = [from, to].sort().join('|');
+      const entry = matrix[key];
+      if (entry) {
+        return json(200, {
+          from, to,
+          distanceMi: entry.distanceMi,
+          durationMin: entry.durationMin ?? null,
+          durationText: entry.durationText ?? null,
+          source: entry.type === 'haversine-fallback' ? 'precomputed-haversine-fallback' : 'precomputed-driving',
+        });
+      }
     }
+  } catch (e) {
+    console.error('get-distance: Blobs lookup failed, falling back to live haversine:', e.message);
   }
 
   // 2. Not in the matrix (state never built, or a site added since) -- fall
