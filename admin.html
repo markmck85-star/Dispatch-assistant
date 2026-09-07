@@ -384,6 +384,16 @@
     One-time per state — costs scale with site count squared, not tech count, so this is priced separately from
     Step 2. Requires Step 1 (geocoding) already done. Adds to the same matrix Step 2 builds; doesn't overwrite it.
   </p>
+  <label style="display:flex;align-items:center;gap:6px;color:#aaa;font-size:12px;margin-bottom:8px;">
+    <input type="checkbox" id="dm-site-full-rebuild">
+    Full rebuild (recompute every pair, not just new sites -- see note below on why incremental can leave gaps)
+  </label>
+  <p style="color:#886;font-size:11px;margin:0 0 8px 0;">
+    Incremental only guarantees each site has been touched at least once, not that it's paired with every other
+    site -- a site that's only ever been a destination can permanently miss pairs toward sites earlier in the
+    list, even after incremental reports "0 new, done." Check this box for a true one-time full rebuild once you
+    want guaranteed complete coverage (e.g. before relying on this data for route optimization).
+  </p>
   <div class="dm-row">
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
@@ -417,6 +427,7 @@
 
   window.dmBuildSiteMatrix = async function () {
     const state = dmState();
+    const fullRebuild = document.getElementById('dm-site-full-rebuild').checked;
 
     // Real dry-run cost preview (2026-09-07) -- replaces the old static
     // DM_SITE_COUNT_HINTS guess with an exact, real-time preview from the
@@ -430,7 +441,7 @@
       const previewRes = await fetch('/.netlify/functions/compute-site-distance-matrix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, dryRun: true }),
+        body: JSON.stringify({ state, dryRun: true, fullRebuild }),
       });
       preview = await previewRes.json();
       if (!preview.ok) { dmSetStatus('❌ ' + (preview.error || 'Could not preview cost')); return; }
@@ -444,6 +455,7 @@
       : '$0.00 (fully covered by this month\'s remaining free tier)';
     const confirmMsg =
       '⚠️ BUILD SITE-TO-SITE MATRIX FOR ' + state + ' ⚠️\n\n' +
+      (fullRebuild ? '*** FULL REBUILD -- recomputes every pair, not just new sites ***\n\n' : '') +
       preview.siteCount + ' sites (' + preview.newSiteCount + ' new), ' + preview.elementCount + ' elements will be queried.\n' +
       'Estimated cost: ' + costLine + '\n\n' +
       'This calls the Google Maps Distance Matrix API and is a one-time cost per state.\n' +
@@ -462,7 +474,7 @@
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state, offset, adminSecret }),
+          body: JSON.stringify({ state, offset, adminSecret, fullRebuild }),
         });
         const data = await res.json();
         if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
