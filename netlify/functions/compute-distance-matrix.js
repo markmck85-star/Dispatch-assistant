@@ -109,7 +109,7 @@ exports.handler = async (event) => {
     const dryStore = getStore("dispatch");
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const [{ data: pSites, error: pSitesErr }, { data: pTechs, error: pTechsErr }] = await Promise.all([
-      supabasePreview.from("sites").select("site_code").eq("state", state),
+      supabasePreview.from("sites").select("site_code").eq("state", state).eq("active", true), // BUG FIX (2026-09-07): matches technicians' existing active-filter convention below -- sites never had it, so soft-deleted sites kept showing up in every build
       supabasePreview.from("technicians").select("slug").eq("home_state", state).eq("active", true),
     ]);
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
@@ -230,7 +230,7 @@ exports.handler = async (event) => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
-    supabase.from("sites").select("site_code, lat, lng").eq("state", state),
+    supabase.from("sites").select("site_code, lat, lng").eq("state", state).eq("active", true), // BUG FIX (2026-09-07)
     supabase.from("technicians").select("slug, lat, lng, active").eq("home_state", state),
   ]);
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });

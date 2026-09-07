@@ -118,7 +118,12 @@ exports.handler = async (event) => {
     const { data: pSites, error: pSitesErr } = await supabasePreview
       .from("sites")
       .select("site_code, lat, lng")
-      .eq("state", state);
+      .eq("state", state)
+      .eq("active", true); // BUG FIX (2026-09-07): soft-deleted sites (delete-location.js
+      // sets active:false, never hard-deletes -- see that file's own comment on why)
+      // were never excluded here, so a deleted site kept showing up in every future
+      // build forever. Confirmed via direct query: sites.active is always true/false,
+      // never null, so this filter is safe with no edge cases.
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
 
     const pLocEntries = (pSites || [])
@@ -281,7 +286,8 @@ exports.handler = async (event) => {
   const { data: sites, error: sitesErr } = await supabase
     .from("sites")
     .select("site_code, lat, lng")
-    .eq("state", state);
+    .eq("state", state)
+    .eq("active", true); // BUG FIX (2026-09-07): see matching comment in the dryRun branch above
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
 
   const locEntries = (sites || [])
