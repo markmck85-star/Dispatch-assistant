@@ -903,6 +903,19 @@
             return parts;
         }
 
+        // Short weekday label for the "DUE ___" badge (2026-09-07) -- deliberately
+        // simple browser-local weekday name, not timezone-projected like
+        // formatServerSlaTime, since this only needs to answer "which day"
+        // for a badge, not an exact time.
+        function dueDayLabel(isoStr) {
+            if (!isoStr) return '';
+            try {
+                return new Date(isoStr).toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+            } catch (e) {
+                return '';
+            }
+        }
+
         function formatServerSlaTime(isoStr, siteCode) {
             // Server-computed SLA/due times (from mailgun-inbound.js) are now
             // stored as genuine UTC instants (fixed 2026-08-15 -- see
@@ -2813,6 +2826,25 @@ function distanceMatrixStatus(state) {
                     // raw one only for assignment rows created before this
                     // field existed.
                     const realSlaEnd = existing.ticket.computedSlaDeadline || existing.ticket.slaEndsAt;
+                    // ticketDueToday (2026-09-07): a separate flag from
+                    // `urgent` on purpose -- urgent means "this is a genuine
+                    // trouble ticket" and stays that way regardless of
+                    // timing (drives the red WO/issue text and the Saturday
+                    // trouble-only filter, both of which correctly want
+                    // "is this real trouble" not "is it due today"). This
+                    // only controls whether the badge says SAME DAY or shows
+                    // the actual due day -- same today-vs-dispatchDate
+                    // comparison already used for isSameDay on restocks
+                    // above, just applied to the ticket's own SLA deadline
+                    // instead of its restockBy date.
+                    let ticketDueToday = true;
+                    if (realSlaEnd) {
+                        const slaLocalDate = new Date(realSlaEnd);
+                        slaLocalDate.setHours(0, 0, 0, 0);
+                        const boardDate = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+                        boardDate.setHours(0, 0, 0, 0);
+                        ticketDueToday = slaLocalDate.getTime() <= boardDate.getTime();
+                    }
                     const pastedItem = pastedByCode[code];
                     if (pastedItem) {
                         // Site already has a stop (from the pasted/loaded
@@ -2824,6 +2856,7 @@ function distanceMatrixStatus(state) {
                         pastedItem.ticketWo = existing.ticket.woNumber;
                         pastedItem.ticketIssue = [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – ');
                         pastedItem.ticketSlaEnd = realSlaEnd;
+                        pastedItem.ticketDueToday = ticketDueToday;
                         return;
                     }
                     if (!LOCATIONS[code]) {
@@ -2837,6 +2870,7 @@ function distanceMatrixStatus(state) {
                         ticketWo: existing.ticket.woNumber,
                         ticketIssue: [existing.ticket.issueCategory, existing.ticket.issueDetail].filter(Boolean).join(' – '),
                         ticketSlaEnd: realSlaEnd,
+                        ticketDueToday: ticketDueToday,
                     });
                 } else if (existing.status === 'planned' && !existing.ticket) {
                     // 2026-08-23: the ticket-linked branch above already solved
@@ -3307,7 +3341,24 @@ function distanceMatrixStatus(state) {
                     const prevItemCode = index > 0 ? items[index - 1].code : null;
                     const leg = getCachedLegInfo(tech, prevItemCode, item.code);
                     const legLabel = `${Math.round(leg.distanceMi * 10) / 10} mi${leg.durationMin != null ? ' · ' + leg.durationMin + ' min' : ''}${leg.isReal ? '' : ' (est.)'}`;
-                    const urgentBadge = item.urgent ? '<span class="same-day-badge">⚡ SAME DAY</span>' : '';
+                    // BUG FIX (2026-09-07): urgent alone used to mean the
+                    // badge always said SAME DAY, even for a ticket already
+                    // correctly pushed to a future day's board (a ticket
+                    // received Friday evening with a holiday in between can
+                    // have a real SLA deadline of the following Tuesday).
+                    // urgent itself is untouched -- still drives the red WO/
+                    // issue text and the Saturday trouble-only filter,
+                    // both of which correctly want "is this real trouble"
+                    // regardless of timing. Only the badge's wording changes:
+                    // ticketDueToday defaults to true for anything that
+                    // isn't a ticket-linked stop (e.g. a manually-flagged
+                    // urgent item with no SLA data at all), preserving prior
+                    // behavior there.
+                    const urgentBadge = item.urgent
+                        ? (item.ticketDueToday !== false
+                            ? '<span class="same-day-badge">⚡ SAME DAY</span>'
+                            : `<span class="same-day-badge" style="background:#8b5a00;">📅 DUE ${dueDayLabel(item.ticketSlaEnd)}</span>`)
+                        : '';
                     const sameDayBadge = item.isSameDay && !item.urgent ? '<span class="same-day-badge" style="background:#8b1a1a;">🚨 TODAY</span>' : '';
                     const rightFormBadge = item.hasRightForms ? '<span style="background:#1a5c1a;color:#88dd88;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">📋 Right Forms</span>' : '';
                     const reassignBadge = item.reassignedFrom 
@@ -4829,8 +4880,17 @@ function distanceMatrixStatus(state) {
 
             function renderPrintTech(techName) {
                 const stops = assignments[techName];
-                const todayStops = stops.filter(s => s.isSameDay || s.urgent);
-                const tomorrowStops = stops.filter(s => !s.isSameDay && !s.urgent);
+                // BUG FIX (2026-09-07): matches the badge fix above -- a
+                // ticket-linked stop with ticketDueToday===false (genuinely
+                // due a later day, not today) would otherwise still land in
+                // todayStops purely because urgent is true, showing under
+                // a "TODAY — COMPLETE NOW" header right next to a badge that
+                // now correctly says "DUE TUE" -- a direct contradiction on
+                // the same line. Non-ticket urgent items (no ticketDueToday
+                // set at all) keep the old behavior.
+                const isUrgentToday = (s) => s.urgent && s.ticketDueToday !== false;
+                const todayStops = stops.filter(s => s.isSameDay || isUrgentToday(s));
+                const tomorrowStops = stops.filter(s => !s.isSameDay && !isUrgentToday(s));
                 const hasMixed = todayStops.length > 0 && tomorrowStops.length > 0;
 
                 let block = `<div class="print-tech-section">
@@ -4844,7 +4904,11 @@ function distanceMatrixStatus(state) {
                     const addr = loc.address || stop.address || "";
                     const badgeStyle = "display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;margin-left:4px;vertical-align:middle;";
                     const todayBadge = (stop.isSameDay && !stop.urgent) ? `<span style="${badgeStyle}background:#c0392b;color:#fff;">TODAY</span>` : "";
-                    const urgentBadge = stop.urgent ? `<span style="${badgeStyle}background:#c0392b;color:#fff;">SAME DAY</span>` : "";
+                    const urgentBadge = stop.urgent
+                        ? (stop.ticketDueToday !== false
+                            ? `<span style="${badgeStyle}background:#c0392b;color:#fff;">SAME DAY</span>`
+                            : `<span style="${badgeStyle}background:#8b5a00;color:#fff;">DUE ${dueDayLabel(stop.ticketSlaEnd)}</span>`)
+                        : "";
                     const rfBadge = stop.hasRightForms ? `<span style="${badgeStyle}background:#2e7d32;color:#fff;">Right Forms</span>` : "";
                     const dateStr = stop.restockBy ? ` <span style="font-size:12px;color:#555;">by ${stop.restockBy}</span>` : "";
 
@@ -5063,7 +5127,11 @@ ${content}</body></html>`;
                 assignments[tech].forEach((item, i) => {
                     const loc = LOCATIONS[item.code];
                     const todayBadge = item.isSameDay ? ' <span style="color:#c0392b;font-weight:bold;">(TODAY)</span>' : '';
-                    const urgentBadge = item.urgent ? ' <span style="color:red;">(SAME DAY)</span>' : '';
+                    const urgentBadge = item.urgent
+                        ? (item.ticketDueToday !== false
+                            ? ' <span style="color:red;">(SAME DAY)</span>'
+                            : ` <span style="color:#8b5a00;">(DUE ${dueDayLabel(item.ticketSlaEnd)})</span>`)
+                        : '';
                     const rfBadge = item.hasRightForms ? ' <span style="color:#2d6a2d;font-weight:bold;">(Right Forms)</span>' : '';
                     const dateStr = item.restockBy ? ` <span style="color:#888;font-size:11px;">by ${item.restockBy}</span>` : '';
 
