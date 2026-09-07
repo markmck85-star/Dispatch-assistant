@@ -388,6 +388,20 @@
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
 
+  <!-- Manual usage correction (2026-09-07) -- rare, one-off use only. The
+       monthly usage counter didn't exist until today, so real usage from
+       earlier this same month (e.g. an accidental build) never got
+       recorded. This is the only way to correct that without waiting for
+       next month's counter to reset on its own. -->
+  <details style="margin-top:12px;">
+    <summary style="color:#888;font-size:12px;cursor:pointer;">Advanced: correct this month's tracked usage</summary>
+    <p style="color:#888;font-size:11px;margin:6px 0;">
+      Only needed to backfill real Google usage the tracker missed (e.g. from before this tracker existed).
+      Does not call Google -- just adjusts the local counter used for cost previews.
+    </p>
+    <button class="dm-btn orange" style="font-size:12px;" onclick="dmAdjustUsage()">➕ Add elements to this month's tracked usage</button>
+  </details>
+
   <div id="dm-status" class="dm-status">Ready.</div>
 </div>
 
@@ -463,6 +477,40 @@
       );
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
+    }
+  };
+
+  window.dmAdjustUsage = async function () {
+    const raw = prompt('How many elements to ADD to this month\'s tracked usage?\n(This does not call Google -- it only corrects the local counter used for cost previews. Use this to backfill real usage the tracker missed, e.g. from before it existed.)');
+    if (!raw) return;
+    const elementsToAdd = Number(raw);
+    if (!Number.isFinite(elementsToAdd) || elementsToAdd <= 0) {
+      dmSetStatus('❌ Enter a positive number of elements.');
+      return;
+    }
+    const reason = prompt('Reason (for the record -- e.g. "IN site-to-site build, ran before tracker existed"):') || '';
+    if (!confirm('Add ' + elementsToAdd + ' elements to this month\'s tracked usage?\n' + (reason ? 'Reason: ' + reason : '(no reason given)'))) {
+      dmSetStatus('Cancelled.');
+      return;
+    }
+    const adminSecret = prompt('Distance Matrix admin password:') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+
+    dmSetStatus('Adjusting monthly usage…');
+    try {
+      const res = await fetch('/.netlify/functions/adjust-distance-matrix-usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ elementsToAdd, reason, adminSecret }),
+      });
+      const data = await res.json();
+      if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error')); return; }
+      dmSetStatus(
+        '✅ Usage adjusted for ' + data.monthKey + '.\n' +
+        'Was ' + data.before + ', added ' + data.added + ', now ' + data.monthlyElementsUsedTotal + ' total tracked this month.'
+      );
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message);
     }
   };
 })();
