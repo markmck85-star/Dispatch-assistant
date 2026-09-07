@@ -36,8 +36,6 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
 }
 
 exports.handler = async (event) => {
-  connectLambda(event);
-
   const params = event.queryStringParameters || {};
   const state = String(params.state || '').trim().toUpperCase();
   const from = String(params.from || '').trim().toUpperCase();
