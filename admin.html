@@ -474,7 +474,8 @@
         '✅ Site-to-site matrix built for ' + state + '.\n' +
         lastResult.siteCount + ' sites, ' + lastResult.newEntryCount + ' pairs computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
         'Total matrix now has ' + lastResult.totalEntryCount + ' entries (tech-to-site + site-to-site combined).' +
-        (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '')
+        (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '') +
+        (lastResult.newSiteCodesForDebug ? '\n[debug] new sites this run: ' + lastResult.newSiteCodesForDebug.join(', ') : '')
       );
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
