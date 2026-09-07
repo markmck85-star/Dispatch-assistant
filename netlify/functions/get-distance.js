@@ -71,7 +71,19 @@ exports.handler = async (event) => {
       throw new Error('Missing siteID or NETLIFY_BLOBS_TOKEN env var for manual Blobs config');
     }
     const store = getStore({ name: 'dispatch', siteID, token });
-    const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
+    const stored = await store.get('distance-matrix/' + state, { type: 'json' });
+    // BUG FIX (2026-09-07, the actual root cause): store.get() returns the
+    // FULL {meta, matrix} wrapper object exactly as compute-site-distance-matrix.js
+    // writes it -- this used to treat that whole wrapper AS IF it were the
+    // flat pair-lookup table itself, so every lookup checked
+    // wrapper['GA1023|GA1042'] (always undefined -- the wrapper's only real
+    // keys are "meta" and "matrix") instead of wrapper.matrix['GA1023|GA1042']
+    // where the actual data lives. Confirmed directly: a debug key-count on
+    // the old code always came back as exactly 2 ("meta", "matrix"),
+    // regardless of how many real pairs were actually stored underneath.
+    // Every other fix today (Blobs auth, key ordering) was real and
+    // necessary, but none of them could have worked while this stayed broken.
+    const matrix = stored && stored.matrix;
     if (matrix) {
       // TEMPORARY DIAGNOSTIC (2026-09-07) -- checking whether this read is
       // actually seeing current data. If this count is far below what the
