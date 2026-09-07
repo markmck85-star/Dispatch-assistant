@@ -39,6 +39,7 @@
  *                    dueAt, slaEndsAt, receivedAt } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
+const { computeSlaDeadline } = require("./slaCalculator.js");
 
 const STALE_GRACE_DAYS = 4;
 const STALE_GRACE_MS = STALE_GRACE_DAYS * 24 * 60 * 60 * 1000;
@@ -115,21 +116,46 @@ exports.handler = async (event) => {
         if (Number.isNaN(deadlineMs)) return true;
         return (now - deadlineMs) <= STALE_GRACE_MS;
       })
-      .map((t) => ({
-        ticketId: t.id,
-        woNumber: t.wo_number,
-        siteText: t.site_text,
-        ticketKind: t.ticket_kind,
-        needsReview: !!t.needs_review,
-        matched: !!t.site_id,
-        issueCategory: t.issue_category,
-        issueDetail: t.issue_detail,
-        description: t.description,
-        address: t.address,
-        dueAt: t.due_at,
-        slaEndsAt: t.sla_ends_at,
-        receivedAt: t.received_at,
-      }));
+      .map((t) => {
+        // computedSlaDeadline replaces the unreliable email-stated deadline
+        // for trouble tickets: 4 business hours (8am-5pm), in the site's
+        // own local timezone (derived from its zip -- receivedAt arrives
+        // in Eastern regardless of site state), skipping non-business days
+        // per state Saturday-coverage rules, Sundays, and holidays.
+        // Decision 2026-09-07: only trouble tickets get this treatment --
+        // install/site_survey deadlines stay as dueAt since those often
+        // reflect a real scheduled meet time with a store manager or
+        // state rep, which the email DOES get right.
+        // slaEndsAt (raw email value) is left in place alongside it rather
+        // than overwritten, so nothing else reading this endpoint breaks.
+        let computedSlaDeadline = null;
+        if (t.ticket_kind === "trouble" && t.received_at) {
+          try {
+            computedSlaDeadline = computeSlaDeadline(t.received_at, t.address, state);
+          } catch (e) {
+            // Missing/unparseable zip AND no state fallback configured --
+            // surface as null rather than failing the whole request.
+            computedSlaDeadline = null;
+          }
+        }
+
+        return {
+          ticketId: t.id,
+          woNumber: t.wo_number,
+          siteText: t.site_text,
+          ticketKind: t.ticket_kind,
+          needsReview: !!t.needs_review,
+          matched: !!t.site_id,
+          issueCategory: t.issue_category,
+          issueDetail: t.issue_detail,
+          description: t.description,
+          address: t.address,
+          dueAt: t.due_at,
+          slaEndsAt: t.sla_ends_at,
+          computedSlaDeadline,
+          receivedAt: t.received_at,
+        };
+      });
 
     return json(200, { entries });
   } catch (e) {
