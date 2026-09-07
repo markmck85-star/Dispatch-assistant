@@ -33,6 +33,7 @@ const getWatchdogLog = require('./get-watchdog-log.js');
 const getEmails = require('./get-emails.js');
 const getSiteHistory = require('./get-site-history.js');
 const getDistance = require('./get-distance.js');
+const getOnCall = require('./get-on-call.js');
 
 const SERVER_NAME = 'mcr-dispatch';
 const SERVER_VERSION = '0.1.0';
@@ -182,6 +183,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_on_call_schedule',
+    description:
+      'Saturday on-call rotation -- which technician covers a state on a given Saturday. Only states with Saturday coverage have any data (others correctly return empty). Omit dates for the next 60 days; omit state for every Saturday-coverage state at once.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', description: '2-letter state code, e.g. GA. Omit for all Saturday-coverage states.' },
+        since: { type: 'string', description: 'YYYY-MM-DD, optional -- defaults to today' },
+        until: { type: 'string', description: 'YYYY-MM-DD, optional -- defaults to 60 days out' },
+      },
+    },
+  },
+  {
     name: 'opportunistic_restock_near',
     description:
       'NOT YET IMPLEMENTED. Will combine the distance matrix with the restock-threshold model to answer what is restock-overdue within N miles of a given site.',
@@ -265,6 +279,15 @@ async function callTool(name, args) {
       if (!from || !to) return toolError('Both from and to site codes are required');
       const { statusCode, body } = await callHandler(getDistance, { state, from, to });
       if (statusCode !== 200) return toolError(body.error || 'get_distance failed');
+      return toolText(body);
+    }
+    case 'get_on_call_schedule': {
+      const qs = {};
+      if (args && args.state) qs.state = String(args.state).toUpperCase();
+      if (args && args.since) qs.since = args.since;
+      if (args && args.until) qs.until = args.until;
+      const { statusCode, body } = await callHandler(getOnCall, qs);
+      if (statusCode !== 200) return toolError(body.error || 'get_on_call_schedule failed');
       return toolText(body);
     }
     case 'opportunistic_restock_near':
