@@ -400,24 +400,41 @@
     document.getElementById('dm-status').textContent = msg;
   }
 
-  // Rough per-state cost estimate shown in the confirm dialog, calibrated
-  // against the existing tech-to-site matrix's own quoted price (GA: 8
-  // techs x 121 sites = 968 elements ~ $3-6) rather than guessing at
-  // Google's pricing separately. See compute-site-distance-matrix.js's
-  // header comment for the full reasoning.
-  const DM_SITE_COUNT_HINTS = {
-    GA: 121, FL: 103, MI: 164, IN: 116, CO: 73, OH: 58, NV: 56,
-    IL: 20, MN: 19, WV: 12, OR: 10, NC: 5, SC: 3,
-  };
-
   window.dmBuildSiteMatrix = async function () {
     const state = dmState();
-    const n = DM_SITE_COUNT_HINTS[state];
-    const pairs = n ? Math.round((n * n) / 2) : null;
-    const costNote = pairs
-      ? 'Roughly ' + pairs + ' pairs, an estimated $' + (pairs * 0.0031).toFixed(0) + '-$' + (pairs * 0.0062).toFixed(0) + '.'
-      : 'Cost scales with site count squared.';
-    if (!confirm('Build the site-to-site driving-distance matrix for ' + state + '?\n' + costNote + '\nThis calls the Google Maps Distance Matrix API and is a one-time cost per state.\n\nRuns in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.')) return;
+
+    // Real dry-run cost preview (2026-09-07) -- replaces the old static
+    // DM_SITE_COUNT_HINTS guess with an exact, real-time preview from the
+    // backend: exact element count for the whole build, exact billable
+    // elements and cost after this month's already-used free tier, same
+    // pattern as Step 2's drive-time preview below. Free, no password
+    // needed, no API call to Google, nothing written.
+    dmSetStatus('Checking exact cost for ' + state + '…');
+    let preview;
+    try {
+      const previewRes = await fetch('/.netlify/functions/compute-site-distance-matrix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, dryRun: true }),
+      });
+      preview = await previewRes.json();
+      if (!preview.ok) { dmSetStatus('❌ ' + (preview.error || 'Could not preview cost')); return; }
+    } catch (e) {
+      dmSetStatus('❌ Network error checking cost: ' + e.message);
+      return;
+    }
+
+    const costLine = preview.estimatedCost > 0
+      ? '$' + preview.estimatedCost.toFixed(2) + ' (' + preview.billableElements + ' billable elements after ' + preview.freeElementsRemainingThisMonth + ' free-tier elements remaining this month)'
+      : '$0.00 (fully covered by this month\'s remaining free tier)';
+    const confirmMsg =
+      '⚠️ BUILD SITE-TO-SITE MATRIX FOR ' + state + ' ⚠️\n\n' +
+      preview.siteCount + ' sites (' + preview.newSiteCount + ' new), ' + preview.elementCount + ' elements will be queried.\n' +
+      'Estimated cost: ' + costLine + '\n\n' +
+      'This calls the Google Maps Distance Matrix API and is a one-time cost per state.\n' +
+      'Runs in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.\n\n' +
+      'DOUBLE-CHECK THE STATE ABOVE IS CORRECT BEFORE CONTINUING.';
+    if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
     const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
     if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
