@@ -453,6 +453,15 @@ exports.handler = async (event) => {
       failedCount: failedPairs.length,
       incremental: !fullRebuild,
       newSiteCount: newSites.length,
+      // TEMPORARY DIAGNOSTIC (2026-09-07) -- investigating why repeated
+      // builds keep reporting the same ~960 "new" pairs with zero net
+      // growth in totalEntryCount. Lists the actual site_code values
+      // classified as "new" this run -- if the same handful shows up
+      // every time, their codes likely don't match ^STATE\d+$ (whitespace,
+      // case, unusual format), which would make them permanently invisible
+      // to the knownCodes check even after being written. Remove once
+      // diagnosed.
+      newSiteCodesForDebug: newSites.map(([code]) => JSON.stringify(code)),
     });
   }
 
