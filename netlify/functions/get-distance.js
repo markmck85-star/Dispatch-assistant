@@ -46,15 +46,30 @@ exports.handler = async (event) => {
   if (from === to) return json(400, { error: 'from and to must be different sites' });
 
   // 1. Try the precomputed matrix first -- free, instant, already-verified data.
-  // Wrapped defensively: connectLambda()/getStore() can throw when this
-  // function is invoked via mcp-server.js's callHandler, which builds a
-  // minimal synthetic event ({httpMethod, queryStringParameters} only, no
-  // headers) rather than a real Netlify request event. Any failure here
-  // should degrade to the live haversine fallback below, not crash the
-  // whole request -- a connector caller has no way to retry intelligently
-  // on a bare 500.
+  //
+  // BUG FIX (2026-09-07): connectLambda(event) reads event.blobs (base64
+  // decoded) and event.headers['x-nf-deploy-id'/'x-nf-site-id'] -- NEITHER
+  // of which exist on mcp-server.js's callHandler synthetic event
+  // ({httpMethod, queryStringParameters} only). That's not a maybe -- it
+  // throws unconditionally on that path, on its very first line, which
+  // means the ENTIRE Blobs read below it never even ran -- every single
+  // get_distance call made through the Claude connector has been landing
+  // on the live haversine fallback regardless of whether real matrix data
+  // existed, ever since this function was written. connectLambda is only
+  // needed to manually set the Blobs context for cases where Netlify's
+  // runtime doesn't already auto-populate process.env.NETLIFY_BLOBS_CONTEXT
+  // -- on a normal deployed function (real request OR this synthetic one),
+  // that env var is already there, so getStore() below works fine on its
+  // own. Isolating connectLambda's own failure into its own try/catch, so
+  // it no longer gates the real read that follows it.
   try {
     connectLambda(event);
+  } catch (e) {
+    // Expected/harmless on the MCP synthetic event path -- getStore()
+    // below still works via the runtime's own auto-injected Blobs context.
+  }
+  let blobsErrorForDebug = null;
+  try {
     const store = getStore('dispatch');
     const matrix = await store.get('distance-matrix/' + state, { type: 'json' });
     if (matrix) {
@@ -80,9 +95,15 @@ exports.handler = async (event) => {
           source: entry.type === 'haversine-fallback' ? 'precomputed-haversine-fallback' : 'precomputed-driving',
         });
       }
+
     }
   } catch (e) {
     console.error('get-distance: Blobs lookup failed, falling back to live haversine:', e.message);
+    // TEMPORARY DIAGNOSTIC (2026-09-07) -- surfacing the real error in the
+    // response itself so it's visible through the MCP connector, which has
+    // no access to Netlify's server-side function logs. Remove once the
+    // persistent-fallback issue is actually diagnosed.
+    blobsErrorForDebug = e.message;
   }
 
   // 2. Not in the matrix (state never built, or a site added since) -- fall
@@ -112,5 +133,6 @@ exports.handler = async (event) => {
     durationText: null,
     source: 'live-haversine-fallback',
     note: 'Straight-line estimate, not a driving distance -- this pair is not yet in the precomputed matrix for ' + state + '.',
+    _debugBlobsError: blobsErrorForDebug,
   });
 };
