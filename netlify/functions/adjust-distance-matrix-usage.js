@@ -20,7 +20,7 @@
  * -> { ok: true, added, monthlyElementsUsedTotal, monthKey }
  */
 
-const { getStore } = require("@netlify/blobs");
+const { getStore, connectLambda } = require("@netlify/blobs");
 const { getMonthlyElementsUsed, addMonthlyElementsUsed, monthKey } = require("./distance-matrix-usage.js");
 
 function json(statusCode, obj) {
@@ -28,6 +28,16 @@ function json(statusCode, obj) {
 }
 
 exports.handler = async (event) => {
+  // BUG FIX (2026-09-07, found immediately after first deploy): missing
+  // connectLambda(event) here -- every other function in this file that
+  // touches Blobs (compute-distance-matrix.js, compute-site-distance-matrix.js,
+  // get-distance.js) calls this first. Without it, getStore() can throw when
+  // invoked via mcp-server.js's synthetic event or Netlify's own function
+  // runtime, and that uncaught exception surfaces client-side as a bare
+  // "Unknown error" with no real message -- exactly what happened on the
+  // first live test.
+  connectLambda(event);
+
   if (event.httpMethod !== "POST") return json(405, { error: "Method Not Allowed" });
 
   let payload;
