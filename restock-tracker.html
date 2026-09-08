@@ -769,7 +769,7 @@ function showStateScreen() {
     // offer the same fixed region list the main dispatch app's selector
     // uses instead, and re-fetch live on pick rather than depending on any
     // locally cached file.
-    const LIVE_REGIONS = ['GA','FL','MI','IN','OH','NV','IL','CO','ID','AL','MN','WV','OR'];
+    const LIVE_REGIONS = ['GA','NC','SC','FL','MI','IN','OH','NV','IL','CO','ID','AL','MN','WV','OR'];
     for (const r of LIVE_REGIONS) {
       const btn = document.createElement('button');
       btn.className = 'state-btn';
@@ -871,13 +871,15 @@ function buildDashboard(state, stateCol) {
 // from the same underlying closed-ticket data, updated in one place.
 const DISPATCH_API_BASE = 'https://mcrdispatch.net';
 
-// Mirrors the region grouping used elsewhere in the dispatch platform
-// (stateSelector on the main board, the Watchdog log's "Georgia / NC / SC"
-// option) -- GA is a combined region covering three real states; every
-// other region maps to itself. Keeps this page's ?state= link consistent
-// with what the rest of the app calls that region.
-const REGION_STATES = { GA: ['GA', 'NC', 'SC'] };
-const REGION_LABELS = { GA: 'Georgia / NC / SC' };
+// 2026-09-08: previously bundled NC and SC into GA here (REGION_STATES),
+// matching the main dispatch platform's combined-territory convention --
+// Gina asked for this page specifically to go back to separate GA/NC/SC
+// entries, so each region now maps to itself. The dispatcher-territory
+// convention elsewhere in the app (who's assigned what) is unrelated and
+// untouched -- this only changes how this page's state picker and live
+// fetch group restock data.
+const REGION_STATES = {};
+const REGION_LABELS = {};
 function statesForRegion(region) { return REGION_STATES[region] || [region]; }
 function labelForRegion(region) { return region ? (REGION_LABELS[region] || region) : 'All States'; }
 
