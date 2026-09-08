@@ -621,7 +621,9 @@ async function loadConsole(state, isRetry) {
         // View/Forward link above -- multiple additions on one ticket stay
         // individually visible/clickable rather than merging into one line.
         const lineItemsTag = (t.lineItems && t.lineItems.length)
-          ? `<div class="meta" style="color:#c98a1e;">` + t.lineItems.map(li => {
+          ? `<div class="meta" style="color:#c98a1e;">` + (t.needsReview
+              ? `<span style="background:#c98a1e;color:#1a1a1a;font-weight:bold;padding:1px 5px;border-radius:3px;margin-right:4px;">⚠ NEEDS REVIEW</span>`
+              : '') + t.lineItems.map(li => {
               const label = li.issueCategory || (li.text ? li.text.slice(0, 60) + (li.text.length > 60 ? '…' : '') : 'see email');
               return `📝 <button onclick="viewSourceEmail('${li.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:#c98a1e;text-decoration:underline;cursor:pointer;font-size:inherit;text-align:left;">Line item added ${fmtDateTime(li.addedAt)} — ${escapeHtml(label)}</button>`;
             }).join('<br>') + `</div>`
