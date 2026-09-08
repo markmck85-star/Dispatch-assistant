@@ -260,12 +260,22 @@ exports.handler = async (event) => {
     // during testing) comfortable headroom without querying an unbounded
     // amount.
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    // 2026-09-08: a needs_review ticket (line item added, or site unmatched)
+    // used to age out of view after 3 days same as anything else -- meaning
+    // a flag meant to say "a dispatcher hasn't looked at this yet" could
+    // silently vanish before anyone had. Found live: WO 00151697 (Jesse
+    // Jewell) rolled off the console over the Labor Day long weekend before
+    // Mark ever saw the badge. Now: normal received_at cutoff stays for
+    // everything else, but needs_review=true tickets are exempt from it
+    // entirely -- they stay visible until someone resolves them, however
+    // old. There's no "mark reviewed" action yet to ever clear the flag, so
+    // this alone doesn't fully close the loop -- worth building next.
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
       .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
-      .gte('received_at', sinceDate)
+      .or(`received_at.gte.${sinceDate},needs_review.eq.true`)
       .order('received_at', { ascending: false })
       .limit(150);
     if (ticketsErr) return json(500, { ok: false, error: 'tickets fetch failed: ' + ticketsErr.message });

@@ -45,10 +45,36 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("assignments")
-      .select("status, assigned_by, sequence_order, locked, sites(site_code, state), technicians(name), tickets(wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, received_at, address)")
+      .select("status, assigned_by, sequence_order, locked, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, received_at, address, needs_review)")
       .eq("dispatch_date", dispatchDate);
 
     if (error) return json(500, { error: "Query failed: " + error.message });
+
+    // 2026-09-08: line items appended to an existing ticket after the fact
+    // (Neumo's "Add Line Item to Work Order" follow-ups) -- same data the
+    // state console now shows, brought here too so the actual dispatch
+    // board (what Gina/Mark/etc. work from day to day) reflects it, not
+    // just the secondary state-console view. Fetched in one batch for
+    // every ticket id present in this response, keyed by ticket_id.
+    const ticketIds = [...new Set((data || []).map(row => row.tickets && row.tickets.id).filter(Boolean))];
+    let lineItemsByTicketId = {};
+    if (ticketIds.length) {
+      const { data: lineItemRows, error: lineItemsErr } = await supabase
+        .from("ticket_line_items")
+        .select("ticket_id, inbound_email_id, text, issue_category, issue_detail, added_at")
+        .in("ticket_id", ticketIds)
+        .order("added_at", { ascending: false });
+      if (lineItemsErr) return json(500, { error: "line-items fetch failed: " + lineItemsErr.message });
+      for (const li of (lineItemRows || [])) {
+        (lineItemsByTicketId[li.ticket_id] = lineItemsByTicketId[li.ticket_id] || []).push({
+          inboundEmailId: li.inbound_email_id,
+          text: li.text,
+          issueCategory: li.issue_category,
+          issueDetail: li.issue_detail,
+          addedAt: li.added_at,
+        });
+      }
+    }
 
     const assignments = (data || [])
       .filter(row => row.sites && row.technicians) // defensive: skip any row with a dangling reference
@@ -83,6 +109,8 @@ exports.handler = async (event) => {
             issueDetail: t.issue_detail,
             slaEndsAt: t.sla_ends_at,
             computedSlaDeadline,
+            needsReview: !!t.needs_review,
+            lineItems: lineItemsByTicketId[t.id] || [],
           } : null,
         };
       });
