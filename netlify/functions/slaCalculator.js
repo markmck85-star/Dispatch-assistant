@@ -54,12 +54,26 @@ const STATE_TIMEZONE_FALLBACK = {
   // roster -- left in for now, worth confirming whether it's an active state
 };
 
-// Company holidays observed across ALL states. Populate/verify against
-// whatever source of truth you want the connector to use -- confirmed
-// 2026-09-07 lines up with the "Holidays in United States" Google calendar.
+// Company holidays observed across ALL states -- per the MCR Technical
+// Service employee handbook (section 7.4), not a generic federal/Google
+// calendar list. MCR observes exactly 6: New Year's Day, Memorial Day,
+// Independence Day, Labor Day, Thanksgiving, Christmas. Found 2026-09-08
+// that the previous list had folded in 4 extra federal holidays MCR does
+// NOT give (MLK Day 1/19, Presidents Day 2/16, Juneteenth 6/19, day after
+// Thanksgiving 11/27) -- those days count as normal business days for SLA
+// purposes; removed. Per the handbook, a holiday falling on a Saturday is
+// observed the preceding Friday, and one falling on a Sunday is observed
+// the following Monday -- 2026-07-04 (Independence Day) falls on a
+// Saturday, so it's listed as 2026-07-03 below; none of the other 5 land
+// on a weekend in 2026. This list must be re-verified/extended by hand
+// each new year -- there's no auto-generation for it yet.
 const HOLIDAYS_2026 = new Set([
-  '2026-01-01', '2026-01-19', '2026-02-16', '2026-05-25', '2026-06-19',
-  '2026-07-03', '2026-09-07', '2026-11-26', '2026-11-27', '2026-12-25',
+  '2026-01-01', // New Year's Day
+  '2026-05-25', // Memorial Day
+  '2026-07-03', // Independence Day (observed Fri -- July 4 falls on a Sat)
+  '2026-09-07', // Labor Day
+  '2026-11-26', // Thanksgiving
+  '2026-12-25', // Christmas
 ]);
 
 const BUSINESS_START_HOUR = 8;
