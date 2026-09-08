@@ -97,33 +97,53 @@ exports.handler = async (event) => {
 
   // ---- push: create a BlueFolder appointment for an existing local row ----
   if (action === 'push') {
-    const { data: existing, error: fetchErr } = await sb
+    // 2026-09-08: was previously one appointment per (state, day,
+    // technician_id) row -- on a Saturday with two on-call techs (the
+    // normal GA rotation pairs a primary + backup), that meant two
+    // separate 8am-8pm blocks stacked in the same calendar cell, which is
+    // exactly the "stretching the calendar cells" problem Mark and TJ
+    // discussed on 9/7 but never actually got fixed. Now: look up every
+    // on_call_schedule row for this (state, day) -- not just this one
+    // technician -- and push them all as ONE appointment with multiple
+    // <userId> entries and both names in the subject. All sibling rows
+    // get the same bluefolder_appt_id, so a second push call for the
+    // other tech on the same day becomes a no-op instead of creating a
+    // second appointment.
+    const { data: dayRows, error: fetchErr } = await sb
       .from('on_call_schedule')
-      .select('bluefolder_appt_id, technicians(name, bluefolder_user_id)')
-      .match({ state, day, technician_id })
-      .maybeSingle();
+      .select('technician_id, bluefolder_appt_id, technicians(name, bluefolder_user_id)')
+      .match({ state, day });
 
     if (fetchErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: fetchErr.message }) };
-    if (!existing) return { statusCode: 404, body: JSON.stringify({ ok: false, error: 'On-call entry not found -- save it locally first' }) };
-    if (existing.bluefolder_appt_id) {
-      return { statusCode: 200, body: JSON.stringify({ ok: true, apptId: existing.bluefolder_appt_id, note: 'Already pushed' }) };
-    }
-    const bfUserId = existing.technicians?.bluefolder_user_id;
-    const techName = existing.technicians?.name || 'Tech';
+    const thisRow = (dayRows || []).find(r => r.technician_id === technician_id);
+    if (!thisRow) return { statusCode: 404, body: JSON.stringify({ ok: false, error: 'On-call entry not found -- save it locally first' }) };
 
-    // 2026-08-26: same fix as save-tech-availability.js's push action
-    // (same day) -- previously refused to push when the technician has no
-    // BlueFolder user ID (hard seat limit, per TJ). Now creates a plain,
-    // unassigned entry instead, mirroring TJ's own manual workaround.
-    // Same UNVERIFIED note applies: whether BlueFolder's API truly accepts
-    // a request with assignedTo omitted hasn't been confirmed live before
-    // this change -- Randy Thomas's Saturday on-call push is the actual
-    // real-world first test of this.
-    const subject = `ON-CALL - ${state} - ${techName}`.slice(0, 100);
+    // Someone already pushed this day (possibly via the sibling tech's
+    // push call) -- link this row to that same appointment rather than
+    // creating a duplicate, then we're done.
+    const alreadyPushed = (dayRows || []).find(r => r.bluefolder_appt_id);
+    if (alreadyPushed) {
+      if (!thisRow.bluefolder_appt_id) {
+        const { error: linkErr } = await sb
+          .from('on_call_schedule')
+          .update({ bluefolder_appt_id: alreadyPushed.bluefolder_appt_id })
+          .match({ state, day, technician_id });
+        if (linkErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: linkErr.message }) };
+      }
+      return { statusCode: 200, body: JSON.stringify({ ok: true, apptId: alreadyPushed.bluefolder_appt_id, note: 'Already pushed' }) };
+    }
+
+    const techs = (dayRows || []).map(r => ({
+      id: r.technician_id,
+      name: r.technicians?.name || 'Tech',
+      bfUserId: r.technicians?.bluefolder_user_id || null,
+    }));
+    const subject = `ON-CALL - ${state} - ${techs.map(t => t.name).join(' / ')}`.slice(0, 100);
     const startDT = toBFDateTime(day, 8, 0);   // 8:00 AM
     const endDT = toBFDateTime(day, 20, 0);    // 8:00 PM -- matches Saturday monitoring hours
-    const assignedToXml = bfUserId
-      ? `\n    <assignedTo>\n      <userId>${bfUserId}</userId>\n    </assignedTo>`
+    const bfUserIds = techs.map(t => t.bfUserId).filter(Boolean);
+    const assignedToXml = bfUserIds.length
+      ? `\n    <assignedTo>\n${bfUserIds.map(id => `      <userId>${id}</userId>`).join('\n')}\n    </assignedTo>`
       : '';
 
     const requestXml = `<request>
@@ -147,10 +167,14 @@ exports.handler = async (event) => {
       return { statusCode: 502, body: JSON.stringify({ ok: false, error: 'BlueFolder returned no appointment id: ' + JSON.stringify(bfResponse) }) };
     }
 
+    // Stamp the same apptId on every technician's row for this day, not
+    // just the one that triggered the push -- that's what makes the
+    // sibling tech's own push call a no-op above instead of creating a
+    // second appointment.
     const { error: updateErr } = await sb
       .from('on_call_schedule')
       .update({ bluefolder_appt_id: String(apptId) })
-      .match({ state, day, technician_id });
+      .match({ state, day });
     if (updateErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: updateErr.message }) };
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, apptId: String(apptId) }) };
@@ -158,14 +182,23 @@ exports.handler = async (event) => {
 
   // ---- delete: remove locally; if pushed, cancel (don't delete) in BlueFolder ----
   if (action === 'delete') {
-    const { data: existing, error: fetchErr } = await sb
+    const { data: dayRows, error: fetchErr } = await sb
       .from('on_call_schedule')
-      .select('bluefolder_appt_id, technicians(name)')
-      .match({ state, day, technician_id })
-      .maybeSingle();
+      .select('technician_id, bluefolder_appt_id, technicians(name)')
+      .match({ state, day });
     if (fetchErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: fetchErr.message }) };
 
-    if (existing?.bluefolder_appt_id) {
+    const existing = (dayRows || []).find(r => r.technician_id === technician_id);
+
+    // 2026-09-08: a pushed appointment may now be shared across every
+    // technician on-call that day (see the combined push above). Only
+    // cancel it in BlueFolder if this row was the last one still pointing
+    // at it -- otherwise the other tech's on-call block would vanish from
+    // TJ's calendar too, even though they're still on-call.
+    const otherRowsOnSameAppt = (dayRows || []).filter(
+      r => r.technician_id !== technician_id && r.bluefolder_appt_id === existing?.bluefolder_appt_id
+    );
+    if (existing?.bluefolder_appt_id && otherRowsOnSameAppt.length === 0) {
       const techName = existing.technicians?.name || 'Tech';
       const cancelSubject = `CANCELLED - ON-CALL - ${state} - ${techName}`.slice(0, 100);
       const editXml = `<request>
