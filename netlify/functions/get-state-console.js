@@ -262,7 +262,7 @@ exports.handler = async (event) => {
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -298,6 +298,31 @@ exports.handler = async (event) => {
       if (closingErr) return json(500, { ok: false, error: 'closing-visit fetch failed: ' + closingErr.message });
       for (const v of (closingVisits || [])) {
         if (!(v.ticket_id in closedByTicketId)) closedByTicketId[v.ticket_id] = v.ended_at || v.started_at;
+      }
+    }
+
+    // 2026-09-08: line items appended to an existing ticket after the
+    // fact (Neumo's "Add Line Item to Work Order" follow-ups) -- each row
+    // is its own addition, with its own source email, so a ticket that's
+    // had more than one stays distinguishable rather than collapsing into
+    // one blob. Grouped by ticket_id below, most-recent-first, same as
+    // closingVisits above.
+    let lineItemsByTicketId = {};
+    if (ticketIds.length) {
+      const { data: lineItemRows, error: lineItemsErr } = await supabase
+        .from('ticket_line_items')
+        .select('ticket_id, inbound_email_id, text, issue_category, issue_detail, added_at')
+        .in('ticket_id', ticketIds)
+        .order('added_at', { ascending: false });
+      if (lineItemsErr) return json(500, { ok: false, error: 'line-items fetch failed: ' + lineItemsErr.message });
+      for (const li of (lineItemRows || [])) {
+        (lineItemsByTicketId[li.ticket_id] = lineItemsByTicketId[li.ticket_id] || []).push({
+          inboundEmailId: li.inbound_email_id,
+          text: li.text,
+          issueCategory: li.issue_category,
+          issueDetail: li.issue_detail,
+          addedAt: li.added_at,
+        });
       }
     }
 
@@ -375,6 +400,8 @@ exports.handler = async (event) => {
         openShipment: openShipmentsBySite[t.site_id] || null,
         manuallyResolvedAt: t.manually_resolved_at,
         manuallyResolvedNote: t.manually_resolved_note,
+        needsReview: !!t.needs_review,
+        lineItems: lineItemsByTicketId[t.id] || [],
         source: 'ticket_email',
       };
     });

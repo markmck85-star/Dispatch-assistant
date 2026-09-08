@@ -1567,6 +1567,26 @@ exports.handler = async (event) => {
               console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum} (site state: ${appendedTicketState || 'still unknown -- original ticket has no site match either'})`);
               appendedToExisting = true;
             }
+
+            // 2026-09-08: structured row per line item, alongside the
+            // description-blob append above (kept as-is for backward
+            // compat / anything still reading description directly).
+            // Lets the state console show each addition as its own
+            // clickable item -- linked to THIS email specifically via
+            // inboundEmailId, reusing the same viewSourceEmail() popup
+            // already used for trouble tickets -- rather than one growing
+            // text blob that can't distinguish "how many" or "which
+            // email" once more than one line item lands on a ticket.
+            const { error: lineItemErr } = await supabase
+              .from('ticket_line_items').insert({
+                ticket_id: existingTicket.id,
+                inbound_email_id: inboundEmailId,
+                wo_number: parsed.woNum,
+                issue_category: parsed.issueCategory || null,
+                issue_detail: parsed.issueDetail || null,
+                text: addedText,
+              });
+            if (lineItemErr) console.error('[mailgun-inbound] ticket_line_items insert failed:', lineItemErr.message);
           }
         }
 
