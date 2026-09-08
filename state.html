@@ -558,17 +558,18 @@ async function loadConsole(state, isRetry) {
         return fmtDateOnly(key);
       }
 
+      // 2026-09-08: simplified per Mark -- date + county grouping headers
+      // made the list too tall to scan and produced duplicate-looking
+      // headers when tickets interleaved by kind within a county. Straight
+      // chronological order by due date now; ticketKind/siteCode are just
+      // stable tie-breakers for tickets due at the exact same time.
       const sortedTickets = [...visibleTickets].sort((a, b) => {
-        const dateA = dateKey(a.dueAt), dateB = dateKey(b.dueAt);
-        if (dateA !== dateB) return dateA.localeCompare(dateB); // soonest date first
-        if (a.ticketKind !== b.ticketKind) return a.ticketKind === 'maintenance' ? 1 : -1; // trouble first within a date
-        const countyA = (a.county || 'zzz').toLowerCase();
-        const countyB = (b.county || 'zzz').toLowerCase();
-        if (countyA !== countyB) return countyA.localeCompare(countyB);
-        return new Date(a.dueAt) - new Date(b.dueAt);
+        const diff = new Date(a.dueAt) - new Date(b.dueAt);
+        if (diff !== 0) return diff;
+        if (a.ticketKind !== b.ticketKind) return a.ticketKind === 'maintenance' ? 1 : -1;
+        return (a.siteCode || '').localeCompare(b.siteCode || '');
       });
 
-      let lastDate = null, lastKind = null, lastCounty = null;
       ticketList.innerHTML = sortedTickets.map(t => {
         // 2026-08-25: bulk-list entries (source: 'bulk_dispatch_list') have
         // no Salesforce closed-ticket-report confirmation to speak of --
@@ -597,20 +598,6 @@ async function loadConsole(state, isRetry) {
               : `<div class="meta" style="color:#4a9eda;">📦 Open parts request at this site (nothing to return)</div>`)
           : '';
 
-        const thisDateKey = dateKey(t.dueAt);
-        const thisCounty = (t.county || '').toLowerCase();
-        let dateHeader = '', countyHeader = '';
-        if (thisDateKey !== lastDate) {
-          dateHeader = `<div class="date-header" style="font-size:14px;font-weight:700;color:#eee;border-bottom:1px solid #444;padding-bottom:4px;margin:18px 0 8px;">${dateLabel(thisDateKey)}</div>`;
-          lastDate = thisDateKey;
-          lastKind = null; // force the county/kind header to re-print under the new date too
-          lastCounty = null;
-        }
-        if (t.ticketKind !== lastKind || thisCounty !== lastCounty) {
-          countyHeader = `<div class="county-header" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin:10px 0 4px;">${escapeHtml(t.county || 'Other / unrecognized county')}</div>`;
-          lastKind = t.ticketKind;
-          lastCounty = thisCounty;
-        }
         // 2026-09-08: line items appended to an existing ticket after the
         // fact (e.g. a restock ticket that picks up a "Journal Printer
         // Jam" follow-up) -- neutral badge, not colored red/urgent, since
@@ -629,7 +616,7 @@ async function loadConsole(state, isRetry) {
             }).join('<br>') + `</div>`
           : '';
 
-        return dateHeader + countyHeader + `<div class="ticket-card ${t.ticketKind}">
+        return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
