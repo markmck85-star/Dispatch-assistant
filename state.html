@@ -611,12 +611,29 @@ async function loadConsole(state, isRetry) {
           lastKind = t.ticketKind;
           lastCounty = thisCounty;
         }
+        // 2026-09-08: line items appended to an existing ticket after the
+        // fact (e.g. a restock ticket that picks up a "Journal Printer
+        // Jam" follow-up) -- neutral badge, not colored red/urgent, since
+        // not all additions are service-affecting (a decal reminder vs a
+        // real fault) and it's the dispatcher's call, not the app's, per
+        // Mark. Each item is its own clickable button to its own source
+        // email via viewSourceEmail(), same pattern as the ticket's own
+        // View/Forward link above -- multiple additions on one ticket stay
+        // individually visible/clickable rather than merging into one line.
+        const lineItemsTag = (t.lineItems && t.lineItems.length)
+          ? `<div class="meta" style="color:#c98a1e;">` + t.lineItems.map(li => {
+              const label = li.issueCategory || (li.text ? li.text.slice(0, 60) + (li.text.length > 60 ? '…' : '') : 'see email');
+              return `📝 <button onclick="viewSourceEmail('${li.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:#c98a1e;text-decoration:underline;cursor:pointer;font-size:inherit;text-align:left;">Line item added ${fmtDateTime(li.addedAt)} — ${escapeHtml(label)}</button>`;
+            }).join('<br>') + `</div>`
+          : '';
+
         return dateHeader + countyHeader + `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
           ${shipmentTag}
+          ${lineItemsTag}
         </div>`;
       }).join('');
     }
