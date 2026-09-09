@@ -11,5 +11,13 @@
 [functions."check-report-sync-health"]
   schedule = "15,35,55 * * * *"
 
-[functions."send-notification-digests"]
-  schedule = "*/15 * * * *"
+
+# 2026-09-08: disabled by Mark -- real-time SMS delivery may be starting to
+# work again after the Verizon block, and he doesn't want a batched morning
+# digest (queued from overnight/off-hours tickets) sending several texts at
+# once, since that's the exact pattern that triggered the original block.
+# Queuing logic in mailgun-inbound.js is untouched -- items still queue into
+# pending-notifications, they just won't be flushed until this schedule is
+# restored. Re-add the block below to turn it back on:
+# [functions."send-notification-digests"]
+#   schedule = "*/15 * * * *"
