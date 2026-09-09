@@ -303,7 +303,8 @@ function renderHistory() {
 
     html += `<h3 class="section-label">Visit History</h3>`;
     html += data.visits.map(v => {
-        const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const dateSource = v.started_at || v.ended_at;
+        const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
         const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
         const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
         const kindClass = isRestockLike ? 'kind-restock' : 'kind-service';
@@ -373,7 +374,8 @@ async function printLocationHistory() {
     </div>`;
 
     content += st.visits.map(v => {
-        const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const dateSource = v.started_at || v.ended_at;
+        const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
         const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
         const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
         const kindColor = isRestockLike ? '#2e7d32' : '#c62828';
