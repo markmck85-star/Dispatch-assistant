@@ -2938,6 +2938,20 @@ function distanceMatrixStatus(state) {
                 })
                 .catch(e => console.warn('[dispatch] get-unmatched-tickets check failed (non-fatal):', e.message));
 
+            // 2026-09-10: placeholder-site promotion check -- companion to
+            // the unmatched-ticket check just above, for the other half of
+            // the site-survey/install placeholder feature (see
+            // lib/placeholder-sites.js). Same fire-and-forget pattern: never
+            // blocks dispatch generation on a failed check.
+            fetch('/.netlify/functions/get-pending-promotions?state=' + CURRENT_STATE, { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && data.pending && data.pending.length > 0) {
+                        setTimeout(() => showPromotionPromptQueue(data.pending), 1200);
+                    }
+                })
+                .catch(e => console.warn('[dispatch] get-pending-promotions check failed (non-fatal):', e.message));
+
             // Now that real DB-backed tickets have had a chance to auto-surface
             // above, this is the real "genuinely nothing to show" check --
             // previously this ran before the auto-surface step and could bail
@@ -4573,6 +4587,97 @@ function distanceMatrixStatus(state) {
                 .catch(e => { status.textContent = 'Network error: ' + e.message; });
             };
         }
+
+        // 2026-09-10: placeholder-site promotion toast -- the other half of
+        // the site-survey/install placeholder feature (see
+        // lib/placeholder-sites.js on the backend). A site_survey/install
+        // ticket with no real Neumo code now gets a temporary STATE+TMP+NNN
+        // placeholder site so it's visible on the board at all (see the
+        // showAddLocationPromptForTicket flow above for the OTHER kind of
+        // new-site toast, which is for trouble/maintenance tickets that
+        // never get auto-created -- this one's specifically for confirming
+        // a temp code should become the real one). When a later ticket
+        // carrying a real code address-matches that placeholder,
+        // get-pending-promotions.js surfaces it here so the dispatcher can
+        // confirm the swap (or dismiss it if it's a false match) instead of
+        // the site sitting under its temp code forever.
+        function showPromotionPromptQueue(pending) {
+            if (!pending || pending.length === 0) return;
+            const [first, ...rest] = pending;
+            showPromotionPrompt(first, () => {
+                if (rest.length > 0) setTimeout(() => showPromotionPromptQueue(rest), 300);
+            });
+        }
+
+        function showPromotionPrompt(item, onComplete) {
+            if (document.getElementById('promotion-prompt')) { if (onComplete) onComplete(); return; }
+            var div = document.createElement('div');
+            div.id = 'promotion-prompt';
+            div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #28a745;border-radius:8px;padding:16px 18px;z-index:9999;width:min(92vw,400px);box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
+            var cleanName = (item.placeholderName || '').replace(/^SURVEY\/INSTALL:\s*/, '');
+            div.innerHTML = `
+                <div style="font-weight:bold;color:#28a745;margin-bottom:4px;">Placeholder site ready to promote</div>
+                <div style="font-size:12px;color:#aaa;margin-bottom:12px;">WO ${item.woNumber || '?'} carries a real site code matching this placeholder's address</div>
+                <div style="font-size:13px;margin-bottom:10px;background:#2a2a3e;border-radius:5px;padding:8px 9px;">
+                    <div style="color:#8ab;font-size:11px;">${item.placeholderCode}</div>
+                    <div>${cleanName || item.placeholderCode}</div>
+                    <div style="color:#aaa;font-size:12px;">${item.address || ''}</div>
+                </div>
+                <input id="pp-code" value="${(item.realCode || '').replace(/"/g, '&quot;')}" placeholder="Real site code" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;text-transform:uppercase;">
+                <input id="pp-name" value="${cleanName.replace(/"/g, '&quot;')}" placeholder="Location name" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:12px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <div style="display:flex;gap:10px;">
+                    <button id="pp-confirm" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Replace ${item.placeholderCode}</button>
+                    <button id="pp-reject" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Not a match</button>
+                </div>
+                <div id="pp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
+            document.body.appendChild(div);
+
+            document.getElementById('pp-reject').onclick = function() {
+                var status = document.getElementById('pp-status');
+                status.textContent = 'Dismissing…';
+                fetch('/.netlify/functions/promote-placeholder-site', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ siteId: item.siteId, action: 'reject' })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) { status.textContent = 'Failed: ' + (data.error || 'unknown error'); return; }
+                    div.remove();
+                    if (onComplete) onComplete();
+                })
+                .catch(e => { status.textContent = 'Network error: ' + e.message; });
+            };
+
+            document.getElementById('pp-confirm').onclick = function() {
+                var code = document.getElementById('pp-code').value.trim().toUpperCase();
+                var name = document.getElementById('pp-name').value.trim();
+                var status = document.getElementById('pp-status');
+                if (!code) { status.textContent = 'Real site code is required.'; return; }
+                status.textContent = 'Promoting…';
+                fetch('/.netlify/functions/promote-placeholder-site', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ siteId: item.siteId, action: 'confirm', newName: name })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) { status.textContent = 'Failed: ' + (data.error || 'unknown error'); return; }
+                    // The temp code no longer exists under that key once
+                    // renamed server-side -- drop the stale entry and pull a
+                    // fresh copy of every state's locations so the site
+                    // shows up correctly under its real code (same
+                    // loadRemoteLocations() call the stale-data banner
+                    // uses), then reprocess so the board itself updates.
+                    delete LOCATIONS[item.placeholderCode];
+                    div.remove();
+                    loadRemoteLocations().then(() => processDispatch(true));
+                    if (onComplete) onComplete();
+                })
+                .catch(e => { status.textContent = 'Network error: ' + e.message; });
+            };
+        }
+
         function generateFinalMessages() {
             const resultsDiv = document.getElementById('results');
             const dateInput = document.getElementById('dispatchDate');
