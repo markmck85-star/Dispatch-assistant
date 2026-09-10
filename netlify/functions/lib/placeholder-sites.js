@@ -51,9 +51,24 @@ async function getOrCreateUnassignedTech(supabase, state) {
   if (findErr) throw new Error('Unassigned-tech lookup failed: ' + findErr.message);
   if (existing) return existing.id;
 
+  // 2026-09-10 fix: technicians.slug is NOT NULL + UNIQUE with no DB
+  // default (confirmed via information_schema against the live table) --
+  // the very first version of this insert omitted it entirely, so every
+  // attempt to create the per-state Unassigned tech failed outright on a
+  // NOT NULL violation, caught non-fatally by the caller in
+  // mailgun-inbound.js and logged only -- which meant the ENTIRE
+  // placeholder-site creation silently never happened for anyone (real
+  // case: today's Mundy Mill install, WO 00152003 -- no placeholder, no
+  // board entry, no error visible anywhere except the Netlify function
+  // log). Slugged per-state (not a single global slug) since the
+  // UNIQUE constraint would otherwise reject the second state's attempt
+  // to create its own "Unassigned (New Site)" row -- matches the
+  // lowercase-hyphenated slug format every other technician row already
+  // uses (e.g. "randy-thomas").
+  const slug = `unassigned-new-site-${state.toLowerCase()}`;
   const { data: created, error: createErr } = await supabase
     .from('technicians')
-    .insert({ name: UNASSIGNED_TECH_NAME, home_state: state, active: true })
+    .insert({ name: UNASSIGNED_TECH_NAME, slug, home_state: state, active: true })
     .select('id')
     .single();
   if (createErr) throw new Error('Unassigned-tech creation failed: ' + createErr.message);
