@@ -1606,6 +1606,26 @@ exports.handler = async (event) => {
         if (ticketErr) console.error('[mailgun-inbound] tickets upsert failed:', ticketErr.message);
         else console.log(`[mailgun-inbound] Supabase: ticket ${parsed.woNum} written (site_id: ${siteId || 'unmatched, needs_review'})`);
 
+        // 2026-09-10: the upsert above uses ignoreDuplicates on wo_number,
+        // so a RE-processed WO (Mark manually re-forwarding a stuck email,
+        // or Mailgun retrying) never updates an existing row's site_id --
+        // even when THIS run resolved one the original processing didn't
+        // (a placeholder just got created, or an address match succeeded
+        // this time around). The board-add step below still works fine
+        // either way since it uses this run's local siteId, not whatever
+        // the stored row says -- but the ticket itself would otherwise
+        // show "unmatched" on the watchdog log/state console forever.
+        // Non-destructive: only touches a row that's CURRENTLY unmatched,
+        // never overwrites a real existing match.
+        if (siteId) {
+          const { error: syncErr } = await supabase
+            .from('tickets')
+            .update({ site_id: siteId, needs_review: false })
+            .eq('wo_number', parsed.woNum)
+            .is('site_id', null);
+          if (syncErr) console.error('[mailgun-inbound] Reprocessed-ticket site_id sync failed (non-fatal):', syncErr.message);
+        }
+
         // Address-based sibling sweep -- mirrors link-ticket-to-site.js's
         // existing rawSiteCode-based sweep, but for the address-match case:
         // a building with a testing station AND an OTC printer (or several
