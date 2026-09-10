@@ -87,7 +87,7 @@ exports.handler = async (event) => {
     // here no matter what SMS notification hours are configured.
     const { data, error } = await supabase
       .from("tickets")
-      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, received_at, status")
+      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, earliest_start_at, received_at, status")
       .or("ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true")
       .eq("status", "open")
       .order("received_at", { ascending: false });
@@ -104,13 +104,20 @@ exports.handler = async (event) => {
       .filter((t) => t.site_text && t.site_text.slice(0, 2).toUpperCase() === state)
       .filter((t) => {
         // Deadline-based staleness cutoff -- see v3 note above. sla_ends_at
-        // (trouble) takes priority over due_at (install/site_survey) since
-        // a ticket could technically have both; falls back to due_at when
-        // sla_ends_at is absent. A ticket with NEITHER field set (shouldn't
-        // happen in practice -- both are populated by mailgun-inbound.js's
-        // parser for every ticket kind included here) is kept rather than
-        // silently dropped.
-        const deadline = t.sla_ends_at || t.due_at;
+        // (trouble) takes priority over due_at (maintenance/needs_review
+        // fallback), EXCEPT for install/site_survey: as of 2026-09-10
+        // those never get an sla_ends_at at all (see mailgun-inbound.js --
+        // it's not a real deadline for these, just a stale receipt-
+        // anchored calculation), and their own "Due Date" field is
+        // boilerplate too (5 PM end-of-window, not the actual appointment)
+        // -- earliest_start_at (Neumo's "Earliest Start Permitted") is the
+        // genuine scheduled time and is what should gate staleness here. A
+        // ticket with NEITHER field set (shouldn't happen in practice) is
+        // kept rather than silently dropped.
+        const isInstallOrSurvey = t.ticket_kind === 'install' || t.ticket_kind === 'site_survey';
+        const deadline = isInstallOrSurvey
+          ? (t.earliest_start_at || t.due_at)
+          : (t.sla_ends_at || t.due_at);
         if (!deadline) return true;
         const deadlineMs = new Date(deadline).getTime();
         if (Number.isNaN(deadlineMs)) return true;
@@ -122,10 +129,8 @@ exports.handler = async (event) => {
         // own local timezone (derived from its zip -- receivedAt arrives
         // in Eastern regardless of site state), skipping non-business days
         // per state Saturday-coverage rules, Sundays, and holidays.
-        // Decision 2026-09-07: only trouble tickets get this treatment --
-        // install/site_survey deadlines stay as dueAt since those often
-        // reflect a real scheduled meet time with a store manager or
-        // state rep, which the email DOES get right.
+        // Decision 2026-09-07 (superseded 2026-09-10 below): only trouble
+        // tickets get this treatment -- install/site_survey never did.
         // slaEndsAt (raw email value) is left in place alongside it rather
         // than overwritten, so nothing else reading this endpoint breaks.
         let computedSlaDeadline = null;
@@ -152,6 +157,11 @@ exports.handler = async (event) => {
           address: t.address,
           dueAt: t.due_at,
           slaEndsAt: t.sla_ends_at,
+          // 2026-09-10: the real scheduled appointment time for
+          // install/site_survey -- see the filter comment above for why
+          // this replaced sla_ends_at/due_at as the meaningful deadline
+          // for these two kinds specifically.
+          earliestStartAt: t.earliest_start_at,
           computedSlaDeadline,
           receivedAt: t.received_at,
         };

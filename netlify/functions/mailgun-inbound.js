@@ -500,6 +500,31 @@ function parseLooseDate(raw) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// 2026-09-10: parseLooseDate above treats a bare "M/D/YYYY, H:MM AM/PM"
+// string (Neumo's format for Earliest Start Permitted / Due Date) as if it
+// were already UTC, since that string carries no timezone of its own and
+// Netlify's server runs in UTC -- new Date("9/10/2026, 11:00 AM") silently
+// becomes 11:00 UTC, i.e. 7:00 AM Eastern, not 11:00 AM. Harmless as long
+// as nothing displayed these fields directly (they mostly fed same-day
+// board-placement logic, where a few hours off rarely changed which day a
+// stop landed on) -- but confirmed wrong the moment they're shown as an
+// actual clock time (today's Mundy Mill earliest_start_at stored as
+// 11:00 UTC instead of the correct 15:00 UTC). Same class of bug the SLA
+// calculator was fixed for on 2026-08-15 (see zonedTimeToUtc above) --
+// applying that exact fix here instead of a second copy of the pattern.
+// Falls back to the naive parse for anything not matching Neumo's exact
+// format, rather than returning null and losing the field entirely.
+function parseLooseLocalDateTime(raw, tz) {
+  if (!raw) return null;
+  const m = String(raw).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return parseLooseDate(raw);
+  const [, moStr, dyStr, yrStr, hStr, minStr, ampm] = m;
+  let hour = parseInt(hStr, 10) % 12;
+  if (/pm/i.test(ampm)) hour += 12;
+  const d = zonedTimeToUtc(parseInt(yrStr, 10), parseInt(moStr, 10), parseInt(dyStr, 10), hour, parseInt(minStr, 10), 0, tz || 'America/New_York');
+  return isNaN(d.getTime()) ? parseLooseDate(raw) : d;
+}
+
 // Parses a Dispatch List email's plain-text body into a { siteCode:
 // 'YYYY-MM-DD' } map of every row's "Restock By" date. Anchors on the
 // site code embedded in each row's Location cell (e.g. "Weld County 1 -
@@ -975,6 +1000,23 @@ function parseEmailBody(text, receivedAt, subject) {
     const slaStr = formatSlaDeadline(slaEnd, ticketTz);
     const siteTrunc = site.length > 40 ? site.substring(0, 38) + '…' : site;
 
+    // 2026-09-10: install/site_survey tickets aren't a response-time SLA
+    // at all -- unlike "Due Date" (still boilerplate, per the note above),
+    // Mark confirmed "Earliest Start Permitted" IS a genuine, specific
+    // scheduled appointment time, and showing the generic 4-hour SLA next
+    // to it was actively misleading (a real case: Mundy Mill's 11 AM
+    // install showing "SLA ends: Thu 12:29 PM" -- a deadline nobody was
+    // ever working toward). Compounding it: these tickets can legitimately
+    // arrive days ahead of the actual appointment (a survey emailed Monday
+    // for a Thursday slot) -- the SLA calc is anchored to THIS EMAIL's
+    // receipt time, so a same-WO re-forward days later recomputes a brand
+    // new, equally meaningless "deadline" every time. Using the real
+    // appointment time instead sidesteps both problems: it doesn't change
+    // on a re-forward (same appointment, same source field) and it's
+    // never stale relative to receipt the way a receipt-anchored SLA is.
+    const earliestStartParsed = parseLooseLocalDateTime(earliestStartRaw, ticketTz);
+    const apptStr = earliestStartParsed ? formatSlaDeadline(earliestStartParsed, ticketTz) : null;
+
     // "Add Line Item to Work Order #NNNN" -- a follow-up adding a new line
     // item to a ticket that (usually) already exists on the board, not a
     // fresh dispatch. Found 2026-07-24 (GA1049, WO 00147776): the existing
@@ -988,9 +1030,16 @@ function parseEmailBody(text, receivedAt, subject) {
 
     let alertBody = `🚨 WO: ${woNum}\nSite: ${siteTrunc}`;
     if (issue && issue !== 'See email for details') alertBody += `\nIssue: ${issue}`;
-    // Always our own calculated SLA now (see note above) -- no more branching
-    // on whether Neumo supplied a Due Date, since that's never trusted.
-    alertBody += `\nSLA ends: ${slaStr}`;
+    if (isInstallCategory && apptStr) {
+      alertBody += `\nScheduled: ${apptStr}`;
+    } else {
+      // Always our own calculated SLA now (see note above) -- no more
+      // branching on whether Neumo supplied a Due Date, since that's
+      // never trusted. Still applies to genuine trouble tickets, and to
+      // an install/site_survey ticket in the rare case it has no parseable
+      // Earliest Start at all (falls back rather than showing nothing).
+      alertBody += `\nSLA ends: ${slaStr}`;
+    }
 
     return {
       type: 'trouble',
@@ -998,6 +1047,12 @@ function parseEmailBody(text, receivedAt, subject) {
       woNum, site, siteCode, issue, slaEnd: slaEnd.toISOString(),
       state: locationState,
       address,
+      // 2026-09-10: carried alongside earliestStartRaw/dueDateRaw so the
+      // outer ticket-insertion code (which stores earliest_start_at/due_at
+      // as real timestamps, not display strings) can parse them with the
+      // same tz-aware helper instead of a naive/UTC-assuming parse -- see
+      // parseLooseLocalDateTime above.
+      tz: ticketTz,
       issueCategory: issueCategory || null,
       issueDetail: issueDetail || null,
       description: lineItemDescription || null,
@@ -1222,6 +1277,14 @@ exports.handler = async (event) => {
     // isLineItemAddition write (deep inside the try) and the SMS-block read
     // (after the try/catch closes) can both actually see it.
     let appendedTicketState = null;
+    // 2026-09-10: same scoping requirement as appendedTicketState above --
+    // must be declared here, before the try, so both the write (deep
+    // inside, right before the ticket upsert) and the read (in the SMS
+    // block, after the try/catch closes) can see it. Tracks whether this
+    // WO already had a `tickets` row before THIS run -- i.e. this email is
+    // a reprocess (Mailgun retry, or Mark manually re-forwarding a stuck
+    // email) rather than the ticket's first arrival.
+    let ticketAlreadyExisted = false;
     try {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -1547,7 +1610,15 @@ exports.handler = async (event) => {
 
         if (!appendedToExisting) {
 
-        const earliestStartAt = parseLooseDate(parsed.earliestStartRaw);
+        // 2026-09-10: tz-aware now (parseLooseLocalDateTime), not the
+        // naive parseLooseDate -- see that function's header comment.
+        // parsed.tz is set by the trouble-ticket parser (covers trouble/
+        // install/site_survey); maintenance tickets go through a separate
+        // parser that doesn't set it, so fall back to deriving it from
+        // whatever site info is available, same pattern used elsewhere in
+        // this file for install/site_survey's synthetic "STATE0000" code.
+        const effectiveTz = parsed.tz || getTimezoneForSiteCode(rawSiteCode || (parsed.state ? parsed.state + '0000' : null));
+        const earliestStartAt = parseLooseLocalDateTime(parsed.earliestStartRaw, effectiveTz);
         // 2026-09-04: for maintenance/restock tickets, parsed.dueDateRaw only
         // exists when the ticket's own free-text description had a
         // confident, explicitly-typed "by <date>" phrase (rare -- Mark
@@ -1561,7 +1632,7 @@ exports.handler = async (event) => {
         // just above already works this out via nextWorkDayStrForSiteCode,
         // it just never got written back onto the ticket itself). Mirrored
         // here so the console shows the same expected day the board uses.
-        let dueAt = parseLooseDate(parsed.dueDateRaw);
+        let dueAt = parseLooseLocalDateTime(parsed.dueDateRaw, effectiveTz);
         if (!dueAt && (parsed.ticketKind || dispatchType) === 'maintenance') {
           const expectedDayStr = nextWorkDayStrForSiteCode(rawSiteCode);
           if (expectedDayStr) {
@@ -1573,6 +1644,17 @@ exports.handler = async (event) => {
             dueAt = new Date(Date.UTC(ey, em - 1, ed, 12, 0, 0));
           }
         }
+
+        // 2026-09-10: is this WO's first arrival, or a reprocess? Checked
+        // before the upsert below (which uses ignoreDuplicates and so gives
+        // no signal either way on its own) -- feeds both the deadline
+        // fields just below and the SMS dedup further down at the alert
+        // block.
+        const { data: preExistingTicket } = await supabase
+          .from('tickets').select('id').eq('wo_number', parsed.woNum).maybeSingle();
+        ticketAlreadyExisted = !!preExistingTicket;
+
+        const isInstallOrSurvey = ['install', 'site_survey'].includes(parsed.ticketKind);
 
         const ticketRow = {
           wo_number: parsed.woNum,
@@ -1589,8 +1671,16 @@ exports.handler = async (event) => {
           received_at: receivedAt.toISOString(),
           earliest_start_at: earliestStartAt ? earliestStartAt.toISOString() : null,
           due_at: dueAt ? dueAt.toISOString() : null,
-          sla_ends_at: parsed.slaEnd || null,
-          deadline_source: dispatchType === 'maintenance' ? 'restock_requested' : 'sla_4h',
+          // 2026-09-10: install/site_survey tickets aren't a response-time
+          // SLA -- see the parser-level comment above (same date this was
+          // fixed). sla_ends_at stays null for them rather than storing a
+          // receipt-anchored 4-hour calculation that has nothing to do
+          // with the real scheduled appointment (earliest_start_at,
+          // already captured above). Trouble tickets are unaffected.
+          sla_ends_at: isInstallOrSurvey ? null : (parsed.slaEnd || null),
+          deadline_source: dispatchType === 'maintenance'
+            ? 'restock_requested'
+            : (isInstallOrSurvey ? 'scheduled_appointment' : 'sla_4h'),
           attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null },
           source: 'email',
           inbound_email_id: inboundEmailId,
@@ -1900,7 +1990,23 @@ exports.handler = async (event) => {
     }
 
     // Send SMS for trouble tickets
-    if (dispatchType === 'trouble' && parsed && parsed.alertBody) {
+    // 2026-09-10: skip re-sending for an install/site_survey WO that
+    // already had a ticket row before this run (ticketAlreadyExisted, set
+    // just above the ticket upsert). These commonly get manually
+    // re-forwarded (a stuck-outbox resend, or just double-checking it
+    // landed) -- unlike a genuine trouble ticket, there's no new
+    // information in a resend (the appointment time is the appointment
+    // time), so it was just re-alerting on a stale, re-anchored SLA
+    // calculation every time (see the parser-level fix above) for nothing
+    // new. Genuine trouble/maintenance tickets are unaffected -- a
+    // real WO re-arriving there (Mailgun retry, etc.) keeps alerting as
+    // before, since that class of ticket doesn't have this problem.
+    const skipAsInstallReprocess = ticketAlreadyExisted
+      && ['install', 'site_survey'].includes((parsed && parsed.ticketKind) || '');
+    if (skipAsInstallReprocess) {
+      console.log(`[mailgun-inbound] Skipping SMS for WO ${parsed.woNum} -- install/site_survey ticket already existed (reprocess/re-forward, nothing new to alert on)`);
+    }
+    if (dispatchType === 'trouble' && parsed && parsed.alertBody && !skipAsInstallReprocess) {
       // Prefer the site-code-derived state already computed for the SLA calc
       // above -- it's reliable (site code is always present on a real work
       // order). Falls back to parsed.state for messages that went through

@@ -8,8 +8,8 @@
  *
  * GET /.netlify/functions/get-assignments?dispatchDate=YYYY-MM-DD
  * -> { assignments: [ { siteCode, techName, status, assignedBy, sequenceOrder, locked,
- *                        ticket: { woNumber, issueCategory, issueDetail, slaEndsAt,
- *                                  computedSlaDeadline } | null } ] }
+ *                        ticket: { woNumber, ticketKind, issueCategory, issueDetail,
+ *                                  slaEndsAt, earliestStartAt, computedSlaDeadline } | null } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
 const { computeSlaDeadline } = require("./slaCalculator.js");
@@ -45,7 +45,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("assignments")
-      .select("status, assigned_by, sequence_order, locked, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, received_at, address, needs_review)")
+      .select("status, assigned_by, sequence_order, locked, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review)")
       .eq("dispatch_date", dispatchDate);
 
     if (error) return json(500, { error: "Query failed: " + error.message });
@@ -105,9 +105,18 @@ exports.handler = async (event) => {
           locked: row.locked,
           ticket: t ? {
             woNumber: t.wo_number,
+            ticketKind: t.ticket_kind,
             issueCategory: t.issue_category,
             issueDetail: t.issue_detail,
             slaEndsAt: t.sla_ends_at,
+            // 2026-09-10: the real scheduled appointment time for
+            // install/site_survey tickets -- Neumo's own "Earliest Start
+            // Permitted" field, which (unlike Due Date/SLA) genuinely
+            // reflects a specific meet time, not boilerplate. Wasn't
+            // exposed here at all before; the board had nothing but the
+            // generic SLA calc to fall back on for these, which is how a
+            // multi-day-out install ended up wrongly flagged same-day.
+            earliestStartAt: t.earliest_start_at,
             computedSlaDeadline,
             needsReview: !!t.needs_review,
             lineItems: lineItemsByTicketId[t.id] || [],
