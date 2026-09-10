@@ -14,6 +14,12 @@
 
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
+const { addressesLooselyMatch, findSiteByAddress } = require("./lib/address-match");
+const {
+  createPlaceholderSite,
+  findPlaceholderByAddress,
+  flagPlaceholderForPromotion,
+} = require("./lib/placeholder-sites");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -221,10 +227,15 @@ async function autoAddTicketToBoard({
   supabase, siteId, ticketKind, dueDateRaw, rawSiteCode, woNum, newTicketId,
   receivedAtIso, issueCategory, issueDetail, description,
 }) {
-        // (not install/site-survey, which stay manual per their lower
-        // volume and frequent lack of a real site code). Assigned to the
-        // site's primary tech with no availability check -- a known,
-        // agreed limitation; reassign manually if they're out. Deliberately
+        // As of 2026-09-10 also covers install/site_survey tickets, once
+        // they've been given a placeholder site (see lib/placeholder-sites.js
+        // and the call site above) -- previously excluded entirely since
+        // they had no site_id at all to hang a board entry off of. Assigned
+        // to the site's primary tech with no availability check -- a known,
+        // agreed limitation; reassign manually if they're out (for a fresh
+        // placeholder, "primary tech" is the per-state Unassigned
+        // placeholder technician, so it shows as its own clearly-labeled
+        // group on the board until a dispatcher reassigns it). Deliberately
         // non-destructive: only inserts if the site has no assignment row
         // at all yet on that date (DO NOTHING on conflict) -- never
         // overwrites an existing planned/completed/reassigned entry, even a
@@ -234,15 +245,18 @@ async function autoAddTicketToBoard({
         // by nature); maintenance tickets target their own parsed due date
         // when one was found, falling back to today when the free-text
         // description didn't yield a confident date (agreed with Mark
-        // 2026-07-21 -- best-guess placement beats losing it silently).
-        if (['trouble', 'maintenance'].includes(ticketKind || 'trouble') && siteId) {
+        // 2026-07-21 -- best-guess placement beats losing it silently);
+        // install/site_survey tickets target their own Earliest Start date
+        // the same way (e.g. Mundy Mill's 11 AM slot), also falling back to
+        // today when that's missing.
+        if (['trouble', 'maintenance', 'install', 'site_survey'].includes(ticketKind || 'trouble') && siteId) {
           try {
             const { data: siteDetail, error: siteDetailErr } = await supabase
               .from('sites').select('primary_tech_id').eq('id', siteId).maybeSingle();
             if (siteDetailErr) console.error('[mailgun-inbound] site detail lookup failed:', siteDetailErr.message);
             else if (siteDetail && siteDetail.primary_tech_id) {
               let dispatchDateStr;
-              if ((ticketKind || 'trouble') === 'maintenance' && dueDateRaw) {
+              if (['maintenance', 'install', 'site_survey'].includes(ticketKind || 'trouble') && dueDateRaw) {
                 const dd = new Date(dueDateRaw);
                 dispatchDateStr = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
               } else if ((ticketKind || 'trouble') === 'maintenance' && rawSiteCode) {
@@ -1009,117 +1023,9 @@ function parseEmailBody(text, receivedAt, subject) {
 // file, one of which was missed even by simple exact-string comparison
 // over a one-letter spelling difference ("Kraft Rd" vs "Krafft Rd").
 //
-// This normalizes both sides enough to survive the variation actually
-// seen in practice (ordinal words vs numerals, spelled-out vs abbreviated
-// street types and directionals, suite/unit noise) plus a small edit-
-// distance tolerance for genuine typos, while still requiring an EXACT
-// street-number match -- that's the cheap, low-false-positive anchor the
-// rest of the comparison hangs off of.
-const ORDINAL_WORDS = {
-  first: '1st', second: '2nd', third: '3rd', fourth: '4th', fifth: '5th',
-  sixth: '6th', seventh: '7th', eighth: '8th', ninth: '9th', tenth: '10th',
-  eleventh: '11th', twelfth: '12th', thirteenth: '13th', fourteenth: '14th',
-  fifteenth: '15th', sixteenth: '16th', seventeenth: '17th', eighteenth: '18th',
-  nineteenth: '19th', twentieth: '20th',
-};
-const STREET_TYPE_WORDS = {
-  street: 'st', avenue: 'ave', road: 'rd', boulevard: 'blvd', drive: 'dr',
-  lane: 'ln', highway: 'hwy', circle: 'cir', court: 'ct', place: 'pl',
-  parkway: 'pkwy', trail: 'trl', terrace: 'ter', square: 'sq',
-};
-const DIRECTION_WORDS = {
-  northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw',
-  north: 'n', south: 's', east: 'e', west: 'w',
-};
-
-function levenshtein(a, b) {
-  a = a || ''; b = b || '';
-  const m = a.length, n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const curr = [i];
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    prev = curr;
-  }
-  return prev[n];
-}
-
-function normalizeStreetLine(line) {
-  let s = (line || '').toLowerCase();
-  const applyWordMap = (map) => {
-    for (const [word, abbr] of Object.entries(map)) {
-      s = s.replace(new RegExp('\\b' + word + '\\b', 'g'), abbr);
-    }
-  };
-  applyWordMap(ORDINAL_WORDS);
-  applyWordMap(DIRECTION_WORDS);
-  applyWordMap(STREET_TYPE_WORDS);
-  s = s.replace(/\b(suite|ste|unit|apt)\b\s*#?\s*\w*/g, ' ');
-  s = s.replace(/[.,#]/g, ' ');
-  s = s.replace(/\s+/g, ' ').trim();
-  return s;
-}
-
-// Pulls { number, direction, street } from the first line of a possibly
-// multi-line address. `direction` (a leading N/S/E/W/NE/NW/SE/SW token) is
-// tracked separately from `street` and compared for an EXACT match below
-// -- a one-character direction difference ("123 N Main St" vs "123 S Main
-// St") must never fall under the typo-tolerance applied to the rest of
-// the street name, since it's a materially different address, not a
-// misspelling.
-function extractStreetSignature(fullAddress) {
-  if (!fullAddress) return null;
-  const firstLine = String(fullAddress).split('\n')[0].split(',')[0];
-  const norm = normalizeStreetLine(firstLine);
-  const m = norm.match(/^(\d+)\s+(.*)$/);
-  if (!m || !m[2]) return null;
-  let rest = m[2].trim();
-  let direction = null;
-  const dirMatch = rest.match(/^(ne|nw|se|sw|n|s|e|w)\s+(.*)$/);
-  if (dirMatch) { direction = dirMatch[1]; rest = dirMatch[2]; }
-  return { number: m[1], direction, street: rest };
-}
-
-// Exact street number AND exact leading direction (if either address has
-// one) required; the remaining street name allowed a small edit-distance
-// tolerance after normalization -- catches genuine typos/spelling variants
-// (e.g. "Kraft"/"Krafft", distance 1) without being loose enough to match
-// two genuinely different streets, or two different sides of the same
-// street name, that happen to share a number.
-function addressesLooselyMatch(addrA, addrB) {
-  const a = extractStreetSignature(addrA);
-  const b = extractStreetSignature(addrB);
-  if (!a || !b) return false;
-  if (a.number !== b.number) return false;
-  if ((a.direction || null) !== (b.direction || null)) return false;
-  if (a.street === b.street) return true;
-  const dist = levenshtein(a.street, b.street);
-  const maxLen = Math.max(a.street.length, b.street.length);
-  return maxLen > 0 && dist <= 2 && dist / maxLen < 0.3;
-}
-
-// Looks for an existing site in the same state whose address matches, when
-// the ticket's own text had no embedded site code to look up directly.
-// Scoped to one state's sites (cheap, and state is reliably known from the
-// ticket's own Location field even without a code) rather than scanning
-// every site in the database.
-async function findSiteByAddress(supabase, address, stateHint) {
-  if (!address || !stateHint) return null;
-  const { data: candidates, error } = await supabase
-    .from('sites')
-    .select('id, site_code, address')
-    .eq('state', stateHint);
-  if (error || !candidates) return null;
-  for (const c of candidates) {
-    if (addressesLooselyMatch(address, c.address)) return c;
-  }
-  return null;
-}
+// 2026-09-10: extracted to lib/address-match.js (unchanged logic) so the
+// new placeholder-site promotion flow (lib/placeholder-sites.js) can reuse
+// the exact same matching instead of a second, potentially-drifting copy.
 
 // ── Twilio SMS (optional — only fires if env vars are set) ───────────────────
 
@@ -1489,7 +1395,55 @@ exports.handler = async (event) => {
               siteId = candidate.id;
               matchedByAddress = candidate;
               console.log(`[mailgun-inbound] Address-matched WO ${parsed.woNum} to existing site ${candidate.site_code} (no embedded code in ticket text)`);
+
+              // 2026-09-10: a REAL Neumo-coded ticket (rawSiteCode present,
+              // just didn't match anything by code) landing on a
+              // placeholder's address is exactly the "install finished,
+              // Neumo assigned the permanent code" moment the placeholder
+              // feature is waiting for. Flag it rather than silently
+              // renaming -- see lib/placeholder-sites.js header for why.
+              // The ticket itself still correctly attaches to the
+              // placeholder's siteId right now (set just above), so it
+              // shows on the board immediately either way; this only adds
+              // the pending-promotion toast on top.
+              if (candidate.is_placeholder && rawSiteCode) {
+                await flagPlaceholderForPromotion(supabase, candidate.id, {
+                  realCode: rawSiteCode,
+                  woNumber: parsed.woNum,
+                });
+              }
             }
+          }
+        }
+
+        // Site-survey / install placeholder creation (2026-09-10): these
+        // ticket kinds essentially never carry a real Neumo site code (see
+        // ticketKind classification in the parser above), so until now
+        // they were left with site_id null and deliberately excluded from
+        // auto-add-to-board further down -- invisible on the actual
+        // dispatch board even though the watchdog log made them visible
+        // there. Real trigger: an 11 AM install with no board presence at
+        // all if the dispatch-list email happened to get missed.
+        //
+        // Reuses an existing placeholder at this address if one's already
+        // there (e.g. a site_survey ticket followed later by its own
+        // install ticket for the same not-yet-coded location); otherwise
+        // creates a fresh one. See lib/placeholder-sites.js for the
+        // STATE+TMP+NNN code scheme and the per-state "Unassigned"
+        // technician placeholders get assigned to.
+        if (['install', 'site_survey'].includes(parsed.ticketKind) && !siteId && parsed.address && parsed.state) {
+          try {
+            let placeholder = await findPlaceholderByAddress(supabase, parsed.address, parsed.state);
+            if (!placeholder) {
+              placeholder = await createPlaceholderSite(supabase, {
+                state: parsed.state,
+                rawName: parsed.site,
+                address: parsed.address,
+              });
+            }
+            if (placeholder) siteId = placeholder.id;
+          } catch (phEx) {
+            console.error('[mailgun-inbound] Placeholder site handling failed (non-fatal):', phEx.message);
           }
         }
 
@@ -1710,21 +1664,35 @@ exports.handler = async (event) => {
           }
         }
 
-        // Auto-add to the dispatch board -- trouble AND maintenance tickets
-        // (not install/site-survey). Logic lives in autoAddTicketToBoard()
-        // (2026-09-02 extraction) so the address-sweep sibling path further
-        // up can call the exact same code once a swept sibling's site_id
-        // is corrected, instead of that ticket silently never getting a
-        // board push at all.
-        if (['trouble', 'maintenance'].includes(parsed.ticketKind || 'trouble') && siteId) {
+        // Auto-add to the dispatch board -- trouble, maintenance, AND (as of
+        // 2026-09-10) install/site_survey tickets, now that those get a
+        // placeholder site above instead of staying site_id null. Logic
+        // lives in autoAddTicketToBoard() (2026-09-02 extraction) so the
+        // address-sweep sibling path further up can call the exact same
+        // code once a swept sibling's site_id is corrected, instead of that
+        // ticket silently never getting a board push at all.
+        if (['trouble', 'maintenance', 'install', 'site_survey'].includes(parsed.ticketKind || 'trouble') && siteId) {
           const { data: ticketRowFetched } = await supabase
             .from('tickets').select('id').eq('wo_number', parsed.woNum).maybeSingle();
+          // install/site_survey tickets have no rawSiteCode (never carry an
+          // embedded code) -- getTimezoneForSiteCode/nextWorkDayStrForSiteCode
+          // both key off the state prefix of whatever code they're given, so
+          // pass a synthetic "STATEXXXX" stand-in (same trick index.html's
+          // buildTechOptions call already uses) rather than letting them
+          // silently default to GA's timezone/Saturday-coverage rules for
+          // every other state.
+          const dateHelperSiteCode = rawSiteCode || (parsed.state ? parsed.state + '0000' : null);
           await autoAddTicketToBoard({
             supabase,
             siteId,
             ticketKind: parsed.ticketKind,
-            dueDateRaw: parsed.dueDateRaw,
-            rawSiteCode,
+            // install/site_survey: use the ticket's own Earliest Start
+            // (Mundy Mill's "11:00 AM" install slot) as the placement date,
+            // falling back to the normal due-date field, same as maintenance.
+            dueDateRaw: ['install', 'site_survey'].includes(parsed.ticketKind)
+              ? (parsed.earliestStartRaw || parsed.dueDateRaw)
+              : parsed.dueDateRaw,
+            rawSiteCode: dateHelperSiteCode,
             woNum: parsed.woNum,
             newTicketId: ticketRowFetched ? ticketRowFetched.id : null,
             receivedAtIso: receivedAt.toISOString(),
