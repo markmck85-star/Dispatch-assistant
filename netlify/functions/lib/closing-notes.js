@@ -31,6 +31,16 @@ const LIST_VIEW_URL = 'https://iti4dmv.my.site.com/dispatchconsole/s/recordlist/
 // failing records get deprioritized rather than permanently excluded
 // (their sort-window/search-index situation may change later, so still
 // worth retrying eventually, just not every single cycle).
+//
+// 2026-09-11 (later): now also excludes closing_note_is_blank=true rows
+// entirely. Those are a different case from "failed/not found" -- the
+// scraper DID reach the record and DID confirm the Appointment Note field
+// renders empty, so there's nothing left to retry for. Recorded found some
+// of these are >18 attempts deep with zero chance of ever changing, wasting
+// real time budget re-checking a page we already know is blank. If a
+// technician's note is ever amended after the fact, this can be manually
+// cleared for that one record -- not expected to happen often enough to
+// need automatic re-checking.
 async function getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState) {
   const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
 
@@ -38,6 +48,7 @@ async function getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState
     .from('site_visits')
     .select('appointment_number, closing_note_attempts')
     .is('closing_note', null)
+    .eq('closing_note_is_blank', false)
     .not('appointment_number', 'is', null)
     .gte('started_at', cutoff)
     .order('closing_note_attempts', { ascending: true })
@@ -86,7 +97,7 @@ async function getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState
 // but skips the actual Supabase update entirely -- lets closing-notes-
 // sync.mjs's --dry-run flag keep working now that it shares this function
 // instead of having its own separate write logic.
-async function recordAttempt(supabase, appointmentNumber, currentAttempts, note, dryRun) {
+async function recordAttempt(supabase, appointmentNumber, currentAttempts, note, dryRun, isBlank = false) {
   const update = {
     closing_note_attempts: currentAttempts + 1,
     closing_note_last_attempted_at: new Date().toISOString(),
@@ -94,6 +105,9 @@ async function recordAttempt(supabase, appointmentNumber, currentAttempts, note,
   if (note) {
     update.closing_note = note;
     update.closing_note_captured_at = new Date().toISOString();
+  }
+  if (isBlank) {
+    update.closing_note_is_blank = true;
   }
   if (dryRun) {
     console.log(`[closing-notes] (dry run -- not written) ${appointmentNumber}:`, JSON.stringify(update));
@@ -226,11 +240,15 @@ async function runClosingNotesPass(page, supabase, options = {}) {
             // way to tell the two apart at all. Recorded as an attempt
             // (so it gets deprioritized like anything else unsuccessful)
             // but closing_note stays null -- there's genuinely nothing to
-            // store, and if the tech's record is ever amended later, a
-            // future attempt would pick it up then.
-            console.log(`[closing-notes] ${saNumber}: record found, but Appointment Note is blank (attempt ${attempts + 1}).`);
+            // store. Now also marked closing_note_is_blank=true, so
+            // getSaNumbersNeedingNotes excludes it going forward entirely
+            // rather than just deprioritizing it -- no reason to keep
+            // re-checking a page we've confirmed is empty. (If a
+            // technician's record is ever amended after the fact, this
+            // flag can be cleared manually for that one record.)
+            console.log(`[closing-notes] ${saNumber}: record found, but Appointment Note is blank (attempt ${attempts + 1}) -- marking as confirmed blank, won't retry.`);
             summary.blank++;
-            await recordAttempt(supabase, saNumber, attempts, null, dryRun);
+            await recordAttempt(supabase, saNumber, attempts, null, dryRun, true);
           } else {
             await recordAttempt(supabase, saNumber, attempts, note, dryRun);
             console.log(`[closing-notes] ${saNumber}: captured (${note.length} chars)${dryRun ? ' [dry run]' : ''}.`);
