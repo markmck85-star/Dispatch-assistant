@@ -686,37 +686,37 @@ export default async (req, context) => {
       }
     }
 
-    await recordSuccess({
-      totalRows: mapped.length,
-      inserted: totalInserted,
-      skippedExisting: totalSkipped,
-      needsReview: totalNeedsReview,
-      rowErrorCount: allRowErrors.length,
-      insertedSamples: allInsertedSamples,
-    });
-
-    if (allRowErrors.length) {
-      await sendAlert(
-        `Salesforce report sync: ${allRowErrors.length} row(s) failed`,
-        `Sync succeeded overall (${totalInserted} imported, ${totalSkipped} already on file), but ${allRowErrors.length} row(s) failed individually:\n\n` +
-          allRowErrors.slice(0, 20).map(e => `${e.appointmentNumber} -- ${e.accountName}: ${e.reason}`).join('\n')
-      );
-    }
-
-    console.log(`[salesforce-report-sync] Success: ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need review, ${allRowErrors.length} row errors.`);
-
     // Closing-notes extraction pass (added 2026-09-11) -- reuses this same
     // login session, runs AFTER the report import above has already
-    // succeeded, and is wrapped so a failure here can never affect that
-    // already-recorded success. Off by default via settings.closingNotesEnabled
-    // until proven reliable over several real cycles.
+    // succeeded but BEFORE recordSuccess() below, so its results can ride
+    // along in the same status payload the frontend already polls. Wrapped
+    // so a failure here can never affect the already-computed import
+    // numbers. Off by default via settings.closingNotesEnabled until
+    // proven reliable over several real cycles.
+    // 2026-09-11 (later same day): raised daysBack 3->7 after Mark's first
+    // live run showed ~27s/record in practice (not the ~5-8s originally
+    // guessed).
+    // 2026-09-11 (later still): the per-cycle limit now scales with how
+    // much genuinely new report-import work there was, instead of a fixed
+    // number -- Mark's observation was that service calls are almost
+    // always completed during business hours, but rather than hardcode a
+    // clock window (which would be wrong for SOME state given MCR spans
+    // multiple time zones, e.g. GA vs OR), react to the sync's own signal
+    // instead: low/zero totalInserted this cycle is a reliable, self-
+    // adjusting proxy for a quiet period (night, weekend, holiday) for
+    // whichever states are actually quiet right now, with no timezone
+    // logic needed at all. Busy cycles stay conservative (30, ~13.5 min
+    // worst case); quiet cycles ramp up to use the idle time productively
+    // and work through the backlog faster.
+    let notesSummary = null;
     try {
       const settingsStore = getStore('dispatch');
       const settings = (await settingsStore.get('settings/global', { type: 'json' })) || {};
       if (settings.closingNotesEnabled === true) {
         await setStage('Capturing closing notes');
-        const notesSummary = await runClosingNotesPass(page, supabase, { daysBack: 3, limit: 15 });
-        console.log(`[closing-notes] Pass complete: ${notesSummary.succeeded} succeeded, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted).`);
+        const notesLimit = totalInserted === 0 ? 60 : (totalInserted < 5 ? 45 : 30);
+        notesSummary = await runClosingNotesPass(page, supabase, { daysBack: 7, limit: notesLimit });
+        console.log(`[closing-notes] Pass complete (limit=${notesLimit}, based on totalInserted=${totalInserted}): ${notesSummary.succeeded} succeeded, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted).`);
         if (notesSummary.failed > 0) {
           await sendAlert(
             `Closing-notes pass: ${notesSummary.failed} failure(s)`,
@@ -728,8 +728,29 @@ export default async (req, context) => {
         console.log('[closing-notes] Skipped -- closingNotesEnabled is not true in settings.');
       }
     } catch (notesErr) {
-      console.error('[closing-notes] Pass threw unexpectedly (import above is unaffected):', notesErr);
+      console.error('[closing-notes] Pass threw unexpectedly (import numbers above are unaffected):', notesErr);
+      notesSummary = { attempted: 0, succeeded: 0, notFound: 0, failed: 0, errors: [{ saNumber: null, error: notesErr.message }] };
     }
+
+    await recordSuccess({
+      totalRows: mapped.length,
+      inserted: totalInserted,
+      skippedExisting: totalSkipped,
+      needsReview: totalNeedsReview,
+      rowErrorCount: allRowErrors.length,
+      insertedSamples: allInsertedSamples,
+      closingNotes: notesSummary, // null when the toggle is off, an object when it ran
+    });
+
+    if (allRowErrors.length) {
+      await sendAlert(
+        `Salesforce report sync: ${allRowErrors.length} row(s) failed`,
+        `Sync succeeded overall (${totalInserted} imported, ${totalSkipped} already on file), but ${allRowErrors.length} row(s) failed individually:\n\n` +
+          allRowErrors.slice(0, 20).map(e => `${e.appointmentNumber} -- ${e.accountName}: ${e.reason}`).join('\n')
+      );
+    }
+
+    console.log(`[salesforce-report-sync] Success: ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need review, ${allRowErrors.length} row errors.`);
 
     await browser.close();
     browser = null;
