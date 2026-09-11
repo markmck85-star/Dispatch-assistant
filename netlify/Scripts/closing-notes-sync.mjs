@@ -28,7 +28,7 @@
 import { chromium } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
-import closingNotesPkg from './lib/closing-notes.js';
+import closingNotesPkg from '../functions/lib/closing-notes.js';
 const { runClosingNotesPass } = closingNotesPkg;
 
 const REPORT_URL = 'https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru';
