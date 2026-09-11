@@ -728,7 +728,7 @@ export default async (req, context) => {
           await setStage('Capturing closing notes');
           console.log(`[closing-notes] Starting with ${Math.round(remainingMs / 1000)}s remaining in this run's time budget${priorityState ? `, prioritizing state=${priorityState}` : ''}.`);
           notesSummary = await runClosingNotesPass(page, supabase, { daysBack: 7, limit: 100, deadlineAt, priorityState });
-          console.log(`[closing-notes] Pass complete: ${notesSummary.succeeded} succeeded, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted${notesSummary.stoppedByDeadline ? ', stopped early by time budget' : ''}).`);
+          console.log(`[closing-notes] Pass complete: ${notesSummary.succeeded} succeeded, ${notesSummary.blank} blank note, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted${notesSummary.stoppedByDeadline ? ', stopped early by time budget' : ''}).`);
         }
         if (notesSummary && notesSummary.failed > 0) {
           await sendAlert(
