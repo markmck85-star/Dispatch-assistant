@@ -17,18 +17,39 @@
 
 const LIST_VIEW_URL = 'https://iti4dmv.my.site.com/dispatchconsole/s/recordlist/ServiceAppointment/00BVN000003AbUV2A0?ServiceAppointment-filterId=Completed';
 
-async function getSaNumbersNeedingNotes(supabase, daysBack, limit) {
+async function getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState) {
   const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase
+
+  const baseQuery = () => supabase
     .from('site_visits')
     .select('appointment_number')
     .is('closing_note', null)
     .not('appointment_number', 'is', null)
     .gte('started_at', cutoff)
-    .order('started_at', { ascending: false })
-    .limit(limit);
-  if (error) throw new Error('Query for SA numbers needing notes failed: ' + error.message);
-  return (data || []).map((r) => r.appointment_number);
+    .order('started_at', { ascending: false });
+
+  if (!priorityState) {
+    const { data, error } = await baseQuery().limit(limit);
+    if (error) throw new Error('Query for SA numbers needing notes failed: ' + error.message);
+    return (data || []).map((r) => r.appointment_number);
+  }
+
+  // A manual Refresh Now triggered from a specific state's panel: that
+  // state's own backlog goes first, then remaining capacity (if any) fills
+  // in with everything else -- so the normal multi-state catch-up still
+  // happens too, just after the state someone specifically asked about.
+  const { data: priorityData, error: priorityErr } = await baseQuery().eq('state', priorityState).limit(limit);
+  if (priorityErr) throw new Error('Priority-state query for SA numbers needing notes failed: ' + priorityErr.message);
+  const priorityNumbers = (priorityData || []).map((r) => r.appointment_number);
+
+  const remaining = limit - priorityNumbers.length;
+  if (remaining <= 0) return priorityNumbers;
+
+  const { data: restData, error: restErr } = await baseQuery().neq('state', priorityState).limit(remaining);
+  if (restErr) throw new Error('Fallback query for SA numbers needing notes failed: ' + restErr.message);
+  const restNumbers = (restData || []).map((r) => r.appointment_number);
+
+  return priorityNumbers.concat(restNumbers);
 }
 
 async function writeNoteBack(supabase, appointmentNumber, note) {
@@ -81,26 +102,42 @@ async function extractAppointmentNote(page) {
  *   currently on/near the report page.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {object} options
- * @param {number} [options.daysBack=3] - only look at recent visits, since
- *   the 20-min cycle's job is staying current, not backfilling. Kept small
- *   deliberately -- each run should mostly be catching up on the handful
- *   of tickets closed since the last cycle, not re-scanning weeks of data
- *   every 20 minutes.
- * @param {number} [options.limit=15] - cap per run, so one slow/stuck
- *   extraction pass can't meaningfully delay the next report-sync cycle.
- * @returns {Promise<{attempted:number, succeeded:number, notFound:number, failed:number, errors:Array}>}
+ * @param {number} [options.daysBack=7] - only look at recent visits, since
+ *   the 20-min cycle's job is staying current, not backfilling.
+ * @param {number} [options.limit=100] - how many candidate rows to query
+ *   for -- deliberately generous now that TIME (deadlineAt), not record
+ *   count, is the real safety mechanism (see deadlineAt below). This just
+ *   needs to be large enough that there's always a full backlog available
+ *   to fill whatever time budget remains, whether that's 2 minutes or 12.
+ * @param {number} [options.deadlineAt] - absolute Date.now()-style
+ *   timestamp (ms) after which the loop stops starting new records, no
+ *   matter how many are left. REQUIRED in practice -- the caller computes
+ *   this from its own real elapsed time so far, since Netlify Background
+ *   Functions have a hard 15-minute execution ceiling and a fixed record
+ *   count can't safely account for how much of that the report-download
+ *   step already used (which varies run to run, sometimes needing several
+ *   reload attempts). Defaults to 10 minutes from now if not passed, as a
+ *   fallback -- but the caller should always pass a real deadline based on
+ *   its own actual start time.
+ * @param {string} [options.priorityState] - 2-letter state code (e.g. "GA").
+ *   When set, that state's own backlog is queried and processed first,
+ *   ahead of everything else, before falling back to normal multi-state
+ *   catch-up for any remaining capacity. Used when a manual Refresh Now is
+ *   triggered from a specific state's panel.
+ * @returns {Promise<{attempted:number, succeeded:number, notFound:number, failed:number, stoppedByDeadline:boolean, errors:Array}>}
  */
 async function runClosingNotesPass(page, supabase, options = {}) {
-  const daysBack = options.daysBack ?? 3;
-  const limit = options.limit ?? 15;
-  const summary = { attempted: 0, succeeded: 0, notFound: 0, failed: 0, errors: [] };
+  const daysBack = options.daysBack ?? 7;
+  const limit = options.limit ?? 100;
+  const deadlineAt = options.deadlineAt ?? (Date.now() + 10 * 60 * 1000);
+  const priorityState = options.priorityState || null;
+  const summary = { attempted: 0, succeeded: 0, notFound: 0, failed: 0, stoppedByDeadline: false, errors: [] };
 
   try {
-    const targets = await getSaNumbersNeedingNotes(supabase, daysBack, limit);
-    summary.attempted = targets.length;
+    const targets = await getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState);
     if (!targets.length) return summary;
 
-    console.log(`[closing-notes] ${targets.length} record(s) to process this cycle.`);
+    console.log(`[closing-notes] ${targets.length} candidate record(s) found, ${Math.round((deadlineAt - Date.now()) / 1000)}s time budget.`);
 
     await page.goto(LIST_VIEW_URL, { waitUntil: 'domcontentloaded' }).catch((err) => {
       console.log('[closing-notes] Navigation to list view threw (often benign):', err.message);
@@ -110,6 +147,18 @@ async function runClosingNotesPass(page, supabase, options = {}) {
     let ctx = await getListViewContext(page);
 
     for (const saNumber of targets) {
+      // Check the deadline BEFORE starting each record, not just once at
+      // the top -- a record that's already in flight is allowed to finish
+      // (it's already this far, and stopping mid-extraction wouldn't save
+      // meaningful time), but no NEW record starts once the deadline has
+      // passed. This is the real safety mechanism, not the query limit.
+      if (Date.now() >= deadlineAt) {
+        console.log(`[closing-notes] Stopping early -- time budget exhausted (${summary.attempted}/${targets.length} attempted).`);
+        summary.stoppedByDeadline = true;
+        break;
+      }
+
+      summary.attempted++;
       try {
         const found = await findAndOpenBySaNumber(ctx, page, saNumber);
         if (!found) {
@@ -133,9 +182,6 @@ async function runClosingNotesPass(page, supabase, options = {}) {
       ctx = await getListViewContext(page);
     }
   } catch (err) {
-    // Outer catch: something failed before even getting into the per-record
-    // loop (e.g. the query itself, or the initial navigation). Still return
-    // a summary rather than throwing, per this module's contract.
     console.log('[closing-notes] Pass failed before processing any records:', err.message);
     summary.errors.push({ saNumber: null, error: err.message });
   }
