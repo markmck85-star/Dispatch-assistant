@@ -350,6 +350,7 @@
                 <a href="shipments.html" class="shipments-link" style="display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📦 RMA Shipments</a>
                 <a href="location-lookup.html" class="location-lookup-link" style="display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🔍 Location Lookup</a>
                 <a id="stateConsoleLink" href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
+                <a href="closing-email-reconstructor.html" class="closing-email-link" style="display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉️ Closing Email Reconstructor</a>
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
@@ -2859,6 +2860,28 @@ function distanceMatrixStatus(state) {
                         pastedItem.ticketDueToday = ticketDueToday;
                         pastedItem.ticketLineItems = existing.ticket.lineItems || [];
                         pastedItem.ticketNeedsReview = existing.ticket.needsReview || false;
+                        // 2026-09-10 fix: isSameDay (used ONLY to split the
+                        // board into the "Today"/"Tomorrow" section headers
+                        // further down) was never set for ticket-linked
+                        // stops at all -- only the separate restockBy pass
+                        // below sets it, and that pass only touches items
+                        // with parsedFormCounts (i.e. came from a pasted
+                        // restock list). A ticket-only stop with nothing
+                        // pasted for it (any auto-added trouble/maintenance
+                        // ticket, and now install/site_survey placeholders
+                        // too) fell into the Tomorrow section regardless of
+                        // its real date -- confirmed live: today's Mundy
+                        // Mill install (due today, correctly showing the
+                        // ⚡ SAME DAY badge) rendered under the "TOMORROW"
+                        // header, since nothing had ever set isSameDay=true
+                        // for it. ticketDueToday is already the exact
+                        // right answer (computed a few lines up from the
+                        // ticket's own real SLA/due date vs. the board
+                        // date) -- just wasn't being fed into isSameDay.
+                        // `||` so a value already set true by something else
+                        // (there isn't one at this point, but cheap safety)
+                        // is never downgraded back to false.
+                        pastedItem.isSameDay = pastedItem.isSameDay || ticketDueToday;
                         return;
                     }
                     if (!LOCATIONS[code]) {
@@ -2875,6 +2898,9 @@ function distanceMatrixStatus(state) {
                         ticketDueToday: ticketDueToday,
                         ticketLineItems: existing.ticket.lineItems || [],
                         ticketNeedsReview: existing.ticket.needsReview || false,
+                        // See the 2026-09-10 comment on the pastedItem branch
+                        // above -- same fix, fresh-item case.
+                        isSameDay: ticketDueToday,
                     });
                 } else if (existing.status === 'planned' && !existing.ticket) {
                     // 2026-08-23: the ticket-linked branch above already solved
