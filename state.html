@@ -1310,7 +1310,7 @@ async function pollSyncStatus() {
         })();
         if (s.closingNotes) {
           const cn = s.closingNotes;
-          notesStatusEl.textContent = `📝 Closing notes: ${cn.succeeded} captured, ${cn.notFound} not found, ${cn.failed} failed (of ${cn.attempted} attempted this run)${cn.stoppedByDeadline ? ' -- stopped early, time budget used up (more remain for next cycle)' : ''}.`;
+          notesStatusEl.textContent = `📝 Closing notes: ${cn.succeeded} captured, ${cn.blank || 0} blank, ${cn.notFound} not found, ${cn.failed} failed (of ${cn.attempted} attempted this run)${cn.stoppedByDeadline ? ' -- stopped early, time budget used up (more remain for next cycle)' : ''}.`;
           notesStatusEl.style.color = cn.failed ? '#e0a030' : '#7bc796';
           notesStatusEl.style.display = '';
         } else {
