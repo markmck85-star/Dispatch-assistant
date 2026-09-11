@@ -90,6 +90,20 @@
             <div class="results-dropdown" id="resultsDropdown"></div>
         </div>
     </div>
+    <div class="filters" id="dateFilters">
+        <label>Date:</label>
+        <input type="date" id="dateSingle">
+        <button type="button" id="useRangeBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Use a range instead</button>
+        <span id="rangeInputs" style="display:none;gap:10px;align-items:center;">
+            <label>From:</label>
+            <input type="date" id="dateFrom">
+            <label>To:</label>
+            <input type="date" id="dateTo">
+        </span>
+        <button type="button" id="clearDateBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear date filter</button>
+        <label>Technician:</label>
+        <select id="techFilter"><option value="">All technicians</option></select>
+    </div>
 
     <div id="output"></div>
     <div id="emailCard"></div>
@@ -104,6 +118,61 @@ const searchInput = document.getElementById('searchInput');
 const resultsDropdown = document.getElementById('resultsDropdown');
 const output = document.getElementById('output');
 const emailCard = document.getElementById('emailCard');
+const dateSingle = document.getElementById('dateSingle');
+const dateFrom = document.getElementById('dateFrom');
+const dateTo = document.getElementById('dateTo');
+const rangeInputs = document.getElementById('rangeInputs');
+const useRangeBtn = document.getElementById('useRangeBtn');
+const clearDateBtn = document.getElementById('clearDateBtn');
+const techFilter = document.getElementById('techFilter');
+let useRange = false;
+
+useRangeBtn.addEventListener('click', () => {
+    useRange = !useRange;
+    rangeInputs.style.display = useRange ? 'flex' : 'none';
+    dateSingle.style.display = useRange ? 'none' : '';
+    useRangeBtn.textContent = useRange ? 'Use a single day instead' : 'Use a range instead';
+    runSearch();
+});
+clearDateBtn.addEventListener('click', () => {
+    dateSingle.value = ''; dateFrom.value = ''; dateTo.value = '';
+    runSearch();
+});
+dateSingle.addEventListener('change', runSearch);
+dateFrom.addEventListener('change', runSearch);
+dateTo.addEventListener('change', runSearch);
+techFilter.addEventListener('change', runSearch);
+
+async function loadTechsForState(state) {
+    techFilter.innerHTML = '<option value="">All technicians</option>';
+    if (!state) return;
+    try {
+        const res = await fetch(`/.netlify/functions/get-state-techs?state=${encodeURIComponent(state)}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        for (const t of (data.techs || [])) {
+            const opt = document.createElement('option');
+            opt.value = t; opt.textContent = t;
+            techFilter.appendChild(opt);
+        }
+    } catch (err) {
+        // Non-fatal -- feed still works with "All technicians" if this fails.
+    }
+}
+
+function currentDateFilter() {
+    if (useRange) return { from: dateFrom.value || null, to: dateTo.value || null };
+    return { date: dateSingle.value || null };
+}
+function dateFilterQueryString() {
+    const f = currentDateFilter();
+    const parts = [];
+    if (f.date) parts.push('date=' + encodeURIComponent(f.date));
+    if (f.from) parts.push('from=' + encodeURIComponent(f.from));
+    if (f.to) parts.push('to=' + encodeURIComponent(f.to));
+    if (techFilter.value) parts.push('tech=' + encodeURIComponent(techFilter.value));
+    return parts.length ? '&' + parts.join('&') : '';
+}
 
 function escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -132,7 +201,16 @@ loadSites();
 function runSearch() {
     const q = searchInput.value.trim().toLowerCase();
     const st = stateFilter.value;
-    if (!q) { resultsDropdown.classList.remove('open'); resultsDropdown.innerHTML = ''; return; }
+    if (!q) {
+        resultsDropdown.classList.remove('open'); resultsDropdown.innerHTML = '';
+        emailCard.innerHTML = '';
+        if (st) {
+            loadStateFeed(st, 0);
+        } else {
+            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to browse recent visits, or search above.</div>`;
+        }
+        return;
+    }
     filteredResults = allSites.filter(s =>
         (!st || s.state === st) &&
         ((s.name || '').toLowerCase().includes(q) || (s.site_code || '').toLowerCase().includes(q))
@@ -151,10 +229,66 @@ function runSearch() {
     });
 }
 searchInput.addEventListener('input', runSearch);
-stateFilter.addEventListener('change', runSearch);
+stateFilter.addEventListener('change', async () => {
+    await loadTechsForState(stateFilter.value);
+    runSearch();
+});
 document.addEventListener('click', (e) => {
     if (!e.target.closest('.search-wrap')) resultsDropdown.classList.remove('open');
 });
+
+let feedState = null; // { state, visits, hasMore, total }
+
+async function loadStateFeed(state, offset) {
+    if (offset === 0) output.innerHTML = '<div class="loading">Loading recent visits…</div>';
+    try {
+        const res = await fetch(`/.netlify/functions/get-recent-visits?state=${encodeURIComponent(state)}&offset=${offset}${dateFilterQueryString()}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        if (offset === 0) {
+            feedState = { state, visits: data.visits, hasMore: data.hasMore, total: data.total };
+        } else {
+            feedState.visits = feedState.visits.concat(data.visits);
+            feedState.hasMore = data.hasMore;
+        }
+        renderStateFeed();
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading visits: ${err.message}</div>`;
+    }
+}
+
+async function loadMoreStateFeed() {
+    const btn = document.getElementById('loadMoreFeedBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    await loadStateFeed(feedState.state, feedState.visits.length);
+}
+
+function renderStateFeed() {
+    if (!feedState.visits.length) {
+        output.innerHTML = `<div class="empty-state">No visits found for ${escapeHtml(feedState.state)}${dateFilterQueryString() ? ' in that date range' : ''}.</div>`;
+        return;
+    }
+    let html = `<div class="card"><h3 class="section-label">Recent Visits — ${escapeHtml(feedState.state)}${feedState.total != null ? ` (${feedState.total} total)` : ''}</h3>`;
+    html += feedState.visits.map((v, i) => {
+        const dateSource = v.started_at || v.ended_at;
+        const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const hasNote = !!v.closing_note;
+        return `<div class="visit-row${hasNote ? '' : ' no-note'}" ${hasNote ? `onclick="generateEmailFromFeed(${i})"` : ''}>
+            <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')} · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span>
+            ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
+            <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+        </div>`;
+    }).join('');
+    if (feedState.hasMore) {
+        html += `<button id="loadMoreFeedBtn" style="width:100%;margin-top:10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;" onclick="loadMoreStateFeed()">Load 50 more${feedState.total != null ? ` (${feedState.total - feedState.visits.length} remaining)` : ''}</button>`;
+    }
+    html += `</div>`;
+    output.innerHTML = html;
+}
+
+function generateEmailFromFeed(i) {
+    generateEmailFromVisit(feedState.visits[i], feedState.visits[i].site_name || '');
+}
 
 async function selectSite(site) {
     searchInput.value = site.name;
@@ -209,12 +343,15 @@ function fmtTime(iso) {
 // Mark's call, rather than shown blank -- only fields we actually have
 // data for appear in the reconstructed email.
 function generateEmail(i) {
-    const v = siteVisits[i];
+    generateEmailFromVisit(siteVisits[i], searchInput.value);
+}
+
+function generateEmailFromVisit(v, locationLabel) {
     const subject = `ITI Technician Service Response - Ticket #${v.wo_number || '?'} from ${v.tech_name_raw || 'Unknown'} (TW)`;
     const lines = [
         `Service Call Date: ${fmtDate(v.started_at)}`,
         `Technician: ${v.tech_name_raw || ''}`,
-        `Location: ${searchInput.value}`,
+        `Location: ${locationLabel}`,
         `Ticket Number: ${v.wo_number || ''}`,
         `Call Type: ${v.remediation || ''}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}`,
         `Status: CLOSED`,

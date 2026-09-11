@@ -78,6 +78,20 @@
             <div class="results-dropdown" id="resultsDropdown"></div>
         </div>
     </div>
+    <div class="filters" id="dateFilters">
+        <label>Date:</label>
+        <input type="date" id="dateSingle">
+        <button type="button" id="useRangeBtn" class="toggle-btn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Use a range instead</button>
+        <span id="rangeInputs" style="display:none;gap:10px;align-items:center;">
+            <label>From:</label>
+            <input type="date" id="dateFrom">
+            <label>To:</label>
+            <input type="date" id="dateTo">
+        </span>
+        <button type="button" id="clearDateBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear date filter</button>
+        <label>Technician:</label>
+        <select id="techFilter"><option value="">All technicians</option></select>
+    </div>
 
     <div id="output"></div>
 
@@ -90,6 +104,60 @@ const stateFilter = document.getElementById('stateFilter');
 const searchInput = document.getElementById('searchInput');
 const resultsDropdown = document.getElementById('resultsDropdown');
 const output = document.getElementById('output');
+const dateSingle = document.getElementById('dateSingle');
+const dateFrom = document.getElementById('dateFrom');
+const dateTo = document.getElementById('dateTo');
+const rangeInputs = document.getElementById('rangeInputs');
+const useRangeBtn = document.getElementById('useRangeBtn');
+const clearDateBtn = document.getElementById('clearDateBtn');
+const techFilter = document.getElementById('techFilter');
+let useRange = false;
+let techListState = ''; // which state's tech list is currently loaded, to avoid re-fetching needlessly
+
+useRangeBtn.addEventListener('click', () => {
+    useRange = !useRange;
+    rangeInputs.style.display = useRange ? 'flex' : 'none';
+    dateSingle.style.display = useRange ? 'none' : '';
+    useRangeBtn.textContent = useRange ? 'Use a single day instead' : 'Use a range instead';
+    runSearch();
+});
+clearDateBtn.addEventListener('click', () => {
+    dateSingle.value = '';
+    dateFrom.value = '';
+    dateTo.value = '';
+    runSearch();
+});
+dateSingle.addEventListener('change', runSearch);
+dateFrom.addEventListener('change', runSearch);
+dateTo.addEventListener('change', runSearch);
+techFilter.addEventListener('change', runSearch);
+
+async function loadTechsForState(state) {
+    techFilter.innerHTML = '<option value="">All technicians</option>';
+    if (!state) { techListState = ''; return; }
+    try {
+        const res = await fetch(`/.netlify/functions/get-state-techs?state=${encodeURIComponent(state)}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        for (const t of (data.techs || [])) {
+            const opt = document.createElement('option');
+            opt.value = t; opt.textContent = t;
+            techFilter.appendChild(opt);
+        }
+        techListState = state;
+    } catch (err) {
+        // Non-fatal -- the feed itself still works with "All technicians"
+        // if this fails, so just leave the dropdown at its default.
+        techListState = '';
+    }
+}
+
+function currentDateFilter() {
+    if (useRange) {
+        return { from: dateFrom.value || null, to: dateTo.value || null };
+    }
+    return { date: dateSingle.value || null };
+}
 
 async function loadSites() {
     output.innerHTML = '<div class="loading">Loading site list…</div>';
@@ -121,33 +189,19 @@ function runSearch() {
     const st = stateFilter.value;
     activeIndex = -1;
     if (!q) {
-        // 2026-08-24: previously cleared the dropdown any time the search
-        // box was empty, even right after picking a state -- so selecting
-        // "GA" alone did nothing until you also typed something. Now an
-        // empty box with a specific state selected browses that state's
-        // full site list instead. Left "All states" + empty box as a
-        // prompt rather than listing every site across every state
-        // unprompted (500+ sites, not really "browsable" at that size).
-        if (st) {
-            filteredResults = allSites
-                .filter(s => s.state === st)
-                .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-            if (!filteredResults.length) {
-                resultsDropdown.innerHTML = '<div class="result-row muted">No sites for this state</div>';
-                resultsDropdown.classList.add('open');
-                return;
-            }
-            resultsDropdown.innerHTML = filteredResults.map((s, i) =>
-                `<div class="result-row" data-i="${i}"><span class="state-tag">${escapeHtml(s.state)}</span><span class="code">${escapeHtml(s.site_code || '')}</span>${escapeHtml(s.name)}</div>`
-            ).join('');
-            resultsDropdown.classList.add('open');
-            resultsDropdown.querySelectorAll('.result-row[data-i]').forEach(row => {
-                row.addEventListener('click', () => selectSite(filteredResults[+row.dataset.i]));
-            });
-            return;
-        }
+        // 2026-09-12: previously an empty box with a state picked just
+        // listed that state's sites alphabetically in the dropdown -- Mark
+        // wanted to browse recent VISITS (newest first) directly instead,
+        // to spot which ones have captured closing notes without knowing
+        // which site to search for first. Now renders into the main output
+        // area (a real list, not the small dropdown) via get-recent-visits.
         resultsDropdown.classList.remove('open');
         resultsDropdown.innerHTML = '';
+        if (st) {
+            loadStateFeed(st, 0);
+        } else {
+            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to browse recent visits, or start typing a name/code above.</div>`;
+        }
         return;
     }
     filteredResults = allSites.filter(s => {
@@ -171,7 +225,10 @@ function runSearch() {
 
 searchInput.addEventListener('input', runSearch);
 searchInput.addEventListener('focus', runSearch);
-stateFilter.addEventListener('change', runSearch);
+stateFilter.addEventListener('change', async () => {
+    await loadTechsForState(stateFilter.value);
+    runSearch();
+});
 
 searchInput.addEventListener('keydown', (e) => {
     const rows = resultsDropdown.querySelectorAll('.result-row[data-i]');
@@ -199,6 +256,77 @@ document.addEventListener('click', (e) => {
 });
 
 let historyState = null; // { code, visits, hasMore, totalVisits, shipments }
+let feedState = null; // { state, visits, hasMore, total }
+
+function dateFilterQueryString() {
+    const f = currentDateFilter();
+    const parts = [];
+    if (f.date) parts.push('date=' + encodeURIComponent(f.date));
+    if (f.from) parts.push('from=' + encodeURIComponent(f.from));
+    if (f.to) parts.push('to=' + encodeURIComponent(f.to));
+    if (techFilter.value) parts.push('tech=' + encodeURIComponent(techFilter.value));
+    return parts.length ? '&' + parts.join('&') : '';
+}
+
+async function loadStateFeed(state, offset) {
+    if (offset === 0) output.innerHTML = '<div class="loading">Loading recent visits…</div>';
+    try {
+        const res = await fetch(`/.netlify/functions/get-recent-visits?state=${encodeURIComponent(state)}&offset=${offset}${dateFilterQueryString()}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        if (offset === 0) {
+            feedState = { state, visits: data.visits, hasMore: data.hasMore, total: data.total };
+        } else {
+            feedState.visits = feedState.visits.concat(data.visits);
+            feedState.hasMore = data.hasMore;
+        }
+        renderStateFeed();
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading visits: ${err.message}</div>`;
+    }
+}
+
+async function loadMoreStateFeed() {
+    const btn = document.getElementById('loadMoreFeedBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    await loadStateFeed(feedState.state, feedState.visits.length);
+}
+
+function renderStateFeed() {
+    if (!feedState.visits.length) {
+        output.innerHTML = `<div class="empty-state">No visits found for ${escapeHtml(feedState.state)}${dateFilterQueryString() ? ' in that date range' : ''}.</div>`;
+        return;
+    }
+    let html = `<div class="card"><h3 class="section-label">Recent Visits — ${escapeHtml(feedState.state)}${feedState.total != null ? ` (${feedState.total} total)` : ''}</h3>`;
+    html += feedState.visits.map(v => {
+        const dateSource = v.started_at || v.ended_at;
+        const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
+        const kindClass = isRestockLike ? 'kind-restock' : 'kind-service';
+        const kindLabel = isRestockLike ? 'Restock' : (v.remediation || 'Service');
+        const hasNote = !!v.closing_note;
+        return `<div class="visit-row" style="cursor:pointer;" onclick='feedSelectSite(${JSON.stringify(v.site_code)}, ${JSON.stringify(v.site_name)})'>
+            <div><strong>${date}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span> · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span></div>
+            <div class="muted">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}</div>
+            ${v.appointment_number ? `<div class="mono">${escapeHtml(v.appointment_number)}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>` : ''}
+            <span class="note-badge ${hasNote ? 'yes' : 'no'}" style="display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;margin-top:4px;${hasNote ? 'color:#7edb8e;background:#16321f;' : 'color:#7a7f87;background:#24272d;'}">${hasNote ? 'Note captured' : 'No note yet'}</span>
+        </div>`;
+    }).join('');
+    if (feedState.hasMore) {
+        html += `<button id="loadMoreFeedBtn" class="toggle-btn" style="width:100%;margin-top:10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;" onclick="loadMoreStateFeed()">Load 50 more${feedState.total != null ? ` (${feedState.total - feedState.visits.length} remaining)` : ''}</button>`;
+    }
+    html += `</div>`;
+    output.innerHTML = html;
+}
+
+// Tapping a visit row in the state-wide feed drills into that site's full
+// history, reusing the existing site-search selectSite() flow -- keeps one
+// history-rendering code path instead of building a second one.
+function feedSelectSite(siteCode, siteName) {
+    if (!siteCode) return;
+    const site = allSites.find(s => s.site_code === siteCode) || { site_code: siteCode, name: siteName, state: feedState.state };
+    selectSite(site);
+}
 
 async function selectSite(site) {
     if (!site || !site.site_code) return;
