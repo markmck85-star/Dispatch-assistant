@@ -154,6 +154,7 @@ async function recordSuccess(summary) {
 }
 
 export default async (req, context) => {
+  const functionStartTime = Date.now(); // real wall-clock anchor for the closing-notes deadline below -- Netlify Background Functions have a hard 15-minute execution ceiling regardless of the 20-min trigger interval
   const store = getSyncStore();
 
   // ── Auto-sync enable/disable check (2026-08-08) ──────────────────────────
@@ -163,9 +164,11 @@ export default async (req, context) => {
   // known-broken Playwright flow. Manual "Refresh Now" from the State Console
   // always proceeds (the UI sends ?force=1).
   let forceRun = false;
+  let priorityState = null; // 2-letter state code, e.g. "GA" -- when set (from a manual Refresh Now triggered on a specific state's panel), the closing-notes pass prioritizes that state's own records first, ahead of whatever's otherwise oldest in the queue. The report DOWNLOAD itself still always covers every state -- this only affects note-extraction ordering.
   try {
     const url = new URL(req.url || '', 'http://localhost');
     forceRun = url.searchParams.get('force') === '1';
+    priorityState = url.searchParams.get('state') || null;
   } catch (_) { /* ignore */ }
 
   if (!forceRun) {
@@ -693,31 +696,41 @@ export default async (req, context) => {
     // so a failure here can never affect the already-computed import
     // numbers. Off by default via settings.closingNotesEnabled until
     // proven reliable over several real cycles.
-    // 2026-09-11 (later same day): raised daysBack 3->7 after Mark's first
-    // live run showed ~27s/record in practice (not the ~5-8s originally
-    // guessed).
-    // 2026-09-11 (later still): the per-cycle limit now scales with how
-    // much genuinely new report-import work there was, instead of a fixed
-    // number -- Mark's observation was that service calls are almost
-    // always completed during business hours, but rather than hardcode a
-    // clock window (which would be wrong for SOME state given MCR spans
-    // multiple time zones, e.g. GA vs OR), react to the sync's own signal
-    // instead: low/zero totalInserted this cycle is a reliable, self-
-    // adjusting proxy for a quiet period (night, weekend, holiday) for
-    // whichever states are actually quiet right now, with no timezone
-    // logic needed at all. Busy cycles stay conservative (30, ~13.5 min
-    // worst case); quiet cycles ramp up to use the idle time productively
-    // and work through the backlog faster.
+    // 2026-09-11 (corrected, same day): the earlier version of this
+    // (limit: 30, then a tiered 30/45/60 based on totalInserted) sized
+    // itself against a 20-MINUTE budget -- but that's just how often the
+    // TRIGGER pings this function; per this file's own header comment,
+    // Background Functions have a hard 15-MINUTE execution ceiling no
+    // matter what. At the real observed ~27s/record rate, the 60-record
+    // tier could reach ~27 minutes, nearly double the actual limit --
+    // caught live when a real run's "Capturing closing notes" stage was
+    // still going at 448s+ with no end in sight. Fixed by switching from a
+    // guessed-safe RECORD COUNT to a real TIME BUDGET: track actual
+    // elapsed time since this function started (which already includes
+    // whatever the report-download step took, however long THAT happened
+    // to be this run), and pass a real deadline into runClosingNotesPass,
+    // which now checks it before starting each new record rather than
+    // just capping how many it queries for. Target ceiling here is 12
+    // minutes total elapsed (leaving a 3-min buffer before the real 15-min
+    // kill for import/cleanup/etc.); skip the pass entirely if that budget
+    // is already gone by the time we get here.
     let notesSummary = null;
     try {
       const settingsStore = getStore('dispatch');
       const settings = (await settingsStore.get('settings/global', { type: 'json' })) || {};
       if (settings.closingNotesEnabled === true) {
-        await setStage('Capturing closing notes');
-        const notesLimit = totalInserted === 0 ? 60 : (totalInserted < 5 ? 45 : 30);
-        notesSummary = await runClosingNotesPass(page, supabase, { daysBack: 7, limit: notesLimit });
-        console.log(`[closing-notes] Pass complete (limit=${notesLimit}, based on totalInserted=${totalInserted}): ${notesSummary.succeeded} succeeded, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted).`);
-        if (notesSummary.failed > 0) {
+        const TARGET_TOTAL_ELAPSED_MS = 12 * 60 * 1000;
+        const deadlineAt = functionStartTime + TARGET_TOTAL_ELAPSED_MS;
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs < 30 * 1000) {
+          console.log(`[closing-notes] Skipped -- only ${Math.round(remainingMs / 1000)}s left in the time budget after the report download/import took the rest.`);
+        } else {
+          await setStage('Capturing closing notes');
+          console.log(`[closing-notes] Starting with ${Math.round(remainingMs / 1000)}s remaining in this run's time budget${priorityState ? `, prioritizing state=${priorityState}` : ''}.`);
+          notesSummary = await runClosingNotesPass(page, supabase, { daysBack: 7, limit: 100, deadlineAt, priorityState });
+          console.log(`[closing-notes] Pass complete: ${notesSummary.succeeded} succeeded, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted${notesSummary.stoppedByDeadline ? ', stopped early by time budget' : ''}).`);
+        }
+        if (notesSummary && notesSummary.failed > 0) {
           await sendAlert(
             `Closing-notes pass: ${notesSummary.failed} failure(s)`,
             `Closing-notes extraction hit ${notesSummary.failed} failure(s) out of ${notesSummary.attempted}:\n\n` +
