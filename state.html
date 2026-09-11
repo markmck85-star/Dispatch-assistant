@@ -1318,6 +1318,25 @@ async function pollSyncStatus() {
         setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%'; }, 1500);
         statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
         statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
+        // 2026-09-11: closing-notes results, when the feature is on, ride
+        // along in the same lastSuccess payload -- shown as a second line
+        // so it's visible without needing to check server logs/Supabase
+        // directly. null (not an object) means the toggle was off this run.
+        const notesStatusEl = document.getElementById('closingNotesRunStatus') || (() => {
+          const el = document.createElement('div');
+          el.id = 'closingNotesRunStatus';
+          el.style.cssText = 'font-size:12px;margin-top:4px;';
+          statusEl.insertAdjacentElement('afterend', el);
+          return el;
+        })();
+        if (s.closingNotes) {
+          const cn = s.closingNotes;
+          notesStatusEl.textContent = `📝 Closing notes: ${cn.succeeded} captured, ${cn.notFound} not found, ${cn.failed} failed (of ${cn.attempted} attempted this run).`;
+          notesStatusEl.style.color = cn.failed ? '#e0a030' : '#7bc796';
+          notesStatusEl.style.display = '';
+        } else {
+          notesStatusEl.style.display = 'none';
+        }
         // List of what was actually imported this run, so a dispatcher
         // watching for a specific ticket can confirm it landed right here
         // instead of scrolling to hunt for it in the list above -- also
