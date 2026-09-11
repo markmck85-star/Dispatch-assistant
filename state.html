@@ -1224,12 +1224,22 @@ async function triggerManualSync() {
   try {
     // Fire-and-forget -- the -background suffix means Netlify acknowledges
     // this immediately and keeps the actual work running server-side even
-    // after this fetch resolves. force=1 tells the background function to
-    // ignore the auto-sync-disabled setting -- WITHOUT this, Refresh Now
-    // silently ran the exact same "check toggle, exit if disabled" logic as
-    // the scheduled run, which is why it looked broken whenever the toggle
-    // was off (found 2026-08-18).
-    fetch('/.netlify/functions/salesforce-report-sync-background?force=1', { method: 'POST' }).catch(() => {});
+    // after this fetch resolves.
+    // force=1 tells the background function to ignore the auto-sync-disabled
+    // setting -- WITHOUT this, Refresh Now silently ran the exact same
+    // "check toggle, exit if disabled" logic as the scheduled run, which is
+    // why it looked broken whenever the toggle was off (found 2026-08-18).
+    // state=<code> (added 2026-09-11) tells the closing-notes pass
+    // specifically to prioritize this state's own records first -- the
+    // report DOWNLOAD itself still always covers every state (it's one
+    // shared report, can't be scoped), but a manual refresh triggered from
+    // a specific state's panel is presumably because someone wants THAT
+    // state's data current right now, so it makes sense for the slower
+    // closing-notes step to focus there rather than working through
+    // whichever state happens to be oldest in the queue.
+    const selectedState = document.getElementById('stateSel')?.value || '';
+    const stateParam = selectedState ? `&state=${encodeURIComponent(selectedState)}` : '';
+    fetch(`/.netlify/functions/salesforce-report-sync-background?force=1${stateParam}`, { method: 'POST' }).catch(() => {});
   } catch (err) {
     // Even if the initial fetch itself fails to fire, still start polling --
     // the scheduled run might pick it up, and polling will just show idle.
@@ -1331,7 +1341,7 @@ async function pollSyncStatus() {
         })();
         if (s.closingNotes) {
           const cn = s.closingNotes;
-          notesStatusEl.textContent = `📝 Closing notes: ${cn.succeeded} captured, ${cn.notFound} not found, ${cn.failed} failed (of ${cn.attempted} attempted this run).`;
+          notesStatusEl.textContent = `📝 Closing notes: ${cn.succeeded} captured, ${cn.notFound} not found, ${cn.failed} failed (of ${cn.attempted} attempted this run)${cn.stoppedByDeadline ? ' -- stopped early, time budget used up (more remain for next cycle)' : ''}.`;
           notesStatusEl.style.color = cn.failed ? '#e0a030' : '#7bc796';
           notesStatusEl.style.display = '';
         } else {
