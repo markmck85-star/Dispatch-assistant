@@ -30,7 +30,7 @@ exports.handler = async (event) => {
 
   const { data: visits, error: visitsErr, count: totalVisits } = await supabase
     .from('site_visits')
-    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, appointment_number, needs_review, ticket_id', { count: 'exact' })
+    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, appointment_number, needs_review, ticket_id, closing_note', { count: 'exact' })
     .eq('site_id', site.id)
     .order('started_at', { ascending: false, nullsFirst: false })
     .range(offset, offset + PAGE_SIZE - 1);
