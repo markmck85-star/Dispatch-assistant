@@ -73,6 +73,8 @@ import * as XLSX from 'xlsx';
 import fs from 'fs';
 import perfImportPkg from './lib/perform-import.js';
 const { performImport } = perfImportPkg;
+import closingNotesPkg from './lib/closing-notes.js';
+const { runClosingNotesPass } = closingNotesPkg;
 
 const REPORT_URL = process.env.SALESFORCE_REPORT_URL
   || 'https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru';
@@ -607,9 +609,6 @@ export default async (req, context) => {
       return fs.readFileSync(tmpPath);
     })();
 
-    await browser.close();
-    browser = null;
-
     const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
     const ws = wb.Sheets[wb.SheetNames[0]];
     let rows = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
@@ -705,6 +704,35 @@ export default async (req, context) => {
     }
 
     console.log(`[salesforce-report-sync] Success: ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need review, ${allRowErrors.length} row errors.`);
+
+    // Closing-notes extraction pass (added 2026-09-11) -- reuses this same
+    // login session, runs AFTER the report import above has already
+    // succeeded, and is wrapped so a failure here can never affect that
+    // already-recorded success. Off by default via settings.closingNotesEnabled
+    // until proven reliable over several real cycles.
+    try {
+      const settingsStore = getStore('dispatch');
+      const settings = (await settingsStore.get('settings/global', { type: 'json' })) || {};
+      if (settings.closingNotesEnabled === true) {
+        await setStage('Capturing closing notes');
+        const notesSummary = await runClosingNotesPass(page, supabase, { daysBack: 3, limit: 15 });
+        console.log(`[closing-notes] Pass complete: ${notesSummary.succeeded} succeeded, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted).`);
+        if (notesSummary.failed > 0) {
+          await sendAlert(
+            `Closing-notes pass: ${notesSummary.failed} failure(s)`,
+            `Closing-notes extraction hit ${notesSummary.failed} failure(s) out of ${notesSummary.attempted}:\n\n` +
+              notesSummary.errors.slice(0, 10).map(e => `${e.saNumber || '(pass-level)'}: ${e.error}`).join('\n')
+          );
+        }
+      } else {
+        console.log('[closing-notes] Skipped -- closingNotesEnabled is not true in settings.');
+      }
+    } catch (notesErr) {
+      console.error('[closing-notes] Pass threw unexpectedly (import above is unaffected):', notesErr);
+    }
+
+    await browser.close();
+    browser = null;
   } catch (err) {
     console.error('[salesforce-report-sync] Unhandled error:', err);
     await recordFailure('Unhandled error: ' + err.message, page);
