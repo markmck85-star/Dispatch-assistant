@@ -14,6 +14,7 @@
 
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
+const crypto = require("crypto");
 const { addressesLooselyMatch, findSiteByAddress } = require("./lib/address-match");
 const {
   createPlaceholderSite,
@@ -1987,6 +1988,82 @@ exports.handler = async (event) => {
     // else legitimately needed this slot.
     if (dispatchType === 'restock') {
       await store.setJSON('inbound/latest-dispatch', { ...payload, inboundKey });
+    }
+
+    // 2026-09-12: revived per Mark's ask -- notify recipients (same
+    // settings/NOTIFICATIONS list the trouble-ticket alerts already use)
+    // when a new dispatch list comes in, so someone still in the field
+    // knows to check the app for same-day additions before heading home,
+    // rather than finding out the next morning. Reuses the trouble-ticket
+    // path's state-coverage and active-hours filtering below (a recipient
+    // covering GA should hear about a list touching GA/NC/SC, same
+    // bundling rule), but deliberately does NOT queue an outside-hours
+    // recipient for a later digest the way trouble tickets do -- "check
+    // before you're already home" has no useful meaning once that
+    // recipient's window reopens the next day, so a missed window here is
+    // just skipped, not caught up later.
+    //
+    // Dedup by content hash, not just dispatchType: Mark re-forwarded the
+    // same list three times in one morning while testing (stale cached
+    // codes, then testing the fix itself) -- without this, every resend
+    // would re-alert every recipient with nothing new to report, exactly
+    // the "no new information in a resend" problem already solved for
+    // install/site_survey tickets above. A genuinely revised list (new
+    // body content) always still alerts.
+    if (dispatchType === 'restock' && states.length > 0) {
+      try {
+        const bodyHash = crypto.createHash('sha256').update(effectiveBody).digest('hex');
+        const lastHash = await store.get('dispatch-list/last-notified-hash', { type: 'text' });
+        if (bodyHash === lastHash) {
+          console.log('[mailgun-inbound] Dispatch-list SMS skipped: identical content already notified (re-forward/resend).');
+        } else {
+          const GA_BUNDLED_STATES = ['NC', 'SC'];
+          const recipientCoversAnyState = (recipientStates, listStates) => {
+            if (recipientStates.includes('ALL')) return true;
+            return listStates.some(s =>
+              recipientStates.includes(s) || (GA_BUNDLED_STATES.includes(s) && recipientStates.includes('GA'))
+            );
+          };
+
+          let dlRecipients = [];
+          const notifData = await store.get('settings/NOTIFICATIONS', { type: 'json' });
+          if (notifData) {
+            const recs = (notifData.settings && notifData.settings.recipients) || notifData.recipients || [];
+            for (const r of recs) {
+              if (r.enabled === false) continue;
+              if (r.states && r.states.length > 0 && !recipientCoversAnyState(r.states, states)) continue;
+              if (r.hoursStart && r.hoursEnd) {
+                const tz = r.timezone || 'America/New_York';
+                const now = new Date();
+                const localStr = now.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+                const [h, m] = localStr.split(':').map(Number);
+                const nowMins = h * 60 + m;
+                const [startH, startM] = r.hoursStart.split(':').map(Number);
+                const [endH, endM] = r.hoursEnd.split(':').map(Number);
+                const startMins = startH * 60 + startM;
+                let endMins = endH * 60 + endM;
+                if (endMins === 0) endMins = 24 * 60;
+                const inWindow = startMins <= endMins
+                  ? (nowMins >= startMins && nowMins <= endMins)
+                  : (nowMins >= startMins || nowMins <= endMins);
+                if (!inWindow) continue;
+              }
+              dlRecipients.push(r.address);
+            }
+          }
+
+          const dateLabel = receivedAt.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+          const dlBody = `MCR Dispatch: New dispatch list for ${dateLabel} received and processed — check the app for today's dispatches. https://mcrdispatch.net`;
+          console.log(`[mailgun-inbound] Dispatch-list SMS recipients: ${dlRecipients.length}`);
+          for (const addr of dlRecipients) {
+            const ok = await sendSms(addr.trim(), dlBody, 'MCR Dispatch');
+            console.log(`[mailgun-inbound] Dispatch-list SMS to ${addr.trim()}: ${ok ? 'sent' : 'failed'}`);
+          }
+          await store.set('dispatch-list/last-notified-hash', bodyHash);
+        }
+      } catch (dlSmsEx) {
+        console.error('[mailgun-inbound] Dispatch-list SMS error (non-fatal):', dlSmsEx.message);
+      }
     }
 
     // Send SMS for trouble tickets
