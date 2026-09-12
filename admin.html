@@ -1712,7 +1712,7 @@
                         const addrParts = (loc.address || '').split(',');
                         const city = addrParts.length >= 2 ? addrParts[addrParts.length - 2].trim().replace(/\s+[A-Z]{2}\s*$/, '').trim() : '';
                         const county = (loc.name || '').split(' ')[0] || '';
-                        const sstName = (loc.state || state) + ' - ' + (loc.name || code) + ' - ' + code;
+                        const sstName = (loc.state || state) + ' - ' + (loc.name || code);
 
                         rows.push([
                             code,
