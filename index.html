@@ -2726,6 +2726,35 @@ function distanceMatrixStatus(state) {
             const dateStr = dateInput && dateInput.value ? dateInput.value : '';
             syncTroubleOnlyDefault(dateStr); // auto-on for Saturdays unless manually overridden this session
 
+            // 2026-09-12: a plain restock/maintenance item (no ticket) has no
+            // business being dispatched on a Saturday at all -- Neumo never
+            // issues restock work orders for Saturday, regardless of whether
+            // the state has Saturday on-call coverage (that coverage is for
+            // trouble tickets only). Found live: Friday's leftover pasted
+            // codes were still sitting in this box when Generate Dispatches
+            // ran against a Saturday date, silently creating phantom restock
+            // stops (GA1029/GA1071/GA1009, no real ticket behind any of them)
+            // that then kept resurfacing fallback-assignment prompts for
+            // techs who correctly weren't on-call that day. Filtered here,
+            // before any persistence or fallback logic ever sees them, using
+            // each item's own effective date (restockBy if present, else the
+            // selected Dispatch Date) so an item explicitly dated for Monday
+            // isn't wrongly caught just because today's board happens to be
+            // open on a Saturday.
+            const skippedSaturdayCodes = [];
+            relevant = relevant.filter(item => {
+                const itemDs = getItemEffectiveDateStr(item, dateStr);
+                const isSat = itemDs && new Date(itemDs + 'T12:00:00Z').getUTCDay() === 6;
+                if (isSat) {
+                    skippedSaturdayCodes.push(item.code);
+                    return false;
+                }
+                return true;
+            });
+            window.skippedSaturdayBannerHtml = skippedSaturdayCodes.length > 0
+                ? `<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;"><strong>⚠️ Skipped (Saturday, no ticket):</strong> ${skippedSaturdayCodes.join(', ')} — restocks aren't dispatched Saturdays; re-paste Monday</div>`
+                : '';
+
 
             // Phase 2 Stage 2b: respect already-persisted dispatcher decisions for
             // this date instead of re-running auto-assignment blind. Completed/
@@ -2933,6 +2962,17 @@ function distanceMatrixStatus(state) {
                     if (pastedByCode[code]) return;
                     if (!LOCATIONS[code]) {
                         console.warn(`[dispatch] Auto-added planned stop for ${code} skipped: not in LOCATIONS`);
+                        return;
+                    }
+                    // 2026-09-12: same Saturday guard as the fresh-parse filter
+                    // above, applied here too -- this branch resurfaces a
+                    // 'planned' row straight from Supabase regardless of what's
+                    // in the paste box, so a stray no-ticket Saturday row
+                    // (however it got created) would otherwise keep
+                    // resurrecting itself and re-triggering fallback prompts on
+                    // every reload even after the paste box itself is fixed.
+                    if (dateStr && new Date(dateStr + 'T12:00:00Z').getUTCDay() === 6) {
+                        console.warn(`[dispatch] Planned no-ticket stop for ${code} on a Saturday skipped: restocks aren't dispatched Saturdays.`);
                         return;
                     }
                     relevant.push({ code, fromSupabaseOnly: true });
@@ -3330,7 +3370,7 @@ function distanceMatrixStatus(state) {
                 </div>`;
             }
 
-            let html = (window.unknownCodesBannerHtml || '') + clusterBannerHtml + headerHtml;
+            let html = (window.unknownCodesBannerHtml || '') + (window.skippedSaturdayBannerHtml || '') + clusterBannerHtml + headerHtml;
 
             // Helper to render a tech card
             // Store route data globally so popover can access it
