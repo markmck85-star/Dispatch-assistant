@@ -1933,10 +1933,17 @@ ${mergeCellsXml}
 
             const DISPLAY_W_PX = 220, DISPLAY_H_PX = 137, EMU_PER_PX = 9525;
             const dispW = DISPLAY_W_PX * EMU_PER_PX, dispH = DISPLAY_H_PX * EMU_PER_PX;
+            // Center the logo across merged A1:D1.
+            // Excel Calibri-11 column px ≈ Truncate(((256*w + 18) / 256) * 7)
+            // A45 + B22 + C16 + D32 = 315+154+112+224 = 805px.
+            const headerWidthPx = 805;
+            const logoColOff = Math.round(((headerWidthPx - DISPLAY_W_PX) / 2) * EMU_PER_PX);
+            const rowHeightEmu = Math.round(105 * 12700); // row 1 ht="105" pt
+            const logoRowOff = Math.max(0, Math.round((rowHeightEmu - dispH) / 2));
             const drawingXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <xdr:oneCellAnchor>
-<xdr:from><xdr:col>0</xdr:col><xdr:colOff>19050</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>19050</xdr:rowOff></xdr:from>
+<xdr:from><xdr:col>0</xdr:col><xdr:colOff>${logoColOff}</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>${logoRowOff}</xdr:rowOff></xdr:from>
 <xdr:ext cx="${dispW}" cy="${dispH}"/>
 <xdr:pic>
 <xdr:nvPicPr><xdr:cNvPr id="2" name="MCR Logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>
