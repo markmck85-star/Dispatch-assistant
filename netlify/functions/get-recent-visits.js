@@ -59,7 +59,7 @@ exports.handler = async (event) => {
         { count: 'exact' }
       )
       .eq('state', state)
-      .order('started_at', { ascending: false })
+      .order('started_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
 
     if (params.date) {
