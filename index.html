@@ -1885,6 +1885,27 @@ function distanceMatrixStatus(state) {
             // Refresh availability panel after date is set so Saturday on-call logic fires correctly
             refreshAvailabilityPanel();
 
+        // 2026-09-12: while TJ's auto-forward from the mailbox is down and
+        // Mark is manually forwarding dispatch-list emails himself, the
+        // phone/email client prepends his own signature above the actual
+        // forwarded content -- purely cosmetic (parseFormCounts only looks
+        // for site-code patterns wherever they appear, so this never broke
+        // parsing), but clutters the box. Strips everything before the
+        // first genuine forwarded-header line ("Subject:", "From:", or
+        // "Date:" at the start of a line) -- alternation naturally finds
+        // whichever of the three occurs earliest, matching real forward
+        // formats regardless of header order. Leaves text alone if no such
+        // line is found (e.g. someone pastes bare codes with no email
+        // wrapper at all), so this never touches the common case.
+        function stripForwardedPreamble(text) {
+            if (!text) return text;
+            const match = text.match(/^\s*(Subject:|From:|Date:)/im);
+            if (!match || match.index === undefined) return text;
+            const before = text.slice(0, match.index);
+            if (before.trim().length === 0) return text; // already clean, nothing to strip
+            return text.slice(match.index).replace(/^\s+/, '');
+        }
+
         function autoDetectDispatchDate(text) {
             // Find all dates in MM/DD/YYYY format in the dispatch text
             const dateMatches = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g) || [];
@@ -1983,7 +2004,7 @@ function distanceMatrixStatus(state) {
             }
             if (effectiveText) {
                 const ta = document.getElementById('locationCodes');
-                if (ta) ta.value = effectiveText;
+                if (ta) ta.value = stripForwardedPreamble(effectiveText);
             }
             // 2026-08-27: this state restore (and the updateContext() that
             // applies it) used to sit at the very BOTTOM of window.onload,
@@ -2056,7 +2077,19 @@ function distanceMatrixStatus(state) {
                     autoDetectDispatchDate(this.value);
                 });
                 dispatchTextarea.addEventListener('paste', function() {
-                    setTimeout(() => autoDetectDispatchDate(this.value), 100);
+                    const self = this;
+                    setTimeout(() => {
+                        const cleaned = stripForwardedPreamble(self.value);
+                        if (cleaned !== self.value) {
+                            self.value = cleaned;
+                            // Programmatic value changes don't fire 'input',
+                            // so mirror what that handler does to keep
+                            // localStorage in sync with what's actually shown.
+                            localStorage.setItem('lastDispatchText', cleaned);
+                            localStorage.setItem('lastDispatchTextSavedAt', new Date().toISOString());
+                        }
+                        autoDetectDispatchDate(self.value);
+                    }, 100);
                 });
             }
 
@@ -3751,9 +3784,10 @@ function distanceMatrixStatus(state) {
                     localStorage.setItem('lastDispatchTextSavedAt', d.receivedAt || new Date().toISOString());
                 }).catch(() => {});
             if (ta) {
-                ta.value = body;
-                localStorage.setItem('lastDispatchText', body);
-                autoDetectDispatchDate(body);
+                const cleanedBody = stripForwardedPreamble(body);
+                ta.value = cleanedBody;
+                localStorage.setItem('lastDispatchText', cleanedBody);
+                autoDetectDispatchDate(cleanedBody);
                 dismissInboundBanner();
                 // Update loaded dispatch label
                 const statusEl = document.getElementById('dispatchListStatus');
