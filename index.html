@@ -1930,10 +1930,60 @@ function distanceMatrixStatus(state) {
             // auto-detection should only ever run off text the dispatcher
             // is actively pasting/typing right now -- see the input/paste
             // listeners below, which still call it correctly.
-            const savedText = localStorage.getItem('lastDispatchText');
-            if (savedText) {
+            // 2026-09-12: previously loaded whatever was in THIS device's
+            // localStorage unconditionally -- fine for the same dispatcher
+            // reloading their own browser, but a second device (e.g. Gina's
+            // tablet) with its own stale cached text from a prior day would
+            // show that old content until someone manually clicked the "new
+            // dispatch list" banner and re-ran Generate Dispatches. The
+            // Supabase-backed assignments themselves were always current
+            // (see the fromSupabaseOnly auto-surface fix below) -- it was
+            // specifically the raw pasted text (restock counts, restockBy
+            // dates) that stayed stuck on whatever this device last saw.
+            //
+            // Fix: check the server's actual latest inbound dispatch (the
+            // same /get-latest-dispatch endpoint the banner already polls)
+            // and prefer it over local cache whenever it's genuinely newer,
+            // compared by timestamp rather than a simple flag so a
+            // dispatcher's own manual paste (which has no associated inbound
+            // email at all) is never overwritten by an OLDER real email --
+            // manual pastes stamp their own "saved at" as the paste moment,
+            // so only a genuinely later-arriving email will ever supersede
+            // one. Fails open to the existing local-cache behavior if the
+            // fetch errors, times out, or finds nothing -- never worse than
+            // before this fix.
+            const savedTextAt = localStorage.getItem('lastDispatchTextSavedAt');
+            const localSavedAtMs = savedTextAt ? Date.parse(savedTextAt) : 0;
+            let effectiveText = savedText;
+            try {
+                const resp = await fetch('/.netlify/functions/get-latest-dispatch');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data && data.found && data.body && data.body.length >= 50 && data.dispatchType === 'restock') {
+                        const serverAtMs = data.receivedAt ? Date.parse(data.receivedAt) : 0;
+                        if (serverAtMs > localSavedAtMs) {
+                            effectiveText = data.body;
+                            localStorage.setItem('lastDispatchText', data.body);
+                            localStorage.setItem('lastDispatchTextSavedAt', data.receivedAt || new Date().toISOString());
+                            // Mark this dispatch as already seen so the banner
+                            // (checkForInboundDispatch, called via
+                            // startInboundPolling below) doesn't immediately
+                            // re-prompt for content we just silently loaded.
+                            const freshKey = data.inboundKey || data.receivedAt || data.body.substring(0, 50);
+                            if (freshKey) {
+                                _lastInboundKey = freshKey;
+                                localStorage.setItem('lastSeenInboundKey', freshKey);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Network/function error -- silently fall back to local cache,
+                // same as this device's behavior before this fix existed.
+            }
+            if (effectiveText) {
                 const ta = document.getElementById('locationCodes');
-                if (ta) ta.value = savedText;
+                if (ta) ta.value = effectiveText;
             }
             // 2026-08-27: this state restore (and the updateContext() that
             // applies it) used to sit at the very BOTTOM of window.onload,
@@ -1996,6 +2046,13 @@ function distanceMatrixStatus(state) {
             if (dispatchTextarea) {
                 dispatchTextarea.addEventListener('input', function() {
                     localStorage.setItem('lastDispatchText', this.value);
+                    // 2026-09-12: stamps this manual edit's own timestamp so
+                    // the page-load freshness check above (server vs. local
+                    // cache) correctly treats "I just typed/pasted this" as
+                    // more current than whatever real inbound email happens
+                    // to already be on file -- only a genuinely later-arriving
+                    // email should ever supersede a deliberate manual entry.
+                    localStorage.setItem('lastDispatchTextSavedAt', new Date().toISOString());
                     autoDetectDispatchDate(this.value);
                 });
                 dispatchTextarea.addEventListener('paste', function() {
@@ -3687,6 +3744,11 @@ function distanceMatrixStatus(state) {
                         _lastInboundKey = key;
                         localStorage.setItem('lastSeenInboundKey', key);
                     }
+                    // 2026-09-12: stamp with the email's own receivedAt (same
+                    // freshness marker the page-load check above compares
+                    // against) rather than "now" -- keeps this consistent
+                    // with the auto-load path for the same dispatch.
+                    localStorage.setItem('lastDispatchTextSavedAt', d.receivedAt || new Date().toISOString());
                 }).catch(() => {});
             if (ta) {
                 ta.value = body;
