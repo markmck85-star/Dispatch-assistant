@@ -363,7 +363,7 @@ function generateEmailFromVisit(v, locationLabel) {
     ];
     emailCard.innerHTML = `<div class="card">
         <h3 class="section-label">Create Closing email</h3>
-        <div class="meta">Editable before sending — this is a best-effort reconstruction from captured data, not the original Neumo email.</div>
+        <div class="meta">Editable before sending — Construction from captured data.</div>
         <input type="text" id="subjectOutput" value="${escapeHtml(subject)}">
         <textarea id="emailOutput">${escapeHtml(lines.join('\n'))}</textarea>
         <div>
