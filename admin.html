@@ -1969,7 +1969,11 @@ ${mergeCellsXml}
             dr.folder('_rels').file('drawing1.xml.rels', drawingRelsXml);
             xl.folder('media').file('image1.png', MCR_LOGO_BASE64, { base64: true });
 
-            return await zip.generateAsync({ type: 'blob' });
+            return await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    compression: 'DEFLATE'
+});
         }
 
         async function exportRosterPublic() {
