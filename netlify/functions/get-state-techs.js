@@ -6,6 +6,19 @@
 // Closing Email Reconstructor's state-wide recent-visits feed -- lets
 // someone pick a tech directly rather than typing/guessing a name, and
 // naturally only shows techs who've actually worked that state.
+//
+// 2026-09-12 (later): now excludes technicians explicitly marked
+// active=false in the `technicians` table (e.g. Robert Whitehead, no
+// longer with MCR but kept inactive rather than deleted so his historical
+// records stay attached). This only trims the DROPDOWN -- his past visits
+// and captured closing notes are untouched and still show up normally in
+// the feed itself; he just won't appear as a pickable filter option going
+// forward. Matched by name (case-insensitive) since site_visits only
+// stores the raw tech_name_raw string, not a reliable technician_id join
+// for every row. Deliberately subtractive rather than an inner join on
+// active=true -- a name that's NOT found in `technicians` at all (e.g. a
+// contractor never added there) stays in the list rather than being
+// silently dropped for the wrong reason.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -35,15 +48,28 @@ exports.handler = async (event) => {
     // pull tech_name_raw for the state (capped generously) and de-dupe in
     // JS -- fine at this scale (a few thousand rows per state at most) and
     // avoids needing a raw-SQL RPC just for this.
-    const { data, error } = await supabase
-      .from('site_visits')
-      .select('tech_name_raw')
-      .eq('state', state)
-      .not('tech_name_raw', 'is', null)
-      .limit(5000);
-    if (error) throw new Error(error.message);
+    const [visitsResult, inactiveResult] = await Promise.all([
+      supabase
+        .from('site_visits')
+        .select('tech_name_raw')
+        .eq('state', state)
+        .not('tech_name_raw', 'is', null)
+        .limit(5000),
+      supabase
+        .from('technicians')
+        .select('name')
+        .eq('active', false),
+    ]);
+    if (visitsResult.error) throw new Error(visitsResult.error.message);
+    if (inactiveResult.error) throw new Error(inactiveResult.error.message);
 
-    const techs = [...new Set((data || []).map((r) => r.tech_name_raw).filter(Boolean))].sort();
+    const inactiveNames = new Set(
+      (inactiveResult.data || []).map((r) => (r.name || '').toLowerCase())
+    );
+
+    const techs = [...new Set((visitsResult.data || []).map((r) => r.tech_name_raw).filter(Boolean))]
+      .filter((name) => !inactiveNames.has(name.toLowerCase()))
+      .sort();
 
     return { statusCode: 200, headers, body: JSON.stringify({ ok: true, techs }) };
   } catch (err) {
