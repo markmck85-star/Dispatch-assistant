@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.79 (blobs-150)</title>
+    <title>MCR Dispatch Hub v9.79 (blobs-151)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -246,7 +246,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-150</div>
+        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-151</div>
 
         <div class="desktop-layout">
             <div class="input-panel">
@@ -1973,6 +1973,7 @@ function distanceMatrixStatus(state) {
             // one. Fails open to the existing local-cache behavior if the
             // fetch errors, times out, or finds nothing -- never worse than
             // before this fix.
+            const savedText = localStorage.getItem('lastDispatchText');
             const savedTextAt = localStorage.getItem('lastDispatchTextSavedAt');
             const localSavedAtMs = savedTextAt ? Date.parse(savedTextAt) : 0;
             let effectiveText = savedText;
