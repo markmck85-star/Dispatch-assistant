@@ -55,7 +55,7 @@ exports.handler = async (event) => {
       .select(
         'id, site_id, account_name_raw, state, appointment_number, wo_number, started_at, ended_at, ' +
         'duration_min, tech_name_raw, remediation, remediation_detail, is_restock, needs_review, ' +
-        'closing_note, closing_note_captured_at, inbound_email_id, sites(name, site_code)',
+        'closing_note, closing_note_captured_at, sites(name, site_code)',
         { count: 'exact' }
       )
       .eq('state', state)
