@@ -363,7 +363,7 @@ function generateEmailFromVisit(v, locationLabel) {
     ];
     emailCard.innerHTML = `<div class="card">
         <h3 class="section-label">Create Closing email</h3>
-        <div class="meta">Editable before sending — Construction from captured data.</div>
+        <div class="meta">Editable before sending — Constructed from captured data.</div>
         <input type="text" id="subjectOutput" value="${escapeHtml(subject)}">
         <textarea id="emailOutput">${escapeHtml(lines.join('\n'))}</textarea>
         <div>
