@@ -276,6 +276,12 @@
                 <button class="big-btn" style="background:#17a2b8;" onclick="exportLocationsCSV()">📊 Export All States to Excel</button>
             </div>
             <div class="form-section" style="margin-top:15px;">
+                <h2>Export Company Roster (XLSX)</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Generates the roster straight from live technician data instead of TJ's hand-maintained copy, so it's always current. Two versions: one safe to circulate company-wide, one for updating home addresses for the distance matrix.</p>
+                <button class="big-btn" style="background:#17a2b8;" onclick="exportRosterPublic()">📋 Export Roster (no addresses)</button>
+                <button class="big-btn" style="background:#6c757d; margin-top:8px;" onclick="exportRosterWithAddresses()">🏠 Export Roster (with addresses)</button>
+            </div>
+            <div class="form-section" style="margin-top:15px;">
                 <h2>Restore from File</h2>
                 <p style="font-size:14px;color:#555;margin-bottom:10px;">Upload a backup JSON file. The file's state must match the selected state.</p>
                 <label for="restoreFile">Select Backup File:</label>
@@ -1750,6 +1756,110 @@
             a.click();
             URL.revokeObjectURL(url);
             showToast('Exported ' + wb.SheetNames.length + ' states to MCR_service_locations.xlsx', 'success');
+        }
+
+        // --- EXPORT COMPANY ROSTER (XLSX) ---
+        // 2026-09-12: built to replace TJ's hand-maintained roster, which
+        // lags behind real staffing changes (Mark has to email/call him to
+        // get new-hire details into it). Generates straight from live
+        // technician data instead. STATE_ORDER/STATE_BLURB below mirror
+        // TJ's existing section layout (state name + the equipment-type
+        // list he includes per state) -- these are static text, not stored
+        // anywhere in the DB, so they need a manual edit here if a state's
+        // covered equipment changes or a new state gets added. Everything
+        // else (name/title/phone/email) is pulled live.
+        const ROSTER_STATE_ORDER = ['OH','IN','AR','MS','GA','WV','MI','MN','NV','NC','SC','IL','OR','FL','CO'];
+        const ROSTER_STATE_BLURB = {
+            OH: 'Ohio, ITI, SST Small Kahuna, OTC POD MKIII',
+            IN: 'Indiana, ITI, SST,Big Kahuna, Small Kahuna, Big Hoku, Small Hoku, SSO',
+            AR: 'Arkansas, ITI, POD MKIII, Mailroom H class',
+            MS: 'Mississippi, ITI, OTC POD MKIII',
+            GA: 'Georgia, ITI, SST, Big Kahuna, Small Kahuna, Surfboard, Mailroom W class',
+            WV: 'West Virginia, ITI, SST, Small Kahuna',
+            MI: 'Michigan, ITI, SST, Big Kahuna, Small Kahuna, K2D Testing Stations',
+            MN: 'Minnesota, ITI, SST, Small kahuna',
+            NV: 'Nevada, ITI, SST, Small Kahuna, Big Kahuna, Hoku, OTC POD MKIII, K2D Testing Station',
+            NC: 'North Carolina, ITI, SST, Surfboard',
+            SC: 'South Carolina, ITI, SST, Small Kahuna',
+            IL: 'Illinois, ITI, SST, Big Kahuna, Small Kahuna',
+            OR: 'Oregon, ITI, SST, Big Kahuna, Small Kahuna',
+            FL: 'Florida, ITI, SST, Small Kahuna, Surfboard',
+            CO: 'Colorado, ITI, SST, Big Kahuna, Small Kahuna, HOKU, K2D testing stations',
+        };
+
+        async function fetchAllRosterTechs() {
+            const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+            const byState = {};
+            for (const state of ROSTER_STATE_ORDER) {
+                try {
+                    const res = await fetch('/.netlify/functions/get-technicians?state=' + state, { cache: 'no-store' });
+                    if (!res.ok) continue;
+                    const data = await res.json();
+                    // Only credit a tech to THIS state's section if it's really
+                    // their home_state -- get-technicians also returns techs
+                    // covering the state via additional_states (e.g. Evan Zent
+                    // under GA), which would otherwise duplicate them into
+                    // every state they help cover instead of just their own.
+                    byState[state] = Object.values(data || {}).filter(t => t.state === state);
+                } catch (e) {
+                    console.warn('Roster fetch failed for', state, e);
+                }
+            }
+            return { XLSX, byState };
+        }
+
+        async function exportRosterPublic() {
+            showToast('Building roster export...', 'info');
+            const { XLSX, byState } = await fetchAllRosterTechs();
+            const rows = [['Position', 'Name', 'Phone', 'Email']];
+            for (const state of ROSTER_STATE_ORDER) {
+                const techs = (byState[state] || [])
+                    .filter(t => t.active && !t.isContractor)
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                if (techs.length === 0) continue;
+                rows.push([ROSTER_STATE_BLURB[state] || state, '', '', '']);
+                techs.forEach(t => rows.push([t.title || 'Field Technician', t.name, t.phone || '', t.email || '']));
+            }
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            ws['!cols'] = [{wch:45},{wch:22},{wch:16},{wch:32}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Roster');
+            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([wbout], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'MCR_roster_' + new Date().toISOString().split('T')[0] + '.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Roster exported.', 'success');
+        }
+
+        async function exportRosterWithAddresses() {
+            showToast('Building roster export with addresses...', 'info');
+            const { XLSX, byState } = await fetchAllRosterTechs();
+            // Includes contractors and blank addresses on purpose here --
+            // this version is for Mark's own use spotting geocoding gaps,
+            // not for circulation, so completeness matters more than a
+            // clean read.
+            const rows = [['State', 'Name', 'Title', 'Home Address', 'Lat', 'Lng']];
+            for (const state of ROSTER_STATE_ORDER) {
+                const techs = (byState[state] || []).filter(t => t.active).sort((a, b) => a.name.localeCompare(b.name));
+                techs.forEach(t => rows.push([state, t.name, t.title || '', t.homeAddress || '', t.lat ?? '', t.lng ?? '']));
+            }
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            ws['!cols'] = [{wch:6},{wch:22},{wch:30},{wch:45},{wch:10},{wch:10}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Roster (addresses)');
+            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([wbout], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'MCR_roster_addresses_' + new Date().toISOString().split('T')[0] + '.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Roster (with addresses) exported.', 'success');
         }
 
         // --- BACKUP / RESTORE ---
