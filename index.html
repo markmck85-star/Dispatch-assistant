@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.79 (blobs-151)</title>
+    <title>MCR Dispatch Hub v9.79 (blobs-153)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -246,7 +246,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-151</div>
+        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-153</div>
 
         <div class="desktop-layout">
             <div class="input-panel">
@@ -1987,6 +1987,22 @@ function distanceMatrixStatus(state) {
                             effectiveText = data.body;
                             localStorage.setItem('lastDispatchText', data.body);
                             localStorage.setItem('lastDispatchTextSavedAt', data.receivedAt || new Date().toISOString());
+                            // 2026-09-12: surface that this happened -- silently
+                            // replacing the box's content with no visible sign
+                            // is confusing (a dispatcher has no way to tell
+                            // whether they're looking at something fresh or
+                            // just whatever happened to be cached). Reuses the
+                            // same status line/style the manual banner-click
+                            // path already shows, so it reads consistently
+                            // either way it got loaded.
+                            const statusEl = document.getElementById('dispatchListStatus');
+                            if (statusEl) {
+                                const receivedDate = data.receivedAt ? new Date(data.receivedAt) : new Date();
+                                const dateStr = receivedDate.toLocaleDateString('en-US', {weekday:'short', month:'numeric', day:'numeric', year:'numeric'});
+                                const timeStr = receivedDate.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+                                statusEl.textContent = `📋 New dispatch list auto-loaded (received ${dateStr} at ${timeStr})`;
+                                statusEl.style.color = '#4caf50';
+                            }
                             // Mark this dispatch as already seen so the banner
                             // (checkForInboundDispatch, called via
                             // startInboundPolling below) doesn't immediately
@@ -3130,8 +3146,8 @@ function distanceMatrixStatus(state) {
                     ? new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
                     : 'this date';
                 const emptyMessage = isSat
-                    ? `No trouble tickets for ${CURRENT_STATE} on ${dateLabel}. Restocks aren't dispatched on Saturdays — if you're expecting a restock list, try switching Dispatch Date to Monday.`
-                    : `No dispatches found for ${CURRENT_STATE} on ${dateLabel}. If you're expecting a restock list, check that it's been loaded (see the banner above) or confirm the Dispatch Date is set correctly.`;
+                    ? `No trouble tickets for ${CURRENT_STATE} on ${dateLabel}. For Friday's restock list, switch Dispatch Date to Monday.`
+                    : `No dispatches found for ${CURRENT_STATE} on ${dateLabel}. Check that a list has been loaded, or confirm the Dispatch Date.`;
                 resultsDiv.innerHTML = `<div class="error" style="color:red; padding:10px; border:1px solid red; border-radius:5px;">${emptyMessage}</div>`;
                 resultsDiv.classList.remove('hidden');
                 if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 400);
