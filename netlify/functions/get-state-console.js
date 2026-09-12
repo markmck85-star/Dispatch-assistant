@@ -31,57 +31,48 @@
 const { createClient } = require('@supabase/supabase-js');
 const { computeSlaDeadline } = require('./slaCalculator.js');
 
-// 2026-08-08: ported directly from index.html -- this GA on-call/comp-day
-// schedule lives ONLY as hardcoded client-side JS there, not in any
-// database table, which is why the state console could never show comp
-// days correctly no matter how the date/timezone handling was fixed.
-// Known tradeoff: this is now duplicated in two places rather than one
-// shared source -- if Mark extends the schedule in index.html, this copy
-// needs the same update or the two pages will disagree again. Worth
-// eventually moving into a real table both pages read from instead.
-const ONCALL_SCHEDULE_GA = {
-  '2026-05-02': ['Omari Williams',  'Robert Medley'],
-  '2026-05-09': ['Nyzier Moore',    'Sean Reich'],
-  '2026-05-16': ['Omari Williams',  'Robert Medley'],
-  '2026-05-23': ['Nyzier Moore',    'Sean Reich'],
-  '2026-05-30': ['Omari Williams',  'Robert Medley'],
-  '2026-06-06': ['Nyzier Moore',    'Sean Reich'],
-  '2026-06-13': ['Omari Williams',  'Robert Medley'],
-  '2026-06-20': ['Nyzier Moore',    'Sean Reich'],
-  '2026-06-27': ['Omari Williams',  'Robert Medley'],
-  '2026-07-04': ['Nyzier Moore',    'Sean Reich'],
-  '2026-07-11': ['Omari Williams',  'Robert Medley'],
-  '2026-07-18': ['Nyzier Moore',    'Sean Reich'],
-  '2026-07-25': ['Omari Williams',  'Robert Medley'],
-  '2026-08-01': ['Nyzier Moore',    'Sean Reich'],
-  '2026-08-08': ['Omari Williams',  'Robert Medley'],
-  '2026-08-15': ['Nyzier Moore',    'Sean Reich'],
-  '2026-08-22': ['Omari Williams',  'Robert Medley'],
-  '2026-08-29': ['Nyzier Moore',    'Sean Reich'],
-  '2026-09-05': ['Omari Williams',  'Robert Medley'],
-  '2026-09-12': ['Nyzier Moore',    'Sean Reich'],
-  '2026-09-19': ['Omari Williams',  'Robert Medley'],
-  '2026-09-26': ['Nyzier Moore',    'Sean Reich'],
-  '2026-10-03': ['Omari Williams',  'Robert Medley'],
-  '2026-10-10': ['Nyzier Moore',    'Sean Reich'],
-  '2026-10-17': ['Omari Williams',  'Robert Medley'],
-  '2026-10-24': ['Nyzier Moore',    'Sean Reich'],
-  '2026-10-31': ['Omari Williams',  'Robert Medley'],
-  '2026-11-07': ['Nyzier Moore',    'Sean Reich'],
-  '2026-11-14': ['Omari Williams',  'Robert Medley'],
-  '2026-11-21': ['Nyzier Moore',    'Sean Reich'],
-  '2026-11-28': ['Omari Williams',  'Robert Medley'],
-  '2026-12-05': ['Nyzier Moore',    'Sean Reich'],
-  '2026-12-12': ['Omari Williams',  'Robert Medley'],
-  '2026-12-19': ['Nyzier Moore',    'Sean Reich'],
-  '2026-12-26': ['Omari Williams',  'Robert Medley'],
-  '2027-01-02': ['Nyzier Moore',    'Sean Reich'],
-};
-const THURSDAY_COMP_TECHS = ['Robert Medley']; // takes Thu comp day before his on-call Sat; all other on-call techs take Mon.
+// 2026-09-12: ONCALL_SCHEDULE_GA (the old hardcoded object that used to
+// live here) was found stale -- it still listed "Nyzier Moore" for every
+// remaining Saturday through 2027-01-02 despite Randy Thomas replacing him
+// back in August, because this copy was never updated when the real
+// on_call_schedule Supabase table (used elsewhere in the app) changed.
+// Replaced with a live query against that table, generalized to work for
+// ANY state -- this is also what makes IN/MI/NV's on-call flags start
+// working the moment their rows exist in on_call_schedule, with no
+// per-state code changes needed here.
+const THURSDAY_COMP_TECHS = ['Robert Medley']; // GA-specific: takes Thu comp day before his on-call Sat; all other GA on-call techs take Mon.
 
-function getCompDaysForDate(dateStr) {
+// Fetches on_call_schedule rows for one state across [fromStr, toStr]
+// inclusive, grouped by day -> [technician names]. Returns { byDay, error }
+// rather than throwing, matching this file's existing style -- the handler
+// has no top-level try/catch, so a thrown error here would otherwise be an
+// unhandled rejection instead of the clean json(500, ...) every other query
+// in this file produces.
+async function getOnCallByDay(supabase, state, fromStr, toStr) {
+  const { data, error } = await supabase
+    .from('on_call_schedule')
+    .select('day, technicians!inner(name)')
+    .eq('state', state)
+    .gte('day', fromStr)
+    .lte('day', toStr);
+  if (error) return { byDay: null, error };
+  const byDay = {};
+  (data || []).forEach(row => {
+    const name = row.technicians && row.technicians.name;
+    if (!name) return;
+    if (!byDay[row.day]) byDay[row.day] = [];
+    byDay[row.day].push(name);
+  });
+  return { byDay, error: null };
+}
+
+// GA-only: comp days land on a weekday up to 5 days before the on-call
+// Saturday they compensate for (Thursday for Robert Medley specifically,
+// Monday for everyone else). onCallByDay only needs to cover the small
+// forward window that could produce a comp day landing on dateStr.
+function getCompDaysForDate(onCallByDay, dateStr) {
   const results = [];
-  Object.entries(ONCALL_SCHEDULE_GA).forEach(([satStr, techs]) => {
+  Object.entries(onCallByDay).forEach(([satStr, techs]) => {
     const satDate = new Date(satStr + 'T12:00:00Z');
     techs.forEach(tech => {
       const offset = THURSDAY_COMP_TECHS.includes(tech) ? -2 : -5; // Thu=Sat-2, Mon=Sat-5
@@ -136,11 +127,20 @@ exports.handler = async (event) => {
     ? requestedDate
     : new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // en-CA locale formats as YYYY-MM-DD
 
-  // Technicians in this state + availability for the requested/today's date
+  // Technicians in this state + availability for the requested/today's date.
+  // 2026-09-12 fixes: (1) added .eq('active', true) -- this query never
+  // filtered on it, which is why inactive techs (e.g. Nyzier Moore, Robert
+  // Whitehead) kept showing up on the availability panel indefinitely after
+  // being marked inactive in admin. (2) added the additional_states OR-match
+  // already used by get-technicians.js since 2026-08-23 -- this file was
+  // missed during that fix, so a tech whose real home_state differs from the
+  // region they're viewed under (e.g. Evan Zent/Michael Newboult on GA's
+  // combined GA/NC/SC console) was silently excluded here too.
   const { data: techs, error: techErr } = await supabase
     .from('technicians')
     .select('id, name')
-    .eq('home_state', state)
+    .or(`home_state.eq.${state},additional_states.cs.{${state}}`)
+    .eq('active', true)
     .order('name');
   if (techErr) return json(500, { ok: false, error: 'technicians fetch failed: ' + techErr.message });
 
@@ -157,43 +157,46 @@ exports.handler = async (event) => {
     for (const row of (avail || [])) unavailableToday[row.technician_id] = { reason: row.reason, note: row.note };
   }
 
-  // GA-only comp-day schedule (see ONCALL_SCHEDULE_GA above) -- only
-  // applied where a BlueFolder-synced reason isn't already present, same
-  // priority index.html itself uses.
+  // On-call/comp-day handling, now sourced from the live on_call_schedule
+  // table instead of the old hardcoded ONCALL_SCHEDULE_GA object (see fetch
+  // helpers above). Comp days land up to 5 days before an on-call Saturday,
+  // so pull a 6-day forward window from today to catch any Saturday whose
+  // comp day could fall on todayStr.
+  const windowEnd = new Date(todayStr + 'T12:00:00Z');
+  windowEnd.setUTCDate(windowEnd.getUTCDate() + 6);
+  const windowEndStr = windowEnd.toISOString().split('T')[0];
+  const { byDay: onCallByDay, error: onCallErr } = await getOnCallByDay(supabase, state, todayStr, windowEndStr);
+  if (onCallErr) return json(500, { ok: false, error: 'on_call_schedule fetch failed: ' + onCallErr.message });
+
+  // Comp days remain GA-only -- the Thursday/Monday comp-day arrangement is
+  // a GA-specific staffing decision, not confirmed to apply to IN/MI/NV.
   if (state === 'GA') {
-    const compDays = getCompDaysForDate(todayStr);
+    const compDays = getCompDaysForDate(onCallByDay, todayStr);
     const nameToId = {};
     (techs || []).forEach(t => { nameToId[t.name] = t.id; });
     compDays.forEach(c => {
       const id = nameToId[c.tech];
       if (id && !unavailableToday[id]) unavailableToday[id] = { reason: 'comp_day', note: c.reason };
     });
-
-    // Saturday-only-on-call rule (2026-08-23) -- this file only ever had
-    // the COMP DAY half of the on-call schedule (the weekday before a
-    // Saturday), never the Saturday itself. On an actual on-call Saturday,
-    // getCompDaysForDate() correctly returns nothing (a comp day always
-    // lands on a weekday, never the Saturday it's compensating for), so
-    // this state console was showing every technician as available with
-    // no code path that could ever mark the non-on-call ones out --
-    // meanwhile index.html has always correctly handled this via its own
-    // separate isSaturday/onCallTechs check. Mirrored here exactly: parse
-    // todayStr as a real Date rather than assume the caller only ever asks
-    // about a Saturday, since ?date= can request any day.
-    const requestedDow = new Date(todayStr + 'T12:00:00Z').getUTCDay();
-    if (requestedDow === 6 && ONCALL_SCHEDULE_GA[todayStr]) {
-      const onCallSet = new Set(ONCALL_SCHEDULE_GA[todayStr]);
-      (techs || []).forEach(t => {
-        if (!onCallSet.has(t.name) && !unavailableToday[t.id]) {
-          unavailableToday[t.id] = { reason: 'not_on_call', note: `Not on call Sat ${todayStr}` };
-        }
-      });
-    }
   }
 
-  const onCallToday = (state === 'GA' && new Date(todayStr + 'T12:00:00Z').getUTCDay() === 6 && ONCALL_SCHEDULE_GA[todayStr])
-    ? new Set(ONCALL_SCHEDULE_GA[todayStr])
-    : new Set();
+  // Saturday-only-on-call rule (2026-08-23, generalized 2026-09-12): on an
+  // actual on-call Saturday, mark every technician NOT on that day's
+  // on-call list as unavailable. Previously GA-only; now runs for any
+  // state, and simply no-ops when on_call_schedule has no rows for that
+  // state/day (e.g. a state with no Saturday coverage at all).
+  const requestedDow = new Date(todayStr + 'T12:00:00Z').getUTCDay();
+  const todaysOnCall = (requestedDow === 6 && onCallByDay[todayStr]) ? onCallByDay[todayStr] : [];
+  if (todaysOnCall.length) {
+    const onCallSet = new Set(todaysOnCall);
+    (techs || []).forEach(t => {
+      if (!onCallSet.has(t.name) && !unavailableToday[t.id]) {
+        unavailableToday[t.id] = { reason: 'not_on_call', note: `Not on call Sat ${todayStr}` };
+      }
+    });
+  }
+
+  const onCallToday = new Set(todaysOnCall);
 
   const technicians = (techs || []).map(t => ({
     id: t.id,
@@ -484,3 +487,4 @@ exports.handler = async (event) => {
 
   return json(200, { ok: true, state, date: todayStr, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
 };
+
