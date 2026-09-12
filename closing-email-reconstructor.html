@@ -362,17 +362,58 @@ function generateEmailFromVisit(v, locationLabel) {
         `End Time: ${fmtTime(v.ended_at)}`
     ];
     emailCard.innerHTML = `<div class="card">
-        <h3 class="section-label">Create Closing email</h3>
-        <div class="meta">Editable before sending — Constructed from captured data.</div>
+        <h3 class="section-label">Reconstructed Closing Email</h3>
+        <div class="meta">Editable before sending — this is a best-effort reconstruction from captured data, not the original Neumo email.</div>
         <input type="text" id="subjectOutput" value="${escapeHtml(subject)}">
         <textarea id="emailOutput">${escapeHtml(lines.join('\n'))}</textarea>
         <div>
             <button class="primary-btn" onclick="copyEmail()">📋 Copy Body</button>
             <button class="secondary-btn" onclick="copySubject()">Copy Subject</button>
         </div>
+        <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select id="closingEmailRecipient" style="padding:8px; border-radius:4px; background:#181818; color:#eee; border:1px solid #444;">
+                <option value="">-- Select recipient --</option>
+                <option value="gownby@mcrtechservice.com">Gina Ownbey</option>
+                <option value="mckelvey@mcrtechservice.com">Mark McKelvey</option>
+                <option value="ccaroen@mcrtechservice.com">Caleb Caroen</option>
+                <option value="jhaines@mcrtechservice.com">Justin Haines</option>
+                <option value="pgerhart@mcrtechservice.com">Rich Gerhart</option>
+                <option value="tkadri@mcrtechservice.com">TJ Kadri</option>
+            </select>
+            <button class="primary-btn" onclick="sendClosingEmail()">✉️ Send Email</button>
+        </div>
         <div id="copyStatus" class="muted" style="margin-top:8px;font-size:12px;"></div>
     </div>`;
     emailCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 2026-09-12: recipient list is a short, hand-maintained set of dispatchers
+// (per Mark) rather than pulled from the technicians table -- TJ isn't a
+// technician record at all (he's Director of Operations, not field/dispatch
+// staff), so a DB-driven list would need a separate lookup anyway for just
+// one extra name. Add a line here if another dispatcher needs to be
+// reachable from this dropdown.
+async function sendClosingEmail() {
+    const recipient = document.getElementById('closingEmailRecipient').value;
+    const statusEl = document.getElementById('copyStatus');
+    if (!recipient) {
+        statusEl.textContent = 'Pick a recipient first.';
+        return;
+    }
+    const subject = document.getElementById('subjectOutput').value;
+    const body = document.getElementById('emailOutput').value;
+    statusEl.textContent = 'Sending...';
+    try {
+        const resp = await fetch('/.netlify/functions/send-sms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: recipient, subject, body })
+        });
+        const data = await resp.json();
+        statusEl.textContent = (resp.ok && data.ok) ? `Sent to ${recipient}.` : 'Send failed — try Copy Body/Subject instead.';
+    } catch (e) {
+        statusEl.textContent = 'Send failed — try Copy Body/Subject instead.';
+    }
 }
 
 async function copyEmail() {
