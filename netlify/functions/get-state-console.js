@@ -485,6 +485,7 @@ exports.handler = async (event) => {
       const site = siteById[a.site_id];
       const status = bulkStatusMap[a.status] || 'open';
       return {
+        assignmentId: a.id,
         siteCode: site ? site.site_code : null,
         siteName: site ? site.name : '(unknown site)',
         county: extractCounty(site ? site.name : null),
