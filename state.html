@@ -171,6 +171,11 @@
       <input type="checkbox" id="hideClosedToggle" onchange="saveHideClosedPref()">
       🙈 Hide closed tickets
     </label>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:8px 10px;background:#1e1e1e;border-radius:6px;">
+      <span style="font-size:12px;color:#aaa;">Mark superseded restocks resolved, due on/before:</span>
+      <input type="date" id="bulkResolveCutoff" style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
+      <button type="button" onclick="bulkResolveSuperseded()" style="padding:5px 10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;font-size:12px;cursor:pointer;">Mark resolved</button>
+    </div>
     <div id="ticketList"></div>
 
     <h2 class="section-label">📋 Update Closed-Ticket Data</h2>
@@ -588,6 +593,7 @@ async function loadConsole(state, isRetry) {
       // closed-ticket report, not necessarily true-to-the-minute).
       const showTroubleOnly = document.getElementById('troubleOnlyToggle') && document.getElementById('troubleOnlyToggle').checked;
       const hideClosed = document.getElementById('hideClosedToggle') && document.getElementById('hideClosedToggle').checked;
+      window._lastRecentTickets = data.recentTickets;
       // 2026-08-25: 'cancelled' (a locally-removed bulk-list stop) hides
       // alongside 'closed' under this same toggle -- a dispatcher hiding
       // resolved items wants both kinds of "nothing left to do here" out
@@ -658,7 +664,8 @@ async function loadConsole(state, isRetry) {
             + (t.manuallyResolvedNote ? `<div class="meta" style="color:#777;font-size:12px;">${escapeHtml(t.manuallyResolvedNote)}</div>` : '')
             + ` <button onclick="undoResolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0;color:#888;text-decoration:underline;cursor:pointer;font-size:12px;">undo</button>`
           : `<span style="color:#e0a030;font-weight:600;">● Open${isBulk ? ' (on board)' : ' (per last import)'}</span>`
-            + (t.woNumber ? ` <button onclick="resolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '');
+            + (t.woNumber ? ` <button onclick="resolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '')
+            + (isBulk && t.assignmentId ? ` <button onclick="resolveAssignment('${t.assignmentId}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '');
         const kindTag = t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
@@ -1213,6 +1220,67 @@ async function undoResolveTicket(woNumber) {
   } catch (e) {
     alert('Could not undo: ' + e.message);
   }
+}
+
+// Bulk-list restock stops (no ticket_id, so no WO number to key off of --
+// see mark-assignment-resolved.js) go straight to assignments.status =
+// 'completed', same as the board's own Done button. No note prompt (the
+// assignments table doesn't have anywhere to put one, unlike tickets).
+async function resolveAssignment(assignmentId) {
+  if (!confirm('Mark this restock resolved?')) return;
+  try {
+    const res = await fetch('/.netlify/functions/mark-assignment-resolved', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignmentId }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    loadConsole(document.getElementById('stateSel').value);
+  } catch (e) {
+    alert('Could not mark resolved: ' + e.message);
+  }
+}
+
+// "Mark all superseded as resolved" (2026-09-13) -- for the recurring case
+// where several days' worth of bulk-list restocks never got clicked Done
+// on the board even though the real-world work almost certainly happened
+// (a newer ticket for the same site already exists). Deliberately date-
+// scoped rather than "resolve everything flagged as superseded": Mark's
+// own point is that a stop genuinely pushed to a later day (e.g. Gina
+// pushing one to Saturday) should NOT get swept in just because it's also
+// old. Shows the exact list before touching anything, since the "due"
+// date shown here doesn't always reflect a push that happened separately
+// on the board -- this is a real judgment call, not something to
+// auto-apply silently.
+async function bulkResolveSuperseded() {
+  const cutoff = document.getElementById('bulkResolveCutoff').value;
+  if (!cutoff) { alert('Pick a cutoff date first.'); return; }
+  const candidates = (window._lastRecentTickets || []).filter(t =>
+    t.source === 'bulk_dispatch_list' && t.status === 'open' && t.assignmentId
+    && new Date(t.dueAt).getTime() <= new Date(cutoff + 'T23:59:59').getTime()
+  );
+  if (!candidates.length) { alert('No open bulk-list restocks due on or before ' + cutoff + '.'); return; }
+
+  const list = candidates.map(t => '• ' + (t.siteCode || '?') + ' — ' + (t.siteName || '') + ' (due ' + fmtDateOnly(t.dueAt) + ')').join('\n');
+  if (!confirm('Mark these ' + candidates.length + ' restock(s) resolved?\n\n' + list + '\n\nDouble-check none of these were pushed to a later date before confirming.')) return;
+
+  let okCount = 0, failCount = 0;
+  for (const t of candidates) {
+    try {
+      const res = await fetch('/.netlify/functions/mark-assignment-resolved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignmentId: t.assignmentId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) okCount++; else failCount++;
+    } catch (e) {
+      failCount++;
+    }
+  }
+  alert(okCount + ' marked resolved' + (failCount ? ', ' + failCount + ' failed' : '') + '.');
+  loadConsole(document.getElementById('stateSel').value);
 }
 
 async function viewSourceEmail(inboundEmailId, siteCode) {
