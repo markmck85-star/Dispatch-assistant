@@ -98,6 +98,11 @@ exports.handler = async (event) => {
         }
         return {
           siteCode: row.sites.site_code,
+          // 2026-09-13: added for the state-console map, which needs to
+          // filter this endpoint's all-states response down to just the
+          // selected one -- nothing else reading this endpoint currently
+          // needs it, but it's a plain passthrough of data already in hand.
+          state: row.sites.state,
           techName: row.technicians.name,
           status: row.status,
           assignedBy: row.assigned_by,
