@@ -792,26 +792,30 @@ async function loadStateDistanceMatrix(state) {
   return _stateMapDmCache[key];
 }
 
-/** fromCode === null means "from the tech's home." Real matrix data first, straight-line haversine fallback second -- same order as index.html. */
-function stateMapLegDist(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode) {
+/** fromCode === null means "from the tech's home." Real matrix data first, straight-line haversine fallback second -- same order as index.html. Returns distance + duration (when real data has it) for both sorting and the mileage display. */
+function stateMapLegInfo(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode) {
   if (fromCode === null) {
     if (matrix) {
       const entry = matrix[techSlug + '|' + toCode];
-      if (entry && entry.distanceMi != null) return entry.distanceMi;
+      if (entry && entry.distanceMi != null) return { distanceMi: entry.distanceMi, durationMin: entry.durationMin != null ? entry.durationMin : null, isReal: entry.type === 'driving' };
     }
     if (techHome && techHome.lat != null && techHome.lng != null) {
       const loc = LOCATIONS[toCode];
-      if (loc && loc.lat != null) return haversineDistance(techHome.lat, techHome.lng, loc.lat, loc.lng);
+      if (loc && loc.lat != null) return { distanceMi: haversineDistance(techHome.lat, techHome.lng, loc.lat, loc.lng), durationMin: null, isReal: false };
     }
-    return 0;
+    return { distanceMi: 0, durationMin: null, isReal: false };
   }
   if (matrix) {
     const entry = matrix[fromCode + '|' + toCode] || matrix[toCode + '|' + fromCode];
-    if (entry && entry.distanceMi != null) return entry.distanceMi;
+    if (entry && entry.distanceMi != null) return { distanceMi: entry.distanceMi, durationMin: entry.durationMin != null ? entry.durationMin : null, isReal: entry.type === 'driving' };
   }
   const a = LOCATIONS[fromCode], b = LOCATIONS[toCode];
-  if (a && b && a.lat != null && b.lat != null) return haversineDistance(a.lat, a.lng, b.lat, b.lng);
-  return 0;
+  if (a && b && a.lat != null && b.lat != null) return { distanceMi: haversineDistance(a.lat, a.lng, b.lat, b.lng), durationMin: null, isReal: false };
+  return { distanceMi: 0, durationMin: null, isReal: false };
+}
+
+function stateMapLegDist(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode) {
+  return stateMapLegInfo(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode).distanceMi;
 }
 
 /** Nearest-neighbor + 2-opt over plain {code,...} objects. Returns a new ordered array; anything missing coordinates is left in place, appended at the end. */
@@ -937,6 +941,7 @@ async function renderStateMap(state, dispatchDate) {
     const routes = [];
     const unmappedCodes = [];
     let stopCount = 0;
+    let fleetMi = 0;
 
     techNames.forEach((tech, techIndex) => {
       const rawActive = [];
@@ -956,9 +961,13 @@ async function renderStateMap(state, dispatchDate) {
       const info = TECHS[tech] || {};
       const techSlug = tech.toLowerCase().replace(/\s+/g, '-');
       const ordered = sortStateMapStops(rawActive, dmMatrix, LOCATIONS, info, techSlug);
+      let prevCode = null;
       const pts = ordered.map(it => {
         const loc = LOCATIONS[it.code];
-        return { lat: Number(loc.lat), lng: Number(loc.lng), code: it.code, loc, ticket: it.ticket, status: it.status };
+        const leg = stateMapLegInfo(dmMatrix, LOCATIONS, info, techSlug, prevCode, it.code);
+        prevCode = it.code;
+        fleetMi += leg.distanceMi;
+        return { lat: Number(loc.lat), lng: Number(loc.lng), code: it.code, loc, ticket: it.ticket, status: it.status, leg };
       });
 
       const home = (info.lat != null && info.lng != null) ? { lat: Number(info.lat), lng: Number(info.lng), label: info.homeAddress || '' } : null;
@@ -1013,6 +1022,12 @@ async function renderStateMap(state, dispatchDate) {
       route.pts.forEach((p, i) => {
         const flagged = isSlaFlagged(p.ticket, p.status);
         const pinClass = 'map-stop-pin' + (flagged ? ' map-stop-pin-flagged' : '');
+        const legLabel = p.leg && p.leg.distanceMi != null
+          ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
+            + (p.leg.durationMin != null ? ' · ' + p.leg.durationMin + ' min' : '')
+            + (p.leg.isReal ? '' : ' (est.)')
+            + (i === 0 ? ' from home' : ' from prev. stop')
+          : '';
         L.marker([p.lat, p.lng], {
           icon: L.divIcon({ className: '', html: '<div class="' + pinClass + '" style="background:' + route.color + ';">' + (i + 1) + '</div>', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -13] }),
           title: 'Stop ' + (i + 1) + ' — ' + p.code + ' (' + route.tech + ')' + (flagged ? ' — SLA at risk' : '')
@@ -1021,6 +1036,7 @@ async function renderStateMap(state, dispatchDate) {
           + '<div>' + escapeHtml(p.loc.name || '') + '</div>'
           + (p.loc.address ? '<div style="color:#666;">' + escapeHtml(p.loc.address) + '</div>' : '')
           + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>' + escapeHtml(route.tech) + '</div>'
+          + (legLabel ? '<div style="color:#666;">📏 ' + escapeHtml(legLabel) + '</div>' : '')
           + (p.ticket ? '<div style="margin-top:3px;">' + (p.ticket.ticketKind === 'trouble' ? '🔧 TROUBLE' : '📦 RESTOCK') + (p.ticket.woNumber ? ' — WO ' + escapeHtml(String(p.ticket.woNumber)) : '') + '</div>' : '')
           + (flagged ? '<div style="color:#c98a1e;font-weight:600;margin-top:3px;">⏰ SLA deadline ' + new Date(p.ticket.computedSlaDeadline).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '</div>' : '')
         ).addTo(group);
@@ -1051,7 +1067,7 @@ async function renderStateMap(state, dispatchDate) {
     renderStateMapLegend(routes);
 
     const meta = document.getElementById('stateMapMeta');
-    if (meta) meta.textContent = routes.length + (routes.length === 1 ? ' tech · ' : ' techs · ') + stopCount + (stopCount === 1 ? ' stop' : ' stops');
+    if (meta) meta.textContent = routes.length + (routes.length === 1 ? ' tech · ' : ' techs · ') + stopCount + (stopCount === 1 ? ' stop · ' : ' stops · ') + (Math.round(fleetMi * 10) / 10) + ' mi';
 
     if (noteEl) {
       const missing = [...new Set(unmappedCodes)];
