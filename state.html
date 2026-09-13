@@ -506,6 +506,13 @@ async function loadConsole(state, isRetry) {
     // watching it had no way to tell "still fresh" from "sync silently
     // stopped 3 hours ago" without doing the subtraction themselves.
     window._lastImportedAtIso = data.lastImportedAt || null;
+    // 2026-09-13: per-state timezone from the backend, replacing the
+    // hardcoded America/New_York used below for TODAY/TOMORROW grouping --
+    // that grouping uses the live current moment (not a noon-anchored
+    // date), so a real day-boundary skew was possible for Pacific/Mountain
+    // states, unlike the noon-anchored fmtDateOnly() label formatter
+    // elsewhere on this page, which is safe regardless of timezone.
+    window._stateTimezone = data.timezone || 'America/New_York';
     updateImportFreshnessDisplays();
     if (!data.recentTickets.length) {
       ticketStatus.textContent = '0 ticket(s) in the last 3 days';
@@ -554,9 +561,10 @@ async function loadConsole(state, isRetry) {
       // and kind still give the same at-a-glance clustering as before,
       // just nested one level deeper instead of competing with date for
       // top billing.
-      const dateKey = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-      const tomorrowKey = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const tz = window._stateTimezone || 'America/New_York';
+      const dateKey = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
+      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+      const tomorrowKey = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: tz });
       function dateLabel(key) {
         if (key === todayKey) return 'TODAY — ' + fmtDateOnly(key);
         if (key === tomorrowKey) return 'TOMORROW — ' + fmtDateOnly(key);
@@ -608,6 +616,16 @@ async function loadConsole(state, isRetry) {
         // email itself, not a guess. Only shown when there's something
         // still open; a fully returned/closed-out shipment history isn't
         // worth cluttering every card with.
+        // 2026-09-13: when an old open board entry has a newer individually-
+        // emailed ticket for the same site, say so -- these are genuinely
+        // different records (see get-state-console.js), not a rendering
+        // duplicate, but leaving them unconnected reads as confusing/stuck
+        // data. Not auto-resolved: the newer ticket might be for the same
+        // restock need (already handled) or something unrelated -- the
+        // dispatcher's call, not the app's.
+        const relatedTicketTag = t.relatedNewerTicket
+          ? `<div class="meta" style="color:#6cb2ff;">ℹ️ A newer ticket for this site is also open${t.relatedNewerTicket.woNumber ? ' (WO ' + escapeHtml(t.relatedNewerTicket.woNumber) + ')' : ''}, due ${fmtDate(t.relatedNewerTicket.dueAt)} -- this older entry may already be resolved.</div>`
+          : '';
         const shipmentTag = t.openShipment
           ? (t.openShipment.needsReturn
               ? `<div class="meta" style="color:#e0a030;">📦 Part return pending at this site${t.openShipment.count > 1 ? ' (' + t.openShipment.count + ')' : ''}</div>`
@@ -623,10 +641,13 @@ async function loadConsole(state, isRetry) {
         // email via viewSourceEmail(), same pattern as the ticket's own
         // View/Forward link above -- multiple additions on one ticket stay
         // individually visible/clickable rather than merging into one line.
+        // 2026-09-13: dropped the "⚠ NEEDS REVIEW" badge that used to sit
+        // in front of this -- it looked actionable but had no dismiss
+        // action, which was the real source of Mark's "hanging" complaint.
+        // The line items themselves stay exactly as useful/clickable as
+        // before; only the non-actionable badge wrapper is gone.
         const lineItemsTag = (t.lineItems && t.lineItems.length)
-          ? `<div class="meta" style="color:#c98a1e;">` + (t.needsReview
-              ? `<span style="background:#c98a1e;color:#1a1a1a;font-weight:bold;padding:1px 5px;border-radius:3px;margin-right:4px;">⚠ NEEDS REVIEW</span>`
-              : '') + t.lineItems.map(li => {
+          ? `<div class="meta" style="color:#c98a1e;">` + t.lineItems.map(li => {
               const label = li.issueCategory || (li.text ? li.text.slice(0, 60) + (li.text.length > 60 ? '…' : '') : 'see email');
               return `📝 <button onclick="viewSourceEmail('${li.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:#c98a1e;text-decoration:underline;cursor:pointer;font-size:inherit;text-align:left;">Line item added ${fmtDateTime(li.addedAt)} — ${escapeHtml(label)}</button>`;
             }).join('<br>') + `</div>`
@@ -637,6 +658,7 @@ async function loadConsole(state, isRetry) {
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
           <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
+          ${relatedTicketTag}
           ${shipmentTag}
           ${lineItemsTag}
         </div>`;
