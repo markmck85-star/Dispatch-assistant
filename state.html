@@ -760,6 +760,104 @@ const MAP_ROUTE_COLORS = [
   '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
 ];
 
+// ── STOP ORDER (nearest-neighbor + 2-opt) ──────────────────────────────────
+// Ported from index.html's sortStopsByDistance/getCachedLegInfo (the
+// dispatch board's own "Sort" feature) so the map's pin numbering reflects
+// a real route order rather than DB sequence_order, which is frequently
+// null (it's only set when a dispatcher manually drags a stop on the
+// board -- most days it's never touched). Applied automatically on every
+// render, per Mark's ask, so it stays correct after any assignment change
+// (including the upcoming embedded-AI reassignment tool) with no separate
+// "Sort" button needed here.
+const _DM_EARTH_RADIUS_MI = 3958.8;
+let _stateMapDmCache = {}; // keyed by state
+
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const toRad = d => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return _DM_EARTH_RADIUS_MI * 2 * Math.asin(Math.sqrt(a));
+}
+
+async function loadStateDistanceMatrix(state) {
+  const key = state.toUpperCase();
+  if (_stateMapDmCache[key] !== undefined) return _stateMapDmCache[key];
+  try {
+    const res = await fetch('/.netlify/functions/get-distance-matrix?state=' + encodeURIComponent(key), { cache: 'no-store' });
+    _stateMapDmCache[key] = res.ok ? await res.json() : null;
+  } catch (e) {
+    _stateMapDmCache[key] = null;
+  }
+  return _stateMapDmCache[key];
+}
+
+/** fromCode === null means "from the tech's home." Real matrix data first, straight-line haversine fallback second -- same order as index.html. */
+function stateMapLegDist(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode) {
+  if (fromCode === null) {
+    if (matrix) {
+      const entry = matrix[techSlug + '|' + toCode];
+      if (entry && entry.distanceMi != null) return entry.distanceMi;
+    }
+    if (techHome && techHome.lat != null && techHome.lng != null) {
+      const loc = LOCATIONS[toCode];
+      if (loc && loc.lat != null) return haversineDistance(techHome.lat, techHome.lng, loc.lat, loc.lng);
+    }
+    return 0;
+  }
+  if (matrix) {
+    const entry = matrix[fromCode + '|' + toCode] || matrix[toCode + '|' + fromCode];
+    if (entry && entry.distanceMi != null) return entry.distanceMi;
+  }
+  const a = LOCATIONS[fromCode], b = LOCATIONS[toCode];
+  if (a && b && a.lat != null && b.lat != null) return haversineDistance(a.lat, a.lng, b.lat, b.lng);
+  return 0;
+}
+
+/** Nearest-neighbor + 2-opt over plain {code,...} objects. Returns a new ordered array; anything missing coordinates is left in place, appended at the end. */
+function sortStateMapStops(items, matrix, LOCATIONS, techHome, techSlug) {
+  if (!items || items.length <= 1) return items || [];
+  const withCoords = items.filter(it => LOCATIONS[it.code] && LOCATIONS[it.code].lat != null);
+  const withoutCoords = items.filter(it => !(LOCATIONS[it.code] && LOCATIONS[it.code].lat != null));
+  if (withCoords.length <= 1) return items;
+
+  const legDist = (fromCode, toCode) => stateMapLegDist(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode);
+  const routeDist = route => {
+    let total = legDist(null, route[0].code);
+    for (let i = 0; i < route.length - 1; i++) total += legDist(route[i].code, route[i + 1].code);
+    return total;
+  };
+
+  const remaining = withCoords.slice();
+  const nnRoute = [];
+  let prevCode = null;
+  while (remaining.length) {
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const d = legDist(prevCode, remaining[i].code);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    const next = remaining.splice(bestIdx, 1)[0];
+    nnRoute.push(next);
+    prevCode = next.code;
+  }
+
+  let route = nnRoute;
+  let bestDist = routeDist(route);
+  let improved = true, guard = 0;
+  while (improved && guard < 200) {
+    improved = false; guard++;
+    for (let i = 0; i < route.length - 1 && !improved; i++) {
+      for (let k = i + 1; k < route.length; k++) {
+        const candidate = route.slice(0, i).concat(route.slice(i, k + 1).reverse()).concat(route.slice(k + 1));
+        const candidateDist = routeDist(candidate);
+        if (candidateDist < bestDist - 0.05) { route = candidate; bestDist = candidateDist; improved = true; break; }
+      }
+    }
+  }
+  return route.concat(withoutCoords);
+}
+
 // Trouble tickets inside this window of their computed SLA deadline (or
 // already past it) get the pulsing amber ring. 2 hours chosen so it fires
 // early enough in the day to be actionable, not just a same-hour panic.
@@ -818,6 +916,8 @@ async function renderStateMap(state, dispatchDate) {
     if (!assignRes.ok) throw new Error(assignData.error || ('assignments HTTP ' + assignRes.status));
     if (!locRes.ok) throw new Error('locations HTTP ' + locRes.status);
     if (!techRes.ok) throw new Error('technicians HTTP ' + techRes.status);
+    const dmData = await loadStateDistanceMatrix(state);
+    const dmMatrix = (dmData && dmData.matrix) || null;
 
     // get-technicians.js is keyed by slug, not name -- re-key by name for lookup.
     const TECHS = {};
@@ -832,7 +932,6 @@ async function renderStateMap(state, dispatchDate) {
       if (!byTech[tech]) byTech[tech] = [];
       byTech[tech].push(a);
     });
-    Object.values(byTech).forEach(list => list.sort((x, y) => (x.sequenceOrder || 0) - (y.sequenceOrder || 0)));
 
     const techNames = Object.keys(byTech).sort();
     const routes = [];
@@ -840,17 +939,28 @@ async function renderStateMap(state, dispatchDate) {
     let stopCount = 0;
 
     techNames.forEach((tech, techIndex) => {
-      const pts = [];
+      const rawActive = [];
       const completedPts = [];
       (byTech[tech] || []).forEach(a => {
         const code = a.siteCode || null;
         const loc = code ? LOCATIONS[code] : null;
         if (!loc || loc.lat == null || loc.lng == null) { if (code) unmappedCodes.push(code); return; }
-        const entry = { lat: Number(loc.lat), lng: Number(loc.lng), code, loc, ticket: a.ticket || null, status: a.status };
-        if (a.status === 'completed') completedPts.push(entry); else pts.push(entry);
+        if (a.status === 'completed') {
+          completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code, loc, ticket: a.ticket || null, status: a.status });
+        } else {
+          rawActive.push({ code, ticket: a.ticket || null, status: a.status });
+        }
       });
-      if (!pts.length && !completedPts.length) return;
+      if (!rawActive.length && !completedPts.length) return;
+
       const info = TECHS[tech] || {};
+      const techSlug = tech.toLowerCase().replace(/\s+/g, '-');
+      const ordered = sortStateMapStops(rawActive, dmMatrix, LOCATIONS, info, techSlug);
+      const pts = ordered.map(it => {
+        const loc = LOCATIONS[it.code];
+        return { lat: Number(loc.lat), lng: Number(loc.lng), code: it.code, loc, ticket: it.ticket, status: it.status };
+      });
+
       const home = (info.lat != null && info.lng != null) ? { lat: Number(info.lat), lng: Number(info.lng), label: info.homeAddress || '' } : null;
       routes.push({ tech, color: MAP_ROUTE_COLORS[techIndex % MAP_ROUTE_COLORS.length], dashed: techIndex >= MAP_ROUTE_COLORS.length, pts, completedPts, home });
       stopCount += pts.length;
