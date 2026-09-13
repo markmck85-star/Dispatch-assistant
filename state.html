@@ -684,7 +684,7 @@ async function loadConsole(state, isRetry) {
         // restock need (already handled) or something unrelated -- the
         // dispatcher's call, not the app's.
         const relatedTicketTag = t.relatedNewerTicket
-          ? `<div class="meta" style="color:#6cb2ff;">ℹ️ A newer ticket for this site is also open${t.relatedNewerTicket.woNumber ? ' (WO ' + escapeHtml(t.relatedNewerTicket.woNumber) + ')' : ''}, due ${fmtDate(t.relatedNewerTicket.dueAt)} -- this older entry may already be resolved.</div>`
+          ? `<div class="meta" style="color:#6cb2ff;">ℹ️ A newer ticket for this site is also open${t.relatedNewerTicket.woNumber ? ' (WO ' + escapeHtml(t.relatedNewerTicket.woNumber) + ')' : ''}, due ${fmtDateOnly((t.relatedNewerTicket.dueAt || '').slice(0, 10))} -- this older entry may already be resolved.</div>`
           : '';
         const shipmentTag = t.openShipment
           ? (t.openShipment.needsReturn
@@ -716,7 +716,7 @@ async function loadConsole(state, isRetry) {
         return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
-          <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDate(t.dueAt) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
+          <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDateOnly((t.dueAt || '').slice(0, 10)) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
           <div class="meta">${statusBadge}</div>
           ${relatedTicketTag}
           ${shipmentTag}
@@ -1256,13 +1256,20 @@ async function resolveAssignment(assignmentId) {
 async function bulkResolveSuperseded() {
   const cutoff = document.getElementById('bulkResolveCutoff').value;
   if (!cutoff) { alert('Pick a cutoff date first.'); return; }
+  // Plain string comparison on the YYYY-MM-DD prefix -- deliberately NOT
+  // new Date(t.dueAt), which parses a bare date as UTC midnight and then
+  // renders/compares in local time, shifting it a day earlier in any
+  // timezone behind UTC (the exact bug just found and fixed in fmtDate's
+  // callers above -- this comparison is just as vulnerable to it and a
+  // bulk-resolve action is exactly the wrong place to have that kind of
+  // off-by-one silently pull in one extra day).
   const candidates = (window._lastRecentTickets || []).filter(t =>
     t.source === 'bulk_dispatch_list' && t.status === 'open' && t.assignmentId
-    && new Date(t.dueAt).getTime() <= new Date(cutoff + 'T23:59:59').getTime()
+    && (t.dueAt || '').slice(0, 10) <= cutoff
   );
   if (!candidates.length) { alert('No open bulk-list restocks due on or before ' + cutoff + '.'); return; }
 
-  const list = candidates.map(t => '• ' + (t.siteCode || '?') + ' — ' + (t.siteName || '') + ' (due ' + fmtDateOnly(t.dueAt) + ')').join('\n');
+  const list = candidates.map(t => '• ' + (t.siteCode || '?') + ' — ' + (t.siteName || '') + ' (due ' + fmtDateOnly((t.dueAt || '').slice(0, 10)) + ')').join('\n');
   if (!confirm('Mark these ' + candidates.length + ' restock(s) resolved?\n\n' + list + '\n\nDouble-check none of these were pushed to a later date before confirming.')) return;
 
   let okCount = 0, failCount = 0;
