@@ -824,15 +824,15 @@ async function renderStateMap(state, dispatchDate) {
     Object.values(TECHS_RAW || {}).forEach(t => { if (t && t.name) TECHS[t.name] = t; });
 
     const rows = (assignData.assignments || [])
-      .filter(a => a.sites && a.sites.state === state && a.status !== 'removed');
+      .filter(a => a.state === state && a.status !== 'removed');
 
     const byTech = {};
     rows.forEach(a => {
-      const tech = a.technicians ? a.technicians.name : '(unassigned)';
+      const tech = a.techName || '(unassigned)';
       if (!byTech[tech]) byTech[tech] = [];
       byTech[tech].push(a);
     });
-    Object.values(byTech).forEach(list => list.sort((x, y) => (x.sequence_order || 0) - (y.sequence_order || 0)));
+    Object.values(byTech).forEach(list => list.sort((x, y) => (x.sequenceOrder || 0) - (y.sequenceOrder || 0)));
 
     const techNames = Object.keys(byTech).sort();
     const routes = [];
@@ -843,10 +843,10 @@ async function renderStateMap(state, dispatchDate) {
       const pts = [];
       const completedPts = [];
       (byTech[tech] || []).forEach(a => {
-        const code = a.sites ? a.sites.site_code : null;
+        const code = a.siteCode || null;
         const loc = code ? LOCATIONS[code] : null;
         if (!loc || loc.lat == null || loc.lng == null) { if (code) unmappedCodes.push(code); return; }
-        const entry = { lat: Number(loc.lat), lng: Number(loc.lng), code, loc, ticket: a.tickets || null, status: a.status };
+        const entry = { lat: Number(loc.lat), lng: Number(loc.lng), code, loc, ticket: a.ticket || null, status: a.status };
         if (a.status === 'completed') completedPts.push(entry); else pts.push(entry);
       });
       if (!pts.length && !completedPts.length) return;
