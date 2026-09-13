@@ -117,15 +117,33 @@ exports.handler = async (event) => {
   // would silently compute "today" as tomorrow relative to any US state.
   // Also had no way to check a different day at all, which Mark ran into
   // directly trying to verify whether "everyone available" was real or a
-  // date bug. Now explicitly anchors to Eastern time as a reasonable
-  // single reference across all US states (this is calendar-day-level
-  // info, not an exact-time calculation, so the few hours of difference
-  // between Eastern and Pacific near midnight is an acceptable edge case
-  // here), and accepts an optional ?date=YYYY-MM-DD override.
+  // date bug. Originally anchored to Eastern time as a single reference
+  // across all states, on the theory that the few hours of difference near
+  // midnight was an acceptable edge case for calendar-day-level info --
+  // but that stops being true once territories further from Eastern (CA,
+  // Pacific) are in real use, where a 3-hour skew covers a real chunk of
+  // the business day, not just a midnight edge case.
+  //
+  // 2026-09-13: switched to a per-state timezone lookup instead. Same
+  // STATE_TIMEZONES map already used by send-notification-digests.js for
+  // its active-hours logic -- duplicated here rather than shared, matching
+  // this codebase's existing per-function style (no shared lib for small
+  // constants like this yet). Falls back to Eastern for any state not yet
+  // listed (new territories added before this map is updated), same as
+  // the original single-timezone behavior for those.
+  const STATE_TIMEZONES = {
+    GA: 'America/New_York', NC: 'America/New_York', SC: 'America/New_York',
+    FL: 'America/New_York', IN: 'America/New_York', OH: 'America/New_York',
+    WV: 'America/New_York', MI: 'America/Detroit', IL: 'America/Chicago',
+    MN: 'America/Chicago', NV: 'America/Los_Angeles', OR: 'America/Los_Angeles',
+    CO: 'America/Denver', ID: 'America/Boise', CA: 'America/Los_Angeles',
+    AL: 'America/Chicago',
+  };
+  const stateTimezone = STATE_TIMEZONES[state] || 'America/New_York';
   const requestedDate = (event.queryStringParameters || {}).date;
   const todayStr = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate || '')
     ? requestedDate
-    : new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // en-CA locale formats as YYYY-MM-DD
+    : new Date().toLocaleDateString('en-CA', { timeZone: stateTimezone }); // en-CA locale formats as YYYY-MM-DD
 
   // Technicians in this state + availability for the requested/today's date.
   // 2026-09-12 fixes: (1) added .eq('active', true) -- this query never
@@ -263,22 +281,26 @@ exports.handler = async (event) => {
     // during testing) comfortable headroom without querying an unbounded
     // amount.
     const sinceDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-    // 2026-09-08: a needs_review ticket (line item added, or site unmatched)
-    // used to age out of view after 3 days same as anything else -- meaning
-    // a flag meant to say "a dispatcher hasn't looked at this yet" could
-    // silently vanish before anyone had. Found live: WO 00151697 (Jesse
-    // Jewell) rolled off the console over the Labor Day long weekend before
-    // Mark ever saw the badge. Now: normal received_at cutoff stays for
-    // everything else, but needs_review=true tickets are exempt from it
-    // entirely -- they stay visible until someone resolves them, however
-    // old. There's no "mark reviewed" action yet to ever clear the flag, so
-    // this alone doesn't fully close the loop -- worth building next.
+    // 2026-09-13: removed the needs_review exemption from the 3-day cutoff
+    // added 2026-09-08. That fix (keep needs_review=true tickets visible
+    // indefinitely so they can't silently roll off before anyone sees them)
+    // solved one real problem but created another: with no "mark reviewed"
+    // action ever built, flagged tickets never left the console at all,
+    // piling up as confusing, seemingly-stuck entries with no way to
+    // dismiss them (Mark: "hanging old completed tickets... you can't click
+    // on the review tags"). Decision: needs_review now follows the same
+    // plain 3-day cutoff as every other ticket -- the flag itself and the
+    // underlying data (line items, unmatched site_id) are untouched and
+    // still queryable, just no longer specially pinned in this view. Live
+    // review-needed visibility is being moved to an on-demand query
+    // instead (see the embedded-AI-panel and State-of-the-State work),
+    // rather than a permanent, undismissable flag in this list.
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
       .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
-      .or(`received_at.gte.${sinceDate},needs_review.eq.true`)
+      .gte('received_at', sinceDate)
       .order('received_at', { ascending: false })
       .limit(150);
     if (ticketsErr) return json(500, { ok: false, error: 'tickets fetch failed: ' + ticketsErr.message });
@@ -482,9 +504,37 @@ exports.handler = async (event) => {
       };
     });
 
+    // 2026-09-13: cross-reference stale open bulk-list entries against a
+    // newer individually-emailed ticket for the same site. These are two
+    // genuinely different records (see the big comment above bulkEntries)
+    // and de-duping them outright isn't safe -- an old open board stop
+    // might really still be undone, or it might already be handled by
+    // something entirely outside the app (e.g. a dispatcher rescheduling
+    // directly in Salesforce, which this app has no visibility into).
+    // Rather than guess, surface the connection and let the dispatcher
+    // judge: an open bulk entry gets a note pointing at the newer ticket
+    // for the same site, if one exists and is dated after it.
+    const newestOpenTicketBySite = {};
+    for (const t of recentTickets) {
+      if (t.source !== 'ticket_email') continue;
+      if (t.status === 'closed' || t.status === 'cancelled' || t.status === 'resolved_local') continue;
+      if (!t.siteCode) continue;
+      const existing = newestOpenTicketBySite[t.siteCode];
+      if (!existing || new Date(t.dueAt) > new Date(existing.dueAt)) {
+        newestOpenTicketBySite[t.siteCode] = { woNumber: t.woNumber, dueAt: t.dueAt };
+      }
+    }
+    for (const b of bulkEntries) {
+      if (b.status !== 'open' || !b.siteCode) continue;
+      const newer = newestOpenTicketBySite[b.siteCode];
+      if (newer && new Date(newer.dueAt) > new Date(b.dueAt)) {
+        b.relatedNewerTicket = newer;
+      }
+    }
+
     recentTickets = recentTickets.concat(bulkEntries);
   }
 
-  return json(200, { ok: true, state, date: todayStr, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
+  return json(200, { ok: true, state, date: todayStr, timezone: stateTimezone, technicians, recentTickets, lastImportedAt, generatedAt: new Date().toISOString() });
 };
 
