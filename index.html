@@ -3568,7 +3568,7 @@ function distanceMatrixStatus(state) {
                             ? '<span class="same-day-badge">⚡ SAME DAY</span>'
                             : `<span class="same-day-badge" style="background:#8b5a00;">📅 DUE ${dueDayLabel(item.ticketSlaEnd)}</span>`)
                         : '';
-                    const sameDayBadge = item.isSameDay && !item.urgent ? '<span class="same-day-badge" style="background:#8b1a1a;">🚨 TODAY</span>' : '';
+                    const sameDayBadge = item.isSameDay && !item.urgent ? '<span class="same-day-badge" style="background:#8b1a1a;">🚨 SAME DAY</span>' : '';
                     const rightFormBadge = item.hasRightForms ? '<span style="background:#1a5c1a;color:#88dd88;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">📋 Right Forms</span>' : '';
                     const reassignBadge = item.reassignedFrom 
                         ? `<span style="background:#856404;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">↔ from ${item.reassignedFrom.split(' ')[0]}</span>` 
@@ -4937,7 +4937,7 @@ function distanceMatrixStatus(state) {
                             const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd, item.code) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                         }
-                        const stopType = item.urgent ? issueStr : (item.isSameDay ? ' - Consumable Restock ⚡ COMPLETE TODAY' : ' - Consumable Restock');
+                        const stopType = item.urgent ? issueStr : (item.isSameDay ? ' - Consumable Restock ⚡ SAME DAY' : ' - Consumable Restock');
                         msg += `${i + 1}. ${prefix}${loc.name}${stopType}${reassignNote}\n`;
 
                         // Append consumables detail for restock stops
@@ -5225,7 +5225,7 @@ function distanceMatrixStatus(state) {
                     const name = loc.name || stop.locationName || "";
                     const addr = loc.address || stop.address || "";
                     const badgeStyle = "display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;margin-left:4px;vertical-align:middle;";
-                    const todayBadge = (stop.isSameDay && !stop.urgent) ? `<span style="${badgeStyle}background:#c0392b;color:#fff;">TODAY</span>` : "";
+                    const todayBadge = (stop.isSameDay && !stop.urgent) ? `<span style="${badgeStyle}background:#c0392b;color:#fff;">SAME DAY</span>` : "";
                     const urgentBadge = stop.urgent
                         ? (stop.ticketDueToday !== false
                             ? `<span style="${badgeStyle}background:#c0392b;color:#fff;">SAME DAY</span>`
@@ -5454,7 +5454,7 @@ ${content}</body></html>`;
                     <div style="font-weight:bold; font-size:18px; margin-bottom:5px;">${tech}</div>`;
                 assignments[tech].forEach((item, i) => {
                     const loc = LOCATIONS[item.code];
-                    const todayBadge = item.isSameDay ? ' <span style="color:#c0392b;font-weight:bold;">(TODAY)</span>' : '';
+                    const todayBadge = item.isSameDay ? ' <span style="color:#c0392b;font-weight:bold;">(SAME DAY)</span>' : '';
                     const urgentBadge = item.urgent
                         ? (item.ticketDueToday !== false
                             ? ' <span style="color:red;">(SAME DAY)</span>'
