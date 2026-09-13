@@ -133,7 +133,9 @@
     <div id="techStatus" class="status-line">Loading…</div>
     <div id="stateMapPanel">
       <div class="map-panel-head">
-        <span class="map-panel-title">Today's Routes</span>
+        <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
+        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; renderStateMap(document.getElementById('stateSel').value, this.value);"
+          style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
         <button type="button" id="mapRefreshBtn" onclick="renderStateMap(document.getElementById('stateSel').value, window._stateMapDate)"
           title="Re-pull current assignments/tickets without reloading the page">🔄 Refresh</button>
         <span id="stateMapMeta" class="map-panel-meta"></span>
@@ -554,8 +556,17 @@ async function loadConsole(state, isRetry) {
     // elsewhere on this page, which is safe regardless of timezone.
     window._stateTimezone = data.timezone || 'America/New_York';
     updateImportFreshnessDisplays();
-    window._stateMapDate = data.date;
-    renderStateMap(state, data.date);
+    // Map date defaults to "today" (per this state's own timezone, from
+    // get-state-console.js) only on first load -- once the dispatcher picks
+    // a different date (e.g. looking ahead to Monday), switching states via
+    // the dropdown shouldn't silently yank them back to today.
+    window._stateConsoleToday = data.date;
+    if (window._stateMapDate === undefined) {
+      window._stateMapDate = data.date;
+      const dateInput = document.getElementById('stateMapDateInput');
+      if (dateInput) dateInput.value = data.date;
+    }
+    renderStateMap(state, window._stateMapDate);
     if (!data.recentTickets.length) {
       ticketStatus.textContent = '0 ticket(s) in the last 3 days';
       ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
@@ -788,6 +799,13 @@ async function renderStateMap(state, dispatchDate) {
   if (typeof L === 'undefined') { panel.style.opacity = '0.5'; return; }
   if (!dispatchDate) return; // set by loadConsole() once get-state-console.js's date is known
 
+  const titleEl = document.getElementById('stateMapTitle');
+  if (titleEl) {
+    titleEl.textContent = (dispatchDate === window._stateConsoleToday)
+      ? "Today's Routes"
+      : new Date(dispatchDate + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + "'s Routes";
+  }
+
   try {
     const [assignRes, locRes, techRes] = await Promise.all([
       fetch('/.netlify/functions/get-assignments?dispatchDate=' + encodeURIComponent(dispatchDate), { cache: 'no-store' }),
@@ -842,7 +860,7 @@ async function renderStateMap(state, dispatchDate) {
       Object.keys(_stateMapLayers).forEach(t => { if (_stateMap) _stateMap.removeLayer(_stateMapLayers[t]); });
       _stateMapLayers = {};
       const meta = document.getElementById('stateMapMeta');
-      if (meta) meta.textContent = 'No plottable stops for ' + state + ' today.';
+      if (meta) meta.textContent = 'No plottable stops for ' + state + ' on ' + dispatchDate + '.';
       if (noteEl) noteEl.style.display = 'none';
       const map = ensureStateMap();
       if (map) map.setView([32.8, -83.6], 7);
