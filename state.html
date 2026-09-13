@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>State Console</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Leaflet 1.9.4 -- same route-map engine as the dispatch board (index.html).
+     Loaded non-async so `L` is defined before renderStateMap() runs. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.5; font-size: 16px; }
@@ -66,6 +72,37 @@
 
   .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 16px 10px; color: #666; }
   .error-state { color: #e57373; }
+
+  /* ── STATE MAP ──────────────────────────────────────────────────────
+     Persistent (no expand/fullscreen) -- default height is generous
+     precisely so it doesn't need one, per Mark: this needs to stay
+     visible at the same time as the embedded AI panel so prompts like
+     "move red to blue" can be judged spatially against the map. */
+  #stateMapPanel { background: #1e1e1e; border: 1px solid #444; border-radius: 8px; padding: 10px 12px; }
+  .map-panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .map-panel-title { font-weight: bold; color: #7ec8e3; font-size: 14px; }
+  .map-panel-meta { font-size: 11px; color: #888; margin-left: auto; text-align: right; }
+  #mapRefreshBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  #mapRefreshBtn:hover { background: #33334a; }
+  #stateMap { height: 420px; border-radius: 6px; background: #2a2a2a; margin-top: 10px; }
+  #stateMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
+  .map-legend-chip:hover { border-color: #7ec8e3; }
+  .map-legend-chip.off { opacity: 0.45; text-decoration: line-through; }
+  .map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
+  .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; }
+  .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
+  .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
+  /* Service-window-flagged stop: an at-risk/overdue trouble-ticket SLA.
+     Pulsing amber ring rather than changing the pin's own tech color, so
+     the tech-color coding stays intact and this reads as an overlay. */
+  .map-stop-pin-flagged { box-shadow: 0 0 0 3px #f0a500, 0 1px 4px rgba(0,0,0,0.6); animation: mapFlagPulse 1.4s ease-in-out infinite; }
+  @keyframes mapFlagPulse { 0%, 100% { box-shadow: 0 0 0 3px #f0a500, 0 1px 4px rgba(0,0,0,0.6); } 50% { box-shadow: 0 0 0 5px rgba(240,165,0,0.55), 0 1px 4px rgba(0,0,0,0.6); } }
+  .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
+  .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+  .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
+  @media (min-width: 700px) { #stateMap { height: 520px; } }
 </style>
 </head>
 <body>
@@ -92,9 +129,24 @@
       <option value="AL">Alabama</option>
     </select>
 
-    <h2 class="section-label">👥 Technician Availability — Today</h2>
+    <h2 class="section-label" style="border-top:none;padding-top:0;">🗺️ Map View</h2>
     <div id="techStatus" class="status-line">Loading…</div>
-    <div id="techGrid" class="tech-grid"></div>
+    <div id="stateMapPanel">
+      <div class="map-panel-head">
+        <span class="map-panel-title">Today's Routes</span>
+        <button type="button" id="mapRefreshBtn" onclick="renderStateMap(document.getElementById('stateSel').value, window._stateMapDate)"
+          title="Re-pull current assignments/tickets without reloading the page">🔄 Refresh</button>
+        <span id="stateMapMeta" class="map-panel-meta"></span>
+      </div>
+      <div id="stateMap"></div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
+        <input type="checkbox" id="mapShowCompletedToggle" checked onchange="window._stateMapShowCompleted = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
+        Show completed stops (✓, muted)
+      </label>
+      <div style="font-size:11px;color:#777;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
+      <div id="stateMapLegend"></div>
+      <div id="stateMapNote" class="map-note" style="display:none;"></div>
+    </div>
 
     <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
       <span>🔄 Restock Status</span>
@@ -467,13 +519,11 @@ async function loadAll() {
 
 async function loadConsole(state, isRetry) {
   const techStatus = document.getElementById('techStatus');
-  const techGrid = document.getElementById('techGrid');
   const ticketStatus = document.getElementById('ticketStatus');
   const ticketList = document.getElementById('ticketList');
 
   techStatus.textContent = 'Loading…';
   ticketStatus.textContent = 'Loading…';
-  techGrid.innerHTML = '';
   ticketList.innerHTML = '';
 
   try {
@@ -483,21 +533,11 @@ async function loadConsole(state, isRetry) {
 
     const outCount = data.technicians.filter(t => !t.available).length;
     techStatus.textContent = data.technicians.length + ' technician(s) · ' + outCount + ' out today';
-    if (!data.technicians.length) {
-      techGrid.innerHTML = '<div class="empty-state">No technicians on file for this state.</div>';
-    } else {
-      techGrid.innerHTML = data.technicians.map(t => {
-        const cls = t.available ? 'avail' : 'out';
-        // Simplified 2026-08-23 -- Mark: the red/green color already says
-        // everything needed for who's out; the reason/note text underneath
-        // was just clutter. Kept exactly one exception: the on-call pair
-        // gets a small "On call" label, since that's the one piece of
-        // "why are they the ones available today" info actually worth
-        // keeping visible at a glance.
-        const statusText = t.onCall ? 'On call' : '';
-        return `<div class="tech-chip ${cls}"><div class="name">${escapeHtml(t.name)}</div>${statusText ? `<div class="status">${statusText}</div>` : ''}</div>`;
-      }).join('');
-    }
+    // Per-tech avail/out grid retired 2026-09-13 in favor of the map below --
+    // who's out shows up there as a tech simply having no route to draw, and
+    // the map is a lot more useful screen-space per pixel for the space this
+    // freed up. data.technicians is still used above for the summary line
+    // and by loadRestock() elsewhere.
 
     // Stored raw so updateImportFreshnessDisplays() can keep the relative
     // time ("14m ago") advancing on its own via setInterval below, without
@@ -514,6 +554,8 @@ async function loadConsole(state, isRetry) {
     // elsewhere on this page, which is safe regardless of timezone.
     window._stateTimezone = data.timezone || 'America/New_York';
     updateImportFreshnessDisplays();
+    window._stateMapDate = data.date;
+    renderStateMap(state, data.date);
     if (!data.recentTickets.length) {
       ticketStatus.textContent = '0 ticket(s) in the last 3 days';
       ticketList.innerHTML = '<div class="empty-state">Nothing in the last 3 days.</div>';
@@ -680,8 +722,244 @@ async function loadConsole(state, isRetry) {
     }
     techStatus.textContent = '';
     ticketStatus.textContent = '';
-    techGrid.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
+    ticketList.innerHTML = '<div class="error-state">Error: ' + escapeHtml(e.message) + '</div>';
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE MAP — v1, added 2026-09-13, ported from index.html's route-map
+// visualizer for the state-console redesign.
+//
+// Data sources (all already-existing endpoints, no new backend work):
+//   get-assignments.js?dispatchDate=X  -- today's board rows, every state,
+//     joined to site_code/state, tech name, sequence_order, and ticket
+//     (incl. computedSlaDeadline). Filtered here to the selected state.
+//   get-locations.js?state=X           -- site_code -> {lat, lng, name, address}
+//   get-technicians.js?state=X         -- tech name -> home {lat, lng}
+//
+// Deliberately simpler than index.html's version: no leg-by-leg mileage
+// (that relies on the dispatch board's own in-memory distance-matrix
+// cache, which doesn't exist on this page) and no "pushed to a future
+// date" pins (this only ever fetches one specific dispatchDate). Route
+// lines connect stops in sequence_order with no distance label.
+// ═══════════════════════════════════════════════════════════════════
+
+const MAP_ROUTE_COLORS = [
+  '#e6194b', '#0071c5', '#2e9e3e', '#f07d02', '#8e24aa',
+  '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
+];
+
+// Trouble tickets inside this window of their computed SLA deadline (or
+// already past it) get the pulsing amber ring. 2 hours chosen so it fires
+// early enough in the day to be actionable, not just a same-hour panic.
+const SLA_FLAG_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+let _stateMap = null;
+let _stateMapLayers = {};
+let _stateMapHiddenTechs = new Set();
+window._stateMapShowCompleted = true;
+
+function ensureStateMap() {
+  if (_stateMap) return _stateMap;
+  const el = document.getElementById('stateMap');
+  if (!el || typeof L === 'undefined') return null;
+  _stateMap = L.map(el, { scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(_stateMap);
+  _stateMap.setView([32.8, -83.6], 7);
+  _stateMap.on('click', () => _stateMap.scrollWheelZoom.enable());
+  _stateMap.on('mouseout', () => _stateMap.scrollWheelZoom.disable());
+  return _stateMap;
+}
+
+function isSlaFlagged(ticket, status) {
+  if (!ticket || status === 'completed') return false;
+  if (ticket.ticketKind !== 'trouble' || !ticket.computedSlaDeadline) return false;
+  const msRemaining = new Date(ticket.computedSlaDeadline).getTime() - Date.now();
+  return msRemaining <= SLA_FLAG_WINDOW_MS;
+}
+
+async function renderStateMap(state, dispatchDate) {
+  const panel = document.getElementById('stateMapPanel');
+  const noteEl = document.getElementById('stateMapNote');
+  if (!panel) return;
+  if (typeof L === 'undefined') { panel.style.opacity = '0.5'; return; }
+  if (!dispatchDate) return; // set by loadConsole() once get-state-console.js's date is known
+
+  try {
+    const [assignRes, locRes, techRes] = await Promise.all([
+      fetch('/.netlify/functions/get-assignments?dispatchDate=' + encodeURIComponent(dispatchDate), { cache: 'no-store' }),
+      fetch('/.netlify/functions/get-locations?state=' + encodeURIComponent(state), { cache: 'no-store' }),
+      fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(state), { cache: 'no-store' }),
+    ]);
+    const assignData = await assignRes.json();
+    const LOCATIONS = await locRes.json();
+    const TECHS_RAW = await techRes.json();
+    if (!assignRes.ok) throw new Error(assignData.error || ('assignments HTTP ' + assignRes.status));
+    if (!locRes.ok) throw new Error('locations HTTP ' + locRes.status);
+    if (!techRes.ok) throw new Error('technicians HTTP ' + techRes.status);
+
+    // get-technicians.js is keyed by slug, not name -- re-key by name for lookup.
+    const TECHS = {};
+    Object.values(TECHS_RAW || {}).forEach(t => { if (t && t.name) TECHS[t.name] = t; });
+
+    const rows = (assignData.assignments || [])
+      .filter(a => a.sites && a.sites.state === state && a.status !== 'removed');
+
+    const byTech = {};
+    rows.forEach(a => {
+      const tech = a.technicians ? a.technicians.name : '(unassigned)';
+      if (!byTech[tech]) byTech[tech] = [];
+      byTech[tech].push(a);
+    });
+    Object.values(byTech).forEach(list => list.sort((x, y) => (x.sequence_order || 0) - (y.sequence_order || 0)));
+
+    const techNames = Object.keys(byTech).sort();
+    const routes = [];
+    const unmappedCodes = [];
+    let stopCount = 0;
+
+    techNames.forEach((tech, techIndex) => {
+      const pts = [];
+      const completedPts = [];
+      (byTech[tech] || []).forEach(a => {
+        const code = a.sites ? a.sites.site_code : null;
+        const loc = code ? LOCATIONS[code] : null;
+        if (!loc || loc.lat == null || loc.lng == null) { if (code) unmappedCodes.push(code); return; }
+        const entry = { lat: Number(loc.lat), lng: Number(loc.lng), code, loc, ticket: a.tickets || null, status: a.status };
+        if (a.status === 'completed') completedPts.push(entry); else pts.push(entry);
+      });
+      if (!pts.length && !completedPts.length) return;
+      const info = TECHS[tech] || {};
+      const home = (info.lat != null && info.lng != null) ? { lat: Number(info.lat), lng: Number(info.lng), label: info.homeAddress || '' } : null;
+      routes.push({ tech, color: MAP_ROUTE_COLORS[techIndex % MAP_ROUTE_COLORS.length], dashed: techIndex >= MAP_ROUTE_COLORS.length, pts, completedPts, home });
+      stopCount += pts.length;
+    });
+
+    if (!routes.length) {
+      Object.keys(_stateMapLayers).forEach(t => { if (_stateMap) _stateMap.removeLayer(_stateMapLayers[t]); });
+      _stateMapLayers = {};
+      const meta = document.getElementById('stateMapMeta');
+      if (meta) meta.textContent = 'No plottable stops for ' + state + ' today.';
+      if (noteEl) noteEl.style.display = 'none';
+      const map = ensureStateMap();
+      if (map) map.setView([32.8, -83.6], 7);
+      return;
+    }
+
+    const map = ensureStateMap();
+    if (!map) return;
+
+    Object.keys(_stateMapLayers).forEach(t => map.removeLayer(_stateMapLayers[t]));
+    _stateMapLayers = {};
+
+    const activeTechs = new Set(routes.map(r => r.tech));
+    [..._stateMapHiddenTechs].forEach(t => { if (!activeTechs.has(t)) _stateMapHiddenTechs.delete(t); });
+
+    const allPoints = [];
+    const visiblePoints = [];
+
+    routes.forEach(route => {
+      const group = L.layerGroup();
+      const shown = !_stateMapHiddenTechs.has(route.tech);
+      const collect = pt => { allPoints.push(pt); if (shown) visiblePoints.push(pt); };
+      const latlngs = route.pts.map(p => [p.lat, p.lng]);
+
+      if (route.home) {
+        if (latlngs.length) {
+          L.polyline([[route.home.lat, route.home.lng], latlngs[0]], { color: route.color, weight: 3.5, opacity: 0.85, dashArray: route.dashed ? '9,6' : null }).addTo(group);
+        }
+        L.marker([route.home.lat, route.home.lng], {
+          icon: L.divIcon({ className: '', html: '<div class="map-home-pin" style="background:' + route.color + ';">🏠</div>', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] }),
+          title: route.tech + ' — start'
+        }).bindPopup('<div class="map-pop-code">' + escapeHtml(route.tech) + ' — start</div>' + (route.home.label ? '<div style="color:#666;">' + escapeHtml(route.home.label) + '</div>' : '')).addTo(group);
+        collect([route.home.lat, route.home.lng]);
+      }
+
+      if (latlngs.length > 1) {
+        L.polyline(latlngs, { color: route.color, weight: 3.5, opacity: 0.85, dashArray: route.dashed ? '9,6' : null }).addTo(group);
+      }
+
+      route.pts.forEach((p, i) => {
+        const flagged = isSlaFlagged(p.ticket, p.status);
+        const pinClass = 'map-stop-pin' + (flagged ? ' map-stop-pin-flagged' : '');
+        L.marker([p.lat, p.lng], {
+          icon: L.divIcon({ className: '', html: '<div class="' + pinClass + '" style="background:' + route.color + ';">' + (i + 1) + '</div>', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -13] }),
+          title: 'Stop ' + (i + 1) + ' — ' + p.code + ' (' + route.tech + ')' + (flagged ? ' — SLA at risk' : '')
+        }).bindPopup(
+          '<div class="map-pop-code">Stop ' + (i + 1) + ' — ' + escapeHtml(p.code) + '</div>'
+          + '<div>' + escapeHtml(p.loc.name || '') + '</div>'
+          + (p.loc.address ? '<div style="color:#666;">' + escapeHtml(p.loc.address) + '</div>' : '')
+          + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>' + escapeHtml(route.tech) + '</div>'
+          + (p.ticket ? '<div style="margin-top:3px;">' + (p.ticket.ticketKind === 'trouble' ? '🔧 TROUBLE' : '📦 RESTOCK') + (p.ticket.woNumber ? ' — WO ' + escapeHtml(String(p.ticket.woNumber)) : '') + '</div>' : '')
+          + (flagged ? '<div style="color:#c98a1e;font-weight:600;margin-top:3px;">⏰ SLA deadline ' + new Date(p.ticket.computedSlaDeadline).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '</div>' : '')
+        ).addTo(group);
+        collect([p.lat, p.lng]);
+      });
+
+      if (window._stateMapShowCompleted !== false) {
+        route.completedPts.forEach(p => {
+          L.marker([p.lat, p.lng], {
+            icon: L.divIcon({ className: '', html: '<div class="map-stop-pin map-stop-pin-done" style="background:' + route.color + ';">✓</div>', iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11] }),
+            title: 'Completed — ' + p.code + ' (' + route.tech + ')'
+          }).bindPopup('<div class="map-pop-code">✓ Completed — ' + escapeHtml(p.code) + '</div><div>' + escapeHtml(p.loc.name || '') + '</div>').addTo(group);
+          collect([p.lat, p.lng]);
+        });
+      }
+
+      _stateMapLayers[route.tech] = group;
+      if (shown) group.addTo(map);
+    });
+
+    const bounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
+    map.invalidateSize();
+    if (bounds.isValid()) {
+      if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(bounds.getCenter(), 12);
+      else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 14 });
+    }
+
+    renderStateMapLegend(routes);
+
+    const meta = document.getElementById('stateMapMeta');
+    if (meta) meta.textContent = routes.length + (routes.length === 1 ? ' tech · ' : ' techs · ') + stopCount + (stopCount === 1 ? ' stop' : ' stops');
+
+    if (noteEl) {
+      const missing = [...new Set(unmappedCodes)];
+      noteEl.style.display = missing.length ? '' : 'none';
+      noteEl.textContent = missing.length ? '⚠ Not plotted (no coordinates on file): ' + missing.join(', ') : '';
+    }
+  } catch (err) {
+    const meta = document.getElementById('stateMapMeta');
+    if (meta) meta.textContent = 'Map error: ' + err.message;
+  }
+}
+
+function renderStateMapLegend(routes) {
+  const el = document.getElementById('stateMapLegend');
+  if (!el) return;
+  const chips = routes.map(route => {
+    const arg = escapeHtml(route.tech).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const doneCount = route.completedPts.length;
+    const countLabel = doneCount ? route.pts.length + ' + ' + doneCount + ' done' : String(route.pts.length);
+    return '<span class="map-legend-chip' + (_stateMapHiddenTechs.has(route.tech) ? ' off' : '') + '" onclick="toggleStateMapTech(\'' + arg + '\')" title="Show or hide this route">'
+      + '<span class="map-legend-swatch" style="background:' + route.color + ';"></span>' + escapeHtml(route.tech) + ' (' + countLabel + ')</span>';
+  });
+  if (_stateMapHiddenTechs.size) {
+    chips.push('<span class="map-legend-chip" onclick="showAllStateMapTechs()" title="Bring every hidden route back">⇂ Show all</span>');
+  }
+  el.innerHTML = chips.join('');
+}
+
+function toggleStateMapTech(tech) {
+  if (_stateMapHiddenTechs.has(tech)) _stateMapHiddenTechs.delete(tech); else _stateMapHiddenTechs.add(tech);
+  renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);
+}
+
+function showAllStateMapTechs() {
+  _stateMapHiddenTechs.clear();
+  renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);
 }
 
 async function loadRestock(state) {
