@@ -530,7 +530,13 @@ export default async (req) => {
   // read-only tools are forceable this way; a write action (reassign_stop,
   // sort_route) always has to come from an actual instruction, never a
   // one-tap button, since it changes the board.
-  const FORCEABLE_TOOLS = new Set(['propose_route_rebalance']);
+  // apply_swap is deliberately NOT in functionDeclarations() -- it's never
+  // reachable via typed/spoken text, only via the Apply/Revert buttons on a
+  // propose_route_rebalance result, which already know exactly which site
+  // and technician they mean. Resolved by site code rather than roster
+  // indices so a click can't go stale if the board shifted slightly
+  // between the analysis running and the button being pressed.
+  const FORCEABLE_TOOLS = new Set(['propose_route_rebalance', 'apply_swap']);
   const forceTool = FORCEABLE_TOOLS.has(payload.forceTool) ? String(payload.forceTool) : null;
   const forceToolArgs = (forceTool && payload.forceToolArgs && typeof payload.forceToolArgs === 'object') ? payload.forceToolArgs : {};
 
@@ -798,6 +804,50 @@ export default async (req) => {
           projectedMinutes: projectedMin,
           driveMinutesWereEstimated: driveMin == null,
           risk,
+        });
+        continue;
+      }
+
+      if (call.name === 'apply_swap') {
+        const toTechName = String(args.toTech || '');
+        const code = String(args.siteCode || '').toUpperCase();
+        const toRoute = working.find((r) => r.tech === toTechName);
+        const fromRoute = working.find((r) => r.stops.includes(code));
+
+        if (!toRoute) {
+          actions.push({ type: 'error', summary: `${toTechName || '(unnamed)'} is not on the current board.` });
+          continue;
+        }
+        if (!fromRoute) {
+          actions.push({ type: 'error', summary: `Could not find ${code} on any current route -- the board may have changed since this suggestion was made.` });
+          continue;
+        }
+        if (fromRoute.tech === toRoute.tech) {
+          actions.push({ type: 'error', summary: `${shortName(toRoute.tech)} already has ${code}.` });
+          continue;
+        }
+        if (unavailableTechs.has(toRoute.tech)) {
+          actions.push({ type: 'error', summary: `${shortName(toRoute.tech)} is marked unavailable on ${dispatchDate} -- pick someone else.` });
+          continue;
+        }
+
+        const fromBefore = routeMetrics(legInfo, fromRoute.tech, fromRoute.stops);
+        const toBefore = routeMetrics(legInfo, toRoute.tech, toRoute.stops);
+        fromRoute.stops.splice(fromRoute.stops.indexOf(code), 1);
+        toRoute.stops = insertStopAtBestPosition(legInfo, toRoute.tech, toRoute.stops, code, ctx.sites);
+        movedCodes.add(code);
+        changedTechs.add(fromRoute.tech);
+        changedTechs.add(toRoute.tech);
+
+        actions.push({
+          type: 'apply_swap',
+          summary: `Moved ${code} to ${shortName(toRoute.tech)}`,
+          siteCode: code,
+          siteName: ctx.siteNames[code] || null,
+          fromTech: fromRoute.tech,
+          toTech: toRoute.tech,
+          fromDelta: deltaText(fromBefore, routeMetrics(legInfo, fromRoute.tech, fromRoute.stops)),
+          toDelta: deltaText(toBefore, routeMetrics(legInfo, toRoute.tech, toRoute.stops)),
         });
         continue;
       }
