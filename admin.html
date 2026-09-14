@@ -334,21 +334,21 @@
 
   <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px;">State</label>
   <select id="dm-state" class="dm-select">
-    <option value="GA">GA — Georgia (119 locations)</option>
-    <option value="FL">FL — Florida (93 locations)</option>
-    <option value="NC">NC — North Carolina (9 locations)</option>
-    <option value="SC">SC — South Carolina (3 locations)</option>
-    <option value="MI">MI — Michigan</option>
-    <option value="IN">IN — Indiana</option>
-    <option value="OH">OH — Ohio</option>
-    <option value="NV">NV — Nevada</option>
-    <option value="IL">IL — Illinois</option>
-    <option value="MN">MN — Minnesota</option>
-    <option value="WV">WV — West Virginia</option>
-    <option value="OR">OR — Oregon</option>
-    <option value="CO">CO — Colorado</option>
-    <option value="ID">ID — Idaho</option>
     <option value="CA">CA — California (290 locations, placeholder)</option>
+    <option value="CO">CO — Colorado</option>
+    <option value="FL">FL — Florida (93 locations)</option>
+    <option value="GA">GA — Georgia (119 locations)</option>
+    <option value="ID">ID — Idaho</option>
+    <option value="IL">IL — Illinois</option>
+    <option value="IN">IN — Indiana</option>
+    <option value="MI">MI — Michigan</option>
+    <option value="MN">MN — Minnesota</option>
+    <option value="NC">NC — North Carolina (9 locations)</option>
+    <option value="NV">NV — Nevada</option>
+    <option value="OH">OH — Ohio</option>
+    <option value="OR">OR — Oregon</option>
+    <option value="SC">SC — South Carolina (3 locations)</option>
+    <option value="WV">WV — West Virginia</option>
   </select>
 
   <!-- Step 1: Geocode addresses (one-time, idempotent) -->
@@ -909,7 +909,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID', 'CA']
+                ? ['AL', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV']
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');

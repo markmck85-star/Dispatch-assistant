@@ -128,21 +128,22 @@
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
     <select id="stateSel" onchange="loadAll()">
-      <option value="GA">Georgia</option>
-      <option value="FL">Florida</option>
-      <option value="MI">Michigan</option>
-      <option value="IN">Indiana</option>
-      <option value="CO">Colorado</option>
-      <option value="OH">Ohio</option>
-      <option value="NV">Nevada</option>
-      <option value="IL">Illinois</option>
-      <option value="MN">Minnesota</option>
-      <option value="WV">West Virginia</option>
-      <option value="OR">Oregon</option>
-      <option value="NC">North Carolina</option>
-      <option value="SC">South Carolina</option>
       <option value="AL">Alabama</option>
       <option value="CA">California</option>
+      <option value="CO">Colorado</option>
+      <option value="FL">Florida</option>
+      <option value="GA">Georgia</option>
+      <option value="ID">Idaho</option>
+      <option value="IL">Illinois</option>
+      <option value="IN">Indiana</option>
+      <option value="MI">Michigan</option>
+      <option value="MN">Minnesota</option>
+      <option value="NV">Nevada</option>
+      <option value="NC">North Carolina</option>
+      <option value="OH">Ohio</option>
+      <option value="OR">Oregon</option>
+      <option value="SC">South Carolina</option>
+      <option value="WV">West Virginia</option>
     </select>
 
     <h2 class="section-label" style="border-top:none;padding-top:0;">🗺️ Map View</h2>
@@ -940,7 +941,7 @@ const STATE_CENTERS = {
   GA: [32.8, -83.6], FL: [28.4, -82.5], MI: [44.3, -85.6], IN: [40.0, -86.1],
   CO: [39.0, -105.5], OH: [40.4, -82.9], NV: [39.3, -116.6], IL: [40.0, -89.2],
   MN: [46.3, -94.3], WV: [38.9, -80.6], OR: [43.9, -120.6], NC: [35.6, -79.4],
-  SC: [33.9, -80.9], AL: [32.8, -86.8], CA: [37.2, -119.4],
+  SC: [33.9, -80.9], AL: [32.8, -86.8], CA: [37.2, -119.4], ID: [44.3, -114.7],
 };
 function stateCenterFor(state) {
   return STATE_CENTERS[state] || STATE_CENTERS.GA;
