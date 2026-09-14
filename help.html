@@ -80,16 +80,19 @@
 <body>
 <header>
   <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.78 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>v9.79 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
 <nav>
   <a href="#whats-new">What's New</a>
+  <a href="#quickref">Quick Reference</a>
   <a href="#login">Login</a>
   <a href="#daily">Daily Dispatch</a>
   <a href="#card-controls">Card Controls</a>
   <a href="#map-view">Map View</a>
+  <a href="#state-console">State Console</a>
+  <a href="#ai-assistant">AI Assistant</a>
   <a href="#session-actions">Session Actions</a>
   <a href="#urgent">Urgent / Trouble Ticket</a>
   <a href="#unknown">Unknown Codes</a>
@@ -101,9 +104,44 @@
 </nav>
 <main>
 
+  <!-- QUICK REFERENCE -->
+  <section id="quickref">
+    <h2>⚡ Quick Reference</h2>
+    <p style="color:var(--muted); font-size:13px; margin-bottom:14px;">The short version. Every row below links to the full section if you need more.</p>
+    <table>
+      <tr><th>I want to...</th><th>Do this</th></tr>
+      <tr><td>Run today's normal dispatch</td><td>Paste the dispatch email → <strong>Generate Dispatches</strong> → review/reassign → <strong>✅ Messages</strong> or <strong>📤 Send</strong>. See <a href="#daily">Daily Dispatch</a>.</td></tr>
+      <tr><td>Handle a trouble ticket right now</td><td>Set Paste Mode to <strong>⚡ URGENT</strong>, paste the ticket email, generate. SLA deadline is calculated automatically. See <a href="#urgent">Urgent Dispatch</a>.</td></tr>
+      <tr><td>A site code isn't recognized</td><td>Amber banner appears with <strong>+ Add to database</strong> -- fill in name/address/machine type, it saves and re-runs immediately. See <a href="#unknown">Unknown Codes</a>.</td></tr>
+      <tr><td>See where everyone is today, at a glance</td><td><strong>🗺️ Map View</strong> on the dispatch board (today's board only), or the <strong>📍 State Console</strong> for any saved date, any state. See <a href="#state-console">State Console</a>.</td></tr>
+      <tr><td>Check if today's routes are efficient</td><td><strong>🧭 Analyze Routes</strong> (dispatch board or State Console) -- suggests specific stop swaps with the mileage each one saves. See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
+      <tr><td>Move a stop with a typed/spoken command</td><td>Type or dictate into the AI command bar, e.g. "move stop 2 from Robert to Keontae." See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
+      <tr><td>Work a state I don't normally cover</td><td>Open that state's <strong>📍 State Console</strong> first -- shows who's out, recent tickets, and restock status without needing the full dispatch workflow.</td></tr>
+      <tr><td>Check for stale/unaddressed trouble tickets</td><td><strong>Watchdog Log</strong> (button next to the state selector, or <code>/watchdog/:state</code>) -- every open trouble/install/site-survey ticket for a state, sorted by urgency.</td></tr>
+      <tr><td>Undo something I just did</td><td><strong>↩ Undo</strong> in the Session Actions list at the bottom -- only works until you refresh the page. See <a href="#session-actions">Session Actions</a>.</td></tr>
+      <tr><td>Add/edit a location or technician</td><td><strong>Admin Panel</strong> → Locations or Technicians tab. See <a href="#admin">Admin Panel</a>.</td></tr>
+      <tr><td>Build real driving-distance data for a state</td><td>Admin Panel → Distance Matrix tab. Haversine (straight-line) is free/instant; real driving distance costs real money per state -- see the note in that section before running it.</td></tr>
+    </table>
+  </section>
+
   <!-- WHAT'S NEW -->
   <section id="whats-new">
     <h2>🆕 What's New</h2>
+
+    <h3>State Console</h3>
+    <p>A separate at-a-glance page for one state at a time -- <strong>📍 State Console</strong> from the dispatch board, or navigate to <code>state.html</code> directly. Shows who's out today, a map of any saved date's routes (independent of whatever date the dispatch board has open), recent trouble/maintenance tickets, and closed-ticket sync status, without needing to run a full dispatch. Remembers the last state you viewed there. See <a href="#state-console">State Console</a> below for the full rundown.</p>
+
+    <h3>AI Dispatch Assistant is live</h3>
+    <p>The command bar (dispatch board and State Console) now takes typed or dictated natural-language commands -- "move stop 2 from Robert to Keontae" -- and applies them directly to the board. The dedicated <strong>🧭 Analyze Routes</strong> button scans the current day's board and suggests specific one-stop swaps between techs, each with the net mileage it would save and its own Apply/Revert button. See <a href="#ai-assistant">AI Assistant</a> below.</p>
+
+    <h3>Watchdog Log</h3>
+    <p>A per-state page listing every open trouble, install, and site-survey ticket -- including ones that never got a matching site code, which previously were only visible via SMS alert with no way to track or revisit them. Sorted by urgency; anything more than 4 days past its own deadline drops off as stale rather than cluttering the list indefinitely.</p>
+
+    <h3>Trouble-ticket SLA is now calculated, not read from the email</h3>
+    <p>Neumo's own stated priority/deadline on a trouble ticket turned out to be unreliable (a full kiosk outage has shown up marked "low priority"). The app now computes the real SLA itself -- 4 business hours, 8am-5pm, in the site's own local timezone, honoring Saturday coverage where it applies and excluding it where it doesn't. Email-stated deadlines still apply for same-day restock requests and scheduled site-survey meet times.</p>
+
+    <h3>More states online</h3>
+    <p>Idaho, Alabama, and California have all been added since the last update. California in particular is a large territory -- 290 locations and 15 technicians -- so if you're covering it for the first time, the State Console is the fastest way to get oriented before touching the full dispatch workflow.</p>
 
     <h3>Map View</h3>
     <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to see every tech's route plotted geographically, color-coded per tech, with a legend showing stop counts. Useful for spotting stops that are geographically close but assigned to different techs -- something that isn't always obvious from the text list alone, especially for anyone covering a state they don't know well.</p>
@@ -201,6 +239,31 @@
     <p>The legend below the map lists each tech with their stop count and lets you toggle their route on/off. Stops without saved coordinates are listed separately under the map ("Not plotted") rather than silently dropped.</p>
     <p>Distance figures use the real site-to-site driving-distance matrix where it's been built for that state (GA has the most complete coverage); elsewhere, or for specific pairs the matrix build didn't resolve, distances fall back to straight-line and are marked <strong>(est.)</strong>.</p>
     <div class="note"><strong>Note:</strong> whether the map is shown or hidden persists across a page refresh.</div>
+  </section>
+
+  <!-- STATE CONSOLE -->
+  <section id="state-console">
+    <h2>State Console</h2>
+    <p>A single-state overview page, separate from the main dispatch workflow -- useful for a quick check-in, or for getting oriented in a state you don't normally cover. Access it via <strong>📍 State Console</strong> on the dispatch board (carries over your currently selected state and date automatically) or by navigating to <code>state.html</code> directly.</p>
+    <ul>
+      <li><strong>Map View</strong> -- plots any saved date's routes for the selected state. This has its own date field, separate from the dispatch board's Dispatch Date -- set both if you want them to match.</li>
+      <li><strong>AI command bar + Analyze Routes</strong> -- same assistant as the dispatch board. See <a href="#ai-assistant">AI Assistant</a>.</li>
+      <li><strong>Restock Status</strong> -- current restock schedule for the state.</li>
+      <li><strong>Recent Trouble/Maintenance Tickets</strong> -- last 3 days by when a ticket was added to the system (not by due date), with a <strong>Trouble tickets only</strong> filter and a <strong>Hide closed tickets</strong> toggle.</li>
+      <li><strong>Update Closed-Ticket Data</strong> -- trigger the Salesforce closed-ticket sync on demand, or upload a manual export, without going through Admin Panel.</li>
+    </ul>
+    <div class="note"><strong>Note:</strong> if you land on the wrong state or date without navigating from the dispatch board's link, it's likely an already-open tab or browser back/forward reloading an old URL rather than a fresh page load -- click through from the dispatch board to guarantee both carry over correctly.</div>
+  </section>
+
+  <!-- AI ASSISTANT -->
+  <section id="ai-assistant">
+    <h2>AI Assistant</h2>
+    <p>Available on both the dispatch board and the State Console, once a board is generated for a real date.</p>
+    <h3>Typed or spoken commands</h3>
+    <p>Type or tap the mic and speak a plain-language instruction -- e.g. <em>"move stop 2 from Robert to Keontae"</em> -- and tap <strong>Run</strong>. The assistant applies the change directly to the board and repaints the map. Voice input runs entirely in the browser; nothing is recorded or sent as audio.</p>
+    <h3>🧭 Analyze Routes</h3>
+    <p>Scans the currently generated board and suggests specific single-stop swaps between two technicians where doing so would reduce total fleet mileage. Each suggestion shows the site, which tech it would move from/to, and the net mileage change, with its own <strong>Apply</strong> button -- apply just the ones that make sense, and tap again to revert (the button relabels itself). It won't suggest moving a stop onto someone marked unavailable that day.</p>
+    <div class="note"><strong>Note:</strong> suggestion quality depends on that state having a distance matrix built (Admin Panel → Distance Matrix). Haversine (free) is enough for reasonable suggestions; real driving-distance data (paid) sharpens them further. A state with no matrix built yet has no real distance data to suggest swaps from.</div>
   </section>
 
   <!-- SESSION ACTIONS -->
@@ -359,6 +422,25 @@ Please acknowledge receipt.</div>
         </ul>
       </div>
       <div class="feature-card">
+        <h4>🧭 AI Assistant</h4>
+        <ul>
+          <li>Natural-language dispatch commands, typed or spoken</li>
+          <li>Analyze Routes -- suggested swaps with mileage saved</li>
+          <li>Per-suggestion Apply/Revert</li>
+          <li>Respects tech availability automatically</li>
+          <li>Available on dispatch board + State Console</li>
+        </ul>
+      </div>
+      <div class="feature-card">
+        <h4>📍 State Console</h4>
+        <ul>
+          <li>Per-state overview without running a full dispatch</li>
+          <li>Map View for any saved date</li>
+          <li>Recent tickets + restock status</li>
+          <li>On-demand closed-ticket sync</li>
+        </ul>
+      </div>
+      <div class="feature-card">
         <h4>🔔 Watchdog</h4>
         <ul>
           <li>Email monitoring (dispatch, trouble/maintenance tickets, RMA shipping)</li>
@@ -375,8 +457,8 @@ Please acknowledge receipt.</div>
     <h2>Planned Features &amp; Future Upgrades</h2>
     <h3>In Testing</h3>
     <ul>
-      <li>AI-assisted dispatch commands ("move stop 2 from Robert to Keontae") -- built, not yet live for general use while it's being tested.</li>
-      <li>Standalone map/lookup page for quick reference (route map, ticket + closing-note history, RMA shipment status, repeat-issue flags) without the full dispatch-generation workflow.</li>
+      <li>Toast alert when a new trouble ticket arrives while a dispatcher has that state's board open (periodic check, not auto-refresh, so it won't interrupt an in-progress reassignment).</li>
+      <li>Toggle to show trouble tickets only on the dispatch board, auto-enabled on Saturdays -- avoids restock tickets generating false "no coverage" prompts against Saturday's on-call-only roster.</li>
     </ul>
     <h3>Medium Term</h3>
     <ul>
@@ -403,7 +485,7 @@ Please acknowledge receipt.</div>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
       <li>Closing notes from Neumo aren't currently available in the closed-ticket report, so full ticket history for a site still requires manually checking Salesforce.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: August 18, 2026 &nbsp;·&nbsp; v9.78</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 14, 2026 &nbsp;·&nbsp; v9.79</p>
   </section>
 
 </main>
