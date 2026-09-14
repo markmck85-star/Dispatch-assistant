@@ -808,6 +808,14 @@ const MAP_ROUTE_COLORS = [
   '#e6194b', '#0071c5', '#2e9e3e', '#f07d02', '#8e24aa',
   '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
 ];
+// Same order as MAP_ROUTE_COLORS and as index.html's identical array --
+// plain-language names so "move red 2 to Mark" can be resolved against
+// window._stateMapTechColors (captured at render time below) instead of
+// the AI needing to guess at hex-to-name mapping itself.
+const MAP_ROUTE_COLOR_NAMES = [
+  'red', 'blue', 'green', 'orange', 'purple',
+  'teal', 'pink', 'brown', 'olive', 'slate'
+];
 
 // ── STOP ORDER (nearest-neighbor + 2-opt) ──────────────────────────────────
 // Ported from index.html's sortStopsByDistance/getCachedLegInfo (the
@@ -991,8 +999,13 @@ async function renderStateMap(state, dispatchDate) {
     const unmappedCodes = [];
     let stopCount = 0;
     let fleetMi = 0;
+    // Read by the AI command bar's snapshot builder below, by tech name --
+    // avoids needing the AI-routes list and this render's tech ordering to
+    // stay in sync positionally; a name lookup can't drift the two apart.
+    window._stateMapTechColors = {};
 
     techNames.forEach((tech, techIndex) => {
+      window._stateMapTechColors[tech] = MAP_ROUTE_COLOR_NAMES[techIndex % MAP_ROUTE_COLOR_NAMES.length];
       const rawActive = [];
       const completedPts = [];
       (byTech[tech] || []).forEach(a => {
@@ -1121,7 +1134,7 @@ async function renderStateMap(state, dispatchDate) {
     // index.html's aiRoutesSnapshot(). Deliberately built from ALL routes,
     // not just currently-visible ones -- hiding a tech via the legend
     // toggle shouldn't remove them from what the assistant can act on.
-    window._stateAiRoutes = routes.map(r => ({ tech: r.tech, stops: r.pts.map(p => p.code) }));
+    window._stateAiRoutes = routes.map(r => ({ tech: r.tech, stops: r.pts.map(p => p.code), color: window._stateMapTechColors[r.tech] || null }));
     refreshStateAiBarState();
 
     const meta = document.getElementById('stateMapMeta');

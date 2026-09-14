@@ -680,7 +680,22 @@
                 if (parts.length === 3) {
                     const mm = parseInt(parts[0]), dd = parseInt(parts[1]), yyyy = parseInt(parts[2]);
                     if (!isNaN(mm) && !isNaN(dd) && !isNaN(yyyy)) {
-                        return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+                        const d = new Date(yyyy, mm - 1, dd);
+                        // 2026-09-13 fix: Neumo never issues restock work orders for
+                        // Saturday, regardless of a state's Saturday on-call coverage
+                        // (that coverage is trouble-only) -- see the parse-time
+                        // skippedSaturdayCodes guard elsewhere in this file for the
+                        // same rule applied to a fresh paste. This function didn't
+                        // share that guard: it took a restockBy date at face value
+                        // during reprocessing/reassignment, so a Saturday-dated
+                        // "Restock By" field (real case: GA1008/1011/1016/1030/1035/
+                        // 1063 etc., Friday's dispatch list, restockBy 9/12/2026)
+                        // silently scheduled a real board assignment for that
+                        // Saturday. Roll forward to Monday here too, so every path
+                        // that derives a date from restockBy is protected the same
+                        // way, not just the initial paste.
+                        if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+                        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
                     }
                 }
             }
@@ -5883,9 +5898,11 @@ ${content}</body></html>`;
          */
         function aiRoutesSnapshot() {
             const assignments = window.currentAssignments || {};
+            const colors = window._dispatchMapTechColors || {};
             return aiTechRoster().map(tech => ({
                 tech: tech,
-                stops: (assignments[tech] || []).map(item => item.code)
+                stops: (assignments[tech] || []).map(item => item.code),
+                color: colors[tech] || null
             }));
         }
 
@@ -6207,6 +6224,14 @@ ${content}</body></html>`;
             '#e6194b', '#0071c5', '#2e9e3e', '#f07d02', '#8e24aa',
             '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
         ];
+        // Same order as MAP_ROUTE_COLORS -- plain-language names so a dispatcher
+        // can tell the AI Dispatch Assistant "move red 2 to Mark" and have it
+        // resolve which technician that actually is (see window._dispatchMapTechColors
+        // below, captured at render time and read by aiRoutesSnapshot()).
+        const MAP_ROUTE_COLOR_NAMES = [
+            'red', 'blue', 'green', 'orange', 'purple',
+            'teal', 'pink', 'brown', 'olive', 'slate'
+        ];
 
         let _dispatchMap = null;
         let _dispatchMapLayers = {};              // tech name -> L.LayerGroup
@@ -6273,6 +6298,12 @@ ${content}</body></html>`;
             const unmappedCodes = [];
             let stopCount = 0;
             let fleetMi = 0;
+            // Rebuilt fresh each render, right alongside the color assignment
+            // below -- the AI Dispatch Assistant's aiRoutesSnapshot() reads
+            // this by tech name so "move red 2 to Mark" resolves to whichever
+            // tech the map is actually showing in red today, without needing
+            // to duplicate this file's tech-ordering logic a second time.
+            window._dispatchMapTechColors = {};
 
             // Completed stops, grouped by tech (2026-08-21) -- Mark specifically
             // wants these to STAY on the map rather than vanish once done, so a
@@ -6295,6 +6326,7 @@ ${content}</body></html>`;
             const allTechNames = new Set([...Object.keys(assignments), ...Object.keys(completedByTech)]);
 
             dispatchMapTechOrder(assignments, allTechNames).forEach((tech, techIndex) => {
+                window._dispatchMapTechColors[tech] = MAP_ROUTE_COLOR_NAMES[techIndex % MAP_ROUTE_COLOR_NAMES.length];
                 // 2026-08-27: split same-day stops from anything pushed to a
                 // later date (tomorrow, or a specific date via the new
                 // 📅 picker) -- previously every item still sitting in
