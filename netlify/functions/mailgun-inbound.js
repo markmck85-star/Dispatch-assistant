@@ -1153,17 +1153,17 @@ exports.handler = async (event) => {
     const htmlBody  = fields["body-html"] || fields["stripped-html"] || "";
     const timestamp = fields["timestamp"] || String(Date.now());
 
-    // A "Re:" subject means this is a reply/comment on an existing ticket
-    // thread -- a scheduling question, a status update, a "can you meet
-    // Monday" -- not a fresh dispatch that needs its own SMS blast. This is
-    // the root-cause fix for the pattern found across three separate
-    // tickets on 2026-07-09 (OH1057, and now MI1047): every prior fix
-    // patched a specific way *state detection* could fail inside the
-    // trouble-ticket path, but the real bug was letting replies enter that
-    // path at all. "Fwd:"/"Fw:" is deliberately NOT included here --
-    // forwarded emails are an intentional re-dispatch mechanism elsewhere
-    // in this file (see the subject-line fallback below), unlike replies.
-    const isReplyOnly = /^\s*re\s*:/i.test(subject);
+    // A "Re:" subject means this is USUALLY a reply/comment on an existing
+    // ticket thread -- a scheduling question, a status update, a "can you
+    // meet Monday" -- not a fresh dispatch that needs its own SMS blast.
+    // Root-cause fix for the pattern found across three separate tickets on
+    // 2026-07-09 (OH1057, and now MI1047). "Fwd:"/"Fw:" is deliberately NOT
+    // included here -- forwarded emails are an intentional re-dispatch
+    // mechanism elsewhere in this file (see the subject-line fallback
+    // below), unlike replies. The actual isReplyOnly decision is finalized
+    // further below, once effectiveBody exists -- see the note there for
+    // why a raw Re: subject alone isn't a safe-enough signal on its own.
+    const rawSubjectIsReply = /^\s*re\s*:/i.test(subject);
 
     // Debug: log all field keys and sizes to diagnose forwarded email parsing
     const fieldKeys = Object.keys(fields);
@@ -1199,9 +1199,29 @@ exports.handler = async (event) => {
       }
     }
 
-    console.log(`[mailgun-inbound] Function version: v176-co-id-states`);
+    console.log(`[mailgun-inbound] Function version: v177-re-dispatch-list-fix`);
     console.log(`[mailgun-inbound] From: ${sender} | Subject: ${subject}`);
     console.log(`[mailgun-inbound] Body length: ${effectiveBody.length} chars`);
+
+    // BUG FOUND 2026-09-14: rawSubjectIsReply alone was silently eating the
+    // real daily bulk dispatch list whenever Neumo's Dontez Turner sent it
+    // -- unlike Taylor Johnson's fresh-subject emails, Dontez's arrive as
+    // "Re: Dispatch List for <date>" (a reply within an existing thread),
+    // so the old isReplyOnly caught it, parseEmailBody was never called,
+    // and the entire day's restock list was silently dropped: classified
+    // 'reply', parse_status 'ignored', no SMS, no board data, no visible
+    // error anywhere. Confirmed live via inbound_emails: 2026-09-14's list
+    // (received 16:25 UTC from Dontez.Turner@neumo.com) sat ignored while
+    // Mark waited for a banner that could never fire. Fix: also check the
+    // body for the same bulk-dispatch-list signature used elsewhere in this
+    // file (Dispatch List / Restock Report / Restock By) before accepting
+    // the Re: reply-skip -- a real ticket reply/comment won't match any of
+    // these, but Dontez's reply-style dispatch-list forward will.
+    const looksLikeBulkDispatchList = /Dispatch List/i.test(effectiveBody) || /Restock Report/i.test(effectiveBody) || /Restock By/i.test(effectiveBody);
+    const isReplyOnly = rawSubjectIsReply && !looksLikeBulkDispatchList;
+    if (rawSubjectIsReply && looksLikeBulkDispatchList) {
+      console.log(`[mailgun-inbound] Re:-prefixed email ("${subject}") matched bulk-dispatch-list signature -- NOT treating as a reply, parsing normally`);
+    }
 
     // Use original email Date header for accurate SLA calculation
     const emailDate = fields["Date"] || fields["date"] || null;
