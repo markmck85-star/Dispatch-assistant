@@ -933,6 +933,19 @@ let _stateMapLayers = {};
 let _stateMapHiddenTechs = new Set();
 window._stateMapShowCompleted = true;
 
+// Fallback center/zoom per state -- used when there's nothing plottable to
+// derive bounds from. Without this the map silently defaulted to Georgia's
+// center regardless of which state was selected.
+const STATE_CENTERS = {
+  GA: [32.8, -83.6], FL: [28.4, -82.5], MI: [44.3, -85.6], IN: [40.0, -86.1],
+  CO: [39.0, -105.5], OH: [40.4, -82.9], NV: [39.3, -116.6], IL: [40.0, -89.2],
+  MN: [46.3, -94.3], WV: [38.9, -80.6], OR: [43.9, -120.6], NC: [35.6, -79.4],
+  SC: [33.9, -80.9], AL: [32.8, -86.8], CA: [37.2, -119.4],
+};
+function stateCenterFor(state) {
+  return STATE_CENTERS[state] || STATE_CENTERS.GA;
+}
+
 function ensureStateMap() {
   if (_stateMap) return _stateMap;
   const el = document.getElementById('stateMap');
@@ -942,7 +955,8 @@ function ensureStateMap() {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(_stateMap);
-  _stateMap.setView([32.8, -83.6], 7);
+  const initState = (document.getElementById('stateSel') || {}).value || 'GA';
+  _stateMap.setView(stateCenterFor(initState), initState === 'CA' ? 6 : 7);
   _stateMap.on('click', () => _stateMap.scrollWheelZoom.enable());
   _stateMap.on('mouseout', () => _stateMap.scrollWheelZoom.disable());
   return _stateMap;
@@ -1048,7 +1062,7 @@ async function renderStateMap(state, dispatchDate) {
       if (meta) meta.textContent = 'No plottable stops for ' + state + ' on ' + dispatchDate + '.';
       if (noteEl) noteEl.style.display = 'none';
       const map = ensureStateMap();
-      if (map) map.setView([32.8, -83.6], 7);
+      if (map) map.setView(stateCenterFor(state), state === 'CA' ? 6 : 7);
       return;
     }
 
