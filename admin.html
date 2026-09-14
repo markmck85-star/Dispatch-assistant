@@ -909,7 +909,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID']
+                ? ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CO', 'ID', 'CA']
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');
