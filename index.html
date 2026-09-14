@@ -572,6 +572,9 @@
         const LOCATIONS_AL = {};;
         const TECHS_AL = {};;
 
+        const LOCATIONS_CA = {};;
+        const TECHS_CA = {};;
+
         // ── SATURDAY ON-CALL SCHEDULE (all states) ──────────────────────────
         const SAT_DISPATCHER = {"2026-02-07":"Gina", "2026-02-14":"Justin", "2026-02-21":"Caleb", "2026-02-28":"Rich", "2026-03-07":"Gina", "2026-03-14":"Caleb", "2026-03-21":"Justin", "2026-03-28":"Rich", "2026-04-04":"Caleb", "2026-04-11":"Gina", "2026-04-18":"Justin", "2026-04-25":"Caleb", "2026-05-02":"Rich", "2026-05-09":"Gina", "2026-05-16":"Caleb", "2026-05-23":"Justin", "2026-05-30":"Rich", "2026-06-06":"Caleb", "2026-06-13":"Gina", "2026-06-20":"Justin", "2026-06-27":"Caleb", "2026-07-04":"Rich", "2026-07-11":"Gina", "2026-07-18":"Caleb", "2026-07-25":"Justin", "2026-08-01":"Rich", "2026-08-08":"Caleb", "2026-08-15":"Gina", "2026-08-22":"Justin", "2026-08-29":"Caleb", "2026-09-05":"Rich", "2026-09-12":"Gina", "2026-09-19":"Caleb", "2026-09-26":"Justin", "2026-10-03":"Rich", "2026-10-10":"Caleb", "2026-10-17":"Gina", "2026-10-24":"Justin", "2026-10-31":"Caleb", "2026-11-07":"Rich", "2026-11-14":"Gina", "2026-11-21":"Caleb", "2026-11-28":"Justin", "2026-12-05":"Rich", "2026-12-12":"Caleb", "2026-12-19":"Gina", "2026-12-26":"Justin", "2027-01-02":"Caleb"};
         const SAT_ONCALL_GA = {"2026-02-07":["Omari Williams","Robert Medley"], "2026-02-14":["Nyzier Moore","Sean Reich"], "2026-02-21":["Omari Williams","Robert Medley"], "2026-02-28":["Nyzier Moore","Sean Reich"], "2026-03-07":["Omari Williams","Robert Medley"], "2026-03-14":["Nyzier Moore","Sean Reich"], "2026-03-21":["Omari Williams","Robert Medley"], "2026-03-28":["Nyzier Moore","Sean Reich"], "2026-04-04":["Omari Williams","Robert Medley"], "2026-04-11":["Nyzier Moore","Sean Reich"], "2026-04-18":["Omari Williams","Robert Medley"], "2026-04-25":["Nyzier Moore","Sean Reich"], "2026-05-02":["Omari Williams","Robert Medley"], "2026-05-09":["Nyzier Moore","Sean Reich"], "2026-05-16":["Omari Williams","Robert Medley"], "2026-05-23":["Nyzier Moore","Sean Reich"], "2026-05-30":["Omari Williams","Robert Medley"], "2026-06-06":["Nyzier Moore","Sean Reich"], "2026-06-13":["Omari Williams","Robert Medley"], "2026-06-20":["Nyzier Moore","Sean Reich"], "2026-06-27":["Omari Williams","Robert Medley"], "2026-07-04":["Nyzier Moore","Sean Reich"], "2026-07-11":["Omari Williams","Robert Medley"], "2026-07-18":["Nyzier Moore","Sean Reich"], "2026-07-25":["Omari Williams","Robert Medley"], "2026-08-01":["Nyzier Moore","Sean Reich"], "2026-08-08":["Omari Williams","Robert Medley"], "2026-08-15":["Nyzier Moore","Sean Reich"], "2026-08-22":["Omari Williams","Robert Medley"], "2026-08-29":["Nyzier Moore","Sean Reich"], "2026-09-05":["Omari Williams","Robert Medley"], "2026-09-12":["Nyzier Moore","Sean Reich"], "2026-09-19":["Omari Williams","Robert Medley"], "2026-09-26":["Nyzier Moore","Sean Reich"], "2026-10-03":["Omari Williams","Robert Medley"], "2026-10-10":["Nyzier Moore","Sean Reich"], "2026-10-17":["Omari Williams","Robert Medley"], "2026-10-24":["Nyzier Moore","Sean Reich"], "2026-10-31":["Omari Williams","Robert Medley"], "2026-11-07":["Nyzier Moore","Sean Reich"], "2026-11-14":["Omari Williams","Robert Medley"], "2026-11-21":["Nyzier Moore","Sean Reich"], "2026-11-28":["Omari Williams","Robert Medley"], "2026-12-05":["Nyzier Moore","Sean Reich"], "2026-12-12":["Omari Williams","Robert Medley"], "2026-12-19":["Nyzier Moore","Sean Reich"], "2026-12-26":["Omari Williams","Robert Medley"], "2027-01-02":["Nyzier Moore","Sean Reich"]};
@@ -1059,6 +1062,7 @@
                 { blobState: 'MN', targetMap: LOCATIONS_MN },
                 { blobState: 'WV', targetMap: LOCATIONS_WV },
                 { blobState: 'OR', targetMap: LOCATIONS_OR },
+                { blobState: 'CA', targetMap: LOCATIONS_CA },
             ];
             let anyLoaded = false;
             await Promise.all(stateTargets.map(async ({ blobState, targetMap }) => {
@@ -1127,6 +1131,7 @@
                 { blobState: 'MN', targetMap: TECHS_MN },
                 { blobState: 'WV', targetMap: TECHS_WV },
                 { blobState: 'OR', targetMap: TECHS_OR },
+                { blobState: 'CA', targetMap: TECHS_CA },
             ].filter(t => t.targetMap); // skip any state maps not yet defined
             await Promise.all(techTargets.map(async ({ blobState, targetMap }) => {
                 try {
@@ -2563,6 +2568,7 @@ function distanceMatrixStatus(state) {
                 'MN': { locs: LOCATIONS_MN, techs: TECHS_MN },
                 'WV': { locs: LOCATIONS_WV, techs: TECHS_WV },
                 'OR': { locs: LOCATIONS_OR, techs: TECHS_OR },
+                'CA': { locs: LOCATIONS_CA, techs: TECHS_CA },
             };
             const ctx = STATE_MAP[CURRENT_STATE] || STATE_MAP['GA'];
             LOCATIONS = ctx.locs;
