@@ -141,6 +141,31 @@
         <span id="stateMapMeta" class="map-panel-meta"></span>
       </div>
       <div id="stateMap"></div>
+
+      <!-- AI DISPATCH ASSISTANT COMMAND BAR -- placed directly under the map
+           so a prompt's effect (pins/routes moving) is visible in the same
+           glance, per the original ask for this redesign: being able to
+           see how a command like "move red to blue" looks spatially.
+           Same backend (/.netlify/functions/dispatch-ai) and response
+           handling as index.html's version; mirrors its element-naming
+           pattern with a state-prefixed id/function set purely for
+           readability since this is a separate file, not to avoid any
+           real collision. -->
+      <div id="stateAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
+          <input type="text" id="stateAiCommandInput" autocomplete="off"
+              placeholder='e.g. "move stop 2 from Robert to Keontae"'
+              onkeydown="if(event.key==='Enter'){event.preventDefault();submitStateAiCommand();}"
+              style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+          <button type="button" id="stateAiMicBtn" onclick="toggleStateAiVoice()" title="Dictate a command"
+              style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+          <button type="button" id="stateAiSendBtn" onclick="submitStateAiCommand()"
+              style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+        </div>
+        <div id="stateAiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
+        <div id="stateAiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
+      </div>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
         <input type="checkbox" id="mapShowCompletedToggle" checked onchange="window._stateMapShowCompleted = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
         Show completed stops (✓, muted)
@@ -1072,6 +1097,14 @@ async function renderStateMap(state, dispatchDate) {
     }
 
     renderStateMapLegend(routes);
+    // Simplified {tech, stops:[code]} snapshot for the AI command bar --
+    // kept in sync with the map on every render (including after the AI
+    // itself changes something and the map redraws), same shape as
+    // index.html's aiRoutesSnapshot(). Deliberately built from ALL routes,
+    // not just currently-visible ones -- hiding a tech via the legend
+    // toggle shouldn't remove them from what the assistant can act on.
+    window._stateAiRoutes = routes.map(r => ({ tech: r.tech, stops: r.pts.map(p => p.code) }));
+    refreshStateAiBarState();
 
     const meta = document.getElementById('stateMapMeta');
     if (meta) meta.textContent = routes.length + (routes.length === 1 ? ' tech · ' : ' techs · ') + stopCount + (stopCount === 1 ? ' stop · ' : ' stops · ') + (Math.round(fleetMi * 10) / 10) + ' mi';
@@ -1111,6 +1144,213 @@ function toggleStateMapTech(tech) {
 function showAllStateMapTechs() {
   _stateMapHiddenTechs.clear();
   renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AI DISPATCH ASSISTANT COMMAND BAR — v1, added 2026-09-13
+//
+// Shares the same backend (/.netlify/functions/dispatch-ai) and request/
+// response contract as index.html's version -- see that file for the
+// full design notes. The main difference: rather than reconstructing rich
+// in-memory stop objects after a change (index.html's applyAiRoutes),
+// this just re-runs renderStateMap() after a persisted change, since the
+// map already re-fetches everything fresh from Supabase on every render
+// -- simpler and can't drift from the true DB state.
+//
+// KNOWN GAP, not yet closed: unlike index.html, this does NOT send
+// unavailableTechs (comp days / BlueFolder time off / Saturday on-call
+// roster) -- that logic (getUnavailableTechsForDate) is index.html-
+// specific and a genuinely large port on its own. Until that's done, the
+// assistant here could OK a reassignment onto someone who's actually out
+// that day. Given the state console is meant to become the PRIMARY
+// reassignment surface (per the redesign this bar is part of), this is
+// worth closing before leaning on it -- best fix is probably moving the
+// check server-side into dispatch-ai.mjs itself (querying
+// technician_availability directly) so both surfaces get it for free
+// instead of duplicating index.html's client logic here.
+// ═══════════════════════════════════════════════════════════════════
+
+let _stateAiBusy = false;
+let _stateAiListening = false;
+let _stateAiRecognition = null;
+
+function refreshStateAiBarState() {
+  const input = document.getElementById('stateAiCommandInput');
+  const sendBtn = document.getElementById('stateAiSendBtn');
+  const micBtn = document.getElementById('stateAiMicBtn');
+  if (!input || !sendBtn) return;
+
+  const hasBoard = (window._stateAiRoutes || []).some(r => (r.stops || []).length > 0);
+  const enabled = hasBoard && !_stateAiBusy;
+
+  input.disabled = !enabled;
+  sendBtn.disabled = !enabled;
+  sendBtn.style.opacity = enabled ? '1' : '0.5';
+  sendBtn.style.cursor = enabled ? 'pointer' : 'default';
+  input.placeholder = hasBoard
+    ? 'e.g. "move stop 2 from Robert to Keontae"'
+    : 'No plottable stops for this date yet';
+
+  if (micBtn) {
+    const speechSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    micBtn.style.display = speechSupported ? '' : 'none';
+    micBtn.disabled = !enabled;
+    micBtn.style.opacity = enabled ? '1' : '0.5';
+  }
+}
+
+function setStateAiStatus(msg, color) {
+  const el = document.getElementById('stateAiCommandStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = color || '#888';
+}
+
+/** Same diff-card rendering as index.html's renderAiDiff. */
+function renderStateAiDiff(data) {
+  const el = document.getElementById('stateAiCommandDiff');
+  if (!el) return;
+
+  const applied = (data.actions || []).filter(a => a.type !== 'error');
+  const errors = (data.actions || []).filter(a => a.type === 'error');
+
+  if (!applied.length && !errors.length) { el.innerHTML = ''; return; }
+
+  let html = '';
+  if (applied.length) {
+    const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#7edb8e' : '#ffb56b';
+    html += '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+      + '<div style="color:#e8f5ec;font-weight:bold;">✅ ' + escapeHtml(applied.map(a => a.summary).join(' · ')) + '</div>';
+    if (data.changedTechs && data.changedTechs.length) {
+      html += '<div style="margin-top:3px;color:' + netColor + ';font-weight:bold;">Net Fleet: ' + escapeHtml(data.fleetDelta || '0.0 mi') + '</div>';
+    }
+    if (data.persisted === false && data.changedTechs && data.changedTechs.length) {
+      html += '<div style="margin-top:3px;color:#ffb56b;font-size:11px;">⚠ Not saved' + (data.reason ? ' (' + escapeHtml(data.reason) + ')' : '') + '</div>';
+    }
+    html += '</div>';
+  }
+  if (errors.length) {
+    html += '<div style="margin-top:4px;color:#ffb56b;font-size:11px;">' + escapeHtml(errors.map(a => a.summary).join(' · ')) + '</div>';
+  }
+  el.innerHTML = html;
+}
+
+async function submitStateAiCommand() {
+  if (_stateAiBusy) return;
+  const input = document.getElementById('stateAiCommandInput');
+  if (!input) return;
+
+  const text = (input.value || '').trim();
+  if (!text) { setStateAiStatus('Type or dictate a command first.', '#ffb56b'); return; }
+
+  const state = document.getElementById('stateSel').value;
+  const dispatchDate = window._stateMapDate;
+  if (!(window._stateAiRoutes || []).some(r => (r.stops || []).length > 0)) {
+    setStateAiStatus('No plottable stops for this date yet.', '#ffb56b');
+    return;
+  }
+
+  if (_stateAiListening) stopStateAiVoice();
+  _stateAiBusy = true;
+  refreshStateAiBarState();
+  setStateAiStatus('Working on it…', '#7ec8e3');
+  const diffEl = document.getElementById('stateAiCommandDiff');
+  if (diffEl) diffEl.innerHTML = '';
+
+  try {
+    const res = await fetch('/.netlify/functions/dispatch-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, state, dispatchDate, routes: window._stateAiRoutes }),
+    });
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || !data || !data.ok) {
+      setStateAiStatus((data && data.error) || ('Assistant failed (HTTP ' + res.status + ')'), '#ff8a80');
+      return;
+    }
+    if (!(data.actions || []).length) {
+      setStateAiStatus(data.reply || 'Nothing to change.', '#ffb56b');
+      return;
+    }
+
+    const changed = data.changedTechs || [];
+    if (changed.length) {
+      // Re-fetch rather than reconstruct in-memory -- the map already
+      // rebuilds itself from Supabase on every render, so this is simpler
+      // than index.html's approach and can't drift from the true DB state.
+      await renderStateMap(state, dispatchDate);
+    }
+
+    renderStateAiDiff(data);
+    setStateAiStatus('', '#888');
+    if (changed.length) input.value = '';
+  } catch (err) {
+    setStateAiStatus('Assistant unreachable: ' + err.message, '#ff8a80');
+  } finally {
+    _stateAiBusy = false;
+    refreshStateAiBarState();
+  }
+}
+
+// Same Web Speech API pattern as index.html's voice input -- transcript
+// only, no audio leaves the browser.
+function toggleStateAiVoice() {
+  if (_stateAiListening) { stopStateAiVoice(); return; }
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { setStateAiStatus('Voice input is not supported in this browser — type the command instead.', '#ffb56b'); return; }
+
+  try {
+    _stateAiRecognition = new SR();
+  } catch (err) {
+    setStateAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
+    return;
+  }
+
+  _stateAiRecognition.lang = 'en-US';
+  _stateAiRecognition.interimResults = true;
+  _stateAiRecognition.continuous = false;
+  _stateAiRecognition.maxAlternatives = 1;
+
+  _stateAiRecognition.onresult = (event) => {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+    const input = document.getElementById('stateAiCommandInput');
+    if (input) input.value = transcript.trim();
+    if (event.results[event.results.length - 1].isFinal) {
+      stopStateAiVoice();
+      submitStateAiCommand();
+    }
+  };
+  _stateAiRecognition.onerror = (event) => {
+    stopStateAiVoice();
+    setStateAiStatus(event.error === 'not-allowed' ? 'Microphone permission denied.' : 'Voice input error: ' + event.error, '#ff8a80');
+  };
+  _stateAiRecognition.onend = () => { if (_stateAiListening) stopStateAiVoice(); };
+
+  _stateAiListening = true;
+  setStateAiStatus('Listening…', '#7edb8e');
+  const micBtn = document.getElementById('stateAiMicBtn');
+  if (micBtn) { micBtn.style.background = '#8b2e2e'; micBtn.style.color = '#fff'; }
+
+  try {
+    _stateAiRecognition.start();
+  } catch (err) {
+    stopStateAiVoice();
+    setStateAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
+  }
+}
+
+function stopStateAiVoice() {
+  _stateAiListening = false;
+  if (_stateAiRecognition) {
+    try { _stateAiRecognition.stop(); } catch (err) { /* already stopped */ }
+    _stateAiRecognition = null;
+  }
+  const micBtn = document.getElementById('stateAiMicBtn');
+  if (micBtn) { micBtn.style.background = '#2a2a3e'; micBtn.style.color = '#ccc'; }
+  if ((document.getElementById('stateAiCommandStatus') || {}).textContent === 'Listening…') setStateAiStatus('');
 }
 
 async function loadRestock(state) {
