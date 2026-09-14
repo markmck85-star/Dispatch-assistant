@@ -215,7 +215,7 @@ function functionDeclarations() {
 function buildRoster(routes, siteNames) {
   const lines = [];
   routes.forEach((r, ti) => {
-    lines.push(`Technician ${ti + 1}: ${r.tech}`);
+    lines.push(`Technician ${ti + 1}: ${r.tech}${r.color ? ` (map color: ${r.color})` : ''}`);
     if (!r.stops.length) {
       lines.push('  (no stops)');
       return;
@@ -247,7 +247,11 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
   }
   lines.push(
     'Rules:',
-    '- Match technicians by first name, last name, or nickname; the dispatcher rarely says the full name.',
+    '- The text may be an imperfect voice-dictation transcript, not typed text. Resolve homophones and near-misses from ' +
+      'context rather than requiring an exact match -- e.g. "stop to" or "stop too" almost always means "stop 2" when a ' +
+      'number is grammatically expected there; the same applies to any other misheard number word or name.',
+    '- Match technicians by first name, last name, nickname, OR the map color shown next to them above (e.g. "move red 2 to Mark" ' +
+      'means the technician whose line says "map color: red"). A color reference always means the technician, never a stop or site.',
     '- If the dispatcher names a site code or site name instead of a stop number, find that stop in the roster and use its number.',
     '- If an instruction implies several changes, emit one tool call per change, in the order they should be applied.',
     '- The advisory tools (get_leg_distance, get_stop_addition_cost, get_overtime_risk) never change the board -- use them ' +
@@ -454,6 +458,7 @@ export default async (req) => {
     .map((r) => ({
       tech: String(r.tech),
       stops: (Array.isArray(r.stops) ? r.stops : []).map((c) => String(c)),
+      color: r.color ? String(r.color) : null,
     }));
   if (!routes.length) {
     return json(400, { ok: false, error: 'No dispatch routes to work with -- generate dispatches first' });
