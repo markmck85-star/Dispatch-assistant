@@ -524,9 +524,21 @@ export default async (req) => {
     return json(400, { ok: false, error: 'Invalid JSON body' });
   }
 
+  // A dedicated button (no typing/dictation) can ask for a specific tool
+  // directly rather than going through NL parsing -- deterministic and
+  // faster, since there's nothing ambiguous to resolve. Only advisory,
+  // read-only tools are forceable this way; a write action (reassign_stop,
+  // sort_route) always has to come from an actual instruction, never a
+  // one-tap button, since it changes the board.
+  const FORCEABLE_TOOLS = new Set(['propose_route_rebalance']);
+  const forceTool = FORCEABLE_TOOLS.has(payload.forceTool) ? String(payload.forceTool) : null;
+  const forceToolArgs = (forceTool && payload.forceToolArgs && typeof payload.forceToolArgs === 'object') ? payload.forceToolArgs : {};
+
   const text = String(payload.text || '').trim();
-  if (!text) return json(400, { ok: false, error: 'No command text provided' });
-  if (text.length > 1000) return json(400, { ok: false, error: 'Command text too long' });
+  if (!forceTool) {
+    if (!text) return json(400, { ok: false, error: 'No command text provided' });
+    if (text.length > 1000) return json(400, { ok: false, error: 'Command text too long' });
+  }
 
   const state = String(payload.state || '').trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(state)) return json(400, { ok: false, error: 'A 2-letter state is required' });
@@ -578,29 +590,33 @@ export default async (req) => {
     const before = routes.map((r) => ({ tech: r.tech, stops: r.stops.slice() }));
     const fleetBefore = fleetMetrics(legInfo, before);
 
-    const ai = new GoogleGenAI({});
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: text,
-      config: {
-        temperature: 0,
-        systemInstruction: systemInstruction(buildRoster(routes, ctx.siteNames), state, dispatchDate, unavailableTechs),
-        tools: [{ functionDeclarations: functionDeclarations() }],
-        toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
-      },
-    });
-
-    const calls = response.functionCalls || [];
-    if (!calls.length) {
-      return json(200, {
-        ok: true,
-        actions: [],
-        summary: '',
-        reply: (response.text || '').trim() || "Couldn't tell which stop or technician you meant — try naming the tech and the stop number.",
-        routes,
-        changedTechs: [],
-        persisted: false,
+    let calls;
+    if (forceTool) {
+      calls = [{ name: forceTool, args: forceToolArgs }];
+    } else {
+      const ai = new GoogleGenAI({});
+      const response = await ai.models.generateContent({
+        model: MODEL,
+        contents: text,
+        config: {
+          temperature: 0,
+          systemInstruction: systemInstruction(buildRoster(routes, ctx.siteNames), state, dispatchDate, unavailableTechs),
+          tools: [{ functionDeclarations: functionDeclarations() }],
+          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+        },
       });
+      calls = response.functionCalls || [];
+      if (!calls.length) {
+        return json(200, {
+          ok: true,
+          actions: [],
+          summary: '',
+          reply: (response.text || '').trim() || "Couldn't tell which stop or technician you meant — try naming the tech and the stop number.",
+          routes,
+          changedTechs: [],
+          persisted: false,
+        });
+      }
     }
 
     const working = routes.map((r) => ({ tech: r.tech, stops: r.stops.slice() }));
