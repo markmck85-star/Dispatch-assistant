@@ -85,6 +85,16 @@
   #mapRefreshBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
   #mapRefreshBtn:hover { background: #33334a; }
   #stateMap { height: 420px; border-radius: 6px; background: #2a2a2a; margin-top: 10px; }
+  /* Hide/Expand controls, mirroring index.html's dispatch-board map panel. */
+  #stateMapPanel.collapsed #stateMapBody { display: none; }
+  #stateMapPanel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
+  #stateMapPanel.map-fullscreen #stateMapBody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #stateMapPanel.map-fullscreen #stateMap { flex: 1; height: auto; }
+  #stateMapToggleBtn, #stateMapFullscreenBtn, #stateMapFullscreenCloseBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  #stateMapToggleBtn:hover, #stateMapFullscreenBtn:hover, #stateMapFullscreenCloseBtn:hover { background: #33334a; }
+  #stateMapFullscreenCloseBtn { display: none; }
+  #stateMapPanel.map-fullscreen #stateMapFullscreenCloseBtn { display: inline-block; }
+  #stateMapPanel.map-fullscreen #stateMapFullscreenBtn { display: none; }
   #stateMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
   .map-legend-chip:hover { border-color: #7ec8e3; }
@@ -136,21 +146,30 @@
         <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
         <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; renderStateMap(document.getElementById('stateSel').value, this.value);"
           style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
+        <button type="button" id="stateMapToggleBtn" onclick="toggleStateMap()"
+          aria-expanded="true" aria-controls="stateMapBody">Hide Map</button>
         <button type="button" id="mapRefreshBtn" onclick="renderStateMap(document.getElementById('stateSel').value, window._stateMapDate)"
           title="Re-pull current assignments/tickets without reloading the page">🔄 Refresh</button>
+        <button type="button" id="stateMapFullscreenBtn" onclick="toggleStateMapFullscreen()"
+          title="Expand the map to fill the screen -- better for pinch-zoom and reading pins on mobile">⛶ Expand</button>
+        <button type="button" id="stateMapFullscreenCloseBtn" onclick="toggleStateMapFullscreen()">✕ Close</button>
         <span id="stateMapMeta" class="map-panel-meta"></span>
       </div>
-      <div id="stateMap"></div>
+      <div id="stateMapBody" class="map-panel-body">
+        <div id="stateMap"></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
+          <input type="checkbox" id="mapShowCompletedToggle" checked onchange="window._stateMapShowCompleted = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
+          Show completed stops (✓, muted)
+        </label>
+        <div style="font-size:11px;color:#777;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
+        <div id="stateMapLegend"></div>
+        <div id="stateMapNote" class="map-note" style="display:none;"></div>
+      </div>
 
-      <!-- AI DISPATCH ASSISTANT COMMAND BAR -- placed directly under the map
-           so a prompt's effect (pins/routes moving) is visible in the same
-           glance, per the original ask for this redesign: being able to
-           see how a command like "move red to blue" looks spatially.
-           Same backend (/.netlify/functions/dispatch-ai) and response
-           handling as index.html's version; mirrors its element-naming
-           pattern with a state-prefixed id/function set purely for
-           readability since this is a separate file, not to avoid any
-           real collision. -->
+      <!-- AI DISPATCH ASSISTANT COMMAND BAR -- deliberately OUTSIDE
+           #stateMapBody (like index.html's bar is a sibling of its own map
+           panel), so it stays usable and visible even if the map itself is
+           hidden or the page hasn't been resized into fullscreen. -->
       <div id="stateAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
         <div style="display:flex; gap:6px; align-items:center;">
           <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
@@ -166,13 +185,6 @@
         <div id="stateAiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
         <div id="stateAiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
-        <input type="checkbox" id="mapShowCompletedToggle" checked onchange="window._stateMapShowCompleted = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
-        Show completed stops (✓, muted)
-      </label>
-      <div style="font-size:11px;color:#777;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
-      <div id="stateMapLegend"></div>
-      <div id="stateMapNote" class="map-note" style="display:none;"></div>
     </div>
 
     <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
@@ -1090,6 +1102,7 @@ async function renderStateMap(state, dispatchDate) {
     });
 
     const bounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
+    window._stateMapBounds = bounds; // reused by the Expand/fullscreen resize handler
     map.invalidateSize();
     if (bounds.isValid()) {
       if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(bounds.getCenter(), 12);
@@ -1145,6 +1158,110 @@ function showAllStateMapTechs() {
   _stateMapHiddenTechs.clear();
   renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);
 }
+
+// Hide/Expand controls -- ported from index.html's dispatch-board map panel
+// (toggleDispatchMap / toggleDispatchMapFullscreen and friends), same
+// approach: collapse state remembered in localStorage, fullscreen routed
+// through history.pushState so the phone's back button/gesture closes the
+// overlay instead of leaving the page, Leaflet re-measured via
+// invalidateSize() + a re-fit on the NEXT frame after the CSS change so it
+// never shows stale tiles in a corner.
+function toggleStateMap() {
+  const panel = document.getElementById('stateMapPanel');
+  const btn = document.getElementById('stateMapToggleBtn');
+  if (!panel) return;
+  const collapsed = panel.classList.toggle('collapsed');
+  if (btn) {
+    btn.textContent = collapsed ? 'Show Map' : 'Hide Map';
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+  try { localStorage.setItem('mcr_state_map_collapsed', collapsed ? '1' : '0'); } catch (err) { /* silent */ }
+  if (!collapsed && _stateMap) _fitStateMapAfterResize();
+}
+
+function restoreStateMapCollapsedState() {
+  const panel = document.getElementById('stateMapPanel');
+  const btn = document.getElementById('stateMapToggleBtn');
+  if (!panel) return;
+  let collapsed = false;
+  try { collapsed = localStorage.getItem('mcr_state_map_collapsed') === '1'; } catch (err) { /* silent */ }
+  panel.classList.toggle('collapsed', collapsed);
+  if (btn) {
+    btn.textContent = collapsed ? 'Show Map' : 'Hide Map';
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+}
+document.addEventListener('DOMContentLoaded', restoreStateMapCollapsedState);
+
+let _stateMapFullscreenPrevViewport = null;
+let _stateMapFullscreenHistoryPushed = false;
+
+function toggleStateMapFullscreen() {
+  const panel = document.getElementById('stateMapPanel');
+  if (!panel) return;
+  if (!panel.classList.contains('map-fullscreen')) {
+    _openStateMapFullscreen();
+  } else if (_stateMapFullscreenHistoryPushed) {
+    history.back(); // triggers popstate -> _closeStateMapFullscreen()
+  } else {
+    _closeStateMapFullscreen();
+  }
+}
+
+function _openStateMapFullscreen() {
+  const panel = document.getElementById('stateMapPanel');
+  panel.classList.add('map-fullscreen');
+  try {
+    history.pushState({ mcrStateMapFullscreen: true }, '', location.href);
+    _stateMapFullscreenHistoryPushed = true;
+  } catch (err) {
+    _stateMapFullscreenHistoryPushed = false; // Close button/Escape will clean up directly instead
+  }
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  if (viewportMeta) {
+    _stateMapFullscreenPrevViewport = viewportMeta.getAttribute('content');
+    viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+  }
+  document.addEventListener('keydown', _stateMapFullscreenEscHandler);
+  _fitStateMapAfterResize();
+}
+
+function _closeStateMapFullscreen() {
+  const panel = document.getElementById('stateMapPanel');
+  if (!panel) return;
+  panel.classList.remove('map-fullscreen');
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  if (viewportMeta && _stateMapFullscreenPrevViewport) {
+    viewportMeta.setAttribute('content', _stateMapFullscreenPrevViewport);
+  }
+  document.removeEventListener('keydown', _stateMapFullscreenEscHandler);
+  _stateMapFullscreenHistoryPushed = false;
+  _fitStateMapAfterResize();
+}
+
+function _fitStateMapAfterResize() {
+  requestAnimationFrame(() => {
+    if (_stateMap) {
+      _stateMap.invalidateSize();
+      if (window._stateMapBounds && window._stateMapBounds.isValid()) {
+        _stateMap.fitBounds(window._stateMapBounds, { padding: [28, 28], maxZoom: 14 });
+      }
+    }
+  });
+}
+
+function _stateMapFullscreenEscHandler(e) {
+  if (e.key === 'Escape') toggleStateMapFullscreen();
+}
+
+// Physical/gesture back button while the map overlay is open: the
+// pushState above means this fires INSTEAD OF leaving the page.
+window.addEventListener('popstate', function() {
+  const panel = document.getElementById('stateMapPanel');
+  if (panel && panel.classList.contains('map-fullscreen')) {
+    _closeStateMapFullscreen();
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // AI DISPATCH ASSISTANT COMMAND BAR — v1, added 2026-09-13
