@@ -87,6 +87,73 @@ const AVG_STOP_DWELL_MIN = 20;
 // already used for SLA calculations elsewhere in this app.
 const WORKDAY_BUDGET_MIN = 8 * 60;
 
+// Minimum net fleet-mileage improvement (savings at the giving-up tech minus
+// cost at the receiving tech) for propose_route_rebalance to bother
+// suggesting a swap. Keeps the list to genuinely worthwhile moves rather
+// than noise-level 0.2-mile shuffles nobody would act on.
+const MIN_REBALANCE_SAVINGS_MI = 1.0;
+
+/**
+ * Greedy multi-round savings algorithm for propose_route_rebalance.
+ *
+ * This is a VRP-lite, not a real solver: each round finds the single best
+ * "take this stop off tech A, insert it on tech B" swap across the whole
+ * board, applies it, then re-evaluates from scratch before looking for the
+ * next one. Re-evaluating every round (rather than ranking all candidates
+ * once against the original board) is what correctly catches the
+ * backtracking case this tool exists for -- a tech with two stops in
+ * opposite directions from each other looks like modest savings for either
+ * stop in isolation, but once one of them moves, the value of moving the
+ * other can change (usually drop, since the detour that made both stops
+ * expensive is now gone).
+ *
+ * locked/unavailable stops and techs are never touched. Returns the
+ * ordered list of suggested moves (empty if nothing clears the minimum
+ * threshold) -- purely advisory, never mutates the routes it's given.
+ */
+function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs, minSavingsMi, maxSuggestions) {
+  let working = routes.map((r) => ({ tech: r.tech, stops: r.stops.slice() }));
+  const suggestions = [];
+
+  for (let round = 0; round < maxSuggestions; round++) {
+    let best = null;
+
+    working.forEach((fromRoute) => {
+      if (unavailableTechs.has(fromRoute.tech)) return;
+      fromRoute.stops.forEach((code, idx) => {
+        if (lockedCodes.has(code)) return;
+        const before = routeMetrics(legInfo, fromRoute.tech, fromRoute.stops);
+        const without = fromRoute.stops.slice(0, idx).concat(fromRoute.stops.slice(idx + 1));
+        const after = routeMetrics(legInfo, fromRoute.tech, without);
+        const savings = before.distanceMi - after.distanceMi;
+        if (savings <= 0) return; // this stop isn't costing its current tech anything extra
+
+        working.forEach((toRoute) => {
+          if (toRoute.tech === fromRoute.tech || unavailableTechs.has(toRoute.tech)) return;
+          const toBefore = routeMetrics(legInfo, toRoute.tech, toRoute.stops);
+          const withStop = insertStopAtBestPosition(legInfo, toRoute.tech, toRoute.stops, code, sites);
+          const toAfter = routeMetrics(legInfo, toRoute.tech, withStop);
+          const cost = toAfter.distanceMi - toBefore.distanceMi;
+          const net = savings - cost;
+          if (net >= minSavingsMi && (!best || net > best.net)) {
+            best = { fromTech: fromRoute.tech, toTech: toRoute.tech, code, savings, cost, net, newFromStops: without, newToStops: withStop };
+          }
+        });
+      });
+    });
+
+    if (!best) break;
+    working = working.map((r) => {
+      if (r.tech === best.fromTech) return { tech: r.tech, stops: best.newFromStops };
+      if (r.tech === best.toTech) return { tech: r.tech, stops: best.newToStops };
+      return r;
+    });
+    suggestions.push(best);
+  }
+
+  return suggestions;
+}
+
 function json(status, obj) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -208,6 +275,27 @@ function functionDeclarations() {
         required: ['techIndex'],
       },
     },
+    {
+      name: 'propose_route_rebalance',
+      description:
+        'Read-only advisory: analyzes the WHOLE board (not just one technician) and suggests specific stop-to-technician swaps ' +
+        "that would reduce total fleet mileage/time. Especially useful for catching a technician with two stops in opposite " +
+        "directions from each other that force a long backtrack, when a different technician has a stop much nearer one of " +
+        "them. Never changes the board by itself -- returns a ranked list of suggested moves with each one's mileage/time " +
+        'impact for the dispatcher to review. Use for requests like "does this board make sense", "any better way to split ' +
+        'these routes", or "look for backtracking" -- and proactively when a rebalance seems relevant to what\'s being asked, ' +
+        "even without an exact match to those phrases.",
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          maxSuggestions: {
+            type: 'INTEGER',
+            description: 'Maximum number of suggested swaps to return. Defaults to 5 if omitted.',
+          },
+        },
+        required: [],
+      },
+    },
   ];
 }
 
@@ -254,8 +342,8 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
       'means the technician whose line says "map color: red"). A color reference always means the technician, never a stop or site.',
     '- If the dispatcher names a site code or site name instead of a stop number, find that stop in the roster and use its number.',
     '- If an instruction implies several changes, emit one tool call per change, in the order they should be applied.',
-    '- The advisory tools (get_leg_distance, get_stop_addition_cost, get_overtime_risk) never change the board -- use them ' +
-      'freely to answer a question, even speculative ones ("what if"), without asking for confirmation first.',
+    '- The advisory tools (get_leg_distance, get_stop_addition_cost, get_overtime_risk, propose_route_rebalance) never change ' +
+      'the board -- use them freely to answer a question, even speculative ones ("what if"), without asking for confirmation first.',
     '- reassign_stop and sort_route DO change the board. Only call one of those when you are confident which technician ' +
       'and stop are meant. If the instruction is ambiguous, unrelated to the board, or refers to someone or something not ' +
       'in the roster, do not call a tool: reply with one short sentence saying what you need clarified.',
@@ -695,6 +783,46 @@ export default async (req) => {
           driveMinutesWereEstimated: driveMin == null,
           risk,
         });
+        continue;
+      }
+
+      if (call.name === 'propose_route_rebalance') {
+        const maxSuggestions = Number.isInteger(args.maxSuggestions) && args.maxSuggestions > 0
+          ? Math.min(args.maxSuggestions, 15)
+          : 5;
+        const lockedCodes = new Set(
+          (Array.isArray(payload.lockedCodes) ? payload.lockedCodes : []).map((c) => String(c))
+        );
+        const rebalance = proposeRebalance(working, legInfo, ctx.sites, lockedCodes, unavailableTechs, MIN_REBALANCE_SAVINGS_MI, maxSuggestions);
+
+        if (!rebalance.length) {
+          actions.push({
+            type: 'propose_route_rebalance',
+            summary: 'No worthwhile rebalancing found -- the board already looks efficient.',
+            suggestions: [],
+          });
+        } else {
+          const lines = rebalance.map((s) =>
+            `${s.code}${ctx.siteNames[s.code] ? ' (' + ctx.siteNames[s.code] + ')' : ''}: ${shortName(s.fromTech)} → ${shortName(s.toTech)}, net ${signed(-s.net, 'mi', 1)}`
+          );
+          actions.push({
+            type: 'propose_route_rebalance',
+            summary: `Found ${rebalance.length} worthwhile swap${rebalance.length === 1 ? '' : 's'}: ` + lines.join(' · '),
+            suggestions: rebalance.map((s) => ({
+              siteCode: s.code,
+              siteName: ctx.siteNames[s.code] || null,
+              fromTech: s.fromTech,
+              toTech: s.toTech,
+              savingsMi: Math.round(s.savings * 10) / 10,
+              costMi: Math.round(s.cost * 10) / 10,
+              netMi: Math.round(s.net * 10) / 10,
+            })),
+          });
+        }
+        // Advisory only -- never touches `working`/changedTechs/persistence,
+        // same as the other three advisory tools. The dispatcher applies a
+        // suggestion by naming it back (e.g. "do the GA1038 one"), which
+        // resolves as an ordinary reassign_stop call on the NEXT request.
         continue;
       }
 
