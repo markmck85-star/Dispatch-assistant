@@ -189,6 +189,9 @@
         </div>
         <div id="stateAiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
         <div id="stateAiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
+        <button type="button" id="stateAiAnalyzeRoutesBtn" onclick="analyzeStateRoutes()"
+            title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
+            style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
       </div>
     </div>
 
@@ -1332,6 +1335,13 @@ function refreshStateAiBarState() {
     micBtn.disabled = !enabled;
     micBtn.style.opacity = enabled ? '1' : '0.5';
   }
+
+  const analyzeBtn = document.getElementById('stateAiAnalyzeRoutesBtn');
+  if (analyzeBtn) {
+    analyzeBtn.disabled = !enabled;
+    analyzeBtn.style.opacity = enabled ? '1' : '0.5';
+    analyzeBtn.style.cursor = enabled ? 'pointer' : 'default';
+  }
 }
 
 function setStateAiStatus(msg, color) {
@@ -1370,13 +1380,13 @@ function renderStateAiDiff(data) {
   el.innerHTML = html;
 }
 
-async function submitStateAiCommand() {
+async function submitStateAiCommand(forceTool) {
   if (_stateAiBusy) return;
   const input = document.getElementById('stateAiCommandInput');
   if (!input) return;
 
   const text = (input.value || '').trim();
-  if (!text) { setStateAiStatus('Type or dictate a command first.', '#ffb56b'); return; }
+  if (!text && !forceTool) { setStateAiStatus('Type or dictate a command first.', '#ffb56b'); return; }
 
   const state = document.getElementById('stateSel').value;
   const dispatchDate = window._stateMapDate;
@@ -1388,7 +1398,7 @@ async function submitStateAiCommand() {
   if (_stateAiListening) stopStateAiVoice();
   _stateAiBusy = true;
   refreshStateAiBarState();
-  setStateAiStatus('Working on it…', '#7ec8e3');
+  setStateAiStatus(forceTool ? 'Scanning the board…' : 'Working on it…', '#7ec8e3');
   const diffEl = document.getElementById('stateAiCommandDiff');
   if (diffEl) diffEl.innerHTML = '';
 
@@ -1396,7 +1406,11 @@ async function submitStateAiCommand() {
     const res = await fetch('/.netlify/functions/dispatch-ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, state, dispatchDate, routes: window._stateAiRoutes }),
+      body: JSON.stringify({
+        text: text || (forceTool ? 'Analyze routes for rebalancing opportunities' : ''),
+        state, dispatchDate, routes: window._stateAiRoutes,
+        forceTool: forceTool || undefined
+      }),
     });
     const data = await res.json().catch(() => null);
 
@@ -1430,6 +1444,14 @@ async function submitStateAiCommand() {
 
 // Same Web Speech API pattern as index.html's voice input -- transcript
 // only, no audio leaves the browser.
+// Dedicated button for propose_route_rebalance -- skips typing/dictation
+// entirely and asks the backend to run that one tool directly (see
+// dispatch-ai.mjs's forceTool handling), so it's deterministic and doesn't
+// depend on the model recognizing a canned phrase.
+function analyzeStateRoutes() {
+  submitStateAiCommand('propose_route_rebalance');
+}
+
 function toggleStateAiVoice() {
   if (_stateAiListening) { stopStateAiVoice(); return; }
 

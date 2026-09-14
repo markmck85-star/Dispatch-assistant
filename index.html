@@ -314,6 +314,9 @@
                     </div>
                     <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
                     <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
+                    <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
+                        title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
+                        style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
                 </div>
 
                 <!-- AVAILABILITY PANEL -->
@@ -5960,6 +5963,13 @@ ${content}</body></html>`;
                 micBtn.disabled = !enabled;
                 micBtn.style.opacity = enabled ? '1' : '0.5';
             }
+
+            const analyzeBtn = document.getElementById('aiAnalyzeRoutesBtn');
+            if (analyzeBtn) {
+                analyzeBtn.disabled = !enabled;
+                analyzeBtn.style.opacity = enabled ? '1' : '0.5';
+                analyzeBtn.style.cursor = enabled ? 'pointer' : 'default';
+            }
         }
 
         function setAiStatus(msg, color) {
@@ -6063,13 +6073,13 @@ ${content}</body></html>`;
             window.currentAssignments = next;
         }
 
-        async function submitAiCommand() {
+        async function submitAiCommand(forceTool) {
             if (_aiBusy) return;
             const input = document.getElementById('aiCommandInput');
             if (!input) return;
 
             const text = (input.value || '').trim();
-            if (!text) {
+            if (!text && !forceTool) {
                 setAiStatus('Type or dictate a command first.', '#ffb56b');
                 return;
             }
@@ -6090,7 +6100,7 @@ ${content}</body></html>`;
             if (_aiListening) stopAiVoice();
             _aiBusy = true;
             refreshAiBarState();
-            setAiStatus('Working on it…', '#7ec8e3');
+            setAiStatus(forceTool ? 'Scanning the board…' : 'Working on it…', '#7ec8e3');
             const diffEl = document.getElementById('aiCommandDiff');
             if (diffEl) diffEl.innerHTML = '';
 
@@ -6105,11 +6115,12 @@ ${content}</body></html>`;
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        text: text,
+                        text: text || (forceTool ? 'Analyze routes for rebalancing opportunities' : ''),
                         state: CURRENT_STATE,
                         dispatchDate: dispatchDate,
                         routes: aiRoutesSnapshot(),
-                        unavailableTechs: unavailableTechs
+                        unavailableTechs: unavailableTechs,
+                        forceTool: forceTool || undefined
                     })
                 });
                 const data = await res.json().catch(() => null);
@@ -6156,6 +6167,14 @@ ${content}</body></html>`;
                 _aiBusy = false;
                 refreshAiBarState();
             }
+        }
+
+        // Dedicated button for propose_route_rebalance -- skips typing/dictation
+        // entirely and asks the backend to run that one tool directly (see
+        // dispatch-ai.mjs's forceTool handling), so it's deterministic and
+        // doesn't depend on the model recognizing a canned phrase.
+        function analyzeRoutes() {
+            submitAiCommand('propose_route_rebalance');
         }
 
         // ─── VOICE INPUT ──────────────────────────────────────────────────────
