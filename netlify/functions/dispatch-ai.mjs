@@ -228,8 +228,8 @@ function buildRoster(routes, siteNames) {
   return lines.join('\n');
 }
 
-function systemInstruction(roster, state, dispatchDate) {
-  return [
+function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
+  const lines = [
     'You are the dispatch assistant for a field-service dispatch board.',
     `Region: ${state}. Dispatch date: ${dispatchDate}.`,
     '',
@@ -237,6 +237,15 @@ function systemInstruction(roster, state, dispatchDate) {
     '',
     roster,
     '',
+  ];
+  if (unavailableTechs && unavailableTechs.size) {
+    lines.push(
+      `Unavailable on ${dispatchDate} (comp day, time off, or not on-call): ${[...unavailableTechs].join(', ')}.`,
+      "Do not call reassign_stop to move a stop onto one of these technicians -- if asked, reply explaining they're unavailable that day instead.",
+      ''
+    );
+  }
+  lines.push(
     'Rules:',
     '- Match technicians by first name, last name, or nickname; the dispatcher rarely says the full name.',
     '- If the dispatcher names a site code or site name instead of a stop number, find that stop in the roster and use its number.',
@@ -246,8 +255,9 @@ function systemInstruction(roster, state, dispatchDate) {
     '- reassign_stop and sort_route DO change the board. Only call one of those when you are confident which technician ' +
       'and stop are meant. If the instruction is ambiguous, unrelated to the board, or refers to someone or something not ' +
       'in the roster, do not call a tool: reply with one short sentence saying what you need clarified.',
-    '- Never invent technicians, stops, or site codes that are not in the roster above.',
-  ].join('\n');
+    '- Never invent technicians, stops, or site codes that are not in the roster above.'
+  );
+  return lines.join('\n');
 }
 
 /** "-4.2 mi" / "+12 min" style signed formatting used in the diff line. */
@@ -449,6 +459,15 @@ export default async (req) => {
     return json(400, { ok: false, error: 'No dispatch routes to work with -- generate dispatches first' });
   }
 
+  // Techs the caller has already determined are unavailable on this date
+  // (comp day, BlueFolder-synced vacation/personal, manual override, or not
+  // on-call on a Saturday) -- index.html computes this the same way its own
+  // Reassign dropdown does (getUnavailableTechsForDate) and sends it along
+  // so a reassign can't silently land on someone who isn't actually working.
+  const unavailableTechs = new Set(
+    (Array.isArray(payload.unavailableTechs) ? payload.unavailableTechs : []).map((t) => String(t))
+  );
+
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return json(500, { ok: false, error: 'Supabase env vars not configured' });
   }
@@ -472,7 +491,7 @@ export default async (req) => {
       contents: text,
       config: {
         temperature: 0,
-        systemInstruction: systemInstruction(buildRoster(routes, ctx.siteNames), state, dispatchDate),
+        systemInstruction: systemInstruction(buildRoster(routes, ctx.siteNames), state, dispatchDate, unavailableTechs),
         tools: [{ functionDeclarations: functionDeclarations() }],
         toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
       },
@@ -511,6 +530,12 @@ export default async (req) => {
         }
         if (from.tech === to.tech) {
           actions.push({ type: 'error', summary: `${shortName(from.tech)} already has that stop.` });
+          continue;
+        }
+        // Hard guard, independent of the system-prompt instruction above --
+        // never rely on the model alone to respect an availability rule.
+        if (unavailableTechs.has(to.tech)) {
+          actions.push({ type: 'error', summary: `${shortName(to.tech)} is marked unavailable on ${dispatchDate} -- pick someone else.` });
           continue;
         }
         if (!Number.isInteger(stopIndex) || stopIndex < 1 || stopIndex > from.stops.length) {
