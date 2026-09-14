@@ -5985,19 +5985,122 @@ ${content}</body></html>`;
          * with the per-tech breakdown underneath so a "net -4.2" that's really
          * "-18 off Robert, +13.8 onto Keontae" is visible rather than hidden.
          */
+        /**
+         * propose_route_rebalance gets its own card with a per-suggestion
+         * Apply/Revert toggle, rather than just a text summary -- separate
+         * from the generic diff below since these need per-row buttons/
+         * status that a plain joined-summary string can't carry. Uses data-
+         * attributes rather than passing tech names through onclick string
+         * args, since a tech name could contain a character that'd need
+         * escaping there; reading them off the row element avoids that
+         * entirely.
+         */
+        function renderRebalanceCardHtml(action) {
+            const suggestions = action.suggestions || [];
+            if (!suggestions.length) {
+                return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;color:#e8f5ec;">'
+                    + escapeAiHtml(action.summary) + '</div>';
+            }
+            const rows = suggestions.map((s, i) => {
+                const rowId = 'aiRebalanceRow' + i;
+                return '<div id="' + rowId + '" data-site="' + escapeAiHtml(s.siteCode) + '" data-from="' + escapeAiHtml(s.fromTech)
+                    + '" data-to="' + escapeAiHtml(s.toTech) + '" data-applied="false" '
+                    + 'style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #234030;">'
+                    + '<div style="flex:1;min-width:0;color:#e8f5ec;">' + escapeAiHtml(s.siteCode)
+                    + (s.siteName ? ' <span style="color:#9fb8a8;">(' + escapeAiHtml(s.siteName) + ')</span>' : '')
+                    + '<br><span style="font-size:11px;color:#9fb8a8;">' + escapeAiHtml(shortNameJs(s.fromTech)) + ' → ' + escapeAiHtml(shortNameJs(s.toTech))
+                    + ', net ' + escapeAiHtml((s.netMi > 0 ? '-' : '+') + Math.abs(s.netMi).toFixed(1) + ' mi') + '</span>'
+                    + '<span class="rebalance-row-status" style="display:block;font-size:11px;color:#7edb8e;"></span></div>'
+                    + '<button type="button" onclick="applyRebalanceSwap(\'' + rowId + '\')" '
+                    + 'style="flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid #2a6496;background:#2a6496;color:#fff;font-size:12px;cursor:pointer;">Apply</button>'
+                    + '</div>';
+            }).join('');
+            return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+                + '<div style="color:#e8f5ec;font-weight:bold;">🧭 ' + escapeAiHtml(suggestions.length + ' suggested swap' + (suggestions.length === 1 ? '' : 's')) + '</div>'
+                + rows + '</div>';
+        }
+
+        function shortNameJs(techName) {
+            return String(techName || '').trim().split(/\s+/)[0] || techName;
+        }
+
+        /** Applies (or reverts, by clicking again -- the row's data-from/data-to swap after a successful apply) one suggested swap without disturbing the rest of the list. */
+        async function applyRebalanceSwap(rowId) {
+            const row = document.getElementById(rowId);
+            if (!row) return;
+            const siteCode = row.dataset.site;
+            const toTech = row.dataset.to;
+            const statusEl = row.querySelector('.rebalance-row-status');
+            const btn = row.querySelector('button');
+
+            const dateInput = document.getElementById('dispatchDate');
+            const dispatchDate = dateInput && dateInput.value ? dateInput.value : '';
+            btn.disabled = true;
+            if (statusEl) { statusEl.style.color = '#7ec8e3'; statusEl.textContent = 'Applying…'; }
+
+            try {
+                const unavailableTechs = [...getUnavailableTechsForDate(dispatchDate)];
+                const res = await fetch('/.netlify/functions/dispatch-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: 'apply suggested swap',
+                        state: CURRENT_STATE,
+                        dispatchDate: dispatchDate,
+                        routes: aiRoutesSnapshot(),
+                        unavailableTechs: unavailableTechs,
+                        forceTool: 'apply_swap',
+                        forceToolArgs: { siteCode: siteCode, toTech: toTech }
+                    })
+                });
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+                const result = (data.actions || [])[0];
+                if (result && result.type === 'error') throw new Error(result.summary);
+
+                if ((data.changedTechs || []).length) {
+                    applyAiRoutes(data.routes);
+                    renderReviewBoard(true);
+                    if (typeof buildPrintableReport === 'function' && window._lastDateStr) {
+                        buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
+                    }
+                }
+
+                // Flip the row so the same button now offers to undo this move.
+                const wasApplied = row.dataset.applied === 'true';
+                row.dataset.applied = wasApplied ? 'false' : 'true';
+                const newFrom = row.dataset.to;
+                const newTo = row.dataset.from;
+                row.dataset.from = newFrom;
+                row.dataset.to = newTo;
+                btn.textContent = wasApplied ? 'Apply' : 'Revert';
+                if (statusEl) {
+                    statusEl.style.color = '#7edb8e';
+                    statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + result.toDelta + ')';
+                }
+            } catch (err) {
+                if (statusEl) { statusEl.style.color = '#ff8a80'; statusEl.textContent = 'Failed: ' + err.message; }
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
         function renderAiDiff(data) {
             const el = document.getElementById('aiCommandDiff');
             if (!el) return;
 
-            const applied = (data.actions || []).filter(a => a.type !== 'error');
-            const errors = (data.actions || []).filter(a => a.type === 'error');
+            const rebalanceAction = (data.actions || []).find(a => a.type === 'propose_route_rebalance');
+            const otherActions = (data.actions || []).filter(a => a.type !== 'propose_route_rebalance');
 
-            if (!applied.length && !errors.length) {
+            const applied = otherActions.filter(a => a.type !== 'error');
+            const errors = otherActions.filter(a => a.type === 'error');
+
+            if (!applied.length && !errors.length && !rebalanceAction) {
                 el.innerHTML = '';
                 return;
             }
 
-            let html = '';
+            let html = rebalanceAction ? renderRebalanceCardHtml(rebalanceAction) : '';
             if (applied.length) {
                 const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#7edb8e' : '#ffb56b';
                 html += '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'

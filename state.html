@@ -1352,16 +1352,95 @@ function setStateAiStatus(msg, color) {
 }
 
 /** Same diff-card rendering as index.html's renderAiDiff. */
+/** Same per-suggestion Apply/Revert card as index.html's version -- see renderRebalanceCardHtml there for the full rationale on data attributes vs onclick string args. */
+function renderStateRebalanceCardHtml(action) {
+  const suggestions = action.suggestions || [];
+  if (!suggestions.length) {
+    return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;color:#e8f5ec;">' + escapeHtml(action.summary) + '</div>';
+  }
+  const rows = suggestions.map((s, i) => {
+    const rowId = 'stateAiRebalanceRow' + i;
+    return '<div id="' + rowId + '" data-site="' + escapeHtml(s.siteCode) + '" data-from="' + escapeHtml(s.fromTech)
+      + '" data-to="' + escapeHtml(s.toTech) + '" data-applied="false" '
+      + 'style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #234030;">'
+      + '<div style="flex:1;min-width:0;color:#e8f5ec;">' + escapeHtml(s.siteCode)
+      + (s.siteName ? ' <span style="color:#9fb8a8;">(' + escapeHtml(s.siteName) + ')</span>' : '')
+      + '<br><span style="font-size:11px;color:#9fb8a8;">' + escapeHtml(shortNameJs(s.fromTech)) + ' → ' + escapeHtml(shortNameJs(s.toTech))
+      + ', net ' + escapeHtml((s.netMi > 0 ? '-' : '+') + Math.abs(s.netMi).toFixed(1) + ' mi') + '</span>'
+      + '<span class="rebalance-row-status" style="display:block;font-size:11px;color:#7edb8e;"></span></div>'
+      + '<button type="button" onclick="applyStateRebalanceSwap(\'' + rowId + '\')" '
+      + 'style="flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid #2a6496;background:#2a6496;color:#fff;font-size:12px;cursor:pointer;">Apply</button>'
+      + '</div>';
+  }).join('');
+  return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+    + '<div style="color:#e8f5ec;font-weight:bold;">🧭 ' + escapeHtml(suggestions.length + ' suggested swap' + (suggestions.length === 1 ? '' : 's')) + '</div>'
+    + rows + '</div>';
+}
+
+function shortNameJs(techName) {
+  return String(techName || '').trim().split(/\s+/)[0] || techName;
+}
+
+/** Applies (or reverts, by clicking again) one suggested swap without disturbing the rest of the list or re-fetching the whole map unnecessarily. */
+async function applyStateRebalanceSwap(rowId) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  const siteCode = row.dataset.site;
+  const toTech = row.dataset.to;
+  const statusEl = row.querySelector('.rebalance-row-status');
+  const btn = row.querySelector('button');
+
+  const state = document.getElementById('stateSel').value;
+  const dispatchDate = window._stateMapDate;
+  btn.disabled = true;
+  if (statusEl) { statusEl.style.color = '#7ec8e3'; statusEl.textContent = 'Applying…'; }
+
+  try {
+    const res = await fetch('/.netlify/functions/dispatch-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'apply suggested swap', state, dispatchDate, routes: window._stateAiRoutes,
+        forceTool: 'apply_swap', forceToolArgs: { siteCode, toTech }
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    const result = (data.actions || [])[0];
+    if (result && result.type === 'error') throw new Error(result.summary);
+
+    if ((data.changedTechs || []).length) {
+      await renderStateMap(state, dispatchDate);
+    }
+
+    const wasApplied = row.dataset.applied === 'true';
+    row.dataset.applied = wasApplied ? 'false' : 'true';
+    const newFrom = row.dataset.to;
+    const newTo = row.dataset.from;
+    row.dataset.from = newFrom;
+    row.dataset.to = newTo;
+    btn.textContent = wasApplied ? 'Apply' : 'Revert';
+    if (statusEl) { statusEl.style.color = '#7edb8e'; statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + result.toDelta + ')'; }
+  } catch (err) {
+    if (statusEl) { statusEl.style.color = '#ff8a80'; statusEl.textContent = 'Failed: ' + err.message; }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function renderStateAiDiff(data) {
   const el = document.getElementById('stateAiCommandDiff');
   if (!el) return;
 
-  const applied = (data.actions || []).filter(a => a.type !== 'error');
-  const errors = (data.actions || []).filter(a => a.type === 'error');
+  const rebalanceAction = (data.actions || []).find(a => a.type === 'propose_route_rebalance');
+  const otherActions = (data.actions || []).filter(a => a.type !== 'propose_route_rebalance');
 
-  if (!applied.length && !errors.length) { el.innerHTML = ''; return; }
+  const applied = otherActions.filter(a => a.type !== 'error');
+  const errors = otherActions.filter(a => a.type === 'error');
 
-  let html = '';
+  if (!applied.length && !errors.length && !rebalanceAction) { el.innerHTML = ''; return; }
+
+  let html = rebalanceAction ? renderStateRebalanceCardHtml(rebalanceAction) : '';
   if (applied.length) {
     const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#7edb8e' : '#ffb56b';
     html += '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
