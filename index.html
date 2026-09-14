@@ -273,7 +273,7 @@
                     </div>
                     <div>
                         <label>Dispatch Date:</label>
-                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true);">
+                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
                     </div>
                     <div>
                         <label>Journal Low At:</label>
@@ -1788,7 +1788,16 @@ function distanceMatrixStatus(state) {
         function updateStateConsoleLink() {
             const sel = document.getElementById('stateSelector');
             const link = document.getElementById('stateConsoleLink');
-            if (sel && link) link.href = 'state.html?state=' + sel.value;
+            const dateInput = document.getElementById('dispatchDate');
+            if (sel && link) {
+                let href = 'state.html?state=' + sel.value;
+                // 2026-09-13: carry over whichever date is on screen here (e.g.
+                // looking at tomorrow's routes tonight) so the state console's
+                // map opens on that same date instead of always defaulting to
+                // today -- state.html reads this once on load via ?date=.
+                if (dateInput && dateInput.value) href += '&date=' + encodeURIComponent(dateInput.value);
+                link.href = href;
+            }
         }
 
         window.onload = async function() {
@@ -2877,6 +2886,23 @@ function distanceMatrixStatus(state) {
                 ? `<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;"><strong>⚠️ Skipped (Saturday, no ticket):</strong> ${skippedSaturdayCodes.join(', ')} — restocks aren't dispatched Saturdays; re-paste Monday</div>`
                 : '';
 
+            // 2026-09-13: the dispatch_date each item actually saves under is
+            // now always its own effective date (getItemEffectiveDateStr),
+            // never just whichever date this input happens to show -- see
+            // the syncAssignmentToSupabase call below. So a mismatch here
+            // can no longer cause the wrong-date persistence bug it used to
+            // (real case: 8 GA sites saved under 9/11 when their own
+            // Restock By said 9/14, because the picker was still on 9/11
+            // when that list got pasted). This banner is purely an
+            // at-a-glance heads-up for the dispatcher now, not a safety net.
+            const dateMismatchCodes = relevant.filter(item => {
+                const itemDs = getItemEffectiveDateStr(item, dateStr);
+                return itemDs && itemDs !== dateStr;
+            }).map(item => item.code);
+            window.dateMismatchBannerHtml = dateMismatchCodes.length > 0
+                ? `<div style="background:#1b2430;border:1px solid #2a6496;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;"><strong>ℹ️ Saved under their own date, not the selected ${dateStr}:</strong> ${dateMismatchCodes.join(', ')} — their own Restock By date differs from the Dispatch Date field above; double-check that field if this list wasn't supposed to span multiple dates.</div>`
+                : '';
+
 
             // Phase 2 Stage 2b: respect already-persisted dispatcher decisions for
             // this date instead of re-running auto-assignment blind. Completed/
@@ -3409,7 +3435,10 @@ function distanceMatrixStatus(state) {
                     const assignedBy = CONTRACTOR_ASSIGNMENTS[item.code] ? 'contractor_rule'
                         : (item.reassignedFrom ? 'fallback_rule' : 'auto');
                     syncAssignmentToSupabase(tech, item, 'planned', assignedBy,
-                        singleTicketWo ? { ticketWoNumber: singleTicketWo } : {});
+                        Object.assign(
+                            { dispatchDateOverride: getItemEffectiveDateStr(item, dateStr) },
+                            singleTicketWo ? { ticketWoNumber: singleTicketWo } : {}
+                        ));
                 });
             });
 
@@ -3537,7 +3566,7 @@ function distanceMatrixStatus(state) {
                 </div>`;
             }
 
-            let html = (window.unknownCodesBannerHtml || '') + (window.skippedSaturdayBannerHtml || '') + clusterBannerHtml + headerHtml;
+            let html = (window.unknownCodesBannerHtml || '') + (window.skippedSaturdayBannerHtml || '') + (window.dateMismatchBannerHtml || '') + clusterBannerHtml + headerHtml;
 
             // Helper to render a tech card
             // Store route data globally so popover can access it

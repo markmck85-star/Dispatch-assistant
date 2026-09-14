@@ -1964,6 +1964,22 @@ async function showSiteHistory(code) {
   }
 })();
 
+// 2026-09-13: same handoff, for the map's date -- index.html's "Open State
+// Console" link now appends &date=YYYY-MM-DD from its own Dispatch Date
+// field, so looking at tomorrow's routes there and clicking through lands
+// on that same date here instead of always resetting to today. Setting
+// window._stateMapDate BEFORE loadConsole() ever runs makes it skip its
+// own "default to today on first load" branch, the same way it already
+// does once a dispatcher has manually picked a date in this tab.
+(function applyDateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = (params.get('date') || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requested)) return;
+  window._stateMapDate = requested;
+  const dateInput = document.getElementById('stateMapDateInput');
+  if (dateInput) dateInput.value = requested;
+})();
+
 // ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
 // v3 (2026-07-29): reverted back to calling the Netlify background
 // function directly. The PC-based flag/poll version (request-local-sync /
