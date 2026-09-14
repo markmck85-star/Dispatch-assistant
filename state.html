@@ -127,7 +127,7 @@
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
-    <select id="stateSel" onchange="loadAll()">
+    <select id="stateSel" onchange="try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} loadAll()">
       <option value="AL">Alabama</option>
       <option value="CA">California</option>
       <option value="CO">Colorado</option>
@@ -2071,12 +2071,27 @@ async function showSiteHistory(code) {
 (function applyStateFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const requested = (params.get('state') || '').trim().toLowerCase();
-  if (!requested) return;
   const sel = document.getElementById('stateSel');
-  for (const opt of sel.options) {
-    if (opt.value.toLowerCase() === requested || opt.textContent.trim().toLowerCase() === requested) {
-      sel.value = opt.value;
-      break;
+  if (requested) {
+    for (const opt of sel.options) {
+      if (opt.value.toLowerCase() === requested || opt.textContent.trim().toLowerCase() === requested) {
+        sel.value = opt.value;
+        try { localStorage.setItem('mcr_state_console_last', opt.value); } catch (err) { /* silent */ }
+        return;
+      }
+    }
+  }
+  // No URL param (e.g. opened directly rather than via the dispatch board's
+  // "State Console" link, or a stale already-open tab) -- fall back to the
+  // last state actually viewed here, rather than whatever option happens to
+  // be first in the dropdown's DOM order. That order isn't stable (it's
+  // alphabetical, so it shifts whenever a new state is added), so relying
+  // on it silently landed people on the wrong state's data.
+  let last = null;
+  try { last = localStorage.getItem('mcr_state_console_last'); } catch (err) { /* silent */ }
+  if (last) {
+    for (const opt of sel.options) {
+      if (opt.value === last) { sel.value = last; break; }
     }
   }
 })();
