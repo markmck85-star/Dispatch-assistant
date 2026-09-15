@@ -33,6 +33,7 @@ const getWatchdogLog = require('./get-watchdog-log.js');
 const getEmails = require('./get-emails.js');
 const getSiteHistory = require('./get-site-history.js');
 const getDistance = require('./get-distance.js');
+const migrateDistanceMatrix = require('./migrate-distance-matrix-to-supabase.js');
 const getOnCall = require('./get-on-call.js');
 const getCalendar = require('./get-calendar.js');
 
@@ -184,6 +185,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'migrate_distance_matrix',
+    description:
+      "The only tool on this connector that can write data -- moves one state's distance-matrix data from the old Netlify Blobs cache into the live Supabase tables (site_site_distances / tech_site_distances) that get_distance and the Reassign dropdown now read from. Safe to call anytime: idempotent (upserts, re-running is harmless), and defaults to a dry run that writes nothing -- pass commit:true to actually migrate. A dry run reports exactly what it would migrate and what it can't resolve (e.g. a site code renamed since the matrix was built, or a placeholder site code with no real site yet) so those can be reviewed before committing.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', description: "2-letter state code, e.g. CO. blobEntryCount:0 in the response means that state never had a matrix built -- nothing to do." },
+        commit: { type: 'boolean', description: 'Defaults to false (dry run, nothing written). Pass true to actually write.' },
+      },
+      required: ['state'],
+    },
+  },
+  {
     name: 'get_on_call_schedule',
     description:
       'Saturday on-call rotation -- which technician covers a state on a given Saturday. Only states with Saturday coverage have any data (others correctly return empty). Omit dates for the next 60 days; omit state for every Saturday-coverage state at once.',
@@ -293,6 +307,15 @@ async function callTool(name, args) {
       if (!from || !to) return toolError('Both from and to site codes are required');
       const { statusCode, body } = await callHandler(getDistance, { state, from, to });
       if (statusCode !== 200) return toolError(body.error || 'get_distance failed');
+      return toolText(body);
+    }
+    case 'migrate_distance_matrix': {
+      const v = validateState(args);
+      if (v.error) return toolError(v.error);
+      const qs = { state: v.state };
+      if (args && args.commit === true) qs.commit = 'true';
+      const { statusCode, body } = await callHandler(migrateDistanceMatrix, qs);
+      if (statusCode !== 200) return toolError(body.error || 'migrate_distance_matrix failed');
       return toolText(body);
     }
     case 'get_on_call_schedule': {

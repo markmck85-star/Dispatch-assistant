@@ -38,7 +38,7 @@
  * 'haversine-fallback', then 'haversine'.
  */
 
-const { getStore, connectLambda } = require('@netlify/blobs');
+const { getStore } = require('@netlify/blobs');
 const { createClient } = require('@supabase/supabase-js');
 
 function json(statusCode, obj) {
@@ -57,8 +57,6 @@ function orderPair(idA, idB) {
 const UPSERT_BATCH = 500;
 
 exports.handler = async (event) => {
-  connectLambda(event);
-
   const params = event.queryStringParameters || {};
   let body = {};
   if (event.httpMethod === 'POST') {
@@ -70,7 +68,18 @@ exports.handler = async (event) => {
 
   const commit = params.commit === 'true' || body.commit === true;
 
-  const store = getStore('dispatch');
+  // Manual siteID/token config (2026-09-15), not connectLambda(event) --
+  // this function is now also called in-process from mcp-server.js's
+  // migrate_distance_matrix tool, whose synthetic event has no real
+  // event.blobs/event.headers for connectLambda to pick up (same root
+  // cause get-distance.js hit earlier the same day). Works identically for
+  // a real HTTP request (phone browser, PowerShell) or the MCP path.
+  const siteID = process.env.SITE_ID;
+  const token = process.env.NETLIFY_BLOBS_TOKEN;
+  if (!siteID || !token) {
+    return json(500, { ok: false, error: 'Missing SITE_ID or NETLIFY_BLOBS_TOKEN env var for Blobs access.' });
+  }
+  const store = getStore({ name: 'dispatch', siteID, token });
   const blob = await store.get('distance-matrix/' + state, { type: 'json' });
   const matrix = (blob && blob.matrix) || {};
   const entryCount = Object.keys(matrix).length;
