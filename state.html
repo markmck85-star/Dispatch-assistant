@@ -1393,6 +1393,10 @@ function renderStateRebalanceCardHtml(action) {
   if (!suggestions.length) {
     return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;color:#e8f5ec;">' + escapeHtml(action.summary) + '</div>';
   }
+  // Reset on every fresh set of suggestions -- individual Apply/Revert clicks
+  // update this in place (see applyStateRebalanceSwap) without re-rendering
+  // the whole card, so this only needs to zero out here.
+  window._stateAiRebalanceTotalSavedMi = 0;
   const rows = suggestions.map((s, i) => {
     const rowId = 'stateAiRebalanceRow' + i;
     return '<div id="' + rowId + '" data-site="' + escapeHtml(s.siteCode) + '" data-from="' + escapeHtml(s.fromTech)
@@ -1409,7 +1413,15 @@ function renderStateRebalanceCardHtml(action) {
   }).join('');
   return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
     + '<div style="color:#e8f5ec;font-weight:bold;">🧭 ' + escapeHtml(suggestions.length + ' suggested swap' + (suggestions.length === 1 ? '' : 's')) + '</div>'
-    + rows + '</div>';
+    + rows
+    + '<div id="stateAiRebalanceTotalMi" style="margin-top:6px;padding-top:6px;border-top:1px solid #234030;font-size:12px;color:#7edb8e;font-weight:bold;">Total mileage saved: 0.0 mi</div>'
+    + '</div>';
+}
+
+/** Pulls the leading signed mileage figure out of a "-13.7 mi" / "-13.7 mi / -5 min" style delta string. Returns 0 if unparseable rather than throwing, since this only ever feeds a running-total display. */
+function parseMiDelta(deltaStr) {
+  const m = /(-?[\d.]+)\s*mi/.exec(String(deltaStr || ''));
+  return m ? parseFloat(m[1]) : 0;
 }
 
 function shortNameJs(techName) {
@@ -1446,6 +1458,22 @@ async function applyStateRebalanceSwap(rowId) {
 
     if ((data.changedTechs || []).length) {
       await renderStateMap(state, dispatchDate);
+    }
+
+    // Running total: fleetDelta is the real fleet-wide mileage change for
+    // THIS action specifically (negative = fleet drove less, i.e. miles
+    // saved). Accumulating it chronologically keeps the total correct
+    // through both Applies and Reverts -- a Revert's own fleetDelta is the
+    // mirror image of the original Apply's, so it naturally subtracts back
+    // out rather than needing special-cased undo logic here.
+    if (data.fleetDelta != null) {
+      window._stateAiRebalanceTotalSavedMi = (window._stateAiRebalanceTotalSavedMi || 0) - parseMiDelta(data.fleetDelta);
+      const totalEl = document.getElementById('stateAiRebalanceTotalMi');
+      if (totalEl) {
+        const t = window._stateAiRebalanceTotalSavedMi;
+        totalEl.textContent = 'Total mileage saved: ' + (t < 0 ? '-' : '') + Math.abs(t).toFixed(1) + ' mi';
+        totalEl.style.color = t > 0 ? '#7edb8e' : (t < 0 ? '#ffb56b' : '#9fb8a8');
+      }
     }
 
     const wasApplied = row.dataset.applied === 'true';
