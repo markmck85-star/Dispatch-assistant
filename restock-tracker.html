@@ -291,6 +291,7 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
 
   <div class="cards" id="summaryCards"></div>
   <div id="freshnessBanner" style="display:none;"></div>
+  <div id="reviewQueueBanner" style="display:none;"></div>
 
   <div class="section-label" id="chartLabel"></div>
   <div class="chart-wrap">
@@ -942,6 +943,77 @@ async function fetchSyncStatus() {
   }
 }
 
+// Ambiguous-note review queue (2026-09-15). Fetches any site_visits rows
+// where closing-note restock detection was low-confidence (see
+// lib/detect-restock-in-note.js) and still waiting on a dispatcher's
+// confirm/reject call -- these don't affect included_restock (and so don't
+// affect the tracker's own numbers above) until resolved.
+async function loadReviewQueue(state, bannerEl) {
+  const qs = new URLSearchParams();
+  if (state) qs.set('state', state);
+  const res = await fetch(`${DISPATCH_API_BASE}/.netlify/functions/get-restock-review-queue?${qs.toString()}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Unknown error from get-restock-review-queue');
+  renderReviewQueue(data.items || [], bannerEl);
+}
+
+function renderReviewQueue(items, bannerEl) {
+  if (!items.length) {
+    bannerEl.style.display = 'none';
+    bannerEl.innerHTML = '';
+    return;
+  }
+  const rows = items.map((item) => {
+    const dateStr = item.startedAt
+      ? new Date(item.startedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : '—';
+    const siteLabel = item.siteName ? `${item.siteCode || ''} — ${item.siteName}` : (item.siteCode || 'Unknown site');
+    return `
+      <div class="review-item" id="review-item-${item.id}" style="border-top:1px solid rgba(255,255,255,0.08);padding:10px 0;">
+        <div style="font-weight:600;font-size:13px;">${escapeHtml(siteLabel)} <span style="font-weight:400;color:var(--muted);">· ${dateStr} · ${escapeHtml(item.tech || 'Unknown tech')} · ${escapeHtml(item.appointmentNumber || '')}</span></div>
+        <div style="font-size:12px;color:var(--muted);margin:4px 0 8px;">${escapeHtml(item.reason || '')}</div>
+        <button onclick="resolveReviewItem('${item.id}', 'confirmed', this)" style="background:#1f5c2e;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;margin-right:8px;">✓ Confirm restock</button>
+        <button onclick="resolveReviewItem('${item.id}', 'rejected', this)" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">✗ Not a restock</button>
+      </div>`;
+  }).join('');
+  bannerEl.style.display = 'block';
+  bannerEl.innerHTML = `
+    <div style="background:#3d2f00;border:1px solid #6b5200;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+      <div style="font-weight:700;color:#f0a500;font-size:13px;margin-bottom:2px;">⚠️ ${items.length} closing note${items.length === 1 ? '' : 's'} need review</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:2px;">Ambiguous restock language -- doesn't count toward the numbers above until you confirm or reject it.</div>
+      ${rows}
+    </div>`;
+}
+
+async function resolveReviewItem(id, decision, btnEl) {
+  const row = document.getElementById(`review-item-${id}`);
+  const buttons = row ? row.querySelectorAll('button') : [];
+  buttons.forEach((b) => { b.disabled = true; b.style.opacity = '0.5'; });
+  try {
+    const res = await fetch(`${DISPATCH_API_BASE}/.netlify/functions/resolve-restock-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, decision }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Unknown error');
+    if (row) {
+      row.style.opacity = '0.4';
+      row.innerHTML = `<div style="padding:4px 0;font-size:12px;color:var(--muted);">${decision === 'confirmed' ? '✓ Marked as a restock.' : '✗ Marked as not a restock.'}</div>`;
+    }
+    // Refresh the underlying dashboard numbers if this was a confirm --
+    // the site's last-restock date may have just changed.
+    if (decision === 'confirmed') {
+      loadLiveDashboard().catch(() => {});
+    }
+  } catch (err) {
+    buttons.forEach((b) => { b.disabled = false; b.style.opacity = '1'; });
+    alert('Could not save that decision: ' + err.message);
+  }
+}
+
 async function fetchLiveRegion(region, since, until) {
   const states = statesForRegion(region);
   const [results, syncStatus] = await Promise.all([
@@ -1014,6 +1086,21 @@ async function loadLiveDashboard() {
 // downstream of it (chart, cards, freshness banner) works unchanged.
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Same treatment as lastVisitCell, but for the restock date itself --
+// added 2026-09-15 alongside the closing-note restock-detection feature,
+// so Mark can click straight through to the note that confirmed a given
+// restock (useful for spot-checking noteConfirmsRestock()'s calls, not
+// just for Gina's original opportunistic-restock workflow).
+function lastRestockCell(loc) {
+  const dateStr = loc.last ? loc.last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+  if (!loc.lastRestockAppt) return dateStr;
+  const encodedNote = loc.lastRestockClosingNote ? encodeURIComponent(loc.lastRestockClosingNote) : '';
+  const apptHtml = loc.lastRestockEmailId
+    ? `<button onclick="openApptAndCopy('${loc.lastRestockEmailId}', '${loc.lastRestockAppt}', '${encodedNote}')" style="background:none;border:none;padding:0;color:var(--info-tc);font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;">${loc.lastRestockAppt}</button>`
+    : `<span style="font-size:12px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastRestockAppt}</span>`;
+  return `${dateStr}<br>${apptHtml}`;
 }
 
 // Renders the "last visit" cell's date + SA number, matching the plain-text
@@ -1172,6 +1259,7 @@ function adaptLiveResponse(data, state) {
     lastRestockTech: item.lastRestockTech,
     lastRestockAppt: item.lastRestockAppt,
     lastRestockEmailId: item.lastRestockEmailId,
+    lastRestockClosingNote: item.lastRestockClosingNote,
     techs: [], // per-tech restock history isn't returned by this endpoint; route-cluster analysis (already shelved) won't have data to show
   }));
 
@@ -1467,6 +1555,21 @@ function renderDashboard(d) {
     freshnessBanner.style.display = 'none';
   }
 
+  // Ambiguous-note review queue (2026-09-15). Only meaningful against live
+  // shared data -- a manually-uploaded xlsx has no closing_note/review
+  // columns at all. Fire-and-forget: doesn't block the rest of the
+  // dashboard render, and a failure here just leaves the banner hidden
+  // rather than surfacing an alert for a secondary feature.
+  const reviewBanner = document.getElementById('reviewQueueBanner');
+  if (d.isLive) {
+    loadReviewQueue(state, reviewBanner).catch((err) => {
+      console.log('[review-queue] load failed:', err.message);
+      reviewBanner.style.display = 'none';
+    });
+  } else {
+    reviewBanner.style.display = 'none';
+  }
+
   // Summary cards
   const cards = document.getElementById('summaryCards');
   cards.innerHTML = `
@@ -1659,7 +1762,7 @@ function renderTableRows(locs) {
       <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}">${loc.shortName}</td>
       <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
       <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
-      <td style="font-weight:600;">${lastStr}</td>
+      <td style="font-weight:600;">${lastRestockCell(loc)}</td>
       <td style="font-weight:600;">${lastVisitCell(loc)}</td>
       <td style="font-weight:600;">${loc.daysSince !== null ? loc.daysSince : '—'}</td>
       <td style="font-weight:600;">${avgLabel}</td>
@@ -1889,7 +1992,7 @@ function renderSharedDates(locs) {
         <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}">${loc.shortName}</td>
         <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
         <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
-        <td style="font-weight:600;">${lastStr}</td>
+        <td style="font-weight:600;">${lastRestockCell(loc)}</td>
         <td style="font-weight:600;">${lastVisitCell(loc)}</td>
         <td style="font-weight:600;">${loc.daysSince !== null ? loc.daysSince : '—'}</td>
         <td style="font-weight:600;">${avgLabel}</td>
