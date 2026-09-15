@@ -114,6 +114,19 @@ exports.handler = async (event) => {
     return siteIdByCode[code] || siteIdByAlias[code] || null;
   }
 
+  // NC's original matrix (built March 2026, per a standalone Python script
+  // -- predates the slug convention compute-distance-matrix.js later
+  // standardized on) keys tech-to-site entries by raw tech name ("Evan
+  // Zent"), not technicians.slug ("evan-zent"). Same slugification the
+  // frontend already applies (index.html's getTechDistance:
+  // techName.toLowerCase().replace(/\s+/g, "-")), tried as a fallback when
+  // the key doesn't match any slug directly.
+  function resolveTechId(key) {
+    if (techIdBySlug[key]) return techIdBySlug[key];
+    const slugified = key.toLowerCase().trim().replace(/\s+/g, '-');
+    return techIdBySlug[slugified] || null;
+  }
+
   const siteToSiteByKey = new Map();
   const techToSiteByKey = new Map();
   const skipped = [];
@@ -175,7 +188,7 @@ exports.handler = async (event) => {
       const siteCode = aIsSite ? a : b;
       const techSlug = aIsSite ? b : a;
       const siteId = resolveSiteId(siteCode);
-      const techId = techIdBySlug[techSlug];
+      const techId = resolveTechId(techSlug);
       if (!siteId || !techId) {
         skipped.push({ key, reason: (!siteId ? 'unresolved site code ' + siteCode : 'unresolved tech slug ' + techSlug) });
         continue;
