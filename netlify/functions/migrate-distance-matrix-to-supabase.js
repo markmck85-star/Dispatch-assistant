@@ -90,8 +90,32 @@ exports.handler = async (event) => {
   const techIdBySlug = Object.fromEntries((techs || []).map((t) => [t.slug, t.id]));
   const siteCodePattern = new RegExp('^' + state + '\\d+$');
 
-  const siteToSiteRows = [];
-  const techToSiteRows = [];
+  // Fallback for a code the blob remembers but sites.site_code no longer
+  // has -- a renumbered/merged site from one of the collision-cleanup
+  // campaigns (see dispatch-platform.md). site_aliases already exists for
+  // exactly this ("GA1018" -> the site now known as GA1083"), reused here
+  // rather than treating a renumbered code as unresolvable. Loaded once,
+  // scoped to this state's sites, and only consulted for a code-shaped
+  // alias (site_aliases also holds a lot of raw ticket-text aliases for the
+  // unrelated ticket-matching mechanism -- irrelevant here, this migration
+  // only ever looks up short site codes, never free text, so a short
+  // code-pattern alias is the only kind that could ever be a hit).
+  const stateSiteIds = new Set((sites || []).map((s) => s.id));
+  const { data: aliasRows, error: aliasErr } = await supabase
+    .from('site_aliases')
+    .select('alias, site_id')
+    .eq('source', 'manual');
+  if (aliasErr) return json(500, { ok: false, error: 'site_aliases fetch failed: ' + aliasErr.message });
+  const siteIdByAlias = {};
+  for (const row of aliasRows || []) {
+    if (stateSiteIds.has(row.site_id) && /^[A-Z]{2}\d+$/.test(row.alias)) siteIdByAlias[row.alias] = row.site_id;
+  }
+  function resolveSiteId(code) {
+    return siteIdByCode[code] || siteIdByAlias[code] || null;
+  }
+
+  const siteToSiteByKey = new Map();
+  const techToSiteByKey = new Map();
   const skipped = [];
 
   for (const [key, entry] of Object.entries(matrix)) {
@@ -105,28 +129,43 @@ exports.handler = async (event) => {
     const bIsSite = siteCodePattern.test(b);
 
     if (aIsSite && bIsSite) {
-      const idA = siteIdByCode[a];
-      const idB = siteIdByCode[b];
+      const idA = resolveSiteId(a);
+      const idB = resolveSiteId(b);
       if (!idA || !idB) {
-        skipped.push({ key, reason: 'unresolved site code (' + (!idA ? a : b) + ' not found or inactive)' });
+        skipped.push({ key, reason: 'unresolved site code (' + (!idA ? a : b) + ' not found, inactive, or aliased)' });
         continue;
       }
       const [site_a, site_b] = orderPair(idA, idB);
-      siteToSiteRows.push({ site_a, site_b, mode, distance_mi: entry.distanceMi, duration_min: entry.durationMin ?? null, computed_at: (blob.meta && blob.meta.siteToSite && blob.meta.siteToSite.computedAt) || new Date().toISOString() });
+      // Two different blob keys (e.g. a stale alias code and its current
+      // code) can resolve to the same real pair -- de-dupe on the resolved
+      // (site_a, site_b, mode) rather than the raw blob key, both because
+      // writing the same row twice in one upsert batch is a Postgres error
+      // ("ON CONFLICT DO UPDATE command cannot affect row a second time"),
+      // and because it wouldn't be meaningful to keep both anyway. Last one
+      // processed wins -- Object.entries order isn't chronological, but for
+      // a genuinely stale-vs-current-code duplicate the values should be
+      // close enough that which one wins doesn't matter.
+      const dedupeKey = site_a + '|' + site_b + '|' + mode;
+      siteToSiteByKey.set(dedupeKey, { site_a, site_b, mode, distance_mi: entry.distanceMi, duration_min: entry.durationMin ?? null, computed_at: (blob.meta && blob.meta.siteToSite && blob.meta.siteToSite.computedAt) || new Date().toISOString() });
     } else if (aIsSite || bIsSite) {
       const siteCode = aIsSite ? a : b;
       const techSlug = aIsSite ? b : a;
-      const siteId = siteIdByCode[siteCode];
+      const siteId = resolveSiteId(siteCode);
       const techId = techIdBySlug[techSlug];
       if (!siteId || !techId) {
         skipped.push({ key, reason: (!siteId ? 'unresolved site code ' + siteCode : 'unresolved tech slug ' + techSlug) });
         continue;
       }
-      techToSiteRows.push({ technician_id: techId, site_id: siteId, mode, distance_mi: entry.distanceMi, duration_min: entry.durationMin ?? null, computed_at: (blob.meta && blob.meta.computedAt) || new Date().toISOString() });
+      // Same dedupe reasoning as the site-to-site branch above.
+      const dedupeKey = techId + '|' + siteId + '|' + mode;
+      techToSiteByKey.set(dedupeKey, { technician_id: techId, site_id: siteId, mode, distance_mi: entry.distanceMi, duration_min: entry.durationMin ?? null, computed_at: (blob.meta && blob.meta.computedAt) || new Date().toISOString() });
     } else {
       skipped.push({ key, reason: 'neither side matches this state\'s site-code pattern' });
     }
   }
+
+  const siteToSiteRows = [...siteToSiteByKey.values()];
+  const techToSiteRows = [...techToSiteByKey.values()];
 
   if (!commit) {
     return json(200, {
