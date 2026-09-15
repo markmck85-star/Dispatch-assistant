@@ -474,6 +474,7 @@ exports.handler = async (event) => {
       const idA = siteIdByCode[a];
       const idB = siteIdByCode[b];
       if (!idA || !idB) { supabaseSyncSkipped.push(key); continue; }
+      if (idA === idB) { supabaseSyncSkipped.push(key); continue; } // self-pair after resolution -- would violate the site_a < site_b CHECK; see migrate-distance-matrix-to-supabase.js's fuller comment on the same case
       const [site_a, site_b] = idA < idB ? [idA, idB] : [idB, idA];
       siteToSiteRows.push({
         site_a, site_b,

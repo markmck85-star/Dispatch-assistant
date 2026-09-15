@@ -145,6 +145,20 @@ exports.handler = async (event) => {
         skipped.push({ key, reason: 'unresolved site code (' + (!idA ? a : b) + ' not found, inactive, or aliased)' });
         continue;
       }
+      if (idA === idB) {
+        // Both sides resolved to the same real site -- e.g. the blob
+        // literally paired a stale alias code against the site's current
+        // code (GA1018 vs GA1083, the same physical DMV under its old and
+        // new number). Not a real pair once resolved; site_site_distances'
+        // own CHECK (site_a < site_b) correctly rejects a self-pair, but
+        // that's a whole-batch failure via upsert, not a per-row skip --
+        // caught here instead so it fails soft, same as any other
+        // unresolvable entry. Found live: this is what actually caused
+        // GA's batch-3000 write failures, not the mode constraint (that
+        // was a real, separate issue, just not this one).
+        skipped.push({ key, reason: 'both sides resolved to the same site (' + a + ' and ' + b + ' are now the same site) -- self-pair, not written' });
+        continue;
+      }
       const [site_a, site_b] = orderPair(idA, idB);
       // Two different blob keys (e.g. a stale alias code and its current
       // code) can resolve to the same real pair -- de-dupe on the resolved
