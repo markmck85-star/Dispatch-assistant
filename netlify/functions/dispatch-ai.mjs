@@ -93,6 +93,20 @@ const WORKDAY_BUDGET_MIN = 8 * 60;
 // than noise-level 0.2-mile shuffles nobody would act on.
 const MIN_REBALANCE_SAVINGS_MI = 1.0;
 
+// Workload-balance extension (2026-09-15): pure mileage-savings was blind to
+// one tech sitting on a handful of stops while another had a full day --
+// a swap that fixes a lopsided day was invisible unless it *also* happened
+// to save fleet miles. A stop-count gap of 1 is normal noise (a 5-stop vs
+// 6-stop day isn't an imbalance worth engineering a swap for); only a gap
+// of 2 or more earns credit, and only for the portion beyond that.
+// WORKLOAD_CREDIT_PER_STOP_MI is a mileage-equivalent value, not a real
+// distance -- it exists purely to let a workload-driven swap clear the same
+// MIN_REBALANCE_SAVINGS_MI bar mileage-driven swaps use, so there's one
+// acceptance test either way. The real mileage delta (net) is never altered
+// by this credit -- it's reported honestly alongside the decision.
+const MIN_STOP_GAP_FOR_CREDIT = 2;
+const WORKLOAD_CREDIT_PER_STOP_MI = 1.5;
+
 /**
  * Greedy multi-round savings algorithm for propose_route_rebalance.
  *
@@ -126,7 +140,14 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
         const without = fromRoute.stops.slice(0, idx).concat(fromRoute.stops.slice(idx + 1));
         const after = routeMetrics(legInfo, fromRoute.tech, without);
         const savings = before.distanceMi - after.distanceMi;
-        if (savings <= 0) return; // this stop isn't costing its current tech anything extra
+        // NOTE: previously bailed here whenever savings <= 0 ("this stop
+        // isn't costing its current tech anything extra"). That's still a
+        // fine reason to skip on pure mileage grounds, but it would also
+        // silently block a workload-only swap -- a perfectly-placed stop on
+        // an 8-stop day can still be worth handing to a 1-stop day even
+        // though removing it doesn't save the giver any miles. Left
+        // unguarded here; the score >= minSavingsMi check below (mileage
+        // net + any workload credit) is what actually decides.
 
         working.forEach((toRoute) => {
           if (toRoute.tech === fromRoute.tech || unavailableTechs.has(toRoute.tech)) return;
@@ -135,8 +156,26 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
           const toAfter = routeMetrics(legInfo, toRoute.tech, withStop);
           const cost = toAfter.distanceMi - toBefore.distanceMi;
           const net = savings - cost;
-          if (net >= minSavingsMi && (!best || net > best.net)) {
-            best = { fromTech: fromRoute.tech, toTech: toRoute.tech, code, savings, cost, net, newFromStops: without, newToStops: withStop };
+
+          // Workload credit: only when fromRoute is genuinely heavier than
+          // toRoute (moving a stop the other direction gets none), and only
+          // for the gap beyond the 1-stop noise floor. A swap between a
+          // 6-stop and a 7-stop route earns nothing; 8 vs 1 (today's real
+          // case) earns credit for 5 of that 7-stop gap.
+          const stopGapBefore = fromRoute.stops.length - toRoute.stops.length;
+          const workloadCredit = stopGapBefore > MIN_STOP_GAP_FOR_CREDIT
+            ? (stopGapBefore - MIN_STOP_GAP_FOR_CREDIT) * WORKLOAD_CREDIT_PER_STOP_MI
+            : 0;
+          const score = net + workloadCredit;
+
+          if (score >= minSavingsMi && (!best || score > best.score)) {
+            best = {
+              fromTech: fromRoute.tech, toTech: toRoute.tech, code, savings, cost, net, score,
+              workloadCredit, stopGapBefore,
+              stopsFromBefore: fromRoute.stops.length, stopsFromAfter: fromRoute.stops.length - 1,
+              stopsToBefore: toRoute.stops.length, stopsToAfter: toRoute.stops.length + 1,
+              newFromStops: without, newToStops: withStop,
+            };
           }
         });
       });
@@ -279,12 +318,15 @@ function functionDeclarations() {
       name: 'propose_route_rebalance',
       description:
         'Read-only advisory: analyzes the WHOLE board (not just one technician) and suggests specific stop-to-technician swaps ' +
-        "that would reduce total fleet mileage/time. Especially useful for catching a technician with two stops in opposite " +
-        "directions from each other that force a long backtrack, when a different technician has a stop much nearer one of " +
-        "them. Never changes the board by itself -- returns a ranked list of suggested moves with each one's mileage/time " +
-        'impact for the dispatcher to review. Use for requests like "does this board make sense", "any better way to split ' +
-        'these routes", or "look for backtracking" -- and proactively when a rebalance seems relevant to what\'s being asked, ' +
-        "even without an exact match to those phrases.",
+        "that would reduce total fleet mileage/time, OR meaningfully even out a lopsided day (one tech with a full route " +
+        "while another has only one or two stops) even when the mileage math alone is close to neutral. Especially useful " +
+        "for catching a technician with two stops in opposite directions from each other that force a long backtrack, when " +
+        "a different technician has a stop much nearer one of them -- or for catching a tech sitting nearly idle while " +
+        "another is overloaded. Never changes the board by itself -- returns a ranked list of suggested moves with each " +
+        "one's real mileage impact (never inflated by the workload consideration) plus, when relevant, the stop-count " +
+        'change for both techs. Use for requests like "does this board make sense", "any better way to split these ' +
+        'routes", "is anyone overloaded today", or "look for backtracking" -- and proactively when a rebalance seems ' +
+        'relevant to what\'s being asked, even without an exact match to those phrases.',
       parameters: {
         type: 'OBJECT',
         properties: {
@@ -868,9 +910,12 @@ export default async (req) => {
             suggestions: [],
           });
         } else {
-          const lines = rebalance.map((s) =>
-            `${s.code}${ctx.siteNames[s.code] ? ' (' + ctx.siteNames[s.code] + ')' : ''}: ${shortName(s.fromTech)} → ${shortName(s.toTech)}, net ${signed(-s.net, 'mi', 1)}`
-          );
+          const lines = rebalance.map((s) => {
+            const base = `${s.code}${ctx.siteNames[s.code] ? ' (' + ctx.siteNames[s.code] + ')' : ''}: ${shortName(s.fromTech)} → ${shortName(s.toTech)}, net ${signed(-s.net, 'mi', 1)}`;
+            return s.workloadCredit > 0
+              ? `${base} (also balances load: ${shortName(s.fromTech)} ${s.stopsFromBefore}→${s.stopsFromAfter}, ${shortName(s.toTech)} ${s.stopsToBefore}→${s.stopsToAfter})`
+              : base;
+          });
           actions.push({
             type: 'propose_route_rebalance',
             summary: `Found ${rebalance.length} worthwhile swap${rebalance.length === 1 ? '' : 's'}: ` + lines.join(' · '),
@@ -882,6 +927,11 @@ export default async (req) => {
               savingsMi: Math.round(s.savings * 10) / 10,
               costMi: Math.round(s.cost * 10) / 10,
               netMi: Math.round(s.net * 10) / 10,
+              workloadMotivated: s.workloadCredit > 0,
+              stopsFromBefore: s.stopsFromBefore,
+              stopsFromAfter: s.stopsFromAfter,
+              stopsToBefore: s.stopsToBefore,
+              stopsToAfter: s.stopsToAfter,
             })),
           });
         }
