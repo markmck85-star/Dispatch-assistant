@@ -103,6 +103,13 @@
         <label>Technician:</label>
         <select id="techFilter"><option value="">All technicians</option></select>
     </div>
+    <div class="filters">
+        <label>Search notes:</label>
+        <div class="search-wrap" style="min-width:280px;">
+            <input type="text" id="noteSearchInput" placeholder="Search closing note text…" autocomplete="off">
+        </div>
+        <button type="button" id="clearNoteSearchBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear</button>
+    </div>
 
     <div id="output"></div>
     <div id="emailCard"></div>
@@ -124,7 +131,10 @@ const rangeInputs = document.getElementById('rangeInputs');
 const useRangeBtn = document.getElementById('useRangeBtn');
 const clearDateBtn = document.getElementById('clearDateBtn');
 const techFilter = document.getElementById('techFilter');
+const noteSearchInput = document.getElementById('noteSearchInput');
+const clearNoteSearchBtn = document.getElementById('clearNoteSearchBtn');
 let useRange = false;
+let noteSearchDebounce = null;
 
 useRangeBtn.addEventListener('click', () => {
     useRange = !useRange;
@@ -141,6 +151,14 @@ dateSingle.addEventListener('change', runSearch);
 dateFrom.addEventListener('change', runSearch);
 dateTo.addEventListener('change', runSearch);
 techFilter.addEventListener('change', runSearch);
+noteSearchInput.addEventListener('input', () => {
+    clearTimeout(noteSearchDebounce);
+    noteSearchDebounce = setTimeout(runSearch, 350);
+});
+clearNoteSearchBtn.addEventListener('click', () => {
+    noteSearchInput.value = '';
+    runSearch();
+});
 
 async function loadTechsForState(state) {
     techFilter.innerHTML = '<option value="">All technicians</option>';
@@ -170,7 +188,23 @@ function dateFilterQueryString() {
     if (f.from) parts.push('from=' + encodeURIComponent(f.from));
     if (f.to) parts.push('to=' + encodeURIComponent(f.to));
     if (techFilter.value) parts.push('tech=' + encodeURIComponent(techFilter.value));
+    const noteQ = noteSearchInput.value.trim();
+    if (noteQ) parts.push('q=' + encodeURIComponent(noteQ));
     return parts.length ? '&' + parts.join('&') : '';
+}
+
+// Short context window around the first match of `q` inside a closing
+// note, so a search-results row shows *why* it matched instead of just
+// the "Note captured" badge.
+function noteSnippet(note, q) {
+    const idx = note.toLowerCase().indexOf(q.toLowerCase());
+    if (idx === -1) return escapeHtml(note.slice(0, 120));
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(note.length, idx + q.length + 60);
+    const before = escapeHtml(note.slice(start, idx));
+    const match = escapeHtml(note.slice(idx, idx + q.length));
+    const after = escapeHtml(note.slice(idx + q.length, end));
+    return `${before}<strong style="color:#e8c46c;">${match}</strong>${after}`;
 }
 
 function escapeHtml(s) {
@@ -203,7 +237,7 @@ function runSearch() {
     if (!q) {
         resultsDropdown.classList.remove('open'); resultsDropdown.innerHTML = '';
         emailCard.innerHTML = '';
-        if (st) {
+        if (st || noteSearchInput.value.trim()) {
             loadStateFeed(st, 0);
         } else {
             output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to browse recent visits, or search above.</div>`;
@@ -263,19 +297,23 @@ async function loadMoreStateFeed() {
 }
 
 function renderStateFeed() {
+    const scopeLabel = feedState.state || 'All States';
     if (!feedState.visits.length) {
-        output.innerHTML = `<div class="empty-state">No visits found for ${escapeHtml(feedState.state)}${dateFilterQueryString() ? ' in that date range' : ''}.</div>`;
+        output.innerHTML = `<div class="empty-state">No visits found for ${escapeHtml(scopeLabel)}${noteSearchInput.value.trim() ? ` matching "${escapeHtml(noteSearchInput.value.trim())}"` : ''}${dateFilterQueryString() ? ' in that date range' : ''}.</div>`;
         return;
     }
-    let html = `<div class="card"><h3 class="section-label">Recent Visits — ${escapeHtml(feedState.state)}${feedState.total != null ? ` (${feedState.total} total)` : ''}</h3>`;
+    let html = `<div class="card"><h3 class="section-label">Recent Visits — ${escapeHtml(scopeLabel)}${feedState.total != null ? ` (${feedState.total} total)` : ''}</h3>`;
     html += feedState.visits.map((v, i) => {
         const dateSource = v.started_at || v.ended_at;
         const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
         const hasNote = !!v.closing_note;
+        const q = noteSearchInput.value.trim();
+        const snippet = (q && v.closing_note) ? noteSnippet(v.closing_note, q) : '';
         return `<div class="visit-row${hasNote ? '' : ' no-note'}" ${hasNote ? `onclick="generateEmailFromFeed(${i})"` : ''}>
             <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')} · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span>
             ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
             <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+            ${snippet ? `<div class="muted" style="margin-top:4px;font-size:12.5px;">…${snippet}…</div>` : ''}
         </div>`;
     }).join('');
     if (feedState.hasMore) {
