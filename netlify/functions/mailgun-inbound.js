@@ -657,6 +657,19 @@ function parseMaintenanceDueDate(description, receivedAt) {
 // `d` is now always a genuine UTC instant (post-2026-08-15 fix), so this
 // must explicitly project it into the site's own timezone for display --
 // it can no longer rely on the server's default tz matching.
+// 2026-09-15: appends the site's timezone abbreviation (EST/EDT, CST/CDT,
+// etc. -- DST-aware via Intl, not hardcoded) so an SLA deadline is
+// unambiguous to anyone reading it outside the site's own zone -- e.g. a
+// Saturday on-call dispatcher in Eastern covering a Central-zone Indiana
+// or Michigan site. Previously this only ever showed the bare time, which
+// happened to be safe for GA (sender and every reader are all Eastern) but
+// not for any multi-timezone state.
+function getTimezoneAbbreviation(d, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d);
+  const tzPart = parts.find((p) => p.type === 'timeZoneName');
+  return tzPart ? tzPart.value : '';
+}
+
 function formatSlaDeadline(d, timezone) {
   const tz = timezone || 'America/New_York';
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -665,7 +678,8 @@ function formatSlaDeadline(d, timezone) {
   const ampm = p.hour >= 12 ? 'PM' : 'AM';
   const h12 = p.hour % 12 || 12;
   const mm = String(p.minute).padStart(2, '0');
-  return `${dow} ${h12}:${mm} ${ampm}`;
+  const tzAbbr = getTimezoneAbbreviation(d, tz);
+  return `${dow} ${h12}:${mm} ${ampm}${tzAbbr ? ' ' + tzAbbr : ''}`;
 }
 
 // ── Email classifier & parser (ported from watchdog.py) ──────────────────────
