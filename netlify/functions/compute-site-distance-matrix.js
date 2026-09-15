@@ -285,7 +285,7 @@ exports.handler = async (event) => {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const { data: sites, error: sitesErr } = await supabase
     .from("sites")
-    .select("site_code, lat, lng")
+    .select("id, site_code, lat, lng")
     .eq("state", state)
     .eq("active", true); // BUG FIX (2026-09-07): see matching comment in the dryRun branch above
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
@@ -293,6 +293,12 @@ exports.handler = async (event) => {
   const locEntries = (sites || [])
     .filter((s) => s.lat != null && s.lng != null)
     .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
+
+  // 2026-09-15: id lookup for the Supabase sync below -- kept separate from
+  // locEntries (which several existing loops below iterate as [code, latlng]
+  // pairs) rather than folding id into that shape, to avoid touching any of
+  // that already-working logic.
+  const siteIdByCode = Object.fromEntries((sites || []).map((s) => [s.site_code, s.id]));
 
   if (locEntries.length < 2) {
     return json(400, {
@@ -446,6 +452,45 @@ exports.handler = async (event) => {
       },
     };
     await store.setJSON("distance-matrix/" + state, { meta: mergedMeta, matrix: mergedMatrix });
+
+    // Supabase sync (2026-09-15) -- Blobs above remains the operational
+    // source of truth for THIS function's own resume/incremental-rebuild
+    // bookkeeping (existingMatrix/knownCodes, the orphaned-build guard's
+    // partialMatrix, etc.) -- deliberately untouched, since that machinery
+    // was hardened after a real ~$122 overspend and isn't worth any risk to
+    // change. This only ADDS a parallel write of this run's real results
+    // (`matrix` -- always pure site-to-site pairs by construction, since it
+    // was built purely from locEntries) into site_site_distances, so reads
+    // (get-distance-matrix.js, get-distance.js, the MCP connector) have
+    // current data without depending on Blobs at all. Best-effort: a
+    // Supabase write failure here is reported but does NOT fail the
+    // response -- the Blobs write above already succeeded and real money
+    // was already spent on this build, so surfacing a hard error here would
+    // wrongly suggest the build itself failed.
+    const siteToSiteRows = [];
+    const supabaseSyncSkipped = [];
+    for (const [key, entry] of Object.entries(matrix)) {
+      const [a, b] = key.split("|");
+      const idA = siteIdByCode[a];
+      const idB = siteIdByCode[b];
+      if (!idA || !idB) { supabaseSyncSkipped.push(key); continue; }
+      const [site_a, site_b] = idA < idB ? [idA, idB] : [idB, idA];
+      siteToSiteRows.push({
+        site_a, site_b,
+        mode: entry.type || "haversine",
+        distance_mi: entry.distanceMi,
+        duration_min: entry.durationMin ?? null,
+        computed_at: mergedMeta.siteToSite.computedAt,
+      });
+    }
+    let supabaseSyncError = null;
+    if (siteToSiteRows.length) {
+      const { error: syncErr } = await supabase
+        .from("site_site_distances")
+        .upsert(siteToSiteRows, { onConflict: "site_a,site_b,mode" });
+      if (syncErr) supabaseSyncError = syncErr.message;
+    }
+
     return json(200, {
       ok: true,
       done: true,
@@ -459,6 +504,7 @@ exports.handler = async (event) => {
       failedCount: failedPairs.length,
       incremental: !fullRebuild,
       newSiteCount: newSites.length,
+      supabaseSync: { written: siteToSiteRows.length, skipped: supabaseSyncSkipped.length, error: supabaseSyncError },
       // TEMPORARY DIAGNOSTIC (2026-09-07) -- investigating why repeated
       // builds keep reporting the same ~960 "new" pairs with zero net
       // growth in totalEntryCount. Lists the actual site_code values

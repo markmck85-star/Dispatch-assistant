@@ -230,8 +230,8 @@ exports.handler = async (event) => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
-    supabase.from("sites").select("site_code, lat, lng").eq("state", state).eq("active", true), // BUG FIX (2026-09-07)
-    supabase.from("technicians").select("slug, lat, lng, active").eq("home_state", state),
+    supabase.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true), // BUG FIX (2026-09-07)
+    supabase.from("technicians").select("id, slug, lat, lng, active").eq("home_state", state),
   ]);
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
   if (techsErr) return json(500, { error: "technicians fetch failed: " + techsErr.message });
@@ -243,6 +243,12 @@ exports.handler = async (event) => {
   const locEntries = (sites || [])
     .filter((s) => s.lat != null && s.lng != null)
     .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
+
+  // 2026-09-15: id lookups for the Supabase sync at the end -- kept
+  // separate from techEntries/locEntries (iterated elsewhere as
+  // [key, latlng] pairs) to avoid touching any of that already-working logic.
+  const siteIdByCode = Object.fromEntries((sites || []).map((s) => [s.site_code, s.id]));
+  const techIdBySlug = Object.fromEntries((techs || []).map((t) => [t.slug, t.id]));
 
   if (techEntries.length === 0)
     return json(400, {
@@ -468,6 +474,42 @@ exports.handler = async (event) => {
 
   await store.setJSON("distance-matrix/" + state, { meta, matrix });
 
+  // Supabase sync (2026-09-15) -- same approach as
+  // compute-site-distance-matrix.js: Blobs above stays the operational
+  // source of truth for this function's own additive-mode "what's already
+  // covered" comparison (untouched, to avoid any risk to the cost-safety
+  // logic above), this just ALSO writes the full current `matrix` (every
+  // entry, not just this run's new ones -- additive mode's `matrix` already
+  // combines carried-over + newly-added, and re-upserting an unchanged
+  // carried-over row is harmless) into tech_site_distances so reads have
+  // current data. Best-effort: reported but never fails the response, since
+  // the Blobs write (and any real Google spend) already succeeded.
+  const techToSiteRows = [];
+  const supabaseSyncSkipped = [];
+  for (const [key, entry] of Object.entries(matrix)) {
+    const [techSlug, siteCode] = key.split("|");
+    const techId = techIdBySlug[techSlug];
+    const siteId = siteIdByCode[siteCode];
+    if (!techId || !siteId) { supabaseSyncSkipped.push(key); continue; }
+    techToSiteRows.push({
+      technician_id: techId,
+      site_id: siteId,
+      mode: entry.type || "haversine",
+      distance_mi: entry.distanceMi,
+      duration_min: entry.durationMin ?? null,
+      computed_at: meta.computedAt,
+    });
+  }
+  let supabaseSyncError = null;
+  const UPSERT_BATCH = 500;
+  for (let i = 0; i < techToSiteRows.length; i += UPSERT_BATCH) {
+    const batch = techToSiteRows.slice(i, i + UPSERT_BATCH);
+    const { error: syncErr } = await supabase
+      .from("tech_site_distances")
+      .upsert(batch, { onConflict: "technician_id,mode,site_id" });
+    if (syncErr) { supabaseSyncError = syncErr.message; break; }
+  }
+
   return json(200, {
     ok: true,
     state,
@@ -475,5 +517,6 @@ exports.handler = async (event) => {
     additive,
     entryCount: Object.keys(matrix).length,
     meta,
+    supabaseSync: { written: techToSiteRows.length, skipped: supabaseSyncSkipped.length, error: supabaseSyncError },
   });
 };

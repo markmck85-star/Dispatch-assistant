@@ -1,27 +1,36 @@
 // get-distance.js
 //
 // Read-only lookup of driving distance/time between two sites, for the
-// search_emails-style "how far is X from Y" question. Reads the SAME
-// precomputed matrix compute-site-distance-matrix.js already builds and
-// caches in Blobs (store "dispatch", key "distance-matrix/{STATE}",
-// entries keyed "{siteCodeA}|{siteCodeB}" alphabetically) -- this function
-// does NOT call the Google Maps API itself and has zero per-query cost,
-// it just reads what's already been built.
+// MCP connector's get_distance tool ("how far is X from Y").
+//
+// v2 (2026-09-15): switched from reading the Blobs distance-matrix/{STATE}
+// key to reading site_site_distances directly -- see
+// migrate-distance-matrix-to-supabase.js for the one-time backfill and
+// compute-site-distance-matrix.js for the writer, both switched the same
+// day.
+//
+// TRANSITIONAL BLOBS FALLBACK: a state that hasn't been migrated to
+// Supabase yet (migration happens one state at a time, Mark's own call)
+// falls back to the old Blobs lookup below rather than jumping straight to
+// a haversine estimate -- so deployment/migration order across states
+// doesn't matter. Safe to delete once every state with real Blobs data is
+// confirmed migrated. Keeps the manual siteID/token getStore() config this
+// file used to need throughout, since mcp-server.js's synthetic event still
+// has no real event.blobs/event.headers for connectLambda to pick up.
 //
 // GET /.netlify/functions/get-distance?state=GA&from=GA1067&to=GA1090
 // -> { from, to, distanceMi, durationMin, durationText, source }
 //
-// If the pair isn't in the precomputed matrix yet (state not built, or a
-// site added since the last build), falls back to a live haversine
-// (straight-line) estimate from the sites table's own lat/lng -- clearly
-// labeled as an estimate, not a driving distance, same honesty the
-// precomputed matrix itself already uses for its own "haversine-fallback"
-// entries when Google's API didn't have a route for a pair.
+// If the pair isn't in site_site_distances OR the Blobs fallback (state's
+// site-to-site matrix never built, or a site added since), falls back to a
+// live haversine (straight-line) estimate from the sites table's own
+// lat/lng -- clearly labeled as an estimate, not a driving distance.
 
-const { getStore } = require('@netlify/blobs');
 const { createClient } = require('@supabase/supabase-js');
+const { getStore } = require('@netlify/blobs');
 
 const R_MI = 3958.8;
+const MODE_PRIORITY = { driving: 0, 'haversine-fallback': 1, haversine: 2 };
 
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
@@ -45,65 +54,47 @@ exports.handler = async (event) => {
   if (!from || !to) return json(400, { error: 'Both from and to site codes are required' });
   if (from === to) return json(400, { error: 'from and to must be different sites' });
 
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  const { data: sites, error: sitesErr } = await supabase
+    .from('sites')
+    .select('id, site_code, lat, lng')
+    .in('site_code', [from, to]);
+  if (sitesErr) return json(500, { error: 'Site lookup failed: ' + sitesErr.message });
+
+  const siteA = (sites || []).find((s) => s.site_code === from);
+  const siteB = (sites || []).find((s) => s.site_code === to);
+  if (!siteA) return json(404, { error: 'Site ' + from + ' not found' });
+  if (!siteB) return json(404, { error: 'Site ' + to + ' not found' });
+
   // 1. Try the precomputed matrix first -- free, instant, already-verified data.
-  //
-  // BUG FIX (2026-09-07): confirmed via the real error message ("The
-  // environment has not been configured to use Netlify Blobs") that this
-  // app runs in Netlify's Lambda-compatibility mode, which does NOT
-  // auto-populate Blobs context the way modern Netlify Functions normally
-  // do -- connectLambda(event) is the only auto path, and it requires a
-  // real event.blobs/event.headers that mcp-server.js's synthetic event
-  // never has. Rather than depend on connectLambda at all, pass siteID
-  // (Netlify's own auto-injected process.env.SITE_ID -- no setup needed)
-  // and token (a Netlify Personal Access Token, stored as
-  // NETLIFY_BLOBS_TOKEN -- this one DOES need to be created and added
-  // manually, since Netlify doesn't auto-provide a token this way)
-  // directly to getStore(). This works identically whether called via a
-  // real HTTP request or the MCP synthetic event -- no more silent,
-  // invocation-path-dependent failures.
-  let blobsErrorForDebug = null;
-  let matrixKeyCountForDebug = null;
-  let sampleKeysForDebug = null;
+  const { data: rows, error: rowsErr } = await supabase
+    .from('site_site_distances')
+    .select('mode, distance_mi, duration_min')
+    .or(`and(site_a.eq.${siteA.id},site_b.eq.${siteB.id}),and(site_a.eq.${siteB.id},site_b.eq.${siteA.id})`);
+  if (!rowsErr && rows && rows.length) {
+    const best = rows.slice().sort((a, b) => (MODE_PRIORITY[a.mode] ?? 9) - (MODE_PRIORITY[b.mode] ?? 9))[0];
+    return json(200, {
+      from, to,
+      distanceMi: Number(best.distance_mi),
+      durationMin: best.duration_min != null ? Number(best.duration_min) : null,
+      durationText: best.duration_min != null ? Math.round(best.duration_min) + ' min' + (Math.round(best.duration_min) === 1 ? '' : 's') : null,
+      source: best.mode === 'driving' ? 'precomputed-driving' : 'precomputed-haversine-fallback',
+    });
+  }
+
+  // 2. Not in Supabase (state not migrated yet, or a site added since) --
+  // try the old Blobs matrix directly as a transitional fallback. See file
+  // header note. Checks both key orderings, matching how the writer stores
+  // (and this file used to read) site-to-site pairs.
   try {
     const siteID = process.env.SITE_ID;
     const token = process.env.NETLIFY_BLOBS_TOKEN;
-    if (!siteID || !token) {
-      throw new Error('Missing siteID or NETLIFY_BLOBS_TOKEN env var for manual Blobs config');
-    }
-    const store = getStore({ name: 'dispatch', siteID, token });
-    const stored = await store.get('distance-matrix/' + state, { type: 'json' });
-    // BUG FIX (2026-09-07, the actual root cause): store.get() returns the
-    // FULL {meta, matrix} wrapper object exactly as compute-site-distance-matrix.js
-    // writes it -- this used to treat that whole wrapper AS IF it were the
-    // flat pair-lookup table itself, so every lookup checked
-    // wrapper['GA1023|GA1042'] (always undefined -- the wrapper's only real
-    // keys are "meta" and "matrix") instead of wrapper.matrix['GA1023|GA1042']
-    // where the actual data lives. Confirmed directly: a debug key-count on
-    // the old code always came back as exactly 2 ("meta", "matrix"),
-    // regardless of how many real pairs were actually stored underneath.
-    // Every other fix today (Blobs auth, key ordering) was real and
-    // necessary, but none of them could have worked while this stayed broken.
-    const matrix = stored && stored.matrix;
-    if (matrix) {
-      // TEMPORARY DIAGNOSTIC (2026-09-07) -- checking whether this read is
-      // actually seeing current data. If this count is far below what the
-      // build just reported writing, the read is stale/stuck on an old
-      // snapshot rather than a key-matching problem.
-      matrixKeyCountForDebug = Object.keys(matrix).length;
-      sampleKeysForDebug = Object.keys(matrix).slice(0, 5);
-      // BUG FIX (2026-09-07): this used to look up only the alphabetically
-      // SORTED key ([from, to].sort().join('|')), but the site-to-site
-      // builder (compute-site-distance-matrix.js) always stores keys as
-      // "originCode|destCode" -- whichever order the origin/destination
-      // batching happened to process them in, NOT sorted. That function's
-      // own header comment always documented "lookups should check both
-      // orderings" -- this reader just never actually did that, so roughly
-      // half of every real computed pair (whichever direction didn't
-      // happen to land in alphabetical order) was silently unreachable
-      // here and fell back to a haversine estimate despite the real
-      // driving data already existing, already paid for, sitting in the
-      // matrix under the other key order the whole time.
-      const entry = matrix[from + '|' + to] || matrix[to + '|' + from];
+    if (siteID && token) {
+      const store = getStore({ name: 'dispatch', siteID, token });
+      const stored = await store.get('distance-matrix/' + state, { type: 'json' });
+      const matrix = stored && stored.matrix;
+      const entry = matrix && (matrix[from + '|' + to] || matrix[to + '|' + from]);
       if (entry) {
         return json(200, {
           from, to,
@@ -113,30 +104,13 @@ exports.handler = async (event) => {
           source: entry.type === 'haversine-fallback' ? 'precomputed-haversine-fallback' : 'precomputed-driving',
         });
       }
-
     }
-  } catch (e) {
-    console.error('get-distance: Blobs lookup failed, falling back to live haversine:', e.message);
-    // TEMPORARY DIAGNOSTIC (2026-09-07) -- surfacing the real error in the
-    // response itself so it's visible through the MCP connector, which has
-    // no access to Netlify's server-side function logs. Remove once the
-    // persistent-fallback issue is actually diagnosed.
-    blobsErrorForDebug = e.message;
+  } catch {
+    // Blobs fallback is best-effort -- fall through to live haversine below.
   }
 
-  // 2. Not in the matrix (state never built, or a site added since) -- fall
-  // back to a live haversine estimate from the sites table's own coordinates.
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const { data: sites, error } = await supabase
-    .from('sites')
-    .select('site_code, lat, lng')
-    .in('site_code', [from, to]);
-  if (error) return json(500, { error: 'Site lookup failed: ' + error.message });
-
-  const siteA = (sites || []).find((s) => s.site_code === from);
-  const siteB = (sites || []).find((s) => s.site_code === to);
-  if (!siteA) return json(404, { error: 'Site ' + from + ' not found' });
-  if (!siteB) return json(404, { error: 'Site ' + to + ' not found' });
+  // 3. Not in either store -- fall back to a live haversine estimate from
+  // the sites table's own coordinates.
   if (siteA.lat == null || siteB.lat == null) {
     return json(404, {
       error: 'One or both sites have no coordinates yet -- run geocode-addresses for ' + state + ' first.',
@@ -151,8 +125,5 @@ exports.handler = async (event) => {
     durationText: null,
     source: 'live-haversine-fallback',
     note: 'Straight-line estimate, not a driving distance -- this pair is not yet in the precomputed matrix for ' + state + '.',
-    _debugBlobsError: blobsErrorForDebug,
-    _debugMatrixKeyCount: matrixKeyCountForDebug,
-    _debugSampleKeys: sampleKeysForDebug,
   });
 };
