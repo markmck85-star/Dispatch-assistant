@@ -6017,6 +6017,10 @@ ${content}</body></html>`;
                     + (s.siteName ? ' <span style="color:#9fb8a8;">(' + escapeAiHtml(s.siteName) + ')</span>' : '')
                     + '<br><span style="font-size:11px;color:#9fb8a8;">' + escapeAiHtml(shortNameJs(s.fromTech)) + ' → ' + escapeAiHtml(shortNameJs(s.toTech))
                     + ', net ' + escapeAiHtml((s.netMi > 0 ? '-' : '+') + Math.abs(s.netMi).toFixed(1) + ' mi') + '</span>'
+                    + (s.workloadMotivated
+                        ? '<br><span style="font-size:11px;color:#e0c080;">⚖️ also balances load: ' + escapeAiHtml(shortNameJs(s.fromTech)) + ' ' + s.stopsFromBefore + '→' + s.stopsFromAfter
+                            + ', ' + escapeAiHtml(shortNameJs(s.toTech)) + ' ' + s.stopsToBefore + '→' + s.stopsToAfter + '</span>'
+                        : '')
                     + '<span class="rebalance-row-status" style="display:block;font-size:11px;color:#7edb8e;"></span></div>'
                     + '<button type="button" onclick="applyRebalanceSwap(\'' + rowId + '\')" '
                     + 'style="flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid #2a6496;background:#2a6496;color:#fff;font-size:12px;cursor:pointer;">Apply</button>'
