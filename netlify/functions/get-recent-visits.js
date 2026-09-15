@@ -10,13 +10,20 @@
 // newest first, without picking a site up front.
 //
 // Query params:
-//   state      (required) - 2-letter state code
+//   state      (optional) - 2-letter state code. Required UNLESS `q` (note
+//              text search) is present, in which case omitting it searches
+//              across all states.
 //   date       (optional) - single day, YYYY-MM-DD -- filters to that one
 //              calendar day (based on started_at)
 //   from / to  (optional) - date range, YYYY-MM-DD each, inclusive.
 //              Ignored if `date` is also present -- date wins.
 //   tech       (optional) - exact tech_name_raw match, from the
 //              Technician dropdown (populated by get-state-techs.js)
+//   q          (optional) - free-text search against the captured
+//              closing_note (case-insensitive substring match). Combines
+//              with state/date/tech -- all provided filters apply together.
+//              Added 2026-09-15 so a dispatcher can search note contents
+//              directly instead of only browsing/filtering by state+date+tech.
 //   limit      (optional) - default 50, max 200
 //   offset     (optional) - default 0, for "Load more" pagination
 //
@@ -37,8 +44,9 @@ exports.handler = async (event) => {
   try {
     const params = event.queryStringParameters || {};
     const state = (params.state || '').trim().toUpperCase();
-    if (!state) {
-      return { statusCode: 400, headers, body: JSON.stringify({ ok: false, error: 'state is required' }) };
+    const noteQuery = (params.q || '').trim();
+    if (!state && !noteQuery) {
+      return { statusCode: 400, headers, body: JSON.stringify({ ok: false, error: 'state is required (or pass q to search note text across all states)' }) };
     }
     const limit = Math.min(parseInt(params.limit, 10) || 50, 200);
     const offset = parseInt(params.offset, 10) || 0;
@@ -58,9 +66,11 @@ exports.handler = async (event) => {
         'closing_note, closing_note_captured_at, sites(name, site_code)',
         { count: 'exact' }
       )
-      .eq('state', state)
       .order('started_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
+
+    if (state) query = query.eq('state', state);
+    if (noteQuery) query = query.ilike('closing_note', `%${noteQuery}%`);
 
     if (params.date) {
       query = query.gte('started_at', `${params.date}T00:00:00`).lte('started_at', `${params.date}T23:59:59`);
