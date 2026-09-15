@@ -1153,7 +1153,26 @@ async function renderStateMap(state, dispatchDate) {
     // index.html's aiRoutesSnapshot(). Deliberately built from ALL routes,
     // not just currently-visible ones -- hiding a tech via the legend
     // toggle shouldn't remove them from what the assistant can act on.
-    window._stateAiRoutes = routes.map(r => ({ tech: r.tech, stops: r.pts.map(p => p.code), color: window._stateMapTechColors[r.tech] || null }));
+    //
+    // BUG FIX (2026-09-15): `routes` only ever contains techs with at least
+    // one real assignment row today (it's built from `byTech`, which comes
+    // straight from the fetched assignments) -- a tech reduced to zero
+    // stops by an earlier swap this same render cycle was never in `routes`
+    // to begin with, so they were silently missing from `_stateAiRoutes`
+    // too. That's exactly what broke Revert immediately after a swap that
+    // emptied someone's board: apply_swap looks for the receiving tech by
+    // name in the routes payload and fails with "X is not on the current
+    // board" if they're not there, even with zero stops. Unlike index.html
+    // (which has its own idle-tech fallback via aiTechRoster()), this file
+    // had no equivalent -- despite already fetching the full active
+    // technician roster (TECHS) on every render. Backfilling from that here
+    // closes the gap using data this function already has in hand.
+    const routedTechNames = new Set(routes.map(r => r.tech));
+    const idleTechs = Object.keys(TECHS || {})
+      .filter(t => !routedTechNames.has(t) && (TECHS[t] || {}).active !== false)
+      .map(t => ({ tech: t, stops: [], color: window._stateMapTechColors[t] || null }));
+    window._stateAiRoutes = routes.map(r => ({ tech: r.tech, stops: r.pts.map(p => p.code), color: window._stateMapTechColors[r.tech] || null }))
+      .concat(idleTechs);
     refreshStateAiBarState();
 
     const meta = document.getElementById('stateMapMeta');

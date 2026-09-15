@@ -6176,7 +6176,17 @@ ${content}</body></html>`;
                     returnedCodes.add(code);
                     stops.push(item);
                 });
-                if (stops.length) next[route.tech] = stops;
+                // BUG FIX (2026-09-15): previously `if (stops.length) next[route.tech] = stops;`
+                // -- dropped a tech from currentAssignments entirely the moment a swap left
+                // them with zero stops, rather than keeping them with an empty list. Board
+                // rendering already filters on stops.length>0 everywhere it builds cards (see
+                // techsSameDay/techsTomorrow below), so this never caused a visible empty card
+                // -- but it silently broke anything that reads Object.keys(assignments) to know
+                // who's actually part of today's roster, which is exactly what let a Revert
+                // immediately after a swap that emptied someone's board fail with "X is not on
+                // the current board": the tech whose only stop just moved away had already been
+                // deleted from the object the very same call that emptied them.
+                next[route.tech] = stops;
             });
 
             Object.entries(current).forEach(([tech, stops]) => {
