@@ -477,7 +477,11 @@ exports.handler = async (event) => {
       const [site_a, site_b] = idA < idB ? [idA, idB] : [idB, idA];
       siteToSiteRows.push({
         site_a, site_b,
-        mode: entry.type || "haversine",
+        // site_site_distances.mode CHECK only allows 'haversine'/'driving'
+        // -- 'haversine-fallback' (a per-pair straight-line substitute for
+        // one failed API element) normalizes to 'haversine', same fix as
+        // migrate-distance-matrix-to-supabase.js, which hit this live.
+        mode: entry.type === "driving" ? "driving" : "haversine",
         distance_mi: entry.distanceMi,
         duration_min: entry.durationMin ?? null,
         computed_at: mergedMeta.siteToSite.computedAt,

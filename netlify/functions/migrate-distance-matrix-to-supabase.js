@@ -124,7 +124,17 @@ exports.handler = async (event) => {
       skipped.push({ key, reason: 'malformed entry' });
       continue;
     }
-    const mode = entry.type || 'haversine';
+    // site_site_distances.mode has a CHECK constraint allowing only
+    // 'haversine'/'driving' -- the blob's own `type` field has a third
+    // value, 'haversine-fallback' (a per-pair straight-line substitute for
+    // one failed API element within an otherwise-driving build), which
+    // isn't a distinction anything downstream actually reads (every reader
+    // already just checks type/mode === 'driving' vs. not) -- normalized
+    // to 'haversine' here rather than widening the DB constraint for a
+    // difference nothing consumes. Found live: batch starting at row 3000
+    // of GA's first commit run failed this exact constraint before this
+    // fix.
+    const mode = entry.type === 'driving' ? 'driving' : 'haversine';
     const aIsSite = siteCodePattern.test(a);
     const bIsSite = siteCodePattern.test(b);
 

@@ -494,7 +494,9 @@ exports.handler = async (event) => {
     techToSiteRows.push({
       technician_id: techId,
       site_id: siteId,
-      mode: entry.type || "haversine",
+      // tech_site_distances.mode CHECK only allows 'haversine'/'driving' --
+      // same normalization as the site-to-site writer.
+      mode: entry.type === "driving" ? "driving" : "haversine",
       distance_mi: entry.distanceMi,
       duration_min: entry.durationMin ?? null,
       computed_at: meta.computedAt,
