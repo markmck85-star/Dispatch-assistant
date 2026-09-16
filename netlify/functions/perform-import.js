@@ -213,32 +213,9 @@ async function performImport(supabase, rows) {
     if (!chunk.length) continue;
     const { data: matchedTickets } = await supabase
       .from('tickets')
-      .select('id, wo_number, site_id, inbound_email_id')
+      .select('id, wo_number, site_id')
       .in('wo_number', chunk);
     for (const t of matchedTickets || []) ticketByWo[t.wo_number] = t;
-  }
-
-  // 2026-08-30: batch-fetch body text for every linked ticket's email, used
-  // below to catch a restock bundled into a visit that Salesforce's own
-  // single-value remediation/remediation_detail summary missed entirely --
-  // confirmed live the same day: a real "Consumable Restock" line item
-  // sitting inside a ticket Salesforce closed out as "Hardware
-  // Troubleshooting" (or similar), invisible to the cycle-tracking math
-  // without this. See included_restock below.
-  const emailIdsToCheck = [...new Set(
-    Object.values(ticketByWo).map((t) => t.inbound_email_id).filter(Boolean)
-  )];
-  let restockMentionByEmailId = {};
-  for (let i = 0; i < emailIdsToCheck.length; i += 500) {
-    const chunk = emailIdsToCheck.slice(i, i + 500);
-    if (!chunk.length) continue;
-    const { data: emails } = await supabase
-      .from('inbound_emails')
-      .select('id, body_text')
-      .in('id', chunk);
-    for (const e of emails || []) {
-      restockMentionByEmailId[e.id] = /Consumable Restock/i.test(e.body_text || '');
-    }
   }
 
   const toInsert = [];
@@ -379,17 +356,6 @@ async function performImport(supabase, rows) {
       if (visitDate) siteDateCompletions.push({ site_id: siteId, visit_date: visitDate });
     }
 
-    // A visit whose Salesforce summary already correctly says restock
-    // doesn't need this secondary check -- only look when the summary
-    // fields DON'T already indicate one, since that's specifically the
-    // gap this catches (Salesforce's remediation_detail is a single value
-    // for the whole appointment, and can miss a restock line item that
-    // rode along with a different primary purpose).
-    const alreadyFlaggedAsRestock = r.remediation === 'Preventative Maintenance' && r.remediationDetail === 'Consumable Restock';
-    const hasConfirmedRestockLineItem = linkedTicket && linkedTicket.inbound_email_id
-      && restockMentionByEmailId[linkedTicket.inbound_email_id];
-    const includedRestock = !alreadyFlaggedAsRestock && hasConfirmedRestockLineItem ? true : null;
-
     toInsert.push({
       appointment_number: r.appointmentNumber,
       site_id: siteId,
@@ -404,8 +370,8 @@ async function performImport(supabase, rows) {
       technician_id: technicianId,
       remediation: r.remediation || null,
       remediation_detail: r.remediationDetail || null,
-      included_restock: includedRestock,
-      included_restock_source: includedRestock ? 'inferred' : null,
+      included_restock: null,
+      included_restock_source: null,
       source: 'salesforce_report',
       needs_review: !matched,
       imported_at: new Date().toISOString(),
@@ -559,6 +525,27 @@ async function performImport(supabase, rows) {
       .select('id, site_id, dispatch_date')
       .in('site_id', chunk)
       .eq('status', 'planned')
+      // 2026-09-17 fix: this site+date fallback was built for ticketless
+      // bulk-restock stops (see the 2026-08-23 comment on
+      // siteDateCompletions above) -- but with no guard here, it was just
+      // as happy to complete a TICKET-LINKED assignment too, using ANY
+      // real visit at that site within the oneDayEarlier() tolerance,
+      // regardless of whether that visit had anything to do with the
+      // ticket. Real case: GA1037 had a genuine closed visit yesterday
+      // (WO 00152403, an offline/EPC replacement) -- that visit is still
+      // in the report every sync cycle (it's already-imported, so it
+      // re-queues into siteDateCompletions via the existingSet branch
+      // above on every run, not just once), and its date falls within a
+      // day of "today." So the very next time a completely unrelated new
+      // ticket (WO 00152597, a registration printer fault) got its own
+      // fresh board entry today, this fallback swallowed it as if
+      // yesterday's EPC visit had closed it too -- and kept doing so
+      // every 20 minutes, since nothing here remembers a visit was
+      // already "spent" from one sync run to the next. A ticket-linked
+      // assignment should ONLY ever close via the precise WO-number match
+      // above (ticketIdsToClose) -- excluding it here entirely closes the
+      // whole bug class rather than just today's one instance.
+      .is('ticket_id', null)
       .order('dispatch_date', { ascending: true });
     if (plannedErr) {
       console.error('[perform-import] site/date auto-complete: planned-assignment lookup failed:', plannedErr.message);
