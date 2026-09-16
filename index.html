@@ -3435,6 +3435,7 @@ function distanceMatrixStatus(state) {
                         tech = availableTechs[0];
                         item.reassignedFrom = preferred;
                         item.needsFallbackAssignment = true; // trigger UI prompt
+                        item.assignmentRole = 'fallback';
                     } else if (preferred && !unavailable.has(preferred) && allTechNames.includes(preferred)) {
                         // Preferred exists and not marked unavailable (edge case)
                         tech = preferred;
@@ -3452,8 +3453,30 @@ function distanceMatrixStatus(state) {
                         // and skipped the flag entirely, which is why the "Set
                         // Default" button wasn't showing up for the NV sites that
                         // already had a (wrong) hardcoded name.
-                        tech = availableTechs[0] || allTechNames[0];
+                        //
+                        // 2026-09-17 fix: the arbitrary availableTechs[0] pick
+                        // here (whatever order the roster happens to return, not
+                        // distance) is exactly what sent GA1041 (Fulton Co Kroger
+                        // Roswell, Atlanta) to Keontae Johnson -- MCR's Savannah
+                        // tech, ~230 miles off -- on a run where this branch fired
+                        // even though the site's own primary_tech_id/fallback_id
+                        // are both correctly set in Supabase (confirmed directly;
+                        // not a data problem, this branch just doesn't always know
+                        // that). Now picks the nearest available tech the same way
+                        // the Reassign dropdown already does (sortTechsByDistance),
+                        // and -- same as the sibling "primary out, no fallback"
+                        // case just above -- flags it for the existing
+                        // showFallbackAssignmentQueue toast instead of silently
+                        // committing to a guess. assignmentRole:'primary' tells
+                        // that toast to offer saving the pick as PRIMARY (there's
+                        // nothing existing worth preserving here), unlike the
+                        // sibling case which saves as fallback to keep the real
+                        // primary intact.
+                        const sortedByDistance = sortTechsByDistance(availableTechs, item.code, item.code.substring(0, 2));
+                        tech = (sortedByDistance[0] && sortedByDistance[0].name) || availableTechs[0] || allTechNames[0];
                         item.noSavedDefault = true;
+                        item.needsFallbackAssignment = true;
+                        item.assignmentRole = 'primary';
                     } else {
                         tech = availableTechs[0] || allTechNames[0];
                     }
@@ -4501,6 +4524,13 @@ function distanceMatrixStatus(state) {
             var code = item.code;
             var locName = loc.name || code;
             var primaryTech = item.reassignedFrom || loc.primaryTech || loc.defaultTech || '?';
+            // 2026-09-17: this queue now also handles the "no saved default at
+            // all" case (see the noSavedDefault branch above), not just "primary
+            // unavailable, no fallback set" -- assignmentRole distinguishes them,
+            // since they need different copy and, more importantly, need to save
+            // to a different field (primaryTech vs fallbackTech) below.
+            var assignmentRole = item.assignmentRole || 'fallback';
+            var isPrimaryRole = assignmentRole === 'primary';
 
             var existing = document.getElementById('fallback-assign-prompt');
             if (existing) existing.remove();
@@ -4520,19 +4550,22 @@ function distanceMatrixStatus(state) {
             // Sort nearest-first and annotate with distance label
             var techOptions = buildTechOptions(liveAvailableTechs, code, CURRENT_STATE, '', new Set([primaryTech]));
             // Check if there's already a fallback set but it's also unavailable — hide save button in that case
+            // (only applies to the fallback role -- the primary role has no
+            // equivalent "already exists but also unavailable" edge case, since
+            // the whole point is there's no usable default at all yet).
             var existingFallback = loc.fallbackTech;
-            var fallbackAlsoUnavailable = existingFallback && currentUnavailable.has(existingFallback);
-            var saveButtonHtml = fallbackAlsoUnavailable 
+            var fallbackAlsoUnavailable = !isPrimaryRole && existingFallback && currentUnavailable.has(existingFallback);
+            var saveButtonHtml = fallbackAlsoUnavailable
                 ? '' // Don't offer to save permanently when fallback is also just out today
-                : `<button id="fap-save" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Assign &amp; save as fallback</button>`;
+                : `<button id="fap-save" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Assign &amp; save as ${isPrimaryRole ? 'primary' : 'fallback'}</button>`;
 
             var div = document.createElement('div');
             div.id = 'fallback-assign-prompt';
             div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #ffa500;border-radius:8px;padding:16px 18px;z-index:9999;width:min(92vw,420px);box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
             div.innerHTML = `
-                <div style="font-weight:bold;color:#ffa500;margin-bottom:6px;">&#9888; ${fallbackAlsoUnavailable ? 'Fallback also unavailable' : 'No fallback set'}</div>
+                <div style="font-weight:bold;color:#ffa500;margin-bottom:6px;">&#9888; ${isPrimaryRole ? 'No default technician set' : (fallbackAlsoUnavailable ? 'Fallback also unavailable' : 'No fallback set')}</div>
                 <div style="margin-bottom:4px;"><strong>${code}</strong> — ${locName}</div>
-                <div style="color:#aaa;margin-bottom:12px;font-size:13px;">${primaryTech} is unavailable. Who should cover this?${remaining.length > 0 ? ` <span style="color:#666;">(${remaining.length} more after this)</span>` : ''}</div>
+                <div style="color:#aaa;margin-bottom:12px;font-size:13px;">${isPrimaryRole ? 'This site has no usable saved default technician.' : (primaryTech + ' is unavailable.')} Who should cover this?${remaining.length > 0 ? ` <span style="color:#666;">(${remaining.length} more after this)</span>` : ''}</div>
                 <select id="fap-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:10px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                     <option value="">-- Select technician --</option>
                     ${techOptions}
@@ -4561,6 +4594,7 @@ function distanceMatrixStatus(state) {
                 // Always add to the selected tech
                 if (movedStop) {
                     movedStop.needsFallbackAssignment = false;
+                    movedStop.noSavedDefault = false;
                     if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
                     window.currentAssignments[newTech].unshift(movedStop);
                     // Persist THIS assignment as a manual override so it's honored on
@@ -4579,7 +4613,18 @@ function distanceMatrixStatus(state) {
                     fetch('/.netlify/functions/save-location', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
+                        body: JSON.stringify(isPrimaryRole ? {
+                            code, state,
+                            name: loc.name || '',
+                            address: loc.address || '',
+                            primaryTech: newTech,
+                            defaultTech: newTech,
+                            fallbackTech: loc.fallbackTech || '',
+                            contractorOverride: false,
+                            contractorName: loc.contractorName || '',
+                            machineType: loc.machineType || 'SK',
+                            remote: loc.remote || false
+                        } : {
                             code, state,
                             name: loc.name || '',
                             address: loc.address || '',
@@ -4595,11 +4640,16 @@ function distanceMatrixStatus(state) {
                     .then(r => r.json())
                     .then(data => {
                         if (data.ok) {
-                            loc.fallbackTech = newTech;
+                            if (isPrimaryRole) {
+                                loc.primaryTech = newTech;
+                                loc.defaultTech = newTech;
+                            } else {
+                                loc.fallbackTech = newTech;
+                            }
                             // Brief toast so dispatcher knows the save landed
                             var toast = document.createElement('div');
                             toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:8px 18px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
-                            toast.textContent = '✓ Fallback saved: ' + code + ' → ' + newTech;
+                            toast.textContent = (isPrimaryRole ? '✓ Primary saved: ' : '✓ Fallback saved: ') + code + ' → ' + newTech;
                             document.body.appendChild(toast);
                             setTimeout(function() { toast.remove(); }, 3500);
                         } else {
