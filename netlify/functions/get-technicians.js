@@ -67,7 +67,21 @@ exports.handler = async (event) => {
       if (techErr) throw techErr;
 
       const result = {};
+      // 2026-09-17 fix: three technicians rows are literally named
+      // "Unassigned (New Site)" (GA, ID, IN) -- a placeholder used
+      // somewhere in the site-creation flow for "no tech assigned yet",
+      // not a real person, but active:true and otherwise shaped like a
+      // normal technician row (no coordinates, since they have no real
+      // home base). Because this endpoint feeds TECHS everywhere in
+      // index.html without distinction, these sentinels were being
+      // treated as genuine, always-idle, always-available technicians --
+      // including by the Analyze Routes AI rebalance tool, which (with no
+      // home coordinates to weigh against) kept suggesting moving real
+      // stops onto "Unassigned" as if it were the cheapest possible
+      // destination. Filtered out here, the one place TECHS gets built,
+      // rather than patching every downstream consumer separately.
       for (const t of (techs || [])) {
+        if (t.name === 'Unassigned (New Site)') continue;
         result[t.slug] = {
           name: t.name,
           state: t.home_state,
