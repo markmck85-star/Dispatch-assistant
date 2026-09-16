@@ -3268,6 +3268,54 @@ function distanceMatrixStatus(state) {
                 if (fc && fc.hasRightForms && isGARightFormsEligible(item.code)) item.hasRightForms = true;
             });
 
+            // 2026-09-16 fix: a stale-pasted item whose OWN effective date is
+            // a different day than the one being built here (e.g. yesterday's
+            // individually-added same-day restock, still sitting in the
+            // Location Codes box/localStorage when the page reloads today)
+            // was only ever checked against dateStr's persisted assignment
+            // above -- never against ITS OWN date's. So a same-day ticket
+            // that was correctly completed under its own dispatch_date could
+            // resurrect on a LATER day's board as a fresh, unhandled item,
+            // with restockOverdue above computed purely from date math and no
+            // idea it was already done. Real case: GA1042 (Glenwood Kroger),
+            // completed 9/15, reappeared OVERDUE on the 9/16 board because
+            // fetchExistingAssignments(dateStr) only ever queried 9/16. Now
+            // re-check any item whose effective date differs from dateStr
+            // against ITS OWN date before letting it stay on today's board --
+            // mirrors the completed/removed filter above, just keyed to the
+            // item's real date instead of the one being viewed.
+            const otherDates = [...new Set(
+                relevant
+                    .map(item => getItemEffectiveDateStr(item, dateStr))
+                    .filter(ds => ds && ds !== dateStr)
+            )];
+            if (otherDates.length > 0) {
+                const otherDateAssignments = {};
+                await Promise.all(otherDates.map(async ds => {
+                    otherDateAssignments[ds] = await fetchExistingAssignments(ds);
+                }));
+                relevant = relevant.filter(item => {
+                    const itemDs = getItemEffectiveDateStr(item, dateStr);
+                    if (!itemDs || itemDs === dateStr) return true;
+                    const existing = (otherDateAssignments[itemDs] || {})[item.code];
+                    if (existing && (existing.status === 'completed' || existing.status === 'removed')) {
+                        if (!existing.movedElsewhere) {
+                            window.removedStops.push({
+                                code: item.code,
+                                tech: existing.techName,
+                                reason: existing.status === 'completed' ? 'completed' : 'canceled',
+                                name: (LOCATIONS[item.code] || {}).name || item.code,
+                                snapshot: { code: item.code },
+                                originalIndex: 0,
+                                inQueue: false
+                            });
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
             const unavailable = dateStr ? getUnavailableTechsForDate(dateStr) : new Set(
                 Object.entries(window.manualUnavailable).filter(([,v]) => v).map(([k]) => k)
             );
