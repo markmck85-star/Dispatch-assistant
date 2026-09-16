@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Digest — MCR Dispatch</title>
+<style>
+  body { background:#111; color:#eee; font-family: -apple-system, Arial, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:1.3rem; margin:0 0 12px; }
+  h2 { font-size:1rem; margin:20px 0 8px; color:#ffa500; }
+  select, button {
+    font-size:1rem; padding:8px 12px; border-radius:6px; border:1px solid #555;
+    background:#222; color:#eee; margin-bottom:14px; margin-right:8px;
+  }
+  button { background:#2563eb; border-color:#2563eb; cursor:pointer; }
+  button.active { background:#ffa500; border-color:#ffa500; color:#000; font-weight:bold; }
+  #status { color:#aaa; margin-bottom:12px; }
+  .card {
+    background:#1c1c1c; border-left:4px solid #888; border-radius:6px;
+    padding:10px 14px; margin-bottom:8px;
+  }
+  .card.trouble { border-left-color:#ef4444; }
+  .card.install, .card.site_survey { border-left-color:#f59e0b; }
+  .card.review { border-left-color:#eab308; }
+  .card.completed { border-left-color:#22c55e; }
+  .card.open { border-left-color:#3b82f6; }
+  .card.removed { border-left-color:#666; }
+  .card .title { font-weight:bold; }
+  .card .meta { color:#aaa; font-size:0.85rem; margin-top:2px; }
+  .kind {
+    display:inline-block; font-size:0.7rem; text-transform:uppercase;
+    letter-spacing:0.03em; padding:2px 6px; border-radius:4px; background:#333; margin-left:6px;
+  }
+  #empty-section { color:#888; padding:6px 0; font-size:0.9rem; }
+  .section-count { color:#888; font-weight:normal; font-size:0.85rem; }
+</style>
+</head>
+<body>
+
+<h1>Daily Digest</h1>
+<div>
+  <select id="stateSelect">
+    <option value="GA">Georgia / NC / SC</option>
+    <option value="CA">California</option>
+    <option value="CO">Colorado</option>
+    <option value="FL">Florida</option>
+    <option value="ID">Idaho</option>
+    <option value="IL">Illinois</option>
+    <option value="IN">Indiana</option>
+    <option value="MI">Michigan</option>
+    <option value="MN">Minnesota</option>
+    <option value="NV">Nevada</option>
+    <option value="OH">Ohio</option>
+    <option value="OR">Oregon</option>
+    <option value="WV">West Virginia</option>
+    <option value="AL">Alabama</option>
+  </select>
+  <button id="morningBtn" class="active">Morning Brief</button>
+  <button id="eveningBtn">State of the State</button>
+  <button id="refreshBtn">Refresh</button>
+</div>
+<div id="status"></div>
+<div id="content"></div>
+
+<script>
+const stateSelect = document.getElementById('stateSelect');
+const morningBtn = document.getElementById('morningBtn');
+const eveningBtn = document.getElementById('eveningBtn');
+const refreshBtn = document.getElementById('refreshBtn');
+const statusEl = document.getElementById('status');
+const contentEl = document.getElementById('content');
+let mode = 'morning';
+
+(function preselectFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const urlState = (params.get('state') || '').trim().toUpperCase();
+  if (urlState && [...stateSelect.options].some(o => o.value === urlState)) {
+    stateSelect.value = urlState;
+  }
+  const urlMode = (params.get('mode') || '').trim().toLowerCase();
+  if (urlMode === 'evening') setMode('evening');
+})();
+
+function setMode(m) {
+  mode = m;
+  morningBtn.classList.toggle('active', m === 'morning');
+  eveningBtn.classList.toggle('active', m === 'evening');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+}
+
+function section(title, items, renderItem, emptyLabel) {
+  const html = items.length
+    ? items.map(renderItem).join('')
+    : `<div id="empty-section">${emptyLabel}</div>`;
+  return `<h2>${title} <span class="section-count">(${items.length})</span></h2>${html}`;
+}
+
+function ticketCard(t) {
+  const kindClass = (t.ticketKind || 'trouble').toLowerCase();
+  const deadline = t.computedSlaDeadline
+    ? `SLA: ${fmtDate(t.computedSlaDeadline)}`
+    : (t.slaEndsAt ? `SLA: ${fmtDate(t.slaEndsAt)}` : (t.earliestStartAt ? `Scheduled: ${fmtDate(t.earliestStartAt)}` : (t.dueAt ? `Due: ${fmtDate(t.dueAt)}` : '')));
+  return `
+    <div class="card ${kindClass}">
+      <span class="title">WO ${t.woNumber || '—'}</span>
+      <span class="kind">${(t.ticketKind || 'trouble').replace('_',' ')}</span>
+      ${!t.matched ? '<span class="kind" style="background:#7c2d12;">unmatched site</span>' : ''}
+      ${t.routedTo ? `<span class="kind" style="background:#1e3a5f;">routed to ${t.routedTo}</span>` : ''}
+      <div>${t.siteText || '(no site text)'}</div>
+      <div class="meta">${[t.issueCategory, t.issueDetail].filter(Boolean).join(' – ') || 'No issue category'}${deadline ? ' · ' + deadline : ''} · Received ${fmtDate(t.receivedAt)}</div>
+    </div>`;
+}
+
+function reviewCard(t) {
+  return `
+    <div class="card review">
+      <span class="title">WO ${t.woNumber || '—'}</span>
+      <span class="kind">needs review</span>
+      <div>${t.siteText || '(no site text)'}</div>
+      <div class="meta">${[t.issueCategory, t.issueDetail].filter(Boolean).join(' – ') || ''} · Received ${fmtDate(t.receivedAt)}</div>
+    </div>`;
+}
+
+function restockCard(cls) {
+  return (r) => `
+    <div class="card ${cls}">
+      <span class="title">${r.siteName || r.siteCode || 'Unknown site'}</span>
+      ${r.siteCode ? `<span class="kind">${r.siteCode}</span>` : ''}
+      ${r.technicianName ? `<div class="meta">${r.technicianName}</div>` : ''}
+    </div>`;
+}
+
+function shipmentCard(s) {
+  return `
+    <div class="card ${s.needsReturn ? 'trouble' : 'open'}">
+      <span class="title">${s.siteName || s.siteCode || 'Unknown site'}</span>
+      ${s.siteCode ? `<span class="kind">${s.siteCode}</span>` : ''}
+      <div class="meta">${s.needsReturn ? 'Part return needed' : 'Outbound only'}${s.warehouseName ? ' · ' + s.warehouseName : ''}</div>
+    </div>`;
+}
+
+async function load() {
+  const state = stateSelect.value;
+  statusEl.textContent = 'Loading…';
+  contentEl.innerHTML = '';
+  try {
+    const resp = await fetch(`/.netlify/functions/get-daily-digest?state=${state}&mode=${mode}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || String(resp.status));
+
+    const unavailable = data.technicians.filter(t => !t.available);
+    statusEl.textContent = `${state} · ${data.date} (${data.timezone}) · generated ${fmtDate(data.generatedAt)}`;
+
+    let html = '';
+    html += section('Unavailable Today', unavailable,
+      (t) => `<div class="card removed"><span class="title">${t.name}</span><div class="meta">${t.reason || ''}${t.note ? ' — ' + t.note : ''}</div></div>`,
+      'Everyone available.');
+    html += section('Open Trouble / Install / Site Survey', data.openTickets, ticketCard, 'Nothing outstanding.');
+    html += section('Needs Review', data.needsReview, reviewCard, 'Nothing flagged.');
+    html += section('Restocks — Completed', data.restocks.completed, restockCard('completed'), 'None completed yet.');
+    html += section('Restocks — Still Open', data.restocks.stillOpen, restockCard('open'), 'None outstanding.');
+    html += section('Restocks — Removed / Pushed', data.restocks.removed, restockCard('removed'), 'None removed today.');
+    html += section('Open RMA Shipments', data.openShipments, shipmentCard, 'None outstanding.');
+
+    if (data.preview) {
+      html += `<h2>Tomorrow Preview — ${data.preview.date} <span class="section-count">(${data.preview.installs.length + data.preview.restocksQueued.length})</span></h2>`;
+      html += data.preview.installs.length
+        ? data.preview.installs.map(ticketCard).join('')
+        : '';
+      html += data.preview.restocksQueued.length
+        ? data.preview.restocksQueued.map(restockCard('open')).join('')
+        : '';
+      if (!data.preview.installs.length && !data.preview.restocksQueued.length) {
+        html += '<div id="empty-section">Nothing queued yet.</div>';
+      }
+    }
+
+    contentEl.innerHTML = html;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+morningBtn.addEventListener('click', () => { setMode('morning'); load(); });
+eveningBtn.addEventListener('click', () => { setMode('evening'); load(); });
+refreshBtn.addEventListener('click', load);
+stateSelect.addEventListener('change', load);
+load();
+</script>
+
+</body>
+</html>
