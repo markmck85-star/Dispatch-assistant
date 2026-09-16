@@ -1813,9 +1813,20 @@ function distanceMatrixStatus(state) {
             restoreJournalThreshold();
             restoreHeavyDayTrigger();
             restoreControlsState();
-            updateWatchdogLink();
-            updateRestockLink();
-            updateStateConsoleLink();
+            // 2026-09-16 fix: updateWatchdogLink/updateRestockLink/
+            // updateStateConsoleLink used to run right here, BEFORE the
+            // region-restore block below sets stateSelector's real value --
+            // that restore assigns sel.value programmatically, which never
+            // fires a 'change' event, so these three links were never
+            // rebuilt afterward. Each one was silently baked in using
+            // whatever the dropdown defaulted to for that first instant of
+            // page load (the browser's own first <option>, now Alabama
+            // since it sorts before Georgia alphabetically) even though the
+            // dropdown itself looked correct a moment later once the real
+            // restore ran. Real case: the State Console link kept opening
+            // Alabama's console despite the dispatch page visibly showing
+            // Georgia / NC / SC selected. Moved below, after the restore
+            // block actually sets the dropdown's real value.
             // 2026-08-31: handoff from State Console's "Send to Dispatch Board"
             // button on an open ticket's source-email popup. Reuses this same
             // paste-and-parse pipeline rather than a separate injection path --
@@ -2083,6 +2094,14 @@ function distanceMatrixStatus(state) {
                     }
                 }
             }
+
+            // Now that stateSelector holds its real, restored value (see
+            // the 2026-09-16 comment above), rebuild the links that depend
+            // on it -- previously these ran before this block and could go
+            // stale for an entire page load.
+            updateWatchdogLink();
+            updateRestockLink();
+            updateStateConsoleLink();
 
             // Sync CURRENT_STATE / LOCATIONS / TECHS (plus journal threshold and
             // availability panel) to the restored dropdown value before anything
