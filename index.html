@@ -1700,6 +1700,22 @@ function distanceMatrixStatus(state) {
             }
 
             let html = '';
+            // 2026-09-17 redesign, per Mark's ask: the panel used to render
+            // every technician (mostly green "Available" tiles) which ate a
+            // lot of vertical space for information that's rarely useful --
+            // the interesting case is who's OUT, not the long list of who
+            // isn't. Now builds two separate pieces: a compact dropdown +
+            // button to mark someone unavailable (pulled from whoever's
+            // currently available), and tiles only for technicians who are
+            // actually out today. Tapping an out tile still restores them,
+            // exactly like before -- toggleManualUnavail() already handles
+            // both directions uniformly regardless of why they were out
+            // (comp day, BlueFolder sync, manual, Saturday not-on-call), so
+            // nothing about that logic needed to change, just what gets
+            // rendered from it.
+            const availableTechs = [];
+            const outTechs = [];
+
             techsToShow.forEach(tech => {
                 const isCompDay = compDayTechs.has(tech);
                 const bfInfo = bfDay[tech] || null; // {reason, note} synced from BlueFolder
@@ -1711,24 +1727,45 @@ function distanceMatrixStatus(state) {
                 const isOut = !isManualAvail && (isCompDay || isBfOut || isManualOut || isSaturdayOut);
                 const compInfo = compDays.find(c => c.tech === tech);
 
-                let bg = isOut ? '#5c1a1a' : '#1a3a1a';
-                let badge = isOut ? '🔴' : '🟢';
-                const bfLabel = bfInfo ? (BF_REASON_LABELS[bfInfo.reason] || 'Time Off') : '';
-                let statusText = isOut
-                    ? (isBfOut && !isManualAvail ? bfLabel : isCompDay && !isManualAvail ? 'Comp Day' : isSaturdayOut ? 'Not on call' : 'Unavailable')
-                    : (isManualAvail && (isCompDay || isBfOut) ? 'Avail (override)' : isSaturday && onCallTechs ? 'On call' : 'Available');
-                let tooltip = isBfOut && bfInfo.note ? bfInfo.note :
-                              isCompDay && compInfo ? compInfo.reason : 
-                              (isSaturday && onCallTechs && onCallTechs.has(tech) ? `On call Sat ${dateStr}` : '');
+                if (!isOut) { availableTechs.push(tech); return; }
 
-                html += `<div onclick="toggleManualUnavail('${tech}')" style="background:${bg}; border-radius:6px; padding:8px 10px; min-width:140px; flex:1; cursor:pointer; user-select:none;">
-                    <div style="color:#ddd; font-size:13px; font-weight:bold;">${badge} ${displayName(tech)}</div>
+                let bg = '#5c1a1a';
+                const bfLabel = bfInfo ? (BF_REASON_LABELS[bfInfo.reason] || 'Time Off') : '';
+                let statusText = isBfOut && !isManualAvail ? bfLabel : isCompDay && !isManualAvail ? 'Comp Day' : isSaturdayOut ? 'Not on call' : 'Unavailable';
+                let tooltip = isBfOut && bfInfo.note ? bfInfo.note :
+                              isCompDay && compInfo ? compInfo.reason : '';
+
+                outTechs.push(`<div onclick="toggleManualUnavail('${tech}')" style="background:${bg}; border-radius:6px; padding:8px 10px; min-width:140px; flex:1; cursor:pointer; user-select:none;">
+                    <div style="color:#ddd; font-size:13px; font-weight:bold;">🔴 ${displayName(tech)}</div>
                     <div style="color:#aaa; font-size:11px; margin-top:2px;">${statusText}</div>
                     ${tooltip ? `<div style="color:#ffa500; font-size:10px;">${tooltip}</div>` : ''}
                     <div style="margin-top:6px; font-size:11px; color:#888; text-align:center;">${isManual ? 'Tap to mark available' : 'Tap to mark out'}</div>
-                </div>`;
+                </div>`);
             });
+
+            const markOutOptions = availableTechs
+                .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+                .map(t => `<option value="${t}">${displayName(t)}</option>`).join('');
+            html += `<div style="display:flex; gap:6px; margin-bottom:10px;">
+                <select id="availMarkOutSelect" style="flex:1; background:#1a1a1a; color:#ddd; border:1px solid #444; border-radius:6px; padding:6px 8px; font-size:13px;">
+                    <option value="" disabled selected>Mark someone unavailable…</option>
+                    ${markOutOptions}
+                </select>
+                <button onclick="markSelectedTechUnavailable()" style="background:#5c1a1a; color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;">Mark Out</button>
+            </div>`;
+
+            html += outTechs.length
+                ? outTechs.join('')
+                : `<div style="color:#7ec98a; font-size:13px; text-align:center; padding:8px 0;">✅ Everyone available today</div>`;
+
             grid.innerHTML = html;
+        }
+
+        /** Companion to the dropdown added in refreshAvailabilityPanel -- marks whichever technician is selected as unavailable, reusing the same toggle used everywhere else. */
+        function markSelectedTechUnavailable() {
+            const select = document.getElementById('availMarkOutSelect');
+            if (!select || !select.value) return;
+            toggleManualUnavail(select.value);
         }
 
         async function toggleManualUnavail(tech) {
