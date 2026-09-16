@@ -1789,6 +1789,32 @@ exports.handler = async (event) => {
           if (syncErr) console.error('[mailgun-inbound] Reprocessed-ticket site_id sync failed (non-fatal):', syncErr.message);
         }
 
+        // 2026-09-16: same reprocess gap as site_id above, but for
+        // attributes.routedState -- the ignoreDuplicates upsert above
+        // never touches an EXISTING ticket row's attributes at all, so a
+        // manual re-forward of an already-seen WO (exactly how Mark tests
+        // this) would otherwise silently never pick up routedState even
+        // though this run correctly computed it. Reads the row's current
+        // attributes first and merges routedState in, rather than
+        // overwriting the whole jsonb column (which would wipe
+        // rawSiteCode/rawIssue/fromSubject already stored there). Only
+        // writes when there's something new to add -- never overwrites an
+        // already-populated routedState with null on some later reprocess
+        // that happens not to find one.
+        if (routedState) {
+          const { data: existingAttrsRow, error: attrsFetchErr } = await supabase
+            .from('tickets').select('attributes').eq('wo_number', parsed.woNum).maybeSingle();
+          if (attrsFetchErr) {
+            console.error('[mailgun-inbound] routedState backfill fetch failed:', attrsFetchErr.message);
+          } else if (existingAttrsRow && !(existingAttrsRow.attributes || {}).routedState) {
+            const mergedAttrs = { ...(existingAttrsRow.attributes || {}), routedState };
+            const { error: attrsUpdateErr } = await supabase
+              .from('tickets').update({ attributes: mergedAttrs }).eq('wo_number', parsed.woNum);
+            if (attrsUpdateErr) console.error('[mailgun-inbound] routedState backfill failed:', attrsUpdateErr.message);
+            else console.log(`[mailgun-inbound] Backfilled routedState=${routedState} onto existing ticket ${parsed.woNum}`);
+          }
+        }
+
         // Address-based sibling sweep -- mirrors link-ticket-to-site.js's
         // existing rawSiteCode-based sweep, but for the address-match case:
         // a building with a testing station AND an OTC printer (or several
