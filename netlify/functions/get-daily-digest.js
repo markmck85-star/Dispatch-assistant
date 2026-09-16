@@ -134,7 +134,7 @@ exports.handler = async (event) => {
     // right-now snapshot, not a rolling alert feed).
     const { data: openTicketRows, error: openErr } = await supabase
       .from('tickets')
-      .select('id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, address, due_at, sla_ends_at, earliest_start_at, received_at, status')
+      .select('id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, address, due_at, sla_ends_at, earliest_start_at, received_at, status, attributes')
       .or('ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true')
       .eq('status', 'open')
       .order('received_at', { ascending: false });
@@ -152,6 +152,17 @@ exports.handler = async (event) => {
           try { computedSlaDeadline = computeSlaDeadline(t.received_at, t.address, state); }
           catch (e) { computedSlaDeadline = null; }
         }
+        // 2026-09-16: routedState is which territory Neumo's own internal
+        // routing considers responsible for this ticket (parsed from the
+        // email's To: header -- see detectRoutedState in
+        // mailgun-inbound.js), independent of the site's own physical
+        // state (this digest's `state` param). Only meaningful when it
+        // differs from the state being viewed -- e.g. an AL site routed
+        // through GA's own team, since AL has no dispatch team of its own
+        // yet. routedTo is null on the vast majority of tickets, where
+        // Neumo's routing matches the site's own state (or the header
+        // didn't match this convention at all).
+        const routedState = (t.attributes || {}).routedState || null;
         return {
           ticketId: t.id,
           woNumber: t.wo_number,
@@ -165,6 +176,7 @@ exports.handler = async (event) => {
           earliestStartAt: t.earliest_start_at,
           computedSlaDeadline,
           receivedAt: t.received_at,
+          routedTo: (routedState && routedState !== state) ? routedState : null,
         };
       });
 
