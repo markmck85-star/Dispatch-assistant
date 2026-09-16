@@ -132,16 +132,48 @@ exports.handler = async (event) => {
     // Open trouble/install/site_survey tickets -- same shape as
     // get-watchdog-log.js, minus its 4-day staleness grace (this is a
     // right-now snapshot, not a rolling alert feed).
+    //
+    // 2026-09-17 fix: tickets.status is NOT a reliable "still open" signal
+    // on its own -- get-state-console.js's own header comment confirms
+    // it's set to 'open' at creation and never updated anywhere in the
+    // app. Filtering on it directly (the original version of this query)
+    // meant a ticket resolved through the app -- manually marked resolved
+    // on the state console, or closed out any way other than Neumo's own
+    // Salesforce closed-ticket report matching back -- would show as open
+    // here forever. Real case: GA1037 (WO 00151999), manually resolved by
+    // Mark, still showed OVERDUE on this digest days later. Now mirrors
+    // get-state-console.js's own derivation instead of inventing a second
+    // one: excluded if manually_resolved_at is set, or if a closing
+    // site_visit (from the Salesforce import) has already linked back to
+    // this ticket's id.
     const { data: openTicketRows, error: openErr } = await supabase
       .from('tickets')
-      .select('id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, address, due_at, sla_ends_at, earliest_start_at, received_at, status, attributes')
+      .select('id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, address, due_at, sla_ends_at, earliest_start_at, received_at, status, attributes, manually_resolved_at')
       .or('ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true')
-      .eq('status', 'open')
       .order('received_at', { ascending: false });
     if (openErr) return json(500, { error: 'open tickets fetch failed: ' + openErr.message });
 
-    const stateTickets = (openTicketRows || []).filter(
+    const candidateTickets = (openTicketRows || []).filter(
       t => t.site_text && t.site_text.slice(0, 2).toUpperCase() === state
+    );
+
+    // Closing-visit check, same signal state console uses: a site_visits
+    // row (from the Salesforce closed-ticket import) whose ticket_id
+    // points back at this ticket means it's genuinely confirmed closed,
+    // regardless of what tickets.status says.
+    const candidateIds = candidateTickets.map(t => t.id);
+    let closedTicketIds = new Set();
+    if (candidateIds.length) {
+      const { data: closingVisits, error: closingErr } = await supabase
+        .from('site_visits')
+        .select('ticket_id')
+        .in('ticket_id', candidateIds);
+      if (closingErr) return json(500, { error: 'closing-visit fetch failed: ' + closingErr.message });
+      (closingVisits || []).forEach(v => { if (v.ticket_id) closedTicketIds.add(v.ticket_id); });
+    }
+
+    const stateTickets = candidateTickets.filter(
+      t => !t.manually_resolved_at && !closedTicketIds.has(t.id)
     );
 
     const openTickets = stateTickets
