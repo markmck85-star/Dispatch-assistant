@@ -1692,7 +1692,7 @@
             
             const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
             
-            const allStates = ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR'];
+            const allStates = ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CA'];
             const wb = XLSX.utils.book_new();
 
             const MODEL_MAP = { 'SK': '6500', 'BK': '6500', 'SB': '6000', 'BH': '7000' };
@@ -1769,7 +1769,7 @@
         // anywhere in the DB, so they need a manual edit here if a state's
         // covered equipment changes or a new state gets added. Everything
         // else (name/title/phone/email) is pulled live.
-        const ROSTER_STATE_ORDER = ['OH','IN','AR','MS','GA','WV','MI','MN','NV','NC','SC','IL','OR','FL','CO'];
+        const ROSTER_STATE_ORDER = ['OH','IN','AR','MS','GA','WV','MI','MN','NV','NC','SC','IL','OR','FL','CO','CA'];
         const ROSTER_STATE_BLURB = {
             OH: 'Ohio, ITI, SST Small Kahuna, OTC POD MKIII',
             IN: 'Indiana, ITI, SST,Big Kahuna, Small Kahuna, Big Hoku, Small Hoku, SSO',
@@ -1786,6 +1786,7 @@
             OR: 'Oregon, ITI, SST, Big Kahuna, Small Kahuna',
             FL: 'Florida, ITI, SST, Small Kahuna, Surfboard',
             CO: 'Colorado, ITI, SST, Big Kahuna, Small Kahuna, HOKU, K2D testing stations',
+            CA: 'California, ITI, SST (equipment mix not yet confirmed per site)',
         };
 
         async function fetchAllRosterTechs() {
