@@ -1712,8 +1712,21 @@
                         // Parse city/county from address
                         const addrParts = (loc.address || '').split(',');
                         const city = addrParts.length >= 2 ? addrParts[addrParts.length - 2].trim().replace(/\s+[A-Z]{2}\s*$/, '').trim() : '';
-                        const county = (loc.name || '').split(' ')[0] || '';
-                        const sstName = (loc.state || state) + ' - ' + (loc.name || code);
+                        // 2026-09-16: only fills County when the name follows
+                        // the "<County> County ..." convention (GA/MI/etc, e.g.
+                        // "Gwinnett County Lawrenceville Kroger" -> "Gwinnett").
+                        // CA's site names are stored as "CA - <City> DMV" -- no
+                        // county data at all -- so the old naive first-word
+                        // heuristic was reading the state prefix itself as the
+                        // county, printing "CA" on every single row. Left blank
+                        // for any state whose naming doesn't carry a real county,
+                        // rather than guessing a wrong value (e.g. the city).
+                        const nameNoStatePrefix = (loc.name || '').replace(new RegExp('^' + (loc.state || state) + '\\s*-\\s*', 'i'), '');
+                        const nameTokens = nameNoStatePrefix.split(' ');
+                        const county = (nameTokens[1] && /^county$/i.test(nameTokens[1])) ? nameTokens[0] : '';
+                        const rawName = loc.name || code;
+                        const nameAlreadyHasStatePrefix = new RegExp('^' + (loc.state || state) + '\\s*-\\s*', 'i').test(rawName);
+                        const sstName = nameAlreadyHasStatePrefix ? rawName : (loc.state || state) + ' - ' + rawName;
 
                         rows.push([
                             code,
@@ -1754,7 +1767,9 @@
             const a = document.createElement('a');
             a.href = url;
             a.download = 'MCR_service_locations_' + new Date().toISOString().split('T')[0] + '.xlsx';
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
             showToast('Exported ' + wb.SheetNames.length + ' states to MCR_service_locations.xlsx', 'success');
         }
@@ -1996,7 +2011,9 @@ ${mergeCellsXml}
             const a = document.createElement('a');
             a.href = url;
             a.download = 'MCR_roster_' + new Date().toISOString().split('T')[0] + '.xlsx';
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
             showToast('Roster exported.', 'success');
         }
@@ -2028,7 +2045,9 @@ ${mergeCellsXml}
             const a = document.createElement('a');
             a.href = url;
             a.download = 'MCR_roster_addresses_' + new Date().toISOString().split('T')[0] + '.xlsx';
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
             showToast('Roster (with addresses) exported.', 'success');
         }
