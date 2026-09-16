@@ -8,6 +8,12 @@
   body { background:#111; color:#eee; font-family: -apple-system, Arial, sans-serif; margin:0; padding:16px; }
   h1 { font-size:1.3rem; margin:0 0 12px; }
   h2 { font-size:1rem; margin:20px 0 8px; color:#ffa500; }
+  .collapsible-section { margin:20px 0 8px; }
+  .collapsible-section summary {
+    font-size:1rem; color:#ffa500; cursor:pointer; list-style:revert;
+    margin-bottom:8px;
+  }
+  .collapsible-section summary .section-count { font-weight:normal; }
   select, button {
     font-size:1rem; padding:8px 12px; border-radius:6px; border:1px solid #555;
     background:#222; color:#eee; margin-bottom:14px; margin-right:8px;
@@ -100,6 +106,16 @@ function section(title, items, renderItem, emptyLabel) {
   return `<h2>${title} <span class="section-count">(${items.length})</span></h2>${html}`;
 }
 
+// Collapsible variant -- defaults closed. Used for sections that are
+// useful to have around but not something you need to scan every load
+// (e.g. shipments), per Mark's ask 2026-09-17.
+function collapsibleSection(title, items, renderItem, emptyLabel) {
+  const html = items.length
+    ? items.map(renderItem).join('')
+    : `<div id="empty-section">${emptyLabel}</div>`;
+  return `<details class="collapsible-section"><summary>${title} <span class="section-count">(${items.length})</span></summary>${html}</details>`;
+}
+
 function ticketCard(t) {
   const kindClass = (t.ticketKind || 'trouble').toLowerCase();
   const deadline = t.computedSlaDeadline
@@ -110,6 +126,7 @@ function ticketCard(t) {
       <span class="title">WO ${t.woNumber || '—'}</span>
       <span class="kind">${(t.ticketKind || 'trouble').replace('_',' ')}</span>
       ${!t.matched ? '<span class="kind" style="background:#7c2d12;">unmatched site</span>' : ''}
+      ${t.routedTo ? `<span class="kind" style="background:#1e3a5f;">routed to ${t.routedTo}</span>` : ''}
       <div>${t.siteText || '(no site text)'}</div>
       <div class="meta">${[t.issueCategory, t.issueDetail].filter(Boolean).join(' – ') || 'No issue category'}${deadline ? ' · ' + deadline : ''} · Received ${fmtDate(t.receivedAt)}</div>
     </div>`;
@@ -164,7 +181,7 @@ async function load() {
     html += section('Restocks — Completed', data.restocks.completed, restockCard('completed'), 'None completed yet.');
     html += section('Restocks — Still Open', data.restocks.stillOpen, restockCard('open'), 'None outstanding.');
     html += section('Restocks — Removed / Pushed', data.restocks.removed, restockCard('removed'), 'None removed today.');
-    html += section('Open RMA Shipments', data.openShipments, shipmentCard, 'None outstanding.');
+    html += collapsibleSection('Open RMA Shipments', data.openShipments, shipmentCard, 'None outstanding.');
 
     if (data.preview) {
       html += `<h2>Tomorrow Preview — ${data.preview.date} <span class="section-count">(${data.preview.installs.length + data.preview.restocksQueued.length})</span></h2>`;
