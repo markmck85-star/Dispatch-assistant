@@ -1202,6 +1202,12 @@ exports.handler = async (event) => {
     // further below, once effectiveBody exists -- see the note there for
     // why a raw Re: subject alone isn't a safe-enough signal on its own.
     const rawSubjectIsReply = /^\s*re\s*:/i.test(subject);
+    // 2026-09-17: normalized subject (Re:/Fwd: stripped, lowercased) --
+    // used below to recognize a same-thread reply-all on an already-
+    // alerted dispatch list (e.g. Neumo's routine "these haven't hit
+    // Salesforce yet" follow-up) so it doesn't re-fire the "new dispatch
+    // list" SMS a second time for the same day's list.
+    const normalizedSubject = (subject || '').replace(/^\s*(re|fwd?)\s*:\s*/i, '').trim().toLowerCase();
 
     // Debug: log all field keys and sizes to diagnose forwarded email parsing
     const fieldKeys = Object.keys(fields);
@@ -2110,6 +2116,46 @@ exports.handler = async (event) => {
     // body content) always still alerts.
     if (dispatchType === 'restock' && states.length > 0) {
       try {
+        // 2026-09-17: real case that prompted this -- Dontez Turner sends
+        // the day's actual dispatch list (itself a "Re:"-subject email,
+        // per the 2026-09-14 fix above), and later the same day Megan
+        // Junk reply-alls on that SAME thread with a routine "these
+        // haven't hit Salesforce yet" note -- her reply quotes the
+        // original list underneath, so it still matches
+        // looksLikeBulkDispatchList and still parses as a fresh list, but
+        // it's NOT a new list, it's the same one with different wrapper
+        // text (so the bodyHash-identical check below, which catches
+        // genuine re-forwards of unchanged content, doesn't catch it --
+        // the hash differs because of the new reply text on top). Mark
+        // confirmed this reply-all pattern is routine and never carries a
+        // real list update, so any Re:-prefixed dispatch-list email
+        // matching a subject already alerted on today gets its SMS
+        // suppressed here -- the first (real) list for a given subject
+        // still alerts normally; only same-thread follow-ups are skipped.
+        let alreadyAlertedThisThread = false;
+        if (rawSubjectIsReply && normalizedSubject) {
+          const dayStart = new Date(receivedAt); dayStart.setUTCHours(0, 0, 0, 0);
+          const dayEnd = new Date(receivedAt); dayEnd.setUTCHours(23, 59, 59, 999);
+          const { data: priorToday, error: priorErr } = await supabase
+            .from('inbound_emails')
+            .select('id, subject')
+            .eq('classified_as', 'dispatch_list')
+            .gte('received_at', dayStart.toISOString())
+            .lte('received_at', dayEnd.toISOString());
+          if (priorErr) {
+            console.error('[mailgun-inbound] Same-thread dispatch-list lookup failed (non-fatal, alerting normally):', priorErr.message);
+          } else {
+            alreadyAlertedThisThread = (priorToday || []).some(row =>
+              row.id !== inboundEmailId &&
+              (row.subject || '').replace(/^\s*(re|fwd?)\s*:\s*/i, '').trim().toLowerCase() === normalizedSubject
+            );
+          }
+        }
+        if (alreadyAlertedThisThread) {
+          console.log(`[mailgun-inbound] Dispatch-list SMS skipped: same-day reply-all on an already-alerted thread ("${subject}").`);
+          throw { __skipDispatchListAlert: true };
+        }
+
         const bodyHash = crypto.createHash('sha256').update(effectiveBody).digest('hex');
         const lastHash = await store.get('dispatch-list/last-notified-hash', { type: 'text' });
         if (bodyHash === lastHash) {
@@ -2160,7 +2206,9 @@ exports.handler = async (event) => {
           await store.set('dispatch-list/last-notified-hash', bodyHash);
         }
       } catch (dlSmsEx) {
-        console.error('[mailgun-inbound] Dispatch-list SMS error (non-fatal):', dlSmsEx.message);
+        if (!dlSmsEx || !dlSmsEx.__skipDispatchListAlert) {
+          console.error('[mailgun-inbound] Dispatch-list SMS error (non-fatal):', dlSmsEx.message);
+        }
       }
     }
 
