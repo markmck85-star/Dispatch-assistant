@@ -108,6 +108,30 @@ function detectStates(text) {
   return [...found].sort();
 }
 
+// 2026-09-16: derives which territory NEUMO's own internal routing
+// considers responsible for a ticket -- distinct from the site's own
+// physical state (sites.state / the "XX - ..." text Neumo embeds in the
+// ticket body). Found via a real Alabama install ticket (WO 00152475,
+// Montgomery Publix) whose raw To: header read "gasstdispatch@neumo.com"
+// -- Neumo internally routes AL work through GA's own dispatch team alias
+// since AL doesn't have its own yet. That's a genuinely different, useful
+// signal from the site's physical state: it says who Neumo itself expects
+// to handle this, which matters for territory coverage (a GA-home tech
+// covering an AL site via additional_states) independent of where the
+// site physically sits. KNOWN mirrors detectStates() above. Returns null
+// when the header doesn't match this "<state>sstdispatch@" convention --
+// most emails won't (this is specifically Neumo's SST-team routing
+// convention, not a general-purpose header), so null is the normal,
+// expected result for the majority of tickets, not a failure.
+function detectRoutedState(toHeader) {
+  if (!toHeader) return null;
+  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID","AL"];
+  const m = String(toHeader).match(/\b([A-Za-z]{2})sstdispatch@/i);
+  if (!m) return null;
+  const code = m[1].toUpperCase();
+  return KNOWN.includes(code) ? code : null;
+}
+
 // ── Timezone mapping by state code ───────────────────────────────────────────
 const STATE_TIMEZONES = {
   GA: 'America/New_York',
@@ -1327,9 +1351,17 @@ exports.handler = async (event) => {
       const classifiedAs = isReplyOnly ? 'reply' : (classifiedAsMap[dispatchType] || 'unknown');
       const parseStatus = isReplyOnly ? 'ignored' : (parsed ? 'parsed' : 'failed');
       const mailgunMessageId = fields['Message-Id'] || fields['message-id'] || null;
+      // 2026-09-16: raw To: header (e.g. "gasstdispatch@neumo.com") --
+      // Neumo's own internal routing address, distinct from `mailbox`
+      // above (the Mailgun-matched address MCR actually received it at).
+      // Stored as-is on inbound_emails; routedState (derived from it,
+      // used on tickets.attributes below) is the parsed territory signal.
+      const toHeader = fields['To'] || fields['to'] || null;
+      const routedState = detectRoutedState(toHeader);
 
       const inboundEmailRow = {
         mailbox: fields['recipient'] || fields['Recipient'] || null,
+        to_address: toHeader,
         sender,
         subject,
         body_text: textBody || null,
@@ -1716,7 +1748,13 @@ exports.handler = async (event) => {
           deadline_source: dispatchType === 'maintenance'
             ? 'restock_requested'
             : (isInstallOrSurvey ? 'scheduled_appointment' : 'sla_4h'),
-          attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null },
+          // 2026-09-16: routedState (from the email's own To: header, see
+          // detectRoutedState above) rides alongside the existing fields
+          // here rather than getting its own column -- same pattern as
+          // rawSiteCode/rawIssue, and null for the vast majority of
+          // tickets where this routing convention doesn't apply, which
+          // fits a jsonb bag better than a mostly-empty new column.
+          attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null, routedState },
           source: 'email',
           inbound_email_id: inboundEmailId,
         };
