@@ -29,6 +29,17 @@
  * dropped -- worth confirming whether it's still meaningfully populated
  * before deciding whether to add the column or leave it retired, given the
  * planned distance-matrix-based clustering rebuild makes it likely moot.
+ *
+ * v4 (2026-09-17): exposes a real `county` column (added to `sites` this
+ * same session, backfilled for California via a Gemini/Maps-grounded
+ * lookup against each site's own address). Was previously derived
+ * client-side in admin.html's locations export by guessing the first word
+ * of the site's name -- broke for CA specifically, whose names are stored
+ * as "CA - <City> DMV" with no county in them at all, so that heuristic
+ * just printed the state code on every row. Returned as `county` here
+ * (empty string when the column is null, e.g. every state besides CA
+ * until/unless they get backfilled the same way) so admin.html can read
+ * it directly instead of guessing.
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
@@ -69,7 +80,7 @@ exports.handler = async (event) => {
 
       const { data: sites, error: sitesErr } = await supabase
         .from("sites")
-        .select("id, site_code, state, name, address, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id")
+        .select("id, site_code, state, name, address, county, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id")
         .eq("state", state);
 
       if (sitesErr) throw sitesErr;
@@ -99,6 +110,7 @@ exports.handler = async (event) => {
           state: s.state,
           name: s.name || s.site_code,
           address: s.address || "",
+          county: s.county || "",
           primaryTech,
           fallbackTech,
           defaultTech: primaryTech, // backward-compat with embedded LOCATIONS records
@@ -114,7 +126,7 @@ exports.handler = async (event) => {
 
       // Fold in code-style site_aliases (e.g. an old/alternate code Neumo's
       // dispatch-list digest still uses) as additional keys pointing at the
-      // same record, without ever overwriting a live site_code entry.
+      // same location object, without ever overwriting a live site_code entry.
       const siteIds = Object.keys(siteIdById);
       if (siteIds.length > 0) {
         const { data: aliases, error: aliasErr } = await supabase
