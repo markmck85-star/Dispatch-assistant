@@ -1689,10 +1689,10 @@
         // --- EXPORT ALL STATES XLSX ---
         async function exportLocationsCSV() {
             showToast('Building multi-state export...', 'info');
+            try {
+            const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
             
-            const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
-            
-            const allStates = ['GA', 'NC', 'SC', 'FL', 'MI', 'IN', 'OH', 'NV', 'IL', 'MN', 'WV', 'OR', 'CA'];
+            const allStates = ['CA', 'FL', 'GA', 'IL', 'IN', 'MI', 'MN', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV'];
             const wb = XLSX.utils.book_new();
 
             const MODEL_MAP = { 'SK': '6500', 'BK': '6500', 'SB': '6000', 'BH': '7000' };
@@ -1772,6 +1772,10 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             showToast('Exported ' + wb.SheetNames.length + ' states to MCR_service_locations.xlsx', 'success');
+            } catch (e) {
+                console.error('[exportLocationsCSV] failed:', e);
+                showToast('Export failed: ' + e.message, 'error');
+            }
         }
 
         // --- EXPORT COMPANY ROSTER (XLSX) ---
@@ -1805,7 +1809,7 @@
         };
 
         async function fetchAllRosterTechs() {
-            const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+            const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
             const byState = {};
             for (const state of ROSTER_STATE_ORDER) {
                 try {
@@ -2025,6 +2029,7 @@ ${mergeCellsXml}
             const ok = confirm('This version includes home addresses and is for internal use only (updating the distance matrix) -- not for company-wide distribution. Continue?');
             if (!ok) return;
             showToast('Building roster export with addresses...', 'info');
+            try {
             const { XLSX, byState } = await fetchAllRosterTechs();
             // Includes contractors and blank addresses on purpose here --
             // this version is for Mark's own use spotting geocoding gaps,
@@ -2050,6 +2055,10 @@ ${mergeCellsXml}
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             showToast('Roster (with addresses) exported.', 'success');
+            } catch (e) {
+                console.error('[exportRosterWithAddresses] failed:', e);
+                showToast('Export failed: ' + e.message, 'error');
+            }
         }
 
         // --- BACKUP / RESTORE ---
