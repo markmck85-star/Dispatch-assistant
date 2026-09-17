@@ -45,7 +45,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("assignments")
-      .select("status, assigned_by, sequence_order, locked, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review)")
+      .select("status, assigned_by, sequence_order, locked, restock_form_counts, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review)")
       .eq("dispatch_date", dispatchDate);
 
     if (error) return json(500, { error: "Query failed: " + error.message });
@@ -108,6 +108,15 @@ exports.handler = async (event) => {
           assignedBy: row.assigned_by,
           sequenceOrder: row.sequence_order,
           locked: row.locked,
+          // 2026-09-17: restock form counts (LF/RF/Journal/consumables/etc),
+          // persisted by save-assignment.js when a stop is first saved from
+          // a fresh dispatch-list paste. Null for assignments saved before
+          // this existed, or for ticket-linked (trouble/maintenance) stops,
+          // which never had this data to begin with. index.html hydrates
+          // window.parsedFormCounts from this on the fromSupabaseOnly path
+          // so counts/items/loadout render even when nobody in this browser
+          // ever pasted the original dispatch-list text.
+          formCounts: row.restock_form_counts || null,
           ticket: t ? {
             woNumber: t.wo_number,
             ticketKind: t.ticket_kind,

@@ -127,6 +127,20 @@ exports.handler = async (event) => {
       row.sequence_order = parseInt(payload.sequenceOrder, 10);
     }
     if (payload.locked !== undefined) row.locked = Boolean(payload.locked);
+    // 2026-09-17: persist the parsed restock form counts (LF/RF/Journal/
+    // consumables/etc, from index.html's parseFormCounts) alongside the
+    // assignment itself. Only written when the caller actually has counts
+    // to send -- status-only calls (Done/Cancel/reassign) omit this field
+    // entirely, and since Postgres's ON CONFLICT DO UPDATE only SETs
+    // columns present in the upserted row, that correctly leaves
+    // previously-saved counts untouched rather than blanking them. This
+    // closes the gap where a stop auto-surfaced from Supabase on a device
+    // that never saw the original dispatch-list paste showed no counts/
+    // items/loadout at all -- see the fromSupabaseOnly comment in
+    // index.html's _processDispatchCore.
+    if (payload.formCounts && typeof payload.formCounts === "object") {
+      row.restock_form_counts = payload.formCounts;
+    }
 
     const { data, error } = await supabase
       .from("assignments")
