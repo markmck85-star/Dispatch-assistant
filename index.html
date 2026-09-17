@@ -3178,6 +3178,18 @@ function distanceMatrixStatus(state) {
                         console.warn(`[dispatch] Auto-added planned stop for ${code} skipped: not in LOCATIONS`);
                         return;
                     }
+                    // 2026-09-17: hydrate window.parsedFormCounts from the
+                    // persisted assignment (see save-assignment.js/
+                    // get-assignments.js) so every downstream renderer that
+                    // keys off that same map -- checkConsumables(), the
+                    // technician-text builder, the dispatch-summary HTML,
+                    // and the min-loadout tally -- works unchanged for a
+                    // stop nobody in this browser ever pasted. Only fills a
+                    // gap; never overwrites a fresher live-parsed value if
+                    // one somehow already exists for this code.
+                    if (existing.formCounts && !window.parsedFormCounts[code]) {
+                        window.parsedFormCounts[code] = existing.formCounts;
+                    }
                     // 2026-09-12: same Saturday guard as the fresh-parse filter
                     // above, applied here too -- this branch resurfaces a
                     // 'planned' row straight from Supabase regardless of what's
@@ -4183,6 +4195,18 @@ function distanceMatrixStatus(state) {
                 assignedBy: assignedBy,
             };
             if (opts.ticketWoNumber) payload.ticketWoNumber = opts.ticketWoNumber;
+            // 2026-09-17: send along the parsed restock form counts (if any
+            // exist for this code in this browser's session) so they get
+            // persisted alongside the assignment itself, not just held in
+            // window.parsedFormCounts. Only attached on a genuine restock
+            // stop with real parsed data -- status-only calls (Done/Cancel/
+            // reassign) naturally omit this since the item usually isn't
+            // freshly re-parsed at that point, which is fine: save-
+            // assignment.js only touches this column when the field is
+            // actually present, so it won't blank out counts saved earlier.
+            // See the fromSupabaseOnly hydration below for the read side.
+            const fcForSave = window.parsedFormCounts && window.parsedFormCounts[item.code];
+            if (fcForSave) payload.formCounts = fcForSave;
             fetch('/.netlify/functions/save-assignment', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
