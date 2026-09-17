@@ -811,16 +811,49 @@ async function loadConsole(state, isRetry) {
 
 const MAP_ROUTE_COLORS = [
   '#e6194b', '#0071c5', '#2e9e3e', '#f07d02', '#8e24aa',
-  '#00838f', '#c2185b', '#6d4c41', '#5d8c00', '#455a64'
+  '#00838f', '#d81b9e', '#6d4c41', '#5d8c00', '#455a64',
+  '#b8860b', '#1a237e', '#7b0000', '#558b2f', '#a0522d', '#6a1b4d'
 ];
 // Same order as MAP_ROUTE_COLORS and as index.html's identical array --
 // plain-language names so "move red 2 to Mark" can be resolved against
 // window._stateMapTechColors (captured at render time below) instead of
 // the AI needing to guess at hex-to-name mapping itself.
+// 2026-09-17: expanded from 10 to 16 (pink's hex also swapped for one
+// further from red -- the original pink/red pair was the exact collision
+// Mark flagged looking at the CA map) after CA's real headcount (15)
+// started wrapping the old 10-color palette and landing SAME colors on
+// different techs (Nick Perez = Aaron Hodge's red, etc.), not just
+// similar-looking ones. See overflowColorName/shadeHexColor below for
+// what happens on a 17th+ tech, once even 16 isn't enough.
 const MAP_ROUTE_COLOR_NAMES = [
   'red', 'blue', 'green', 'orange', 'purple',
-  'teal', 'pink', 'brown', 'olive', 'slate'
+  'teal', 'pink', 'brown', 'olive', 'slate',
+  'gold', 'navy', 'maroon', 'lime', 'rust', 'plum'
 ];
+
+// 2026-09-17: overflow handling for a headcount that exceeds even the
+// 16-color palette above. Rather than silently repeating a color (the
+// original bug), a tech beyond the base palette gets the same hue shaded
+// lighter/darker (alternating, growing each pass) plus a letter suffix on
+// its name -- "Red" vs "Red B" -- so the AI command bar can still resolve
+// "move red b 2 to Mark" unambiguously, and the map legend/swatch actually
+// looks different rather than being a literal duplicate.
+function shadeHexColor(hex, cycleNum) {
+  if (!cycleNum) return hex;
+  const amt = 0.22 * Math.ceil(cycleNum / 2); // 0.22, 0.22, 0.44, 0.44, ...
+  const lighten = cycleNum % 2 === 1; // odd cycles lighten, even cycles darken
+  const num = parseInt(hex.slice(1), 16);
+  let r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
+  const adjust = c => lighten ? Math.round(c + (255 - c) * amt) : Math.round(c * (1 - amt));
+  r = Math.max(0, Math.min(255, adjust(r)));
+  g = Math.max(0, Math.min(255, adjust(g)));
+  b = Math.max(0, Math.min(255, adjust(b)));
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+function overflowColorName(baseName, cycleNum) {
+  if (!cycleNum) return baseName;
+  return baseName + ' ' + String.fromCharCode(65 + cycleNum); // B, C, D...
+}
 
 // ── STOP ORDER (nearest-neighbor + 2-opt) ──────────────────────────────────
 // Ported from index.html's sortStopsByDistance/getCachedLegInfo (the
@@ -888,9 +921,18 @@ function sortStateMapStops(items, matrix, LOCATIONS, techHome, techSlug) {
   if (withCoords.length <= 1) return items;
 
   const legDist = (fromCode, toCode) => stateMapLegDist(matrix, LOCATIONS, techHome, techSlug, fromCode, toCode);
+  // 2026-09-17: previously only summed home->stop1->stop2->...->stopN,
+  // never the trip back home at the end -- so the optimizer could pick an
+  // ordering that's shortest to drive TO, while leaving the tech stranded
+  // far from home on the last stop, since that leg was invisible to the
+  // cost function entirely. Real distance data has no separate "return"
+  // entry (the matrix only stores home<->site once), so this reuses the
+  // same home<->lastStop distance for the return leg -- a fair
+  // approximation, and a real improvement over counting it as zero.
   const routeDist = route => {
     let total = legDist(null, route[0].code);
     for (let i = 0; i < route.length - 1; i++) total += legDist(route[i].code, route[i + 1].code);
+    total += legDist(null, route[route.length - 1].code); // trip back home
     return total;
   };
 
@@ -1024,7 +1066,9 @@ async function renderStateMap(state, dispatchDate) {
     window._stateMapTechColors = {};
 
     techNames.forEach((tech, techIndex) => {
-      window._stateMapTechColors[tech] = MAP_ROUTE_COLOR_NAMES[techIndex % MAP_ROUTE_COLOR_NAMES.length];
+      const _baseIdx = techIndex % MAP_ROUTE_COLOR_NAMES.length;
+      const _cycleNum = Math.floor(techIndex / MAP_ROUTE_COLOR_NAMES.length);
+      window._stateMapTechColors[tech] = overflowColorName(MAP_ROUTE_COLOR_NAMES[_baseIdx], _cycleNum);
       const rawActive = [];
       const completedPts = [];
       (byTech[tech] || []).forEach(a => {
@@ -1052,7 +1096,7 @@ async function renderStateMap(state, dispatchDate) {
       });
 
       const home = (info.lat != null && info.lng != null) ? { lat: Number(info.lat), lng: Number(info.lng), label: info.homeAddress || '' } : null;
-      routes.push({ tech, color: MAP_ROUTE_COLORS[techIndex % MAP_ROUTE_COLORS.length], dashed: techIndex >= MAP_ROUTE_COLORS.length, pts, completedPts, home });
+      routes.push({ tech, color: shadeHexColor(MAP_ROUTE_COLORS[_baseIdx], _cycleNum), dashed: _cycleNum > 0, pts, completedPts, home });
       stopCount += pts.length;
     });
 
