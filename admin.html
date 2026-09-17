@@ -1686,6 +1686,47 @@
             }
         }
 
+        // 2026-09-17: shared download helper. The anchor-click technique
+        // (create <a download>, appendChild, click, removeChild) works fine
+        // for small blobs (confirmed: the JSON backup and the no-addresses
+        // roster export both use it successfully on Mark's phone) but some
+        // Android browsers silently drop it for larger blobs specifically --
+        // no error, the click just never triggers a real download. The
+        // locations export (13 states, hundreds of rows) is meaningfully
+        // bigger than either of those. Adds a second attempt via
+        // window.open() on the same blob URL, which forces the browser to
+        // actually navigate to the file -- triggering its own native
+        // save/open handling -- instead of relying purely on the
+        // programmatic click. Runs both; whichever the browser actually
+        // honors is the one that produces a result, and running both is
+        // harmless (worst case two tabs/downloads instead of one).
+        function triggerFileDownload(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            try {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } catch (e) {
+                console.warn('[triggerFileDownload] anchor-click attempt failed:', e);
+            }
+            // Fallback: open the blob directly. On browsers where the anchor
+            // click above silently did nothing, this forces a real
+            // navigation to the file, which is what actually triggers
+            // Android's download handling in those cases.
+            setTimeout(() => {
+                try {
+                    window.open(url, '_blank');
+                } catch (e) {
+                    console.warn('[triggerFileDownload] window.open fallback failed:', e);
+                }
+                // Revoke well after both attempts have had a chance to read it.
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            }, 300);
+        }
+
         // --- EXPORT ALL STATES XLSX ---
         async function exportLocationsCSV() {
             showToast('Building multi-state export...', 'info');
@@ -1712,18 +1753,17 @@
                         // Parse city/county from address
                         const addrParts = (loc.address || '').split(',');
                         const city = addrParts.length >= 2 ? addrParts[addrParts.length - 2].trim().replace(/\s+[A-Z]{2}\s*$/, '').trim() : '';
-                        // 2026-09-16: only fills County when the name follows
-                        // the "<County> County ..." convention (GA/MI/etc, e.g.
-                        // "Gwinnett County Lawrenceville Kroger" -> "Gwinnett").
-                        // CA's site names are stored as "CA - <City> DMV" -- no
-                        // county data at all -- so the old naive first-word
-                        // heuristic was reading the state prefix itself as the
-                        // county, printing "CA" on every single row. Left blank
-                        // for any state whose naming doesn't carry a real county,
-                        // rather than guessing a wrong value (e.g. the city).
-                        const nameNoStatePrefix = (loc.name || '').replace(new RegExp('^' + (loc.state || state) + '\\s*-\\s*', 'i'), '');
-                        const nameTokens = nameNoStatePrefix.split(' ');
-                        const county = (nameTokens[1] && /^county$/i.test(nameTokens[1])) ? nameTokens[0] : '';
+                        // 2026-09-17: prefer the real `county` column from
+                        // the database (get-locations.js v4) now that CA has
+                        // been backfilled via a Gemini/Maps-grounded lookup.
+                        // Falls back to the old name-derived guess only for
+                        // states that don't have a real county on file yet.
+                        let county = loc.county || '';
+                        if (!county) {
+                            const nameNoStatePrefix = (loc.name || '').replace(new RegExp('^' + (loc.state || state) + '\\s*-\\s*', 'i'), '');
+                            const nameTokens = nameNoStatePrefix.split(' ');
+                            county = (nameTokens[1] && /^county$/i.test(nameTokens[1])) ? nameTokens[0] : '';
+                        }
                         const rawName = loc.name || code;
                         const nameAlreadyHasStatePrefix = new RegExp('^' + (loc.state || state) + '\\s*-\\s*', 'i').test(rawName);
                         const sstName = nameAlreadyHasStatePrefix ? rawName : (loc.state || state) + ' - ' + rawName;
@@ -1763,14 +1803,7 @@
 
             const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
             const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'MCR_service_locations_' + new Date().toISOString().split('T')[0] + '.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            triggerFileDownload(blob, 'MCR_service_locations_' + new Date().toISOString().split('T')[0] + '.xlsx');
             showToast('Exported ' + wb.SheetNames.length + ' states to MCR_service_locations.xlsx', 'success');
             } catch (e) {
                 console.error('[exportLocationsCSV] failed:', e);
@@ -2011,14 +2044,7 @@ ${mergeCellsXml}
             showToast('Building roster export...', 'info');
             const { byState } = await fetchAllRosterTechs();
             const blob = await buildStyledRosterXlsx(byState);
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'MCR_roster_' + new Date().toISOString().split('T')[0] + '.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            triggerFileDownload(blob, 'MCR_roster_' + new Date().toISOString().split('T')[0] + '.xlsx');
             showToast('Roster exported.', 'success');
         }
 
@@ -2046,14 +2072,7 @@ ${mergeCellsXml}
             XLSX.utils.book_append_sheet(wb, ws, 'Roster (addresses)');
             const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
             const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'MCR_roster_addresses_' + new Date().toISOString().split('T')[0] + '.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            triggerFileDownload(blob, 'MCR_roster_addresses_' + new Date().toISOString().split('T')[0] + '.xlsx');
             showToast('Roster (with addresses) exported.', 'success');
             } catch (e) {
                 console.error('[exportRosterWithAddresses] failed:', e);
