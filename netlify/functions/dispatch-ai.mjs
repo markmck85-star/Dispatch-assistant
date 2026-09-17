@@ -1,5 +1,11 @@
 /**
- * dispatch-ai.mjs — v1 (fresh rebuild) — 2026-09-13
+ * dispatch-ai.mjs — v1.1 (2026-09-17)
+ *   - retry Gemini generateContent on transient TLS/fetch failures
+ *   - stop propose_route_rebalance from suggesting a swap and its reverse
+ *   - cap how many extra miles workload-credit can buy
+ *   - optional fromTechIndexes / toTechIndexes so "off Hodge onto Alex/Miguel" stays scoped
+ *
+ * Original rebuild — 2026-09-13
  *
  * Backend for the embedded AI Dispatch Assistant command bar -- shared by
  * index.html's board panel and the state-console redesign (state.html),
@@ -106,6 +112,11 @@ const MIN_REBALANCE_SAVINGS_MI = 1.0;
 // by this credit -- it's reported honestly alongside the decision.
 const MIN_STOP_GAP_FOR_CREDIT = 2;
 const WORKLOAD_CREDIT_PER_STOP_MI = 1.5;
+// Workload credit must not buy a huge detour. Today's CA1067 Aaron↔Nick
+// oscillation was a mileage-losing move that cleared the score bar on
+// credit, then the next round's best move was the exact reverse.
+const MAX_WORKLOAD_MILEAGE_COST_MI = 6;
+const GEMINI_FETCH_RETRIES = 3;
 
 /**
  * Greedy multi-round savings algorithm for propose_route_rebalance.
@@ -125,17 +136,20 @@ const WORKLOAD_CREDIT_PER_STOP_MI = 1.5;
  * ordered list of suggested moves (empty if nothing clears the minimum
  * threshold) -- purely advisory, never mutates the routes it's given.
  */
-function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs, minSavingsMi, maxSuggestions) {
+function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs, minSavingsMi, maxSuggestions, fromTechSet, toTechSet) {
   let working = routes.map((r) => ({ tech: r.tech, stops: r.stops.slice() }));
   const suggestions = [];
+  const usedCodes = new Set();
+  const bannedKeys = new Set(); // `${from}|${to}|${code}` and the reverse
 
   for (let round = 0; round < maxSuggestions; round++) {
     let best = null;
 
     working.forEach((fromRoute) => {
       if (unavailableTechs.has(fromRoute.tech)) return;
+      if (fromTechSet && fromTechSet.size && !fromTechSet.has(fromRoute.tech)) return;
       fromRoute.stops.forEach((code, idx) => {
-        if (lockedCodes.has(code)) return;
+        if (lockedCodes.has(code) || usedCodes.has(code)) return;
         const before = routeMetrics(legInfo, fromRoute.tech, fromRoute.stops);
         const without = fromRoute.stops.slice(0, idx).concat(fromRoute.stops.slice(idx + 1));
         const after = routeMetrics(legInfo, fromRoute.tech, without);
@@ -151,6 +165,8 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
 
         working.forEach((toRoute) => {
           if (toRoute.tech === fromRoute.tech || unavailableTechs.has(toRoute.tech)) return;
+          if (toTechSet && toTechSet.size && !toTechSet.has(toRoute.tech)) return;
+          if (bannedKeys.has(`${fromRoute.tech}|${toRoute.tech}|${code}`)) return;
           const toBefore = routeMetrics(legInfo, toRoute.tech, toRoute.stops);
           const withStop = insertStopAtBestPosition(legInfo, toRoute.tech, toRoute.stops, code, sites);
           const toAfter = routeMetrics(legInfo, toRoute.tech, withStop);
@@ -166,6 +182,7 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
           const workloadCredit = stopGapBefore > MIN_STOP_GAP_FOR_CREDIT
             ? (stopGapBefore - MIN_STOP_GAP_FOR_CREDIT) * WORKLOAD_CREDIT_PER_STOP_MI
             : 0;
+          if (workloadCredit > 0 && net < -MAX_WORKLOAD_MILEAGE_COST_MI) return;
           const score = net + workloadCredit;
 
           if (score >= minSavingsMi && (!best || score > best.score)) {
@@ -182,6 +199,9 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
     });
 
     if (!best) break;
+    usedCodes.add(best.code);
+    bannedKeys.add(`${best.fromTech}|${best.toTech}|${best.code}`);
+    bannedKeys.add(`${best.toTech}|${best.fromTech}|${best.code}`);
     working = working.map((r) => {
       if (r.tech === best.fromTech) return { tech: r.tech, stops: best.newFromStops };
       if (r.tech === best.toTech) return { tech: r.tech, stops: best.newToStops };
@@ -191,6 +211,36 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
   }
 
   return suggestions;
+}
+
+function isTransientFetchError(err) {
+  const msg = String(err && (err.message || err));
+  const cause = err && err.cause;
+  const code = (cause && cause.code) || err.code || '';
+  return (
+    /fetch failed/i.test(msg) ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    /tls|socket disconnected|network/i.test(msg + ' ' + String(cause && cause.message || ''))
+  );
+}
+
+async function generateContentWithRetry(ai, request) {
+  let lastErr;
+  for (let attempt = 1; attempt <= GEMINI_FETCH_RETRIES; attempt++) {
+    try {
+      return await ai.models.generateContent(request);
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientFetchError(err) || attempt === GEMINI_FETCH_RETRIES) throw err;
+      const waitMs = 400 * attempt;
+      console.warn(`[dispatch-ai] Gemini fetch failed (attempt ${attempt}/${GEMINI_FETCH_RETRIES}): ${err.message}; retrying in ${waitMs}ms`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+  throw lastErr;
 }
 
 function json(status, obj) {
@@ -326,13 +376,24 @@ function functionDeclarations() {
         "one's real mileage impact (never inflated by the workload consideration) plus, when relevant, the stop-count " +
         'change for both techs. Use for requests like "does this board make sense", "any better way to split these ' +
         'routes", "is anyone overloaded today", or "look for backtracking" -- and proactively when a rebalance seems ' +
-        'relevant to what\'s being asked, even without an exact match to those phrases.',
+        'relevant to what\'s being asked, even without an exact match to those phrases. Prefer this tool over ' +
+        'get_stop_addition_cost when the site is already on someone\'s route and the ask is who should take it.',
       parameters: {
         type: 'OBJECT',
         properties: {
           maxSuggestions: {
             type: 'INTEGER',
             description: 'Maximum number of suggested swaps to return. Defaults to 5 if omitted.',
+          },
+          fromTechIndexes: {
+            type: 'ARRAY',
+            items: { type: 'INTEGER' },
+            description: 'Optional 1-based technician numbers to take stops FROM. Use when the dispatcher names overloaded techs.',
+          },
+          toTechIndexes: {
+            type: 'ARRAY',
+            items: { type: 'INTEGER' },
+            description: 'Optional 1-based technician numbers who should RECEIVE stops. Use when the dispatcher names lighter techs.',
           },
         },
         required: [],
@@ -386,6 +447,9 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
     '- If an instruction implies several changes, emit one tool call per change, in the order they should be applied.',
     '- The advisory tools (get_leg_distance, get_stop_addition_cost, get_overtime_risk, propose_route_rebalance) never change ' +
       'the board -- use them freely to answer a question, even speculative ones ("what if"), without asking for confirmation first.',
+    '- If asked which existing stops to move from one tech (or color) onto another to balance load, call propose_route_rebalance ' +
+      'ONCE with fromTechIndexes / toTechIndexes. Do not call get_stop_addition_cost for sites already on the board -- that tool is ' +
+      'only for a site that is not currently assigned.',
     '- reassign_stop and sort_route DO change the board. Only call one of those when you are confident which technician ' +
       'and stop are meant. If the instruction is ambiguous, unrelated to the board, or refers to someone or something not ' +
       'in the roster, do not call a tool: reply with one short sentence saying what you need clarified.',
@@ -419,6 +483,16 @@ function legText(leg) {
 /** First name only, which is how the dispatcher-facing diff line reads. */
 function shortName(techName) {
   return String(techName || '').trim().split(/\s+/)[0] || techName;
+}
+
+function techSetFromIndexes(indexes, routes) {
+  if (!Array.isArray(indexes) || !indexes.length) return null;
+  const set = new Set();
+  for (const raw of indexes) {
+    const i = Number(raw);
+    if (Number.isInteger(i) && i >= 1 && i <= routes.length) set.add(routes[i - 1].tech);
+  }
+  return set.size ? set : null;
 }
 
 /**
@@ -643,7 +717,7 @@ export default async (req) => {
       calls = [{ name: forceTool, args: forceToolArgs }];
     } else {
       const ai = new GoogleGenAI({});
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry(ai, {
         model: MODEL,
         contents: text,
         config: {
@@ -901,7 +975,12 @@ export default async (req) => {
         const lockedCodes = new Set(
           (Array.isArray(payload.lockedCodes) ? payload.lockedCodes : []).map((c) => String(c))
         );
-        const rebalance = proposeRebalance(working, legInfo, ctx.sites, lockedCodes, unavailableTechs, MIN_REBALANCE_SAVINGS_MI, maxSuggestions);
+        const fromTechSet = techSetFromIndexes(args.fromTechIndexes, working);
+        const toTechSet = techSetFromIndexes(args.toTechIndexes, working);
+        const rebalance = proposeRebalance(
+          working, legInfo, ctx.sites, lockedCodes, unavailableTechs,
+          MIN_REBALANCE_SAVINGS_MI, maxSuggestions, fromTechSet, toTechSet,
+        );
 
         if (!rebalance.length) {
           actions.push({
