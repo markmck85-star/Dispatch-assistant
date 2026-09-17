@@ -141,6 +141,21 @@ export function routeMetrics(legInfo, techName, codes) {
     else durationMin += leg.durationMin;
     prev = code;
   }
+  // 2026-09-17: previously stopped at the last stop -- the trip back home
+  // at the end of the day was never counted anywhere in this app (the two
+  // client-side copies of this same gap were just fixed the same way).
+  // Since this function backs nearly everything -- fleet totals, per-swap
+  // savings, stop-addition cost, overtime risk, and (via optimizeRoute
+  // below) the ordering decision itself -- fixing it here is what actually
+  // makes the "Total mileage saved" figures, tech-card totals, and swap
+  // deltas reflect a technician's real round-trip day, not just the
+  // outbound leg. legInfo(tech, lastCode, null) reuses the same
+  // tech<->site distance as the outbound home leg, since the matrix only
+  // stores that pair once -- a fair approximation of the return drive.
+  const returnLeg = legInfo(techName, null, codes[codes.length - 1]);
+  distanceMi += returnLeg.distanceMi || 0;
+  if (returnLeg.durationMin == null) allReal = false;
+  else durationMin += returnLeg.durationMin;
   return {
     distanceMi,
     durationMin: allReal ? durationMin : null,
@@ -173,9 +188,14 @@ export function optimizeRoute(legInfo, techName, codes, sites) {
   if (withCoords.length <= 1) return codes.slice();
 
   const legDist = (from, to) => legInfo(techName, from, to).distanceMi;
+  // Same return-trip-home fix as routeMetrics above, applied here too since
+  // this is a SEPARATE local implementation used only for the 2-opt
+  // decision itself (matches the two client-side copies of this same
+  // duplication).
   const routeDist = (route) => {
     let total = legDist(null, route[0]);
     for (let i = 0; i < route.length - 1; i++) total += legDist(route[i], route[i + 1]);
+    total += legDist(null, route[route.length - 1]); // trip back home
     return total;
   };
 
