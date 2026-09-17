@@ -26,17 +26,22 @@
  * the old flat $200/month credit (changed March 1, 2025). Distance Matrix
  * is Legacy status but still billed this way.
  *
- * EST_COST_PER_ELEMENT: Google's exact tiered/negotiated per-element rate
- * isn't hardcoded here -- this reuses the same conservative low-end
- * estimate ($3.10/1,000 elements) already baked into admin.html's Step 3
- * DM_SITE_COUNT_HINTS cost range (0.0031-0.0062/element), using the LOW end
- * so previews don't overstate cost. Treat as an approximation for the
- * confirm dialog, not an exact bill -- check Google Cloud billing console
- * for the real number.
+ * EST_COST_PER_ELEMENT: 2026-09-17 fix -- was $0.0031/element, explicitly
+ * labeled in this file's own prior comment as "a conservative low-end
+ * estimate... not Google's real negotiated rate." Checked against Google's
+ * official current pricing list (developers.google.com/maps/billing-and-
+ * pricing/pricing, page itself last updated 2026-09-10) before Mark quoted
+ * a build cost to TJ: the real published Distance Matrix (Legacy,
+ * Essentials) rate is $5.00 per 1,000 elements for the first 100,000
+ * monthly elements, dropping to $4.00/1,000 beyond that -- the old constant
+ * was underquoting real cost by roughly 61%. Using the $5.00/1,000 rate
+ * here (the tier that applies to MCR's actual per-state build volumes,
+ * which stay well under 100k/month) rather than trying to model the tier
+ * break, since a single state's one-time build is never going to cross it.
  */
 
 const MONTHLY_FREE_ELEMENTS = 10000;
-const EST_COST_PER_ELEMENT = 0.0031;
+const EST_COST_PER_ELEMENT = 0.005;
 
 function monthKey(date) {
   return (date || new Date()).toISOString().slice(0, 7); // "YYYY-MM"
