@@ -3553,6 +3553,40 @@ function distanceMatrixStatus(state) {
                 ? window.ticketMeta.woNumber : null;
             Object.entries(assignments).forEach(([tech, stops]) => {
                 stops.forEach(item => {
+                    // 2026-09-17: neither skip guard below is aware of restock
+                    // counts at all -- they only ever gate the full tech/status
+                    // sync. Together they meant the counts persistence added
+                    // tonight almost never actually ran: the "unchanged tech"
+                    // guard fires for nearly every routine daily restock (same
+                    // primary tech every day), and the "silent auto-load" guard
+                    // fires for the normal auto-forwarded-email workflow (no
+                    // manual Generate Dispatches click). Real symptom: every
+                    // assignment row in the table, including ones synced minutes
+                    // after tonight's deploy, still had restock_form_counts
+                    // null. Fixed by syncing counts on their own, unconditionally
+                    // whenever this fresh parse has them and they differ from
+                    // what's already stored -- via save-form-counts.js, a plain
+                    // UPDATE that touches no column but restock_form_counts, so
+                    // it can't reproduce either bug the two guards below exist
+                    // to prevent (no new row, no clobbered tech/status/assigned_by).
+                    const freshFc = window.parsedFormCounts && window.parsedFormCounts[item.code];
+                    if (freshFc) {
+                        const existingFc = existingByCode[item.code] && existingByCode[item.code].formCounts;
+                        if (!existingFc || JSON.stringify(existingFc) !== JSON.stringify(freshFc)) {
+                            fetch('/.netlify/functions/save-form-counts', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    dispatchDate: getItemEffectiveDateStr(item, dateStr),
+                                    siteCode: item.code,
+                                    formCounts: freshFc,
+                                })
+                            }).then(r => r.json()).then(data => {
+                                if (!data.ok) console.error('[save-form-counts] rejected:', data.error);
+                            }).catch(err => console.error('[save-form-counts] failed (non-fatal):', err.message));
+                        }
+                    }
+
                     // Skip re-sync only when we actually honored the existing persisted
                     // assignment unchanged -- re-syncing an unchanged assignment would
                     // overwrite assigned_by provenance (e.g. a manual reassignment) back
