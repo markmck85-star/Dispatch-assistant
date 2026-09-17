@@ -3089,6 +3089,19 @@ function distanceMatrixStatus(state) {
                         boardDate.setHours(0, 0, 0, 0);
                         ticketDueToday = slaLocalDate.getTime() <= boardDate.getTime();
                     }
+                    // 2026-09-17: same hydration as the plain-restock
+                    // (fromSupabaseOnly) branch below -- a site can pick up
+                    // its own individual maintenance/restock ticket (real
+                    // case: GA1040, WO 00152523) which switches it onto THIS
+                    // branch instead. Without this, a stop that already had
+                    // restock_form_counts correctly persisted still rendered
+                    // with no Items:/Counts: the moment it became ticket-
+                    // linked, since this branch never touched
+                    // window.parsedFormCounts at all. Only fills a gap; never
+                    // overwrites a fresher live-parsed value.
+                    if (existing.formCounts && !window.parsedFormCounts[code]) {
+                        window.parsedFormCounts[code] = existing.formCounts;
+                    }
                     const pastedItem = pastedByCode[code];
                     if (pastedItem) {
                         // Site already has a stop (from the pasted/loaded
