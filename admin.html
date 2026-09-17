@@ -1686,45 +1686,25 @@
             }
         }
 
-        // 2026-09-17: shared download helper. The anchor-click technique
-        // (create <a download>, appendChild, click, removeChild) works fine
-        // for small blobs (confirmed: the JSON backup and the no-addresses
-        // roster export both use it successfully on Mark's phone) but some
-        // Android browsers silently drop it for larger blobs specifically --
-        // no error, the click just never triggers a real download. The
-        // locations export (13 states, hundreds of rows) is meaningfully
-        // bigger than either of those. Adds a second attempt via
-        // window.open() on the same blob URL, which forces the browser to
-        // actually navigate to the file -- triggering its own native
-        // save/open handling -- instead of relying purely on the
-        // programmatic click. Runs both; whichever the browser actually
-        // honors is the one that produces a result, and running both is
-        // harmless (worst case two tabs/downloads instead of one).
+        // 2026-09-17: shared download helper, kept simple. An earlier
+        // version of this added a window.open() fallback meant to help the
+        // locations export download on mobile -- that turned out to be a
+        // real regression instead: it triggered popup-blocker interference
+        // and, when allowed, saved the file under a meaningless blob-URL
+        // filename instead of the real one (navigating directly to a blob
+        // URL carries no filename hint). The plain anchor-click technique
+        // below is the same one already confirmed working for the JSON
+        // backup and the no-addresses roster export -- reverted back to
+        // just this, no extra fallback.
         function triggerFileDownload(blob, filename) {
             const url = URL.createObjectURL(blob);
-            try {
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            } catch (e) {
-                console.warn('[triggerFileDownload] anchor-click attempt failed:', e);
-            }
-            // Fallback: open the blob directly. On browsers where the anchor
-            // click above silently did nothing, this forces a real
-            // navigation to the file, which is what actually triggers
-            // Android's download handling in those cases.
-            setTimeout(() => {
-                try {
-                    window.open(url, '_blank');
-                } catch (e) {
-                    console.warn('[triggerFileDownload] window.open fallback failed:', e);
-                }
-                // Revoke well after both attempts have had a chance to read it.
-                setTimeout(() => URL.revokeObjectURL(url), 10000);
-            }, 300);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         // --- EXPORT ALL STATES XLSX ---
