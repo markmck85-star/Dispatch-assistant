@@ -5213,7 +5213,14 @@ function distanceMatrixStatus(state) {
             
             const urgencySelector = document.getElementById('urgencySelector');
             const isUrgentMode = urgencySelector && urgencySelector.value === 'urgent';
-            const baseContext = (isToday || isUrgentMode) ? 'today' : `tomorrow ${dateStr}`;
+            // 2026-09-18 fix: this used to hardcode the word "tomorrow" in
+            // front of dateStr regardless of how many days out the selected
+            // dispatch date actually was -- redundant even on a genuine
+            // next-day send ("for tomorrow Monday, September 21" says the
+            // same thing twice), and flatly wrong if the board were ever
+            // built more than one day ahead. The spelled-out weekday+date
+            // is unambiguous on its own; no "tomorrow" prefix needed.
+            const baseContext = (isToday || isUrgentMode) ? 'today' : dateStr;
 
             let html = `<div style="margin-bottom:20px;"><button class="big-btn" onclick="renderReviewBoard()" style="background:#6c757d;">⬅ Back</button></div>`;
             
