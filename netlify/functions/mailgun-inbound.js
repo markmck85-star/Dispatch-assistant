@@ -1172,6 +1172,75 @@ async function sendSms(to, body, subject) {
   }
 }
 
+// 2026-09-18: extracted from the trouble-ticket SMS block below so the new
+// line-item-review SMS path (added same day, see the isLineItemAddition
+// block below) can reuse the EXACT same state/hours filtering logic rather
+// than re-implementing it -- this logic has a real history of subtle bugs
+// (fail-open state detection, GA/NC/SC bundling, timezone-of-recipient-not-
+// ticket for hours filtering, the "00:00 means midnight" off-by-one), and
+// duplicating it risked silently reintroducing any of them in the new path.
+// Pure given (store, ticketState) -- no side effects, safe to call from
+// either SMS trigger.
+const GA_BUNDLED_STATES = ['NC', 'SC'];
+function recipientCoversState(recipientStates, tState) {
+  if (!tState) return true; // still can't determine state -- fail open, don't drop a real ticket
+  if (recipientStates.includes(tState)) return true;
+  if (GA_BUNDLED_STATES.includes(tState) && recipientStates.includes('GA')) return true;
+  return false;
+}
+async function getSmsRecipientsForState(store, ticketState) {
+  let smsRecipients = [];
+  let hoursExcluded = [];
+  try {
+    const notifData = await store.get('settings/NOTIFICATIONS', { type: 'json' });
+    if (notifData) {
+      const recs = (notifData.settings && notifData.settings.recipients) || notifData.recipients || [];
+      for (const r of recs) {
+        if (r.enabled === false) continue;
+        if (r.states && r.states.length > 0 && !r.states.includes('ALL') && !recipientCoversState(r.states, ticketState)) {
+          continue;
+        }
+        if (r.hoursStart && r.hoursEnd) {
+          const tz = r.timezone || 'America/New_York';
+          const now = new Date();
+          const localStr = now.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+          const [h, m] = localStr.split(':').map(Number);
+          const nowMins = h * 60 + m;
+          const [startH, startM] = r.hoursStart.split(':').map(Number);
+          const [endH, endM] = r.hoursEnd.split(':').map(Number);
+          const startMins = startH * 60 + startM;
+          let endMins = endH * 60 + endM;
+          if (endMins === 0) endMins = 24 * 60;
+          const inWindow = startMins <= endMins
+            ? (nowMins >= startMins && nowMins <= endMins)
+            : (nowMins >= startMins || nowMins <= endMins);
+          if (!inWindow) {
+            hoursExcluded.push(r.address);
+            continue;
+          }
+        }
+        smsRecipients.push(r.address);
+      }
+    }
+  } catch (e) {}
+  return { smsRecipients, hoursExcluded };
+}
+async function queuePendingDigest(store, hoursExcluded, entry) {
+  if (!hoursExcluded.length) return;
+  try {
+    const pending = (await store.get('pending-notifications', { type: 'json' })) || {};
+    for (const addr of hoursExcluded) {
+      const key = addr.trim();
+      if (!pending[key]) pending[key] = [];
+      pending[key].push({ ...entry, queuedAt: new Date().toISOString() });
+      if (pending[key].length > 50) pending[key] = pending[key].slice(-50);
+    }
+    await store.setJSON('pending-notifications', pending);
+  } catch (e) {
+    console.error('[mailgun-inbound] Failed to queue pending notification:', e.message);
+  }
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 exports.handler = async (event) => {
@@ -1630,7 +1699,7 @@ exports.handler = async (event) => {
         // block -- see the 2026-08-29 comment there.)
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
-            .from('tickets').select('id, description, ticket_kind, site_id, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
+            .from('tickets').select('id, description, ticket_kind, site_id, site_text, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
           if (existingErr) {
             console.error('[mailgun-inbound] existing-ticket lookup for line item addition failed:', existingErr.message);
           } else if (existingTicket) {
@@ -1638,14 +1707,17 @@ exports.handler = async (event) => {
             const stamp = receivedAt.toISOString().slice(0, 10);
             const addedText = parsed.description || parsed.issue || 'See email for details';
             let noteLine = `[Line item added ${stamp}] ${addedText}`;
+            let flaggedForReview = false;
+            let slaStrForAlert = null;
             if (existingTicket.ticket_kind === 'maintenance') {
-              const slaStr = formatSlaDeadline(new Date(parsed.slaEnd), getTimezoneForSiteCode(rawSiteCode));
-              noteLine = `⚠️ REVIEW NEEDED -- possible SLA impact (would be ${slaStr} if urgent): ${noteLine}`;
+              slaStrForAlert = formatSlaDeadline(new Date(parsed.slaEnd), getTimezoneForSiteCode(rawSiteCode));
+              noteLine = `⚠️ REVIEW NEEDED -- possible SLA impact (would be ${slaStrForAlert} if urgent): ${noteLine}`;
+              flaggedForReview = true;
             }
             const newDescription = (existingTicket.description ? existingTicket.description + '\n\n' : '') + noteLine;
 
             const updateFields = { description: newDescription };
-            if (existingTicket.ticket_kind === 'maintenance') {
+            if (flaggedForReview) {
               updateFields.needs_review = true;
               console.log(`[mailgun-inbound] Flagged ticket ${parsed.woNum} for dispatcher review (line item added to existing restock, possible SLA impact)`);
             }
@@ -1656,6 +1728,40 @@ exports.handler = async (event) => {
             else {
               console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum} (site state: ${appendedTicketState || 'still unknown -- original ticket has no site match either'})`);
               appendedToExisting = true;
+            }
+
+            // 2026-09-18: TJ's first feature request -- a flagged line item
+            // (the exact needs_review case above) already showed up on the
+            // watchdog LIST (get-watchdog-log.js already ORs on
+            // needs_review.eq.true, added 2026-08-12 for this same reason),
+            // but never sent a text the way a fresh trouble ticket does --
+            // so a dispatcher without the app open in front of them had no
+            // way to know one had landed. This closes that gap using the
+            // exact same recipient/state/hours filtering as the trouble-
+            // ticket SMS below (via the shared helpers), so "watchdog
+            // notifications enabled" means the same thing in both places.
+            // Deliberately only fires when flaggedForReview is true -- an
+            // ordinary (non-maintenance-ticket) line item was never review-
+            // worthy in the first place and getting a text for every single
+            // one would just retrain people to ignore this channel.
+            if (flaggedForReview) {
+              try {
+                const alertBody = `⚠️ Line item added -- review needed\nWO ${parsed.woNum}${existingTicket.site_text ? ' -- ' + existingTicket.site_text : ''}\n${addedText}\nWould be due ${slaStrForAlert} if urgent.`;
+                const { smsRecipients: lineItemRecipients, hoursExcluded: lineItemHoursExcluded } =
+                  await getSmsRecipientsForState(store, appendedTicketState);
+                console.log(`[mailgun-inbound] Line-item review SMS recipients: ${lineItemRecipients.length}`);
+                for (const addr of lineItemRecipients) {
+                  const ok = await sendSms(addr.trim(), alertBody, 'MCR Dispatch');
+                  console.log(`[mailgun-inbound] Line-item review SMS to ${addr.trim()}: ${ok ? 'sent' : 'failed'}`);
+                }
+                await queuePendingDigest(store, lineItemHoursExcluded, {
+                  ticketId: parsed.woNum || null,
+                  siteCode: existingTicket.site_text || null,
+                  summary: alertBody.split('\n')[0].slice(0, 120),
+                });
+              } catch (smsEx) {
+                console.error('[mailgun-inbound] Line-item review SMS error (non-fatal):', smsEx.message);
+              }
             }
 
             // 2026-09-08: structured row per line item, alongside the
@@ -2265,72 +2371,11 @@ exports.handler = async (event) => {
       // this, fixing the null-state bug above would just trade "everyone
       // gets every ticket" for "GA/NC/SC recipients silently stop getting
       // NC/SC tickets" -- same root cause, opposite direction.
-      const GA_BUNDLED_STATES = ['NC', 'SC'];
-      const recipientCoversState = (recipientStates, tState) => {
-        if (!tState) return true; // still can't determine state -- fail open, don't drop a real ticket
-        if (recipientStates.includes(tState)) return true;
-        if (GA_BUNDLED_STATES.includes(tState) && recipientStates.includes('GA')) return true;
-        return false;
-      };
-
-      // Load recipients from Blobs
-      let smsRecipients = [];
-      let hoursExcluded = []; // recipients that passed the state check but are outside
-                               // their active-hours window right now -- queued below so
-                               // they get a digest once their window opens, instead of
-                               // the ticket silently vanishing for them
-      try {
-        const notifData = await store.get('settings/NOTIFICATIONS', { type: 'json' });
-        if (notifData) {
-          const recs = (notifData.settings && notifData.settings.recipients) || notifData.recipients || [];
-          for (const r of recs) {
-            if (r.enabled === false) continue;
-            // Filter by state
-            if (r.states && r.states.length > 0 && !r.states.includes('ALL') && !recipientCoversState(r.states, ticketState)) {
-              continue;
-            }
-            // Filter by active hours
-            if (r.hoursStart && r.hoursEnd) {
-              // Bug fixed 2026-07-22: this used to compute "now" in the
-              // TICKET's state timezone (STATE_TIMEZONES[ticketState]),
-              // not the recipient's own. That silently shifted a
-              // recipient's active-hours window for any ticket from a
-              // state in a different timezone than their own -- e.g. a GA-
-              // based recipient's morning could read as pre-7am Pacific
-              // for an NV ticket and get filtered out. Confirmed via WO
-              // 00147417 (NV) showing zero SMS recipients despite Mark
-              // covering NV and being Active. Now uses the recipient's own
-              // r.timezone (set in admin.html's notification settings,
-              // defaulting to Eastern -- correct for GA/IN/MI/OH/most of
-              // the roster today) instead of the ticket's state.
-              const tz = r.timezone || 'America/New_York';
-              const now = new Date();
-              const localStr = now.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-              const [h, m] = localStr.split(':').map(Number);
-              const nowMins = h * 60 + m;
-              const [startH, startM] = r.hoursStart.split(':').map(Number);
-              const [endH, endM] = r.hoursEnd.split(':').map(Number);
-              const startMins = startH * 60 + startM;
-              // "00:00" as an end time is meant as "through midnight" (end of day),
-              // not literal minute 0 of the day -- without this, a same-day window
-              // like 07:00-00:00 computes endMins=0, and nowMins > 0 is true almost
-              // every minute of the day, so the recipient gets silently excluded
-              // nearly 24/7. Confirmed 2026-07-21: this exact bug zeroed out Mark's
-              // own 07:00-00:00 window entirely.
-              let endMins = endH * 60 + endM;
-              if (endMins === 0) endMins = 24 * 60;
-              const inWindow = startMins <= endMins
-                ? (nowMins >= startMins && nowMins <= endMins)   // normal same-day window
-                : (nowMins >= startMins || nowMins <= endMins);  // wraps past midnight, e.g. 22:00-06:00
-              if (!inWindow) {
-                hoursExcluded.push(r.address);
-                continue;
-              }
-            }
-            smsRecipients.push(r.address);
-          }
-        }
-      } catch(e) {}
+      // 2026-09-18: recipient loading/filtering itself now lives in the
+      // shared getSmsRecipientsForState() helper (see above sendSms) so the
+      // new line-item-review SMS path reuses this exact logic instead of a
+      // second, possibly-diverging copy.
+      const { smsRecipients, hoursExcluded } = await getSmsRecipientsForState(store, ticketState);
 
       // NOTE: previously fell back to a raw SMS_RECIPIENTS env var (a single
       // hardcoded, state-blind address) whenever the filtered list came back
@@ -2352,26 +2397,14 @@ exports.handler = async (event) => {
       // buffers/delays the batch" problem Mark flagged 2026-07-21. One
       // summary text goes out (send-notification-digests.js) the next time
       // that recipient's active-hours window opens.
-      if (hoursExcluded.length) {
-        try {
-          const pending = (await store.get('pending-notifications', { type: 'json' })) || {};
-          for (const addr of hoursExcluded) {
-            const key = addr.trim();
-            if (!pending[key]) pending[key] = [];
-            pending[key].push({
-              ticketId: parsed.woNum || null,
-              siteCode: parsed.site || null,
-              summary: parsed.alertBody ? parsed.alertBody.split('\n')[0].slice(0, 120) : (parsed.woNum || 'ticket'),
-              queuedAt: new Date().toISOString(),
-            });
-            // Cap so a multi-day outage or a stuck config can't grow this unbounded
-            if (pending[key].length > 50) pending[key] = pending[key].slice(-50);
-          }
-          await store.setJSON('pending-notifications', pending);
-        } catch (e) {
-          console.error('[mailgun-inbound] Failed to queue pending notification:', e.message);
-        }
-      }
+      // 2026-09-18: now calls the shared queuePendingDigest() helper (see
+      // above sendSms) instead of inline Blobs read/write -- same reasoning
+      // as the recipient-filtering extraction just above.
+      await queuePendingDigest(store, hoursExcluded, {
+        ticketId: parsed.woNum || null,
+        siteCode: parsed.site || null,
+        summary: parsed.alertBody ? parsed.alertBody.split('\n')[0].slice(0, 120) : (parsed.woNum || 'ticket'),
+      });
     }
 
     return json(200, {
