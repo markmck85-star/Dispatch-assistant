@@ -984,6 +984,20 @@ export default async (req) => {
         // pinning it to the front, matching what a manual reassign +
         // auto-resort pair ends up doing.
         to.stops = insertStopAtBestPosition(legInfo, to.tech, to.stops, code, ctx.sites);
+        // 2026-09-21: insertStopAtBestPosition only finds the best SINGLE
+        // slot for the new stop within whatever order the route already
+        // happened to be in -- it never re-examines the rest of the
+        // sequence. On its own that can leave a route that looks like
+        // backtracking on the map, exactly the thing a dispatcher would
+        // otherwise have to notice and fix by hand with the Sort button.
+        // Fully re-sorting both sides here (same nearest-neighbor + 2-opt
+        // sort_route already uses) means the board is always left in a
+        // sensible order the moment a reassignment is applied -- no
+        // separate manual Sort step needed. Removing a stop from `from`
+        // can't make its order worse, so re-sorting it too is just a cheap,
+        // harmless consistency pass, not strictly required for correctness.
+        from.stops = optimizeRoute(legInfo, from.tech, from.stops, ctx.sites);
+        to.stops = optimizeRoute(legInfo, to.tech, to.stops, ctx.sites);
         movedCodes.add(code);
         changedTechs.add(from.tech);
         changedTechs.add(to.tech);
@@ -1147,6 +1161,15 @@ export default async (req) => {
         const toBefore = routeMetrics(legInfo, toRoute.tech, toRoute.stops);
         fromRoute.stops.splice(fromRoute.stops.indexOf(code), 1);
         toRoute.stops = insertStopAtBestPosition(legInfo, toRoute.tech, toRoute.stops, code, ctx.sites);
+        // 2026-09-21: same full re-sort as reassign_stop above, applied
+        // here too -- this is the path Analyze Routes' Apply button
+        // actually uses, and it's exactly what Mark asked for: after
+        // applying a suggested swap, the affected technicians' routes get
+        // fully re-sorted automatically, so the map never shows crazy
+        // backtracking waiting on a manual Sort click. See that comment
+        // for the fuller rationale (same logic, not repeated here).
+        fromRoute.stops = optimizeRoute(legInfo, fromRoute.tech, fromRoute.stops, ctx.sites);
+        toRoute.stops = optimizeRoute(legInfo, toRoute.tech, toRoute.stops, ctx.sites);
         movedCodes.add(code);
         changedTechs.add(fromRoute.tech);
         changedTechs.add(toRoute.tech);
