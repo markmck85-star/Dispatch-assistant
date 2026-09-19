@@ -20,14 +20,21 @@
  * in compute-site-distance-matrix.js and compute-distance-matrix.js,
  * fixed alongside this.
  *
+ * v3 (2026-09-21): the single-address geocode call moved out to
+ * lib/geocode-one.js so lib/placeholder-sites.js can call the exact same
+ * logic when a site-survey/install placeholder is first created, instead
+ * of every placeholder sitting with null lat/lng until someone happens to
+ * re-run this admin action for that state (see that file's header for the
+ * real case -- OHTMP001, Pataskala Kroger #591 -- this was found from).
+ *
  * Parallel-batch strategy unchanged: runs up to CONCURRENCY geocode calls
  * at once so the whole operation finishes well inside Netlify's function
  * time budget even for larger states.
  */
 
 const { createClient } = require("@supabase/supabase-js");
+const { geocodeOne } = require("./lib/geocode-one");
 
-const GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 const CONCURRENCY = 8;
 
 function json(statusCode, obj) {
@@ -36,31 +43,6 @@ function json(statusCode, obj) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(obj),
   };
-}
-
-async function geocodeOne(address, apiKey) {
-  if (!address || address.trim().length < 8) return { error: "address too short" };
-  if (/\bTBD\b|PLACEHOLDER|Address TBD/i.test(address)) return { error: "TBD/placeholder" };
-  try {
-    const url =
-      GEOCODE_URL +
-      "?address=" +
-      encodeURIComponent(address.trim()) +
-      "&key=" +
-      apiKey;
-    const res = await fetch(url);
-    if (!res.ok) return { error: "HTTP " + res.status };
-    const data = await res.json();
-    if (data.status !== "OK" || !data.results?.length) return { error: data.status + (data.error_message ? ": " + data.error_message : "") };
-    const loc = data.results[0].geometry.location;
-    return {
-      lat: loc.lat,
-      lng: loc.lng,
-      formatted: data.results[0].formatted_address,
-    };
-  } catch (e) {
-    return { error: "exception: " + e.message };
-  }
 }
 
 async function runBatched(tasks, concurrency) {
