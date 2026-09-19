@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.79 (blobs-154)</title>
+    <title>MCR Dispatch Hub v9.79 (blobs-155)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -246,7 +246,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-154</div>
+        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-155</div>
 
         <div class="desktop-layout">
             <div class="input-panel">
@@ -1264,6 +1264,9 @@ const _DM_EARTH_RADIUS_MI = 3958.8;
 
 // Per-session cache: { [state]: { meta, matrix } | null }
 const _dmCache = {};
+// In-flight fetches so processDispatch / updateContext / the page-load
+// kickoff share one request instead of racing and painting haversine first.
+const _dmInflight = {};
 
 // ─── HAVERSINE ───────────────────────────────────────────────────────────────
 /**
@@ -1453,17 +1456,36 @@ async function loadDistanceMatrix(state) {
   if (!state) return null;
   const key = state.toUpperCase();
   if (_dmCache[key] !== undefined) return _dmCache[key];
-  try {
-    const res = await fetch(
-      "/.netlify/functions/get-distance-matrix?state=" + key,
-      { cache: "no-store" }
-    );
-    const data = res.ok ? await res.json() : null;
-    _dmCache[key] = data; // may be null
-  } catch {
-    _dmCache[key] = null;
-  }
-  return _dmCache[key];
+  if (_dmInflight[key]) return _dmInflight[key];
+
+  const hadBoard = !!(window.currentAssignments && Object.keys(window.currentAssignments).length);
+
+  _dmInflight[key] = (async () => {
+    try {
+      const res = await fetch(
+        "/.netlify/functions/get-distance-matrix?state=" + key,
+        { cache: "no-store" }
+      );
+      const data = res.ok ? await res.json() : null;
+      _dmCache[key] = data; // may be null
+    } catch {
+      _dmCache[key] = null;
+    } finally {
+      delete _dmInflight[key];
+    }
+    // 2026-09-19: cards used to render while this fetch was still in flight,
+    // so first-stop / route totals stayed on "~8.5 mi (est.)" (straight-line
+    // over Lake Lanier, etc.) even after the real driving matrix landed.
+    // Reassign dropdowns looked correct because they query getTechDistance()
+    // at click time. If a board was already on screen when the cache filled,
+    // rebuild it so "from home" picks up type:"driving" legs.
+    if (hadBoard && _dmCache[key] && typeof renderReviewBoard === "function") {
+      try { renderReviewBoard(true); } catch (err) { /* board not ready */ }
+    }
+    return _dmCache[key];
+  })();
+
+  return _dmInflight[key];
 }
 
 // ─── DISTANCE LOOKUP ─────────────────────────────────────────────────────────
@@ -1617,7 +1639,9 @@ function distanceMatrixStatus(state) {
         ]);
         window.__remoteDataPromise.then(() => {
             window.__remoteLocationsAttempted = true;
-            // Kick off background matrix load for the active state (non-blocking)
+            // Start the matrix fetch early so it overlaps other work;
+            // processDispatch() awaits the same in-flight promise before
+            // painting first-stop miles.
             loadDistanceMatrix(CURRENT_STATE).catch(() => {});
         });
 
@@ -2616,8 +2640,9 @@ function distanceMatrixStatus(state) {
 
             CURRENT_STATE = selector.value;
             localStorage.setItem('lastSelectedState', CURRENT_STATE);
-            // Kick off matrix load for the newly selected state (cached after first load)
-            loadDistanceMatrix(CURRENT_STATE).catch(() => {});
+            // Await so processDispatch() below does not paint haversine
+            // first-stop miles against an empty _dmCache for the new state.
+            await loadDistanceMatrix(CURRENT_STATE);
             // Map state code to location/tech database
             const STATE_MAP = {
                 'GA': { locs: LOCATIONS_GA, techs: TECHS_GA },
@@ -2750,6 +2775,11 @@ function distanceMatrixStatus(state) {
                 // just without the manual-paste-only parsing steps below,
                 // since there's no text to parse.
                 window.ticketMeta = {};
+                if (window.__remoteDataPromise) {
+                    await window.__remoteDataPromise;
+                    window.__remoteDataPromise = null;
+                }
+                await loadDistanceMatrix(CURRENT_STATE);
                 await _processDispatchCore(true);
                 return;
             }
@@ -2759,6 +2789,9 @@ function distanceMatrixStatus(state) {
                 await window.__remoteDataPromise;
                 window.__remoteDataPromise = null; // only need to await once
             }
+            // Same matrix the reassign dropdown already reads -- wait for it
+            // so "from home" / "To 1st Stop" is driving miles, not haversine.
+            await loadDistanceMatrix(CURRENT_STATE);
 
             // Parse form counts and ticket metadata (includes automatic SLA from Earliest Start Permitted)
             window.parsedFormCounts = parseFormCounts(codesInput.value);
