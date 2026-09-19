@@ -1,5 +1,5 @@
 /**
- * get-unmatched-tickets.js — v2 — updated 2026-08-07
+ * get-unmatched-tickets.js — v3 — updated 2026-09-18
  *
  * Netlify Function — surfaces open trouble/maintenance tickets that never
  * matched an existing site (site_id IS NULL), so the dispatch board can
@@ -22,6 +22,25 @@
  * tickets.address column same day. Now exposes both, so the toast can be
  * close to fully pre-filled rather than just the name.
  *
+ * v3: added a second auto-suggest namespace, P-codes (STATE+P+NNN, e.g.
+ * OHP001), for locations that generate "OTC"-subject POD-printer tickets
+ * but have no numbered kiosk at all -- these never get a Neumo-assigned
+ * code the way a real SST does, the same gap T-codes solved for K2D
+ * testing stations. Mark's own framing: if a location already has a real
+ * numbered kiosk on site, its POD-printer tickets should link to THAT
+ * existing site_code, not get a separate P-code just because the ticket's
+ * subject says OTC -- a P-code is only for genuinely kiosk-less locations.
+ * Since the OTC subject token alone can't distinguish those two cases
+ * (a site can have both a kiosk and POD printers), this reuses the same
+ * street-number + first-street-word address-signature check already used
+ * elsewhere (the ticket-driven Add-Location toast's duplicate-address
+ * safety net) to see whether ANY existing site in this state already sits
+ * at that address before offering a new P-code. A match found there means
+ * this ticket almost certainly belongs to an existing numbered site whose
+ * account-name text just didn't line up -- so it's left for manual
+ * linking instead, exactly like any other raw-text mismatch, rather than
+ * risking a duplicate site record.
+ *
  * Scoped to ticket_kind IN ('trouble','maintenance') only -- site_survey
  * tickets are deliberately excluded. Mark's plan for those is a separate,
  * not-yet-built "temporary category, promoted to a real site once the
@@ -31,8 +50,9 @@
  *
  * GET /.netlify/functions/get-unmatched-tickets?state=CO
  * -> { unmatched: [ { ticketId, woNumber, siteText, suggestedName,
- *                      suggestedCode, suggestedAddress, issueCategory,
- *                      issueDetail, receivedAt } ] }
+ *                      suggestedCode, autoSuggested, suggestedCodeType,
+ *                      possibleExistingSite, suggestedAddress,
+ *                      issueCategory, issueDetail, receivedAt } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
 
@@ -47,6 +67,17 @@ function json(statusCode, obj) {
     },
     body: JSON.stringify(obj),
   };
+}
+
+// Same lightweight signature used by the ticket-driven Add-Location toast's
+// duplicate-address safety net: leading street number + first alphabetic
+// street-name word, lowercased. Good enough to catch "same building,
+// different text" without needing a real geocode round trip here.
+function addressSignature(address) {
+  if (!address) return null;
+  const m = String(address).match(/(\d+)\s+([A-Za-z]+)/);
+  if (!m) return null;
+  return `${m[1]}|${m[2].toLowerCase()}`;
 }
 
 exports.handler = async (event) => {
@@ -75,23 +106,22 @@ exports.handler = async (event) => {
 
     if (error) return json(500, { error: error.message });
 
-    // Auto-suggest the next sequential T-code (STATE+T+NNN, e.g. MIT033) for
-    // testing-station tickets, added 2026-08-30. Neumo's own dispatch email
-    // subject line carries a clean asset-type token distinguishing these:
-    // "Tech Dispatch - K2D - ..." for testing stations, vs. "SST" for real
-    // kiosk installs and "OTC" for over-the-counter/state-office consumable
-    // service -- confirmed against every K2D-subject ticket on file (30/30,
-    // matched or not) mapping to a genuine testing-station site, with zero
-    // false positives on real kiosk installs at BMV/SOS offices (which show
-    // "SST" instead). An earlier version of this guessed from the site NAME
-    // containing BMV/DMV/SOS/MV instead -- wrong, since real numbered kiosk
-    // sites also sit at those same offices (e.g. MI1009 Taylor SOS); the
-    // subject-line token is the actual ground truth Mark uses to tell them
-    // apart. T is MCR's own invented namespace (Neumo has no equivalent
-    // numbering for these at all), so there's no risk of colliding with a
-    // real upstream code the way there would be for normal numeric codes.
+    // T-codes: testing-station tickets, added 2026-08-30. Neumo's own
+    // dispatch email subject line carries a clean asset-type token
+    // distinguishing these: "Tech Dispatch - K2D - ..." for testing
+    // stations, vs. "SST" for real kiosk installs and "OTC" for
+    // over-the-counter/state-office consumable service -- confirmed
+    // against every K2D-subject ticket on file (30/30, matched or not)
+    // mapping to a genuine testing-station site, with zero false
+    // positives on real kiosk installs at BMV/SOS offices (which show
+    // "SST" instead). T is MCR's own invented namespace (Neumo has no
+    // equivalent numbering for these at all), so there's no risk of
+    // colliding with a real upstream code the way there would be for
+    // normal numeric codes.
     const HAS_REAL_CODE = /^[A-Z]{2}\d{3,5}/;
     let nextTNum = null; // lazy-loaded only if this state actually has a candidate this run
+    let nextPNum = null; // same, for P-codes
+    let stateSiteSignatures = null; // lazy-loaded set of address signatures for every site already in this state
 
     const unmatched = [];
     for (const t of (data || [])) {
@@ -104,9 +134,13 @@ exports.handler = async (event) => {
       const rawSiteCode = (t.attributes && t.attributes.rawSiteCode) || "";
       const subject = (t.inbound_emails && t.inbound_emails.subject) || "";
       const isTestingStation = /\bK2D\b/i.test(subject);
+      const isOtc = /\bOTC\b/i.test(subject);
 
       let suggestedCode = rawSiteCode;
       let autoSuggested = false;
+      let suggestedCodeType = null;
+      let possibleExistingSite = null;
+
       if (!suggestedCode && !HAS_REAL_CODE.test(t.site_text) && isTestingStation) {
         if (nextTNum === null) {
           const { data: tCodes } = await supabase
@@ -123,6 +157,45 @@ exports.handler = async (event) => {
         nextTNum += 1;
         suggestedCode = `${state}T${String(nextTNum).padStart(3, "0")}`;
         autoSuggested = true;
+        suggestedCodeType = "testing_station";
+      } else if (!suggestedCode && !HAS_REAL_CODE.test(t.site_text) && isOtc && t.address) {
+        if (stateSiteSignatures === null) {
+          const { data: stateSites } = await supabase
+            .from("sites")
+            .select("site_code, address")
+            .eq("state", state);
+          stateSiteSignatures = new Map();
+          for (const s of (stateSites || [])) {
+            const sig = addressSignature(s.address);
+            if (sig) stateSiteSignatures.set(sig, s.site_code);
+          }
+        }
+        const ticketSig = addressSignature(t.address);
+        const existingMatch = ticketSig ? stateSiteSignatures.get(ticketSig) : null;
+
+        if (existingMatch) {
+          // A site already sits at this address -- almost certainly the
+          // same physical location under different account-name text, so
+          // don't offer a new P-code. Flag it for manual linking instead.
+          possibleExistingSite = existingMatch;
+        } else {
+          if (nextPNum === null) {
+            const { data: pCodes } = await supabase
+              .from("sites")
+              .select("site_code")
+              .ilike("site_code", `${state}P%`);
+            let maxN = 0;
+            for (const s of (pCodes || [])) {
+              const m = s.site_code.match(new RegExp(`^${state}P(\\d+)$`));
+              if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+            }
+            nextPNum = maxN;
+          }
+          nextPNum += 1;
+          suggestedCode = `${state}P${String(nextPNum).padStart(3, "0")}`;
+          autoSuggested = true;
+          suggestedCodeType = "otc_no_kiosk";
+        }
       }
 
       unmatched.push({
@@ -132,6 +205,8 @@ exports.handler = async (event) => {
         suggestedName,
         suggestedCode,
         autoSuggested,
+        suggestedCodeType,
+        possibleExistingSite,
         isTestingStation,
         suggestedAddress: t.address || "",
         issueCategory: t.issue_category,
