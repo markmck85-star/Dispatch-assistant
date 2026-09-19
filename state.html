@@ -122,12 +122,12 @@
 </head>
 <body>
 <div class="container">
-  <a href="/" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
+  <a href="/" id="backToDispatchTop" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
   <div class="console">
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
-    <select id="stateSel" onchange="try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} loadAll()">
+    <select id="stateSel" onchange="try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} updateDispatchBackLinks(); loadAll()">
       <option value="AL">Alabama</option>
       <option value="CA">California</option>
       <option value="CO">Colorado</option>
@@ -151,7 +151,7 @@
     <div id="stateMapPanel">
       <div class="map-panel-head">
         <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
-        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; renderStateMap(document.getElementById('stateSel').value, this.value);"
+        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; updateDispatchBackLinks(); renderStateMap(document.getElementById('stateSel').value, this.value);"
           style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
         <button type="button" id="stateMapToggleBtn" onclick="toggleStateMap()"
           aria-expanded="true" aria-controls="stateMapBody">Hide Map</button>
@@ -259,7 +259,7 @@
       <div id="importStatus" class="status-line" style="padding:4px 0;">Ready.</div>
     </div>
 
-    <a href="/" class="back-btn">← Back to Dispatch Tool</a>
+    <a href="/" id="backToDispatchBottom" class="back-btn">← Back to Dispatch Tool</a>
   </div>
 </div>
 
@@ -1965,7 +1965,14 @@ function sendToDispatchBoard() {
         state,
         bodyText,
     }));
-    window.location.href = '/';
+    updateDispatchBackLinks();
+    const date = (window._stateMapDate || '').trim();
+    let href = '/';
+    const q = [];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) q.push('date=' + encodeURIComponent(date));
+    if (state) q.push('state=' + encodeURIComponent(state));
+    if (q.length) href += '?' + q.join('&');
+    window.location.href = href;
 }
 
 function closeSourceEmail() {
@@ -2225,6 +2232,30 @@ async function showSiteHistory(code) {
   const dateInput = document.getElementById('stateMapDateInput');
   if (dateInput) dateInput.value = requested;
 })();
+
+// 2026-09-19: hub already sends ?date= into this page; the two "Back to
+// Dispatch Tool" links were bare "/" and reset the board to today.
+// Carry date (and state) back the same way. sessionStorage covers the
+// case where index.html would otherwise overwrite the date with "today"
+// before reading the query string.
+function updateDispatchBackLinks() {
+  const date = (window._stateMapDate || (document.getElementById('stateMapDateInput') || {}).value || '').trim();
+  const state = ((document.getElementById('stateSel') || {}).value || '').trim();
+  let href = '/';
+  const q = [];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) q.push('date=' + encodeURIComponent(date));
+  if (/^[A-Z]{2}$/.test(state)) q.push('state=' + encodeURIComponent(state));
+  if (q.length) href += '?' + q.join('&');
+  try {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) sessionStorage.setItem('mcr_pending_dispatch_date', date);
+    if (/^[A-Z]{2}$/.test(state)) sessionStorage.setItem('mcr_pending_dispatch_state', state);
+  } catch (err) { /* private mode */ }
+  ['backToDispatchTop', 'backToDispatchBottom'].forEach((id) => {
+    const a = document.getElementById(id);
+    if (a) a.href = href;
+  });
+}
+updateDispatchBackLinks();
 
 // ── Manual "Refresh Now" trigger for the automated Salesforce sync ────────
 // v3 (2026-07-29): reverted back to calling the Netlify background
