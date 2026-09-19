@@ -31,6 +31,23 @@
  * board toast; promote-placeholder-site.js performs the rename once a
  * dispatcher confirms it.
  *
+ * 2026-09-21 fix: createPlaceholderSite() now geocodes the address at
+ * creation time (same geocodeOne() helper geocode-addresses.js uses,
+ * extracted to lib/geocode-one.js so both share one copy). Previously it
+ * saved the address text only, with no lat/lng at all -- fine for the
+ * board toast this feature was built for, but every mileage calculation
+ * that later touched the stop (Analyze Routes, the tech-card totals, the
+ * dispatch board's own distance display) had nothing to work with and
+ * silently showed NaN instead of a real or even estimated number. Found
+ * live: OHTMP001 (Pataskala Kroger #591, created 2026-09-18) sat with null
+ * coordinates for three days before anyone noticed the NaN mileage next
+ * to it. Geocoding failure here is non-fatal -- the placeholder still
+ * gets created and still shows up on the board (this feature's whole
+ * point), it just falls back to the pre-fix behavior of no coordinates
+ * yet, logged so it's visible rather than silent. A state's regular
+ * geocode-addresses.js run will still pick up any placeholder that slips
+ * through this (a bad/incomplete address, a transient API failure).
+ *
  * Requires two new sites columns (migration given separately):
  *   is_placeholder boolean not null default false
  *   promotion_candidate_code text
@@ -38,6 +55,7 @@
  */
 
 const { addressesLooselyMatch } = require('./address-match');
+const { geocodeOne } = require('./geocode-one');
 
 const UNASSIGNED_TECH_NAME = 'Unassigned (New Site)';
 
@@ -101,6 +119,26 @@ async function createPlaceholderSite(supabase, { state, rawName, address }) {
   const cleanName = (rawName || '').replace(/^[A-Z]{2}\s*[-\u2013]\s*/, '').trim();
   const name = ('SURVEY/INSTALL: ' + (cleanName || 'new site pending install')).slice(0, 120);
 
+  // 2026-09-21: best-effort geocode right now -- see file header. Never
+  // blocks/fails the placeholder creation itself; a missing API key, a
+  // bad address, or a transient Google error just leaves lat/lng null the
+  // same way this always used to behave, logged so it's visible rather
+  // than a silent gap discovered days later from NaN mileage on the board.
+  let lat = null;
+  let lng = null;
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (apiKey && address) {
+    const geo = await geocodeOne(address, apiKey);
+    if (geo?.lat != null) {
+      lat = geo.lat;
+      lng = geo.lng;
+    } else {
+      console.warn(`[placeholder-sites] Geocoding failed for ${code} ("${address}"): ${geo?.error || 'unknown reason'} -- site created without coordinates, will need a manual geocode-addresses run`);
+    }
+  } else if (!apiKey) {
+    console.warn(`[placeholder-sites] GOOGLE_MAPS_API_KEY not set -- ${code} created without coordinates`);
+  }
+
   const { data: site, error } = await supabase
     .from('sites')
     .insert({
@@ -110,11 +148,13 @@ async function createPlaceholderSite(supabase, { state, rawName, address }) {
       address: address || null,
       is_placeholder: true,
       primary_tech_id: techId,
+      lat,
+      lng,
     })
-    .select('id, site_code, name, address, primary_tech_id')
+    .select('id, site_code, name, address, primary_tech_id, lat, lng')
     .single();
   if (error) throw new Error('Placeholder site creation failed: ' + error.message);
-  console.log(`[placeholder-sites] Created placeholder ${code} ("${name}") for ${state}`);
+  console.log(`[placeholder-sites] Created placeholder ${code} ("${name}") for ${state}${lat != null ? ' (geocoded)' : ' (no coordinates)'}`);
   return site;
 }
 
