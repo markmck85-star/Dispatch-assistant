@@ -22,24 +22,28 @@
  * tickets.address column same day. Now exposes both, so the toast can be
  * close to fully pre-filled rather than just the name.
  *
- * v3: added a second auto-suggest namespace, P-codes (STATE+P+NNN, e.g.
- * OHP001), for locations that generate "OTC"-subject POD-printer tickets
- * but have no numbered kiosk at all -- these never get a Neumo-assigned
- * code the way a real SST does, the same gap T-codes solved for K2D
- * testing stations. Mark's own framing: if a location already has a real
- * numbered kiosk on site, its POD-printer tickets should link to THAT
- * existing site_code, not get a separate P-code just because the ticket's
- * subject says OTC -- a P-code is only for genuinely kiosk-less locations.
- * Since the OTC subject token alone can't distinguish those two cases
- * (a site can have both a kiosk and POD printers), this reuses the same
- * street-number + first-street-word address-signature check already used
- * elsewhere (the ticket-driven Add-Location toast's duplicate-address
- * safety net) to see whether ANY existing site in this state already sits
- * at that address before offering a new P-code. A match found there means
- * this ticket almost certainly belongs to an existing numbered site whose
- * account-name text just didn't line up -- so it's left for manual
- * linking instead, exactly like any other raw-text mismatch, rather than
- * risking a duplicate site record.
+ * v3: added a second auto-suggest namespace for locations that generate
+ * "OTC"-subject POD-printer tickets but have no numbered kiosk at all --
+ * these never get a Neumo-assigned code the way a real SST does, the same
+ * gap T-codes solved for K2D testing stations. This reuses the STATE+C+NNN
+ * convention (e.g. OHC003) already established in an earlier session
+ * (OHC001/OHC002 already existed) -- corrected here same day after briefly
+ * floating STATE+P+NNN before that earlier convention was remembered; P
+ * never shipped anywhere but this file. Mark's own framing: if a location
+ * already has a real numbered kiosk on site, its POD-printer tickets
+ * should link to THAT existing site_code, not get a separate C-code just
+ * because the ticket's subject says OTC -- a C-code is only for genuinely
+ * kiosk-less locations. Since the OTC subject token alone can't
+ * distinguish those two cases (a site can have both a kiosk and POD
+ * printers), this reuses the same street-number + first-street-word
+ * address-signature check already used elsewhere (the ticket-driven
+ * Add-Location toast's duplicate-address safety net) to see whether ANY
+ * existing site in this state already sits at that address before
+ * offering a new C-code. A match found there means this ticket almost
+ * certainly belongs to an existing numbered site whose account-name text
+ * just didn't line up -- so it's left for manual linking instead, exactly
+ * like any other raw-text mismatch, rather than risking a duplicate site
+ * record.
  *
  * Scoped to ticket_kind IN ('trouble','maintenance') only -- site_survey
  * tickets are deliberately excluded. Mark's plan for those is a separate,
@@ -120,7 +124,7 @@ exports.handler = async (event) => {
     // normal numeric codes.
     const HAS_REAL_CODE = /^[A-Z]{2}\d{3,5}/;
     let nextTNum = null; // lazy-loaded only if this state actually has a candidate this run
-    let nextPNum = null; // same, for P-codes
+    let nextCNum = null; // same, for C-codes
     let stateSiteSignatures = null; // lazy-loaded set of address signatures for every site already in this state
 
     const unmatched = [];
@@ -176,23 +180,23 @@ exports.handler = async (event) => {
         if (existingMatch) {
           // A site already sits at this address -- almost certainly the
           // same physical location under different account-name text, so
-          // don't offer a new P-code. Flag it for manual linking instead.
+          // don't offer a new C-code. Flag it for manual linking instead.
           possibleExistingSite = existingMatch;
         } else {
-          if (nextPNum === null) {
-            const { data: pCodes } = await supabase
+          if (nextCNum === null) {
+            const { data: cCodes } = await supabase
               .from("sites")
               .select("site_code")
-              .ilike("site_code", `${state}P%`);
+              .ilike("site_code", `${state}C%`);
             let maxN = 0;
-            for (const s of (pCodes || [])) {
-              const m = s.site_code.match(new RegExp(`^${state}P(\\d+)$`));
+            for (const s of (cCodes || [])) {
+              const m = s.site_code.match(new RegExp(`^${state}C(\\d+)$`));
               if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
             }
-            nextPNum = maxN;
+            nextCNum = maxN;
           }
-          nextPNum += 1;
-          suggestedCode = `${state}P${String(nextPNum).padStart(3, "0")}`;
+          nextCNum += 1;
+          suggestedCode = `${state}C${String(nextCNum).padStart(3, "0")}`;
           autoSuggested = true;
           suggestedCodeType = "otc_no_kiosk";
         }
