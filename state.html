@@ -118,6 +118,22 @@
   .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
   .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
   @media (min-width: 700px) { #stateMap { height: 520px; } }
+
+  /* Desktop: stop looking like a phone column in the middle of a 27" monitor.
+     Phone layout is unchanged (container stays 900px-capped below this). */
+  @media (min-width: 1100px) {
+    body { padding: 20px 28px; }
+    .container { max-width: 1680px; }
+    .console { padding: 20px 24px; }
+    .console h1 { font-size: 24px; }
+    select#stateSel { width: auto; min-width: 280px; max-width: 420px; }
+    #stateMap { height: 620px; }
+    .tech-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  }
+  @media (min-width: 1500px) {
+    .container { max-width: 1900px; }
+    #stateMap { height: 700px; }
+  }
 </style>
 </head>
 <body>

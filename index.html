@@ -143,6 +143,28 @@
         .map-panel-body { margin-top: 10px; }
         .map-panel.collapsed .map-panel-body { display: none; }
         #dispatchMap { height: 320px; border-radius: 6px; background: #2a2a2a; }
+        #bootStatus {
+            display: flex; align-items: center; gap: 10px;
+            margin: 8px 0 12px; padding: 8px 12px;
+            background: #1b2430; border: 1px solid #2a6496; border-radius: 8px;
+            color: #cfe3f5; font-size: 13px;
+        }
+        #bootStatus[hidden] { display: none !important; }
+        #bootStatus .boot-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #4fa87b;
+            box-shadow: 0 0 0 0 rgba(79,168,123,0.6);
+            animation: bootPulse 1.2s ease-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes bootPulse {
+            0% { box-shadow: 0 0 0 0 rgba(79,168,123,0.55); }
+            70% { box-shadow: 0 0 0 8px rgba(79,168,123,0); }
+            100% { box-shadow: 0 0 0 0 rgba(79,168,123,0); }
+        }
+        #dispatchMapBoot {
+            display: flex; align-items: center; justify-content: center;
+            height: 100%; color: #888; font-size: 13px;
+        }
         #dispatchMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
         .map-legend-chip:hover { border-color: #7ec8e3; }
@@ -246,7 +268,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-155</div>
+        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-156</div>
+        <div id="bootStatus" role="status" aria-live="polite">
+            <span class="boot-dot" aria-hidden="true"></span>
+            <span id="bootStatusText">Starting…</span>
+        </div>
 
         <div class="desktop-layout">
             <div class="input-panel">
@@ -418,7 +444,7 @@
                         <span id="dispatchMapMeta" class="map-panel-meta"></span>
                     </div>
                     <div id="dispatchMapBody" class="map-panel-body">
-                        <div id="dispatchMap"></div>
+                        <div id="dispatchMap"><div id="dispatchMapBoot">Loading map…</div></div>
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
                             <input type="checkbox" id="mapShowCompletedToggle" checked onchange="toggleMapShowCompleted(this.checked)">
                             Show completed stops (✓, muted)
@@ -1630,8 +1656,27 @@ function distanceMatrixStatus(state) {
 
         // ── END DISTANCE MATRIX CLIENT MODULE ──────────────────────────────
 
+        // First-open status (2026-09-19): first visit waits on technicians,
+        // locations, the drive-time matrix, and today's assignments with no
+        // visible feedback. Only used during the initial boot; region changes
+        // after that stay quiet.
+        window.__bootLoading = true;
+        function setBootStatus(msg) {
+            if (!window.__bootLoading) return;
+            const el = document.getElementById('bootStatusText');
+            if (el && msg) el.textContent = msg;
+            const bar = document.getElementById('bootStatus');
+            if (bar) bar.hidden = false;
+        }
+        function hideBootStatus() {
+            window.__bootLoading = false;
+            const bar = document.getElementById('bootStatus');
+            if (bar) bar.hidden = true;
+        }
+
         // Kick off remote location load as early as possible.
         window.__remoteLocationsAttempted = false;
+        setBootStatus('Loading technicians and locations…');
         // Store promises so processDispatch can await them before generating
         window.__remoteDataPromise = Promise.all([
             loadRemoteLocations(),
@@ -1639,6 +1684,7 @@ function distanceMatrixStatus(state) {
         ]);
         window.__remoteDataPromise.then(() => {
             window.__remoteLocationsAttempted = true;
+            setBootStatus('Loading drive times…');
             // Start the matrix fetch early so it overlaps other work;
             // processDispatch() awaits the same in-flight promise before
             // painting first-stop miles.
@@ -1880,6 +1926,7 @@ function distanceMatrixStatus(state) {
         }
 
         window.onload = async function() {
+            setBootStatus('Starting…');
             restoreJournalThreshold();
             restoreHeavyDayTrigger();
             restoreControlsState();
@@ -2186,6 +2233,7 @@ function distanceMatrixStatus(state) {
             // availability panel) to the restored dropdown value before anything
             // reads them. Awaited so its own internal rebuild finishes before the
             // load rebuild below, rather than racing it.
+            setBootStatus('Loading drive times and today’s routes…');
             await updateContext();
             // 2026-08-23: always call processDispatch() on load, not just when
             // this BROWSER has cached paste text -- previously this whole call
@@ -2210,6 +2258,8 @@ function distanceMatrixStatus(state) {
             // that click re-ran the derivation logic that honors
             // assignedBy==='manual' overrides.
             await processDispatch(true);
+            setBootStatus('Map ready');
+            hideBootStatus();
             // Save textarea content on input and auto-detect date
             const dispatchTextarea = document.getElementById('locationCodes');
             if (dispatchTextarea) {
