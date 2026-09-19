@@ -1,5 +1,21 @@
 /**
- * dispatch-ai.mjs — v1.2 (2026-09-19)
+ * dispatch-ai.mjs — v1.3 (2026-09-19b)
+ *   - propose_route_rebalance now refuses any candidate swap that would
+ *     push the RECEIVING technician into 'likely' overtime risk (same
+ *     dwell-time + drive-time model get_overtime_risk already used, now
+ *     factored into estimateOvertimeRisk() and shared by both). Follow-up
+ *     to the same-day distance-source fix below: once real leg data was
+ *     restored, a genuinely low marginal-mileage insertion could still
+ *     legitimately exist -- e.g. a technician whose day already spans
+ *     Cherokee to Coweta County can pick up one more central stop "on the
+ *     way" for very few extra miles -- but stacking several such stops
+ *     onto the same already-sprawling day while another tech sits idle is
+ *     a bad dispatch outcome even though the mileage math checks out. See
+ *     /areas/route-rebalance-bug.md for the live case this came from
+ *     (Randy Thomas emptied to 0 stops, Robert Medley absorbing 4 more on
+ *     top of an already Cherokee-to-Coweta-spanning day).
+ *
+ * v1.2 (2026-09-19)
  *   - loadContext now reads distances from Supabase (tech_site_distances /
  *     site_site_distances) instead of the legacy distance-matrix/{STATE}
  *     Blob, matching what get-distance-matrix.js and the Reassign dropdown
@@ -48,6 +64,10 @@
  * is wrong pixels in this app, not a wrong truck. The three advisory
  * tools are explicitly read-only/no-DB-write -- they answer a question,
  * they never block or auto-flag an action a dispatcher is taking.
+ * propose_route_rebalance's new overtime guardrail (v1.3) doesn't break
+ * that philosophy -- it narrows what counts as a "worthwhile" suggestion
+ * to surface, it doesn't touch the board or override a dispatcher who
+ * still wants to make that exact move by hand via reassign_stop.
  *
  * NO EXTERNAL MAPPING API IS CALLED HERE. Every mile and minute quoted
  * comes from Supabase's tech_site_distances / site_site_distances tables
@@ -112,11 +132,32 @@ const AVG_STOP_DWELL_MIN = 20;
 // already used for SLA calculations elsewhere in this app.
 const WORKDAY_BUDGET_MIN = 8 * 60;
 
-// Minimum net fleet-mileage improvement (savings at the giving-up tech minus
-// cost at the receiving tech) for propose_route_rebalance to bother
-// suggesting a swap. Keeps the list to genuinely worthwhile moves rather
-// than noise-level 0.2-mile shuffles nobody would act on.
-const MIN_REBALANCE_SAVINGS_MI = 1.0;
+/**
+ * Same dwell-time + drive-time workday model get_overtime_risk exposes as
+ * its own tool, factored out (2026-09-19b) so propose_route_rebalance can
+ * apply the identical physical workday-length constraint when scoring a
+ * candidate swap -- see proposeRebalance's own comment on why a purely
+ * mileage/workload-count score isn't enough by itself: a technician whose
+ * day already spans a big chunk of the territory can make one more
+ * central stop look deceptively cheap in marginal miles, even though
+ * piling several such stops onto that same day is a bad real-world call.
+ *
+ * metrics is whatever routeMetrics() returned for the route being
+ * evaluated; stopCount is that same route's stop count (routeMetrics
+ * itself has no reason to know it). An unresolved/Infinity distanceMi
+ * correctly comes out as 'likely' overtime here too -- there's no
+ * legitimate route this app can vouch for if it can't even price the leg.
+ */
+function estimateOvertimeRisk(metrics, stopCount) {
+  const dwellMin = stopCount * AVG_STOP_DWELL_MIN;
+  const driveMin = metrics.durationMin != null
+    ? metrics.durationMin
+    : (Number.isFinite(metrics.distanceMi) ? Math.round((metrics.distanceMi / 35) * 60) : Infinity);
+  const projectedMin = driveMin + dwellMin;
+  const overBy = projectedMin - WORKDAY_BUDGET_MIN;
+  const risk = overBy > 0 ? 'likely' : (overBy > -60 ? 'borderline' : 'unlikely');
+  return { projectedMin, overBy, risk };
+}
 
 // Workload-balance extension (2026-09-15): pure mileage-savings was blind to
 // one tech sitting on a handful of stops while another had a full day --
@@ -129,12 +170,27 @@ const MIN_REBALANCE_SAVINGS_MI = 1.0;
 // MIN_REBALANCE_SAVINGS_MI bar mileage-driven swaps use, so there's one
 // acceptance test either way. The real mileage delta (net) is never altered
 // by this credit -- it's reported honestly alongside the decision.
+const MIN_REBALANCE_SAVINGS_MI = 1.0;
 const MIN_STOP_GAP_FOR_CREDIT = 2;
 const WORKLOAD_CREDIT_PER_STOP_MI = 1.5;
 // Workload credit must not buy a huge detour. Today's CA1067 Aaron↔Nick
 // oscillation was a mileage-losing move that cleared the score bar on
 // credit, then the next round's best move was the exact reverse.
 const MAX_WORKLOAD_MILEAGE_COST_MI = 6;
+
+// Concentration cap (2026-09-19b, see /areas/route-rebalance-bug.md): a
+// second, deterministic guardrail alongside estimateOvertimeRisk. The
+// overtime check catches a receiving tech whose PROJECTED HOURS cross the
+// workday budget -- but a spread-out existing route can keep even a
+// heavily-loaded day's projected hours under budget while still being an
+// unreasonable amount of NEW work to hand one person in a single pass
+// (Robert Medley absorbing 4 stops from Randy Thomas in one Analyze
+// Routes run, while Randy dropped to zero, is the live case this guards
+// against). This caps stops GAINED per technician per propose_route_
+// rebalance call, independent of the hours math -- a tech can still end
+// up with a long day overall, just not from a single rebalance pass
+// piling several strangers' stops onto them at once.
+const MAX_STOPS_GAINED_PER_TECH_PER_RUN = 2;
 const GEMINI_FETCH_RETRIES = 3;
 
 /**
@@ -161,12 +217,25 @@ const GEMINI_FETCH_RETRIES = 3;
  * through the existing `score >= minSavingsMi` check below (Infinity or
  * NaN both fail it). Documented so a future reader doesn't assume this
  * function needs its own explicit unresolved-leg guard.
+ *
+ * 2026-09-19b: added the workday-length guardrail (see
+ * estimateOvertimeRisk above) -- a candidate that would push the
+ * RECEIVING technician into 'likely' overtime risk is rejected before it
+ * can even be scored, regardless of how good the mileage math looks.
+ * Rejected here means it never becomes `best` for this round or any later
+ * one (the greedy loop re-evaluates from scratch each round, so a
+ * receiving tech who crosses the line via an EARLIER accepted swap this
+ * same run is correctly protected from round 2 onward too, not just
+ * checked once against their original board state).
  */
 function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs, minSavingsMi, maxSuggestions, fromTechSet, toTechSet) {
   let working = routes.map((r) => ({ tech: r.tech, stops: r.stops.slice() }));
   const suggestions = [];
   const usedCodes = new Set();
   const bannedKeys = new Set(); // `${from}|${to}|${code}` and the reverse
+  // 2026-09-19b: how many stops each tech has GAINED across rounds so far
+  // this run -- see MAX_STOPS_GAINED_PER_TECH_PER_RUN's comment above.
+  const stopsGainedByTech = new Map();
 
   for (let round = 0; round < maxSuggestions; round++) {
     let best = null;
@@ -193,11 +262,24 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
           if (toRoute.tech === fromRoute.tech || unavailableTechs.has(toRoute.tech)) return;
           if (toTechSet && toTechSet.size && !toTechSet.has(toRoute.tech)) return;
           if (bannedKeys.has(`${fromRoute.tech}|${toRoute.tech}|${code}`)) return;
+          // Concentration cap (2026-09-19b) -- checked before any of the
+          // mileage/workload math below, since no amount of savings should
+          // buy past this. Independent of, and in addition to, the
+          // hours-based overtime check further down.
+          if ((stopsGainedByTech.get(toRoute.tech) || 0) >= MAX_STOPS_GAINED_PER_TECH_PER_RUN) return;
           const toBefore = routeMetrics(legInfo, toRoute.tech, toRoute.stops);
           const withStop = insertStopAtBestPosition(legInfo, toRoute.tech, toRoute.stops, code, sites);
           const toAfter = routeMetrics(legInfo, toRoute.tech, withStop);
           const cost = toAfter.distanceMi - toBefore.distanceMi;
           const net = savings - cost;
+
+          // Workday-length guardrail (2026-09-19b) -- see this function's
+          // own header comment and estimateOvertimeRisk's comment above.
+          // Checked BEFORE workload credit so a workload-motivated swap
+          // can't buy its way past a technician's physical day length
+          // either.
+          const toRisk = estimateOvertimeRisk(toAfter, withStop.length);
+          if (toRisk.risk === 'likely') return;
 
           // Workload credit: only when fromRoute is genuinely heavier than
           // toRoute (moving a stop the other direction gets none), and only
@@ -214,7 +296,7 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
           if (score >= minSavingsMi && (!best || score > best.score)) {
             best = {
               fromTech: fromRoute.tech, toTech: toRoute.tech, code, savings, cost, net, score,
-              workloadCredit, stopGapBefore,
+              workloadCredit, stopGapBefore, toOvertimeRisk: toRisk.risk,
               stopsFromBefore: fromRoute.stops.length, stopsFromAfter: fromRoute.stops.length - 1,
               stopsToBefore: toRoute.stops.length, stopsToAfter: toRoute.stops.length + 1,
               newFromStops: without, newToStops: withStop,
@@ -226,6 +308,7 @@ function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs,
 
     if (!best) break;
     usedCodes.add(best.code);
+    stopsGainedByTech.set(best.toTech, (stopsGainedByTech.get(best.toTech) || 0) + 1);
     bannedKeys.add(`${best.fromTech}|${best.toTech}|${best.code}`);
     bannedKeys.add(`${best.toTech}|${best.fromTech}|${best.code}`);
     working = working.map((r) => {
@@ -398,12 +481,15 @@ function functionDeclarations() {
         "while another has only one or two stops) even when the mileage math alone is close to neutral. Especially useful " +
         "for catching a technician with two stops in opposite directions from each other that force a long backtrack, when " +
         "a different technician has a stop much nearer one of them -- or for catching a tech sitting nearly idle while " +
-        "another is overloaded. Never changes the board by itself -- returns a ranked list of suggested moves with each " +
-        "one's real mileage impact (never inflated by the workload consideration) plus, when relevant, the stop-count " +
-        'change for both techs. Use for requests like "does this board make sense", "any better way to split these ' +
-        'routes", "is anyone overloaded today", or "look for backtracking" -- and proactively when a rebalance seems ' +
-        'relevant to what\'s being asked, even without an exact match to those phrases. Prefer this tool over ' +
-        'get_stop_addition_cost when the site is already on someone\'s route and the ask is who should take it.',
+        "another is overloaded. Never suggests a swap that would push the receiving technician into likely-overtime " +
+        "territory for the day, even when the marginal mileage looks cheap, and never hands more than a couple of " +
+        "stops to the same technician in a single pass. Never changes the board by itself -- returns " +
+        "a ranked list of suggested moves with each one's real mileage impact (never inflated by the workload " +
+        "consideration) plus, when relevant, the stop-count change for both techs. Use for requests like \"does this " +
+        'board make sense", "any better way to split these routes", "is anyone overloaded today", or "look for ' +
+        'backtracking" -- and proactively when a rebalance seems relevant to what\'s being asked, even without an exact ' +
+        'match to those phrases. Prefer this tool over get_stop_addition_cost when the site is already on someone\'s ' +
+        'route and the ask is who should take it.',
       parameters: {
         type: 'OBJECT',
         properties: {
@@ -1018,15 +1104,8 @@ export default async (req) => {
           continue;
         }
         const metrics = routeMetrics(legInfo, route.tech, route.stops);
-        const dwellMin = route.stops.length * AVG_STOP_DWELL_MIN;
-        const driveMin = metrics.durationMin != null ? metrics.durationMin : null;
-        // If any leg lacked real drive-time data, driveMin is null -- still
-        // give a rough estimate off distance (assume ~35 mph average) so
-        // the tool always answers something, but say plainly it's rougher.
-        const estimatedDriveMin = driveMin != null ? driveMin : Math.round((metrics.distanceMi / 35) * 60);
-        const projectedMin = estimatedDriveMin + dwellMin;
-        const overBy = projectedMin - WORKDAY_BUDGET_MIN;
-        const risk = overBy > 0 ? 'likely' : (overBy > -60 ? 'borderline' : 'unlikely');
+        const driveMinWasEstimated = metrics.durationMin == null;
+        const { projectedMin, overBy, risk } = estimateOvertimeRisk(metrics, route.stops.length);
         actions.push({
           type: 'get_overtime_risk',
           summary: overBy > 0
@@ -1035,7 +1114,7 @@ export default async (req) => {
           tech: route.tech,
           stopCount: route.stops.length,
           projectedMinutes: projectedMin,
-          driveMinutesWereEstimated: driveMin == null,
+          driveMinutesWereEstimated: driveMinWasEstimated,
           risk,
         });
         continue;
@@ -1108,9 +1187,19 @@ export default async (req) => {
         } else {
           const lines = rebalance.map((s) => {
             const base = `${s.code}${ctx.siteNames[s.code] ? ' (' + ctx.siteNames[s.code] + ')' : ''}: ${shortName(s.fromTech)} → ${shortName(s.toTech)}, net ${signed(-s.net, 'mi', 1)}`;
-            return s.workloadCredit > 0
-              ? `${base} (also balances load: ${shortName(s.fromTech)} ${s.stopsFromBefore}→${s.stopsFromAfter}, ${shortName(s.toTech)} ${s.stopsToBefore}→${s.stopsToAfter})`
-              : base;
+            const notes = [];
+            if (s.workloadCredit > 0) {
+              notes.push(`also balances load: ${shortName(s.fromTech)} ${s.stopsFromBefore}→${s.stopsFromAfter}, ${shortName(s.toTech)} ${s.stopsToBefore}→${s.stopsToAfter}`);
+            }
+            // 2026-09-19b: 'likely' overtime candidates never reach here
+            // (proposeRebalance rejects them outright), so the only risk
+            // level a surfaced suggestion can carry is 'borderline' --
+            // still worth flagging, since "cheap in miles" and "fits
+            // comfortably in a workday" are two different questions.
+            if (s.toOvertimeRisk === 'borderline') {
+              notes.push(`⚠ borderline on ${shortName(s.toTech)}'s workday length`);
+            }
+            return notes.length ? `${base} (${notes.join('; ')})` : base;
           });
           actions.push({
             type: 'propose_route_rebalance',
@@ -1124,6 +1213,7 @@ export default async (req) => {
               costMi: Math.round(s.cost * 10) / 10,
               netMi: Math.round(s.net * 10) / 10,
               workloadMotivated: s.workloadCredit > 0,
+              toOvertimeRisk: s.toOvertimeRisk,
               stopsFromBefore: s.stopsFromBefore,
               stopsFromAfter: s.stopsFromAfter,
               stopsToBefore: s.stopsToBefore,
