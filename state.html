@@ -1086,6 +1086,9 @@ async function renderStateMap(state, dispatchDate) {
 
     const rows = (assignData.assignments || [])
       .filter(a => a.state === state && a.status !== 'removed');
+    window._stateAssignFp = rows.map(a =>
+      [a.siteCode || a.code || '', a.techName || '', a.status || '', a.sequenceOrder || a.sequence_order || ''].join('|')
+    ).sort().join('\n');
 
     const byTech = {};
     rows.forEach(a => {
@@ -2642,6 +2645,36 @@ function toggleRestockSection() {
 
 restoreConsolePrefs();
 loadAll();
+
+// Quiet live board: TJ's hub on another monitor writes assignments;
+// this page used to sit stale until 🔄 Refresh. Poll assignments only
+// (not locations/matrix) every 45s. Skip when the tab is hidden.
+window._stateLivePollTimer = null;
+async function pollStateAssignments() {
+  if (document.hidden) return;
+  const state = (document.getElementById('stateSel') || {}).value;
+  const date = window._stateMapDate;
+  if (!state || !date) return;
+  try {
+    const res = await fetch('/.netlify/functions/get-assignments?dispatchDate=' + encodeURIComponent(date), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const rows = (data.assignments || []).filter(a => a.state === state && a.status !== 'removed');
+    const fp = rows.map(a =>
+      [a.siteCode || a.code || '', a.techName || '', a.status || '', a.sequenceOrder || a.sequence_order || ''].join('|')
+    ).sort().join('\n');
+    if (fp === window._stateAssignFp) return;
+    await renderStateMap(state, date);
+  } catch (err) { /* leave the last good map up */ }
+}
+function startStateLivePoll() {
+  if (window._stateLivePollTimer) return;
+  window._stateLivePollTimer = setInterval(pollStateAssignments, 45000);
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) pollStateAssignments();
+  });
+}
+startStateLivePoll();
 </script>
 </body>
 </html>

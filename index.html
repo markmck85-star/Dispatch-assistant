@@ -268,7 +268,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-156</div>
+        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-157</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -2260,6 +2260,7 @@ function distanceMatrixStatus(state) {
             await processDispatch(true);
             setBootStatus('Map ready');
             hideBootStatus();
+            startAssignmentPoll();
             // Save textarea content on input and auto-detect date
             const dispatchTextarea = document.getElementById('locationCodes');
             if (dispatchTextarea) {
@@ -4126,6 +4127,45 @@ function distanceMatrixStatus(state) {
         function startInboundPolling() {
             checkForInboundDispatch();
             _inboundPollTimer = setInterval(checkForInboundDispatch, 60000); // check every 60s
+        }
+
+        // 2026-09-19: four-monitor desk — State Console and this board
+        // used to go stale until a manual refresh. Poll assignments for
+        // the selected date every 45s; only rebuild if tech/status/order
+        // actually changed. Skip while boot is running or a modal is up.
+        window._lastAssignFp = '';
+        window._assignPollTimer = null;
+        function assignmentRowsFingerprint(assignments, state) {
+            return (assignments || [])
+                .filter(a => !state || a.state === state)
+                .map(a => [a.siteCode || a.code || '', a.techName || '', a.status || '', a.sequenceOrder || a.sequence_order || ''].join('|'))
+                .sort()
+                .join('\n');
+        }
+        async function pollBoardAssignments(seedOnly) {
+            if (window.__bootLoading) return;
+            if (document.getElementById('fallback-assign-prompt')) return;
+            const dateInput = document.getElementById('dispatchDate');
+            const dateStr = dateInput && dateInput.value;
+            if (!dateStr) return;
+            try {
+                const res = await fetch('/.netlify/functions/get-assignments?dispatchDate=' + encodeURIComponent(dateStr), { cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                const fp = assignmentRowsFingerprint(data.assignments, window.CURRENT_STATE || CURRENT_STATE);
+                if (fp === window._lastAssignFp) return;
+                window._lastAssignFp = fp;
+                if (seedOnly) return;
+                await processDispatch(true);
+            } catch (err) { /* keep the last good board */ }
+        }
+        function startAssignmentPoll() {
+            if (window._assignPollTimer) return;
+            pollBoardAssignments(true);
+            window._assignPollTimer = setInterval(function() { pollBoardAssignments(false); }, 45000);
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) pollBoardAssignments(false);
+            });
         }
 
         async function checkForInboundDispatch() {
