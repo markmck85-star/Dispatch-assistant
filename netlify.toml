@@ -5,6 +5,9 @@
 [functions."bluefolder-sync"]
   schedule = "0,30 * * * *"
 
+[functions."bluefolder-service-requests-sync"]
+  schedule = "0 8 * * *"
+
 [functions."salesforce-report-sync-trigger"]
   schedule = "*/20 * * * *"
 
