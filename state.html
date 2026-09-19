@@ -567,6 +567,29 @@ async function loadAll() {
   const url = new URL(window.location.href);
   url.searchParams.set('state', state);
   history.replaceState(null, '', url);
+
+  // 2026-09-21: a stale propose_route_rebalance suggestion card (or any
+  // plain command result) from whichever state was PREVIOUSLY selected
+  // otherwise just sits in #stateAiCommandDiff untouched across a state
+  // switch -- nothing ever re-renders or clears it until the next AI
+  // command actually runs. Found live: switching GA -> MI left GA's
+  // Robert/Randy swap suggestions on screen, and hitting Revert on one
+  // correctly errored ("Robert Medley is not on the current board") since
+  // Robert isn't in MI's roster -- but the stale card itself should never
+  // have still been showing regardless of what a click on it does. Clearing
+  // here means every state switch starts the AI panel clean, no matter
+  // which state it's switching to or from -- including window._stateAi
+  // RebalanceTotalSavedMi, a stray global otherwise left over from the
+  // previous state's card (renderStateRebalanceCardHtml already resets it
+  // on the NEXT real card render, but zeroing it here too means nothing
+  // stale can be read even in the brief window before that happens).
+  const diffEl = document.getElementById('stateAiCommandDiff');
+  if (diffEl) diffEl.innerHTML = '';
+  const cmdInput = document.getElementById('stateAiCommandInput');
+  if (cmdInput) cmdInput.value = '';
+  if (typeof setStateAiStatus === 'function') setStateAiStatus('');
+  window._stateAiRebalanceTotalSavedMi = 0;
+
   loadConsole(state);
   loadRestock(state);
 }
