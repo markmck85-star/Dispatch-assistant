@@ -33,6 +33,23 @@
  *   tech -> site : "{tech-name-lowercased-hyphenated}|{SITECODE}"
  *   site -> site : "{SITECODE_A}|{SITECODE_B}", either ordering
  * Entry shape   : { distanceMi, durationMin?, durationText?, type }
+ *
+ * 2026-09-19 FIX (see /areas/route-rebalance-bug.md for the full incident):
+ * createLegResolver used to fail closed to a real-looking 0 mi whenever a
+ * leg couldn't be resolved from the matrix or from stored coordinates.
+ * That silently scored a technician's missing home-to-site leg as FREE
+ * rather than unknown -- exactly how propose_route_rebalance suggested
+ * moving four stops onto a technician 14-31 mi away, reporting a fictional
+ * ~21.6 mi fleet savings while the real board got ~19.8 mi LONGER.
+ * Unresolved legs now return distanceMi: Infinity instead of 0. This is a
+ * deliberate sentinel, not a real distance: every consumer in this file
+ * (routeMetrics, insertStopAtBestPosition, optimizeRoute's local distance
+ * helpers) already does plain arithmetic/comparison on distanceMi, and
+ * Infinity propagates through all of that exactly the way "never pick
+ * this, treat this route as unknown-cost" should -- it always loses a
+ * `<` comparison, it always blows up a sum, and Infinity - Infinity = NaN,
+ * which also always fails a `>=` savings-threshold check. No other
+ * function in this file needed to change for this fix to hold.
  */
 
 const EARTH_RADIUS_MI = 3958.8;
@@ -48,9 +65,19 @@ export function haversineDistance(lat1, lng1, lat2, lng2) {
   return EARTH_RADIUS_MI * 2 * Math.asin(Math.sqrt(a));
 }
 
-/** index.html/state.html derive a tech's matrix key from the display name this way. */
+/**
+ * index.html/state.html derive a tech's matrix key from the display name
+ * this way. Trimmed as of 2026-09-19 (see file header) -- a name carrying
+ * incidental leading/trailing whitespace anywhere along the
+ * routes-payload -> matrix-key path would otherwise silently miss every
+ * matrix entry for that technician and fall through to the
+ * coordinate-lookup branch (or, before this file's other 2026-09-19 fix,
+ * all the way through to a free-looking 0 mi). Trimming here is a cheap,
+ * unconditional safety net regardless of whether whitespace was ever the
+ * actual trigger for a given incident.
+ */
 export function techMatrixKey(techName) {
-  return String(techName || "").toLowerCase().replace(/\s+/g, "-");
+  return String(techName || "").trim().toLowerCase().replace(/\s+/g, "-");
 }
 
 /**
@@ -65,6 +92,12 @@ export function techMatrixKey(techName) {
  * fromCode means "from the technician's home base", and returns
  * { distanceMi, durationMin, isReal } — durationMin is null whenever only
  * straight-line distance was available, exactly like the other two copies.
+ *
+ * distanceMi is Infinity (not 0) whenever a leg genuinely cannot be
+ * resolved from either the matrix or stored coordinates -- see the
+ * 2026-09-19 fix note in this file's header. isReal is always false in
+ * that case, and callers that display a leg to a person should treat a
+ * non-finite distanceMi as "no route data" rather than formatting it.
  */
 export function createLegResolver(matrix, techs, sites) {
   const m = matrix || {};
@@ -88,7 +121,9 @@ export function createLegResolver(matrix, techs, sites) {
           isReal: false,
         };
       }
-      return { distanceMi: 0, durationMin: null, isReal: false };
+      // 2026-09-19: was `{ distanceMi: 0, ... }` -- see file header. Never
+      // treat a genuinely unresolved home leg as free.
+      return { distanceMi: Infinity, durationMin: null, isReal: false };
     }
 
     const entry = m[fromCode + "|" + toCode] || m[toCode + "|" + fromCode];
@@ -108,7 +143,8 @@ export function createLegResolver(matrix, techs, sites) {
         isReal: false,
       };
     }
-    return { distanceMi: 0, durationMin: null, isReal: false };
+    // 2026-09-19: same fix as the home-leg branch above.
+    return { distanceMi: Infinity, durationMin: null, isReal: false };
   };
 }
 
@@ -125,6 +161,13 @@ function hasCoords(sites, code) {
  * durationMin is null unless every leg resolved a duration, so the assistant
  * never quotes a time delta that silently mixes real drive times with legs
  * that had none.
+ *
+ * distanceMi can come back Infinity if any leg (including the return-home
+ * leg) was unresolved -- see createLegResolver's 2026-09-19 fix note.
+ * Callers doing comparisons or subtraction on this don't need special-case
+ * handling: Infinity naturally loses every "pick the cheapest" comparison
+ * and naturally kills a savings threshold check via Infinity - Infinity =
+ * NaN, which always fails a `>=` test.
  */
 export function routeMetrics(legInfo, techName, codes) {
   if (!codes || codes.length === 0) {
@@ -247,6 +290,12 @@ export function optimizeRoute(legInfo, techName, codes, sites) {
  * than always dropping it at the front. Used by reassign_stop so a moved
  * stop lands in route order the way a manual reassign + re-sort pair ends
  * up leaving it, without disturbing the rest of the sequence.
+ *
+ * 2026-09-19: no code change needed here for the Infinity-sentinel fix --
+ * `d < bestDist` already correctly rejects Infinity per candidate position,
+ * unlike the old 0-mi sentinel which could have looked like a false win.
+ * Documented explicitly since this is exactly the comparison that would
+ * have silently misbehaved with the old fallback value.
  */
 export function insertStopAtBestPosition(legInfo, techName, codes, newCode, sites) {
   if (!hasCoords(sites, newCode) || codes.length === 0) {
@@ -259,5 +308,12 @@ export function insertStopAtBestPosition(legInfo, techName, codes, newCode, site
     const d = routeMetrics(legInfo, techName, candidate).distanceMi;
     if (d < bestDist) { bestDist = d; bestRoute = candidate; }
   }
-  return bestRoute;
+  // Every candidate came back unresolved (Infinity) -- fall back to a
+  // plain append rather than returning null, so callers always get a
+  // usable route back. This only happens when the receiving technician's
+  // home leg is unresolved for every position, in which case the
+  // resulting route's own distanceMi will itself read Infinity and get
+  // correctly rejected upstream (proposeRebalance's score check, or simply
+  // shown as "no route data" if a dispatcher asks about it directly).
+  return bestRoute || codes.concat([newCode]);
 }
