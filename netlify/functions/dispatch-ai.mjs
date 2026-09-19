@@ -1,5 +1,23 @@
 /**
- * dispatch-ai.mjs — v1.1 (2026-09-17)
+ * dispatch-ai.mjs — v1.2 (2026-09-19)
+ *   - loadContext now reads distances from Supabase (tech_site_distances /
+ *     site_site_distances) instead of the legacy distance-matrix/{STATE}
+ *     Blob, matching what get-distance-matrix.js and the Reassign dropdown
+ *     already switched to on 2026-09-15. The Blob had drifted stale (still
+ *     carried pre-cleanup TMPGA001-era entries) and was the actual root
+ *     cause of the Randy->Robert mis-suggestion documented in
+ *     /areas/route-rebalance-bug.md -- not a data-quality problem with any
+ *     individual technician's coordinates, which were fine the whole time.
+ *   - trims technician names when building `routes`, and route-optimizer.mjs
+ *     now trims inside techMatrixKey too, so incidental whitespage anywhere
+ *     along the payload path can't silently miss a matrix/coordinate
+ *     lookup for a technician.
+ *   - display formatting (signed/legText) now shows "no route data"
+ *     instead of "Infinity mi" for a leg route-optimizer.mjs couldn't
+ *     resolve -- see that file's 2026-09-19 header note for why unresolved
+ *     legs are now Infinity rather than a free-looking 0.
+ *
+ * v1.1 (2026-09-17)
  *   - retry Gemini generateContent on transient TLS/fetch failures
  *   - stop propose_route_rebalance from suggesting a swap and its reverse
  *   - cap how many extra miles workload-credit can buy
@@ -32,12 +50,12 @@
  * they never block or auto-flag an action a dispatcher is taking.
  *
  * NO EXTERNAL MAPPING API IS CALLED HERE. Every mile and minute quoted
- * comes from the locally pre-computed distance matrix
- * (distance-matrix/{STATE} in Blobs, built by compute-distance-matrix.js
- * and compute-site-distance-matrix.js) with a straight-line haversine
- * fallback over stored lat/lng -- see lib/route-optimizer.mjs, the same
- * ordering/leg-distance math index.html's tech cards and state.html's map
- * both already use client-side.
+ * comes from Supabase's tech_site_distances / site_site_distances tables
+ * (falling back to the legacy Blob cache, distance-matrix/{STATE}, only
+ * for a state that hasn't been migrated yet -- see loadContext) with a
+ * straight-line haversine fallback over stored lat/lng -- see
+ * lib/route-optimizer.mjs, the same ordering/leg-distance math index.html's
+ * tech cards and state.html's map both already use client-side.
  *
  * Written as a modern (v2) ESM function on purpose -- Netlify's AI Gateway
  * only injects provider credentials into the modern function runtime, so
@@ -77,6 +95,7 @@ import {
   fleetMetrics,
   optimizeRoute,
   insertStopAtBestPosition,
+  techMatrixKey,
 } from './lib/route-optimizer.mjs';
 
 // 2026-09-13: same model the old PR branch used. Verify this is still a
@@ -135,6 +154,13 @@ const GEMINI_FETCH_RETRIES = 3;
  * locked/unavailable stops and techs are never touched. Returns the
  * ordered list of suggested moves (empty if nothing clears the minimum
  * threshold) -- purely advisory, never mutates the routes it's given.
+ *
+ * 2026-09-19: no logic change needed here for the Infinity-sentinel fix
+ * (see route-optimizer.mjs) -- `net`/`score` are plain arithmetic on
+ * routeMetrics' distanceMi, and Infinity already propagates correctly
+ * through the existing `score >= minSavingsMi` check below (Infinity or
+ * NaN both fail it). Documented so a future reader doesn't assume this
+ * function needs its own explicit unresolved-leg guard.
  */
 function proposeRebalance(routes, legInfo, sites, lockedCodes, unavailableTechs, minSavingsMi, maxSuggestions, fromTechSet, toTechSet) {
   let working = routes.map((r) => ({ tech: r.tech, stops: r.stops.slice() }));
@@ -460,6 +486,10 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
 
 /** "-4.2 mi" / "+12 min" style signed formatting used in the diff line. */
 function signed(value, unit, decimals) {
+  // 2026-09-19: an unresolved leg now comes back as Infinity (see
+  // route-optimizer.mjs) rather than a free-looking 0 -- show that
+  // honestly instead of formatting "Infinity" or "-0.0" for the dispatcher.
+  if (!Number.isFinite(value)) return 'no route data';
   const rounded = Number(value.toFixed(decimals));
   const sign = rounded > 0 ? '+' : (rounded < 0 ? '-' : '');
   return `${sign}${Math.abs(rounded).toFixed(decimals)} ${unit}`;
@@ -475,6 +505,8 @@ function deltaText(before, after) {
 
 /** "12.3 mi" / "12.3 mi (18 min)" style plain (non-diff) formatting for the advisory tools. */
 function legText(leg) {
+  // 2026-09-19: same non-finite guard as signed() above.
+  if (!Number.isFinite(leg.distanceMi)) return 'no route data available for this leg';
   const mi = `${leg.distanceMi.toFixed(1)} mi`;
   if (leg.durationMin == null) return `${mi} (estimated, no real drive-time data)`;
   return `${mi} (${Math.round(leg.durationMin)} min)`;
@@ -496,20 +528,26 @@ function techSetFromIndexes(indexes, routes) {
 }
 
 /**
- * Loads everything the metrics need: the pre-computed matrix for the state
- * plus technician and site coordinates. All local reads -- Blobs and
- * Supabase, no mapping API.
+ * Loads everything the metrics need: leg-distance data for the state plus
+ * technician and site coordinates. All local reads -- Supabase and Blobs,
+ * no mapping API.
+ *
+ * 2026-09-19 REWRITE (see /areas/route-rebalance-bug.md): the matrix used
+ * to come exclusively from the legacy distance-matrix/{STATE} Blob. That
+ * Blob is no longer the source of truth anywhere else in the app --
+ * get-distance-matrix.js and the Reassign dropdown switched to reading
+ * Supabase's tech_site_distances / site_site_distances tables on
+ * 2026-09-15 -- but this function never got the same update, so it kept
+ * scoring swaps off a copy of the data that had already drifted stale
+ * (it still carries pre-cleanup TMPGA001-era entries). This now builds the
+ * matrix the exact same way get-distance-matrix.js does: query both
+ * Supabase tables for the technicians/sites this request actually needs,
+ * prefer 'driving' rows over 'haversine-fallback' over 'haversine' when a
+ * pair has more than one, and fall back to the legacy Blob ONLY if a state
+ * hasn't been migrated into those tables yet at all (transitional -- see
+ * get-distance-matrix.js's own header for the same fallback rationale).
  */
 async function loadContext(supabase, state, techNames, siteCodes) {
-  let matrix = null;
-  try {
-    const store = getStore('dispatch');
-    const blob = await store.get('distance-matrix/' + state, { type: 'json' });
-    matrix = (blob && blob.matrix) || null;
-  } catch (err) {
-    console.error('[dispatch-ai] distance matrix unavailable, falling back to haversine:', err.message);
-  }
-
   const techs = {};
   const techIdByName = {};
   if (techNames.length) {
@@ -537,6 +575,80 @@ async function loadContext(supabase, state, techNames, siteCodes) {
       sites[s.site_code] = { lat: s.lat, lng: s.lng };
       siteIdByCode[s.site_code] = s.id;
       siteNames[s.site_code] = s.name;
+    }
+  }
+
+  const matrix = {};
+  const techIds = Object.values(techIdByName);
+  const siteIds = Object.values(siteIdByCode);
+
+  const [{ data: techToSite, error: t2sErr }, { data: siteToSite, error: s2sErr }] = await Promise.all([
+    techIds.length
+      ? supabase.from('tech_site_distances').select('technician_id, site_id, mode, distance_mi, duration_min').in('technician_id', techIds)
+      : Promise.resolve({ data: [], error: null }),
+    siteIds.length
+      ? supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi, duration_min').or(`site_a.in.(${siteIds.join(',')}),site_b.in.(${siteIds.join(',')})`)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (t2sErr) console.error('[dispatch-ai] tech_site_distances lookup failed, continuing with what resolved:', t2sErr.message);
+  if (s2sErr) console.error('[dispatch-ai] site_site_distances lookup failed, continuing with what resolved:', s2sErr.message);
+
+  const nameById = Object.fromEntries(Object.entries(techIdByName).map(([name, id]) => [id, name]));
+  const codeById = Object.fromEntries(Object.entries(siteIdByCode).map(([code, id]) => [id, code]));
+
+  // Same driving > haversine-fallback > haversine preference
+  // get-distance-matrix.js uses when a pair has rows in more than one mode.
+  const MODE_PRIORITY = { driving: 0, 'haversine-fallback': 1, haversine: 2 };
+  const pickBest = (rows) => rows.slice().sort((a, b) => (MODE_PRIORITY[a.mode] ?? 9) - (MODE_PRIORITY[b.mode] ?? 9))[0];
+
+  const byTechSite = {};
+  for (const row of techToSite || []) {
+    const k = row.technician_id + '|' + row.site_id;
+    (byTechSite[k] = byTechSite[k] || []).push(row);
+  }
+  for (const rows of Object.values(byTechSite)) {
+    const best = pickBest(rows);
+    const name = nameById[best.technician_id];
+    const code = codeById[best.site_id];
+    if (!name || !code) continue; // one side outside this request's scope -- skip
+    matrix[techMatrixKey(name) + '|' + code] = {
+      distanceMi: Number(best.distance_mi),
+      durationMin: best.duration_min != null ? Number(best.duration_min) : null,
+      type: best.mode,
+    };
+  }
+
+  const bySiteSite = {};
+  for (const row of siteToSite || []) {
+    const k = row.site_a + '|' + row.site_b;
+    (bySiteSite[k] = bySiteSite[k] || []).push(row);
+  }
+  for (const rows of Object.values(bySiteSite)) {
+    const best = pickBest(rows);
+    const codeA = codeById[best.site_a];
+    const codeB = codeById[best.site_b];
+    if (!codeA || !codeB) continue;
+    matrix[codeA + '|' + codeB] = {
+      distanceMi: Number(best.distance_mi),
+      durationMin: best.duration_min != null ? Number(best.duration_min) : null,
+      type: best.mode,
+    };
+  }
+
+  // TRANSITIONAL FALLBACK: a state with nothing in either Supabase table
+  // yet (not migrated -- see mcp-server.js's migrate_distance_matrix tool)
+  // falls back to the legacy Blob wholesale, exactly as this function used
+  // to work, rather than silently running the whole request on zero real
+  // distance data. Safe to delete once every active state is confirmed
+  // migrated (same note get-distance-matrix.js's header makes about its
+  // own copy of this fallback).
+  if (!Object.keys(matrix).length) {
+    try {
+      const store = getStore('dispatch');
+      const blob = await store.get('distance-matrix/' + state, { type: 'json' });
+      if (blob && blob.matrix) Object.assign(matrix, blob.matrix);
+    } catch (err) {
+      console.error('[dispatch-ai] legacy Blob fallback also unavailable:', err.message);
     }
   }
 
@@ -675,11 +787,16 @@ export default async (req) => {
   // {tech, stops} shape from get-assignments.js -- rather than this
   // function re-deriving it, so in-session moves not yet persisted are
   // respected either way.
+  // 2026-09-19: trim tech name -- see route-optimizer.mjs's techMatrixKey
+  // fix note. This is the payload's own point of entry, so trimming here
+  // (in addition to techMatrixKey's own trim) means `techs[name]` /
+  // `techIdByName[name]` lookups in loadContext, which key off this exact
+  // string rather than the slug, stay consistent too.
   const routes = (Array.isArray(payload.routes) ? payload.routes : [])
     .filter((r) => r && r.tech)
     .map((r) => ({
-      tech: String(r.tech),
-      stops: (Array.isArray(r.stops) ? r.stops : []).map((c) => String(c)),
+      tech: String(r.tech).trim(),
+      stops: (Array.isArray(r.stops) ? r.stops : []).map((c) => String(c).trim()),
       color: r.color ? String(r.color) : null,
     }));
   if (!routes.length) {
@@ -692,7 +809,7 @@ export default async (req) => {
   // Reassign dropdown does (getUnavailableTechsForDate) and sends it along
   // so a reassign can't silently land on someone who isn't actually working.
   const unavailableTechs = new Set(
-    (Array.isArray(payload.unavailableTechs) ? payload.unavailableTechs : []).map((t) => String(t))
+    (Array.isArray(payload.unavailableTechs) ? payload.unavailableTechs : []).map((t) => String(t).trim())
   );
 
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
