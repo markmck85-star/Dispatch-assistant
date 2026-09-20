@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.79 (blobs-155)</title>
+    <title>MCR Dispatch Hub v9.80 (blobs-158)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -303,7 +303,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-157</div>
+        <h1>MCR Dispatch Hub v9.80</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-158</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -1707,6 +1707,11 @@ function distanceMatrixStatus(state) {
             window.__bootLoading = false;
             const bar = document.getElementById('bootStatus');
             if (bar) bar.hidden = true;
+
+            // Make sure the page is at the top once the splash clears —
+            // something during boot (e.g. an input grabbing focus) can
+            // leave the page scrolled down, hiding the map and version.
+            window.scrollTo(0, 0);
 
             // Fade out and release the splash video overlay
             const splash = document.getElementById('appSplashOverlay');
