@@ -3884,7 +3884,17 @@ function distanceMatrixStatus(state) {
                 // that are already sitting in _dmCache from page load.
                 let totalMi = 0, totalDurMin = 0, anyRealDuration = false, allLegsReal = true;
                 let prevCode = null;
+                // 2026-09-19 fix: was iterating every item regardless of
+                // isSameDay, so a stop pushed to a later date (still sitting
+                // in this tech's array) got counted into today's mileage/
+                // drive-time total and chained into the "from prev stop"
+                // math for whatever came after it -- exactly the map's own
+                // fleetMi calc already deliberately excludes (see the
+                // 2026-08-27 comment on the map's futurePts split). Skipping
+                // non-same-day items here brings this total back in line
+                // with what the map actually shows.
                 for (const item of items) {
+                    if (item.isSameDay === false) continue;
                     const leg = getCachedLegInfo(tech, prevCode, item.code);
                     totalMi += leg.distanceMi;
                     if (leg.durationMin != null) { totalDurMin += leg.durationMin; anyRealDuration = true; }
@@ -3916,9 +3926,26 @@ function distanceMatrixStatus(state) {
                     // this exact index against window.currentAssignments[tech].
                     if (!isStopVisible(item)) return;
                     const loc = LOCATIONS[item.code];
-                    const prevItemCode = index > 0 ? items[index - 1].code : null;
-                    const leg = getCachedLegInfo(tech, prevItemCode, item.code);
-                    const legLabel = `${Math.round(leg.distanceMi * 10) / 10} mi${leg.durationMin != null ? ' · ' + leg.durationMin + ' min' : ''}${leg.isReal ? '' : ' (est.)'}`;
+                    // 2026-09-19 fix: this used items[index-1] regardless of
+                    // isSameDay, so a stop pushed to a later date still got
+                    // a real "X mi from prev stop" leg computed for it (and
+                    // for whatever came right after it), making it look
+                    // exactly like a normal part of today's drive -- the
+                    // one visible inconsistency Mark flagged against the
+                    // map, which correctly draws these as dashed, unconnected
+                    // "not today" pins with no leg at all. lastSameDayCode
+                    // walks backward past any skipped future stop so the
+                    // NEXT real stop's leg is still computed from the last
+                    // actual same-day stop, not a future one.
+                    let lastSameDayCode = null;
+                    for (let j = index - 1; j >= 0; j--) {
+                        if (items[j].isSameDay !== false) { lastSameDayCode = items[j].code; break; }
+                    }
+                    const isFuturePushed = item.isSameDay === false;
+                    const leg = isFuturePushed ? null : getCachedLegInfo(tech, lastSameDayCode, item.code);
+                    const legLabel = isFuturePushed
+                        ? `📅 Not part of today's route${item.restockBy ? ' -- pushed to ' + item.restockBy : ''}`
+                        : `${Math.round(leg.distanceMi * 10) / 10} mi${leg.durationMin != null ? ' · ' + leg.durationMin + ' min' : ''}${leg.isReal ? '' : ' (est.)'}`;
                     // BUG FIX (2026-09-07): urgent alone used to mean the
                     // badge always said SAME DAY, even for a ticket already
                     // correctly pushed to a future day's board (a ticket
@@ -3995,7 +4022,7 @@ function distanceMatrixStatus(state) {
                                 <div>
                                     <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
-                                    <div style="font-size:11px;color:#888;margin-top:1px;">📏 ${legLabel}${index === 0 ? ' from home' : ' from prev. stop'}</div>
+                                    <div style="font-size:11px;color:#888;margin-top:1px;">${isFuturePushed ? legLabel : '📏 ' + legLabel + (index === 0 ? ' from home' : ' from prev. stop')}</div>
                                     ${ticketInfoStr}
                                     ${lineItemsStr}
                                 </div>
@@ -4382,7 +4409,24 @@ function distanceMatrixStatus(state) {
                 status: status,
                 assignedBy: assignedBy,
             };
-            if (opts.ticketWoNumber) payload.ticketWoNumber = opts.ticketWoNumber;
+            // 2026-09-19 fix: every call site except the original single-
+            // ticket-flow generation call (see singleTicketWo above) synced
+            // without ever passing ticketWoNumber -- so reassignStop(),
+            // removeStop(), pushToTomorrow(), and confirmPushToDate() all
+            // created/updated assignment rows with no ticket_id, even for a
+            // stop that was genuinely ticket-linked (item.ticketWo already
+            // set from the bulk auto-surface path). Confirmed live: GA1038's
+            // trouble ticket (WO 00152903) lost its ticket_id the moment it
+            // was pushed to a later date -- the in-memory item still showed
+            // the WO/urgent styling in the current tab, but the persisted
+            // row had nothing to link back to, so the ticket vanished from
+            // the board on the next reload/different device. Falling back
+            // to the item's own ticketWo here (only when the caller didn't
+            // already supply one explicitly) fixes every one of those call
+            // sites in one place, plus the original bulk-restock-ticket gap
+            // described in dispatch-board-completion-sync.md.
+            const ticketWoNumber = opts.ticketWoNumber || item.ticketWo;
+            if (ticketWoNumber) payload.ticketWoNumber = ticketWoNumber;
             // 2026-09-17: send along the parsed restock form counts (if any
             // exist for this code in this browser's session) so they get
             // persisted alongside the assignment itself, not just held in
