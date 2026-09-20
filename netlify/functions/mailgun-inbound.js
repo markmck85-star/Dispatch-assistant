@@ -21,6 +21,76 @@ const {
   findPlaceholderByAddress,
   flagPlaceholderForPromotion,
 } = require("./lib/placeholder-sites");
+const { parseMileageWorkbookBuffer, evaluateMileageReport } = require("./lib/mileage-check.js");
+
+// 2026-09-20: extracts file attachments from a raw multipart/form-data
+// body, byte-accurately -- added for the technician mileage sanity-check
+// feature (Mike forwards each tech's biweekly expense/mileage .xlsx as it
+// comes in). Every OTHER field this file reads comes through
+// parseMailgunBody, which decodes the whole body to a UTF-8 string first
+// -- fine for text fields, but that decode step is LOSSY/CORRUPTING for
+// binary content (an .xlsx is a zip archive; UTF-8 decoding arbitrary
+// bytes and re-encoding is not guaranteed to round-trip). This works
+// directly against the raw Buffer instead, using a latin1 (ISO-8859-1)
+// string view purely to locate the boundary/header text -- latin1 maps
+// each byte to exactly one JS UTF-16 code unit, so string indices found
+// this way equal real byte offsets into the original buffer, and slicing
+// the ORIGINAL buffer at those offsets (never the decoded string) keeps
+// the attachment's bytes intact. Standard technique for byte-safe
+// multipart parsing in Node without a full multipart library dependency,
+// matching this file's existing preference for small inline parsers
+// (see parseMailgunBody's own boundary auto-detection, reused here)
+// over pulling in something like `busboy`.
+function extractAttachments(rawBuffer) {
+  const latin1 = rawBuffer.toString("latin1");
+  const boundaryMatch = latin1.match(/^--([^\r\n]+)/);
+  if (!boundaryMatch) return [];
+  const boundary = "--" + boundaryMatch[1];
+  const attachments = [];
+  let searchFrom = 0;
+  while (true) {
+    const partStart = latin1.indexOf(boundary, searchFrom);
+    if (partStart === -1) break;
+    const partContentStart = partStart + boundary.length;
+    const nextBoundary = latin1.indexOf(boundary, partContentStart);
+    if (nextBoundary === -1) break;
+    const partStr = latin1.slice(partContentStart, nextBoundary);
+    searchFrom = nextBoundary;
+
+    const nameMatch = partStr.match(/Content-Disposition:[^\r\n]*name="([^"]+)"/i);
+    const filenameMatch = partStr.match(/Content-Disposition:[^\r\n]*filename="([^"]+)"/i);
+    if (!nameMatch || !filenameMatch || !filenameMatch[1]) continue; // a plain text field, not a file part
+
+    const headerEnd = partStr.indexOf("\r\n\r\n");
+    const altHeaderEnd = partStr.indexOf("\n\n");
+    const contentStartInPart = headerEnd !== -1 ? headerEnd + 4 : (altHeaderEnd !== -1 ? altHeaderEnd + 2 : -1);
+    if (contentStartInPart === -1) continue;
+    let contentEndInPart = partStr.length;
+    if (partStr.slice(contentEndInPart - 2) === "\r\n") contentEndInPart -= 2; // trailing CRLF belongs to the boundary delimiter
+
+    const byteStart = partContentStart + contentStartInPart;
+    const byteEnd = partContentStart + contentEndInPart;
+    let content = rawBuffer.slice(byteStart, byteEnd);
+
+    // Defensive only -- real multipart file parts carry raw bytes
+    // directly, not base64-within-the-part, but honor an explicit
+    // Content-Transfer-Encoding if one is ever present rather than
+    // assuming.
+    const cteMatch = partStr.slice(0, contentStartInPart).match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
+    if (cteMatch && /base64/i.test(cteMatch[1])) {
+      content = Buffer.from(content.toString("latin1").replace(/\s+/g, ""), "base64");
+    }
+
+    const contentTypeMatch = partStr.match(/Content-Type:\s*([^\r\n]+)/i);
+    attachments.push({
+      fieldName: nameMatch[1],
+      filename: filenameMatch[1],
+      contentType: contentTypeMatch ? contentTypeMatch[1].trim() : null,
+      content,
+    });
+  }
+  return attachments;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1277,6 +1347,16 @@ exports.handler = async (event) => {
       : event.body || "";
     const fields = parseMailgunBody(body);
 
+    // 2026-09-20: byte-safe attachment extraction for the technician
+    // mileage sanity-check feature -- see extractAttachments' own header
+    // for why this operates on the raw buffer rather than `body` above
+    // (which is already UTF-8-decoded and would corrupt a binary .xlsx).
+    const rawBuffer = event.isBase64Encoded
+      ? Buffer.from(event.body, "base64")
+      : Buffer.from(event.body || "", "utf8");
+    const attachments = extractAttachments(rawBuffer);
+    const timesheetAttachments = attachments.filter((a) => /_Expense_.*\.xlsx$/i.test(a.filename || ""));
+
     const sender    = fields["sender"] || fields["from"] || "unknown";
     const subject   = fields["subject"] || "";
     // Prioritize full body fields over stripped — stripped versions lose forwarded content
@@ -1492,6 +1572,40 @@ exports.handler = async (event) => {
           .single();
         if (error) console.error('[mailgun-inbound] inbound_emails insert failed:', error.message);
         else inboundEmailId = data.id;
+      }
+
+      // 2026-09-20: technician mileage sanity-check -- Mike forwards each
+      // tech's biweekly expense/mileage .xlsx as it comes in
+      // (FieldPilot-standardized filename, e.g.
+      // "McKelvey_Expense_9_14_2026.xlsx"). Runs independently of the
+      // dispatchType classification below, since a forwarded timesheet's
+      // own body text ("see attached") has nothing to do with any of
+      // those categories -- presence of a matching attachment is the
+      // only signal needed. No SMS here (routine, non-urgent, admin-
+      // review data, same treatment as the BlueFolder sync) -- results
+      // land in technician_mileage_reports for the Admin Panel's Mileage
+      // Check tab. See lib/mileage-check.js for the actual comparison
+      // logic; this just extracts each attachment and hands off to the
+      // exact same evaluateMileageReport the manual Admin Panel upload
+      // path calls, so both are scored identically.
+      for (const att of timesheetAttachments) {
+        try {
+          const { technicianNameRaw, legs } = parseMileageWorkbookBuffer(att.content);
+          if (!technicianNameRaw || !legs.length) {
+            console.log(`[mailgun-inbound] Mileage timesheet ${att.filename}: no NAME/legs found -- skipping (possibly not the expected template)`);
+            continue;
+          }
+          const payPeriodEnd = legs.map((l) => l.date).filter(Boolean).sort().slice(-1)[0] || null;
+          const report = await evaluateMileageReport(supabase, {
+            technicianNameRaw, legs, payPeriodEnd,
+            source: 'email',
+            sourceEmailId: inboundEmailId,
+            sourceFilename: att.filename,
+          });
+          console.log(`[mailgun-inbound] Mileage timesheet processed: ${att.filename} -- ${report.matched_legs}/${report.total_legs} legs matched, ${report.flagged_legs.length} flagged, needs_review=${report.needs_review}`);
+        } catch (mileageEx) {
+          console.error(`[mailgun-inbound] Mileage timesheet processing failed for ${att.filename} (non-fatal):`, mileageEx.message);
+        }
       }
 
       // ITI/TechWeb closing emails go straight into site_visits, not
