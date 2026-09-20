@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.80 (blobs-158)</title>
+    <title>MCR Dispatch Hub v9.81 (blobs-159)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -303,7 +303,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.80</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-158</div>
+        <h1>MCR Dispatch Hub v9.81</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-159</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -3791,7 +3791,13 @@ function distanceMatrixStatus(state) {
                 });
             });
 
-            renderReviewBoard();
+            // preserveScroll=true here: this render runs as part of the
+            // silent boot/auto-load pass (_processDispatchCore(auto=true)).
+            // Without it, renderReviewBoard()'s default branch schedules a
+            // scrollIntoView(resultsDiv) ~100ms later, which fires AFTER
+            // hideBootStatus()'s scroll-to-top and yanks the page back down
+            // past the map/version header on every load and refresh.
+            renderReviewBoard(true);
 
             // Collect locations where primary was out and no fallback was set
             const needsFallback = [];
