@@ -23,8 +23,8 @@
         .big-btn.delete-btn:active { background: #a71d2a; }
         .big-btn.back-btn { background: #6c757d; }
         .big-btn.back-btn:active { background: #545b62; }
-        .tab-bar { display: flex; gap: 5px; margin-bottom: 15px; }
-        .tab-bar button { flex: 1; padding: 12px; border: 2px solid #ddd; background: #f8f9fa; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; color: #333; }
+        .tab-bar { display: flex; gap: 5px; margin-bottom: 15px; flex-wrap: wrap; }
+        .tab-bar button { flex: 1 1 110px; padding: 12px; border: 2px solid #ddd; background: #f8f9fa; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; color: #333; }
         .tab-bar button.active { background: #007bff; color: white; border-color: #007bff; }
         .section { display: none; }
         .section.active { display: block; }
@@ -1020,7 +1020,7 @@
                 showToast('Distance Matrix is restricted to admin users.', 'error');
                 tab = 'locations';
             }
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule'];
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule', 'mileagecheck'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -3083,22 +3083,35 @@ ${mergeCellsXml}
                     break;
                 }
             }
-            const legs = [];
-            let currentDate = null;
+            const WEEKDAYS = new Set(['sun','mon','tue','wed','thu','fri','sat']);
+            const blocks = [];
+            let current = null;
             for (const row of grid) {
-                const a = row[0], b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
-                if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break;
-                if (a instanceof Date && !isNaN(a)) currentDate = a;
-                const fromRaw = typeof b === 'string' ? b.trim() : '';
-                const toRaw = typeof d === 'string' ? d.trim() : '';
-                if (fromRaw && toRaw && typeof f === 'number') {
-                    legs.push({
-                        date: currentDate ? currentDate.toISOString().slice(0, 10) : null,
-                        fromRaw, toRaw,
-                        odometerStart: typeof c === 'number' ? c : null,
-                        odometerEnd: typeof e === 'number' ? e : null,
-                        claimedMiles: f,
-                    });
+                const a = row[0];
+                const aStr = typeof a === 'string' ? a.trim().toLowerCase() : null;
+                if (aStr && WEEKDAYS.has(aStr)) { current = { date: null, rows: [] }; blocks.push(current); }
+                if (!current) continue;
+                current.rows.push(row);
+                if (a instanceof Date && !isNaN(a) && !current.date) current.date = a;
+            }
+            const legs = [];
+            outer:
+            for (const block of blocks) {
+                if (!block.date) continue;
+                const dateStr = block.date.toISOString().slice(0, 10);
+                for (const row of block.rows) {
+                    const b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
+                    if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break outer;
+                    const fromRaw = typeof b === 'string' ? b.trim() : '';
+                    const toRaw = typeof d === 'string' ? d.trim() : '';
+                    if (fromRaw && toRaw && typeof f === 'number') {
+                        legs.push({
+                            date: dateStr, fromRaw, toRaw,
+                            odometerStart: typeof c === 'number' ? c : null,
+                            odometerEnd: typeof e === 'number' ? e : null,
+                            claimedMiles: f,
+                        });
+                    }
                 }
             }
             return { technicianNameRaw, legs };
@@ -3157,12 +3170,31 @@ ${mergeCellsXml}
                 el.innerHTML = data.reports.map(r => {
                     const flagCount = (r.flagged_legs || []).length;
                     const unmatchedCount = (r.unmatched_legs || []).length;
+                    const resolvedCount = (r.resolved_via_closed_tickets || []).length;
                     const statusColor = flagCount > 0 ? '#e05555' : (r.needs_review ? '#ffa500' : '#4caf50');
                     const flagRows = (r.flagged_legs || []).map(f =>
                         `<div style="padding:6px 10px; background:#2a1010; border-left:3px solid #e05555; border-radius:0 4px 4px 0; margin-top:4px; font-size:12px;">`
                         + `${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> -- `
                         + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
                         + (f.reason === 'negative_or_zero' ? ' -- negative/zero mileage' : ` -- ${f.ratio}x expected`)
+                        + `</div>`
+                    ).join('');
+                    const resolvedRows = (r.resolved_via_closed_tickets || []).map(g =>
+                        `<div style="padding:6px 10px; background:#0f2a10; border-left:3px solid #4caf50; border-radius:0 4px 4px 0; margin-top:4px; font-size:12px; color:#bbb;">`
+                        + `${mcFmtDate(g.date)}: "${g.rawLabel}" matched to <strong>${g.resolvedSiteCode || ''} ${g.resolvedSiteName}</strong> via the closed-ticket report (now remembered for next time)`
+                        + `</div>`
+                    ).join('');
+                    // 2026-09-20: surfaces exactly what the technician typed for a
+                    // leg nothing could resolve -- alias table, token matching, and
+                    // the closed-ticket positional check all came up empty. Mark's
+                    // point: Mike already has to eyeball these by hand every pay
+                    // period regardless, so showing the raw text here (rather than
+                    // just a count buried in the summary line) saves him having to
+                    // dig through raw report data to find them.
+                    const unmatchedRows = (r.unmatched_legs || []).map(u =>
+                        `<div style="padding:6px 10px; background:#2a2000; border-left:3px solid #ffa500; border-radius:0 4px 4px 0; margin-top:4px; font-size:12px; color:#ddd;">`
+                        + `${mcFmtDate(u.date)}: <strong>"${u.fromRaw}"</strong> → <strong>"${u.toRaw}"</strong> -- claimed ${u.claimedMiles} mi `
+                        + `<span style="color:#999;">(${u.reason === 'no_distance_data' ? 'site matched, no distance data on file' : 'could not identify this stop'})</span>`
                         + `</div>`
                     ).join('');
                     return `<div style="background:#111; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:10px 14px; margin-bottom:10px;">`
@@ -3173,9 +3205,12 @@ ${mergeCellsXml}
                         + `<div style="color:#ccc; font-size:13px; margin-top:6px;">`
                         + `${r.matched_legs}/${r.total_legs} legs matched · claimed ${r.total_claimed_miles} mi vs expected ~${r.total_expected_miles} mi`
                         + (unmatchedCount ? ` · ${unmatchedCount} unmatched` : '')
+                        + (resolvedCount ? ` · ${resolvedCount} resolved via closed tickets` : '')
                         + ` · <span style="color:${statusColor}; font-weight:600;">${flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine')}</span>`
                         + `</div>`
                         + flagRows
+                        + resolvedRows
+                        + unmatchedRows
                         + `</div>`;
                 }).join('');
             } catch (err) {
