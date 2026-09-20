@@ -250,7 +250,7 @@ function nextWorkDayStrForSiteCode(siteCode) {
 // swept sibling, right after that sibling's site_id is corrected.
 async function autoAddTicketToBoard({
   supabase, siteId, ticketKind, dueDateRaw, rawSiteCode, woNum, newTicketId,
-  receivedAtIso, issueCategory, issueDetail, description,
+  receivedAtIso, issueCategory, issueDetail, description, slaEndIso,
 }) {
         // As of 2026-09-10 also covers install/site_survey tickets, once
         // they've been given a placeholder site (see lib/placeholder-sites.js
@@ -303,6 +303,30 @@ async function autoAddTicketToBoard({
                 } else {
                   dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
                 }
+              } else if ((ticketKind || 'trouble') === 'trouble' && slaEndIso) {
+                // 2026-09-19 fix: trouble tickets used to fall straight into
+                // the bare else branch below (nextWorkDayStrForSiteCode),
+                // which only checks whether TODAY is a covered calendar day
+                // at all -- it has zero idea what TIME it is. GA has
+                // Saturday on-call coverage (SAT_STATES), so a trouble
+                // ticket received Saturday evening, well after the 5 PM
+                // close, was still landing on TODAY's (Saturday) board --
+                // even though calculateSlaDeadline (which IS business-
+                // hours-aware) had already correctly worked out the real
+                // deadline was Monday. Confirmed live: WO 00152903 (GA1038)
+                // and WO 00152905 (GA1014), both received Saturday evening,
+                // both auto-added to Saturday's dispatch_date while their
+                // own sla_ends_at correctly read Monday -- invisible from
+                // Monday's board (where Mark was actually looking) even
+                // though they showed correctly on the state console and
+                // fired the watchdog SMS (both read the ticket row
+                // directly, not the assignment's dispatch_date). Using the
+                // ticket's own already-computed SLA deadline's calendar day
+                // (in the site's local timezone) instead wires the same,
+                // correct answer into where the board actually places it.
+                const tzForSla = getTimezoneForSiteCode(rawSiteCode);
+                const p = getZonedParts(new Date(slaEndIso), tzForSla);
+                dispatchDateStr = `${p.year}-${String(p.month).padStart(2,'0')}-${String(p.day).padStart(2,'0')}`;
               } else {
                 dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
               }
@@ -1312,7 +1336,7 @@ exports.handler = async (event) => {
       }
     }
 
-    console.log(`[mailgun-inbound] Function version: v177-re-dispatch-list-fix`);
+    console.log(`[mailgun-inbound] Function version: v178-trouble-ticket-sla-dispatch-date`);
     console.log(`[mailgun-inbound] From: ${sender} | Subject: ${subject}`);
     console.log(`[mailgun-inbound] Body length: ${effectiveBody.length} chars`);
 
@@ -1938,7 +1962,7 @@ exports.handler = async (event) => {
           try {
             const { data: siblings } = await supabase
               .from('tickets')
-              .select('id, address, wo_number, ticket_kind, due_at, issue_category, issue_detail, description, received_at')
+              .select('id, address, wo_number, ticket_kind, due_at, sla_ends_at, issue_category, issue_detail, description, received_at')
               .is('site_id', null)
               .neq('wo_number', parsed.woNum)
               .eq('status', 'open');
@@ -1966,6 +1990,11 @@ exports.handler = async (event) => {
                       siteId: matchedByAddress.id,
                       ticketKind: sib.ticket_kind,
                       dueDateRaw: sib.due_at,
+                      // 2026-09-19: carried through for the same reason as
+                      // the primary call site below -- a swept trouble-kind
+                      // sibling deserves the same SLA-aware placement, not
+                      // just maintenance/install/site_survey siblings.
+                      slaEndIso: sib.sla_ends_at,
                       rawSiteCode: null, // swept siblings never had an embedded site code -- that's why they needed the address sweep in the first place
                       woNum: sib.wo_number,
                       newTicketId: sib.id,
@@ -2013,6 +2042,14 @@ exports.handler = async (event) => {
             dueDateRaw: ['install', 'site_survey'].includes(parsed.ticketKind)
               ? (parsed.earliestStartRaw || parsed.dueDateRaw)
               : parsed.dueDateRaw,
+            // 2026-09-19 fix: pass the ticket's own already-computed,
+            // business-hours-aware SLA deadline through so a plain trouble
+            // ticket lands on the board day its real deadline falls on,
+            // not just whatever day today happens to be. See the long
+            // comment in autoAddTicketToBoard's dispatchDateStr branch for
+            // the full story (GA1038/GA1014, received Saturday evening,
+            // previously landed on Saturday's board instead of Monday's).
+            slaEndIso: parsed.slaEnd || null,
             rawSiteCode: dateHelperSiteCode,
             woNum: parsed.woNum,
             newTicketId: ticketRowFetched ? ticketRowFetched.id : null,
