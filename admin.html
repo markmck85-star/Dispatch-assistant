@@ -107,6 +107,7 @@
             <button id="tabRepeatissues" onclick="switchTab('repeatissues')">⚠️ Repeat Issues</button>
             <button id="tabUnmatchedsites" onclick="switchTab('unmatchedsites')">🔍 Unmatched Sites</button>
             <button id="tabRestockschedule" onclick="switchTab('restockschedule')">🔄 Restock Schedule</button>
+            <button id="tabMileagecheck" onclick="switchTab('mileagecheck')">🚗 Mileage Check</button>
         </div>
 
         <!-- LOCATIONS TAB -->
@@ -722,6 +723,29 @@
                     <div id="ctResultsSummary" style="color:#ccc; font-size:13px; line-height:1.6;"></div>
                     <div id="ctReviewList" style="margin-top:10px;"></div>
                 </div>
+
+                <div style="margin-top:24px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.12);">
+                    <h3 style="font-size:14px; color:#f0f0f0; margin-bottom:6px;">🗂️ BlueFolder OTC / Testing-Station Sync</h3>
+                    <p style="color:#aaa;font-size:12px;margin:0 0 10px 0;">
+                        Separate pipeline covering non-Salesforce sites (testing stations, OTC/counter printers). Runs
+                        automatically every day, pulling closed BlueFolder Service Requests into a staging table --
+                        this doesn't yet feed the main closed-ticket view above, it's reference data for a future
+                        matching/display pass.
+                    </p>
+                    <div id="bfStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin-bottom:10px;">Loading…</div>
+                    <button class="big-btn" id="bfRefreshBtn" onclick="bfLoadStatus()" style="background:#3a3a3a;">Refresh Status</button>
+
+                    <div style="margin-top:16px; padding-top:14px; border-top:1px dashed rgba(255,255,255,0.12);">
+                        <p style="color:#aaa;font-size:12px;margin:0 0 8px 0;">
+                            The daily sync only pulls forward from whenever it first ran. To pull in older closed
+                            tickets, run backfill chunks one at a time (BlueFolder caps each request at ~6 months) --
+                            each click walks further back and reports what it actually found, since BlueFolder history
+                            has some known gaps from past cleanup and there's no way to know the real depth in advance.
+                        </p>
+                        <button class="big-btn" id="bfBackfillBtn" onclick="bfRunBackfillChunk()" style="background:#7a3b1e;">Run Backfill Chunk (~6 months further back)</button>
+                        <div id="bfBackfillStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin-top:10px;"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -816,6 +840,31 @@
                 </div>
                 <div id="rsStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
                 <div id="rsResults"></div>
+            </div>
+        </div>
+
+        <!-- MILEAGE CHECK TAB -->
+        <div id="sectionMileagecheck" class="section">
+            <div class="form-section">
+                <h2>🚗 Mileage Check</h2>
+                <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
+                    A ballpark sanity check against each technician's biweekly mileage log, not a precise audit --
+                    catches an odometer/mileage number that's wildly off (a mistyped digit, a transposed pair, a
+                    negative-mileage leg) by comparing each drive against the known distance between those two
+                    stops. Small differences from lunch detours or a mid-route errand are expected and won't be
+                    flagged. Timesheets forwarded to dispatch@mcrdispatch.net (filename containing "_Expense_")
+                    are picked up automatically -- use the upload below to test one manually or reprocess an older file.
+                </p>
+
+                <label for="mcFileInput">Upload timesheet (.xlsx):</label>
+                <input type="file" id="mcFileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="mcHandleFile(this.files[0])" style="width:100%;padding:8px;margin-bottom:12px;">
+                <div id="mcUploadStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin-bottom:16px;">Ready.</div>
+
+                <div style="padding-top:14px; border-top:1px solid rgba(255,255,255,0.12);">
+                    <h3 style="font-size:14px; color:#f0f0f0; margin-bottom:8px;">Recent Reports</h3>
+                    <button class="big-btn" onclick="mcLoadReports()" style="background:#3a3a3a; margin-bottom:10px;">Refresh</button>
+                    <div id="mcReportsList" style="color:#ccc; font-size:13px;">Loading…</div>
+                </div>
             </div>
         </div>
 
@@ -2806,7 +2855,7 @@ ${mergeCellsXml}
 
         // Load notifications when tab opens
         var _origSwitchTab = switchTab;
-        switchTab = function(tab) { _origSwitchTab(tab); if (tab === 'notifications') loadNotifRecipients(); };
+        switchTab = function(tab) { _origSwitchTab(tab); if (tab === 'notifications') loadNotifRecipients(); if (tab === 'closedtickets') bfLoadStatus(); if (tab === 'mileagecheck') mcLoadReports(); };
 
         // --- CLOSED TICKETS IMPORT ---
         let ctParsedRows = null;
@@ -2952,6 +3001,186 @@ ${mergeCellsXml}
                 statusEl.textContent = 'Error during re-check: ' + err.message + `\n(Checked ${totalProcessed} rows before failing, ${totalChanged} fixed so far -- safe to run again, it will continue correctly.)`;
             }
             btn.disabled = false;
+        }
+
+        // 2026-09-20: BlueFolder OTC/testing-station sync status + manual
+        // backfill trigger -- see get-bluefolder-sync-status.js and
+        // bluefolder-service-requests-backfill.js for the backend side.
+        // _bfNextChunkEndDate tracks where the next backfill chunk should
+        // pick up; starts undefined so the first click uses that
+        // function's own default (right behind the daily sync's own
+        // rolling window).
+        let _bfNextChunkEndDate = null;
+
+        function bfFmtDate(iso) {
+            if (!iso) return 'never';
+            return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+
+        async function bfLoadStatus() {
+            const el = document.getElementById('bfStatus');
+            el.textContent = 'Loading…';
+            try {
+                const res = await fetch('/.netlify/functions/get-bluefolder-sync-status');
+                const data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                const closedRange = (data.earliestClosed && data.latestClosed)
+                    ? `${bfFmtDate(data.earliestClosed)} – ${bfFmtDate(data.latestClosed)}`
+                    : 'no records yet';
+                el.textContent = `Last synced: ${bfFmtDate(data.lastSyncedAt)}\n`
+                    + `${data.totalRows} record${data.totalRows === 1 ? '' : 's'} on file (closed ${closedRange})\n`
+                    + `${data.needsReviewCount} still need${data.needsReviewCount === 1 ? 's' : ''} a site match`;
+            } catch (err) {
+                el.textContent = 'Error loading status: ' + err.message;
+            }
+        }
+
+        async function bfRunBackfillChunk() {
+            const btn = document.getElementById('bfBackfillBtn');
+            const statusEl = document.getElementById('bfBackfillStatus');
+            btn.disabled = true;
+            statusEl.textContent = 'Requesting older records from BlueFolder…';
+            try {
+                const body = _bfNextChunkEndDate ? { chunkEndDate: _bfNextChunkEndDate } : {};
+                const res = await fetch('/.netlify/functions/bluefolder-service-requests-backfill', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error((data.errors && data.errors.join('; ')) || data.error || ('HTTP ' + res.status));
+                _bfNextChunkEndDate = data.nextChunkEndDate;
+                let msg = `Checked ${data.chunkStart} through ${data.chunkEnd}: found ${data.fetched}, saved ${data.upserted}.`;
+                if (data.fetched === 0) {
+                    msg += '\n\nNo records in that window -- could be a real quiet period, or a gap from past BlueFolder cleanup. Click again to keep walking further back, or stop here if this looks far enough.';
+                } else {
+                    msg += `\n\nClick again to go further back (next chunk ends ${data.nextChunkEndDate}).`;
+                }
+                if (data.errors && data.errors.length) msg += '\n\nErrors: ' + data.errors.join('; ');
+                statusEl.textContent = msg;
+                bfLoadStatus();
+            } catch (err) {
+                statusEl.textContent = 'Error: ' + err.message + ' (safe to try again -- nothing already saved is lost).';
+            }
+            btn.disabled = false;
+        }
+
+        // 2026-09-20: Technician Mileage Check tab. mcExtractLegsFromGrid
+        // is the browser-side twin of lib/mileage-check.js's
+        // extractMileageLegs (Node) -- kept as two copies rather than one
+        // shared module since one runs in the browser (via the SheetJS
+        // global already loaded for the Closed Tickets tab) and the other
+        // in a Netlify Function (via the `xlsx` npm package). Any change
+        // to the day-block/leg-row parsing logic needs to be made in BOTH
+        // places -- see that file's own header for the quirks this
+        // handles (the weekday-name/actual-date split across two rows,
+        // day-off placeholder rows, etc).
+        function mcExtractLegsFromGrid(grid) {
+            let technicianNameRaw = null;
+            for (const row of grid) {
+                if (row[0] && String(row[0]).trim().toUpperCase() === 'NAME:') {
+                    technicianNameRaw = String(row[1] || '').trim();
+                    break;
+                }
+            }
+            const legs = [];
+            let currentDate = null;
+            for (const row of grid) {
+                const a = row[0], b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
+                if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break;
+                if (a instanceof Date && !isNaN(a)) currentDate = a;
+                const fromRaw = typeof b === 'string' ? b.trim() : '';
+                const toRaw = typeof d === 'string' ? d.trim() : '';
+                if (fromRaw && toRaw && typeof f === 'number') {
+                    legs.push({
+                        date: currentDate ? currentDate.toISOString().slice(0, 10) : null,
+                        fromRaw, toRaw,
+                        odometerStart: typeof c === 'number' ? c : null,
+                        odometerEnd: typeof e === 'number' ? e : null,
+                        claimedMiles: f,
+                    });
+                }
+            }
+            return { technicianNameRaw, legs };
+        }
+
+        function mcHandleFile(file) {
+            if (!file) return;
+            const statusEl = document.getElementById('mcUploadStatus');
+            statusEl.textContent = `Reading ${file.name}…`;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+                    const sheetName = wb.SheetNames.find(n => /mileage/i.test(n)) || wb.SheetNames[0];
+                    const ws = wb.Sheets[sheetName];
+                    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+                    const { technicianNameRaw, legs } = mcExtractLegsFromGrid(grid);
+                    if (!technicianNameRaw || !legs.length) {
+                        statusEl.textContent = 'No NAME/legs found -- is this the expected mileage-log template? (checked sheet: ' + sheetName + ')';
+                        return;
+                    }
+                    statusEl.textContent = `Parsed ${legs.length} legs for ${technicianNameRaw}. Comparing against known distances…`;
+                    const res = await fetch('/.netlify/functions/process-mileage-timesheet', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ technicianNameRaw, legs, sourceFilename: file.name }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                    const r = data.report;
+                    statusEl.textContent = `Done. ${r.matched_legs}/${r.total_legs} legs matched. `
+                        + `Claimed ${r.total_claimed_miles} mi vs. expected ~${r.total_expected_miles} mi (matched legs only). `
+                        + `${r.flagged_legs.length} flagged for review.`;
+                    mcLoadReports();
+                } catch (err) {
+                    statusEl.textContent = 'Error: ' + err.message;
+                }
+            };
+            reader.onerror = () => { statusEl.textContent = 'Could not read file.'; };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function mcFmtDate(iso) {
+            if (!iso) return '—';
+            return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        async function mcLoadReports() {
+            const el = document.getElementById('mcReportsList');
+            el.textContent = 'Loading…';
+            try {
+                const res = await fetch('/.netlify/functions/get-mileage-reports?limit=25');
+                const data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                if (!data.reports.length) { el.innerHTML = '<div style="color:#888;">No reports yet.</div>'; return; }
+                el.innerHTML = data.reports.map(r => {
+                    const flagCount = (r.flagged_legs || []).length;
+                    const unmatchedCount = (r.unmatched_legs || []).length;
+                    const statusColor = flagCount > 0 ? '#e05555' : (r.needs_review ? '#ffa500' : '#4caf50');
+                    const flagRows = (r.flagged_legs || []).map(f =>
+                        `<div style="padding:6px 10px; background:#2a1010; border-left:3px solid #e05555; border-radius:0 4px 4px 0; margin-top:4px; font-size:12px;">`
+                        + `${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> -- `
+                        + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
+                        + (f.reason === 'negative_or_zero' ? ' -- negative/zero mileage' : ` -- ${f.ratio}x expected`)
+                        + `</div>`
+                    ).join('');
+                    return `<div style="background:#111; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:10px 14px; margin-bottom:10px;">`
+                        + `<div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">`
+                        + `<strong style="color:#f0f0f0;">${r.technicianName || r.technician_name_raw || 'Unknown tech'}</strong>`
+                        + `<span style="color:#888; font-size:12px;">period ending ${mcFmtDate(r.pay_period_end)} · ${r.source === 'email' ? '📧 auto' : '📁 manual'}${r.source_filename ? ' · ' + r.source_filename : ''}</span>`
+                        + `</div>`
+                        + `<div style="color:#ccc; font-size:13px; margin-top:6px;">`
+                        + `${r.matched_legs}/${r.total_legs} legs matched · claimed ${r.total_claimed_miles} mi vs expected ~${r.total_expected_miles} mi`
+                        + (unmatchedCount ? ` · ${unmatchedCount} unmatched` : '')
+                        + ` · <span style="color:${statusColor}; font-weight:600;">${flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine')}</span>`
+                        + `</div>`
+                        + flagRows
+                        + `</div>`;
+                }).join('');
+            } catch (err) {
+                el.textContent = 'Error loading reports: ' + err.message;
+            }
         }
 
     </script>
