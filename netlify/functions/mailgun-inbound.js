@@ -2340,7 +2340,7 @@ exports.handler = async (event) => {
           }
 
           const dateLabel = receivedAt.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
-          const dlBody = `MCR Dispatch: New dispatch list for ${dateLabel} received and processed — check the app for today's dispatches. https://mcrdispatch.net`;
+          const dlBody = `MCR Dispatch: New dispatch list for ${dateLabel} received — open the app to load and dispatch it (not yet on the board automatically). https://mcrdispatch.net`;
           console.log(`[mailgun-inbound] Dispatch-list SMS recipients: ${dlRecipients.length}`);
           for (const addr of dlRecipients) {
             const ok = await sendSms(addr.trim(), dlBody, 'MCR Dispatch');
