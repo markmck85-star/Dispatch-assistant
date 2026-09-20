@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.81 (blobs-159)</title>
+    <title>MCR Dispatch Hub v9.82 (blobs-160)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -301,9 +301,23 @@
             <source src="logo-loading.mp4" type="video/mp4">
         </video>
     </div>
+    <script>
+        // Only play the boot splash once per browser tab session. Every
+        // page here (dispatch board, state console, watchdog, etc.) is a
+        // real page load, not a SPA route, so simply navigating back to
+        // this page used to replay the splash video every single time.
+        // sessionStorage persists across page loads in this tab but clears
+        // when the tab/browser closes, so a genuine fresh app start still
+        // gets the animation. Runs inline, immediately, before the overlay
+        // paints, so skipped runs show nothing at all -- no flash.
+        if (sessionStorage.getItem('mcrSplashShown')) {
+            var _splash = document.getElementById('appSplashOverlay');
+            if (_splash) _splash.style.display = 'none';
+        }
+    </script>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.81</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-159</div>
+        <h1>MCR Dispatch Hub v9.82</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-160</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -1707,6 +1721,11 @@ function distanceMatrixStatus(state) {
             window.__bootLoading = false;
             const bar = document.getElementById('bootStatus');
             if (bar) bar.hidden = true;
+
+            // Mark the splash as shown for the rest of this tab session, so
+            // navigating back to this page later (from the state console,
+            // watchdog, etc.) skips it instead of replaying it.
+            sessionStorage.setItem('mcrSplashShown', '1');
 
             // Make sure the page is at the top once the splash clears —
             // something during boot (e.g. an input grabbing focus) can
