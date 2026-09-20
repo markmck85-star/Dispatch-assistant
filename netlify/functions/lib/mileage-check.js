@@ -58,7 +58,18 @@
  *   error, and kept separate so it's never miscounted as "flagged."
  */
 
-const TOKEN_ALIASES = { co: 'county', cnty: 'county', ave: 'avenue', blvd: 'boulevard', dr: 'drive', rd: 'road', st: 'street', mt: 'mount', hwy: 'highway', pkwy: 'parkway' };
+const TOKEN_ALIASES = {
+  co: 'county', cnty: 'county', ave: 'avenue', blvd: 'boulevard', dr: 'drive', rd: 'road',
+  st: 'street', mt: 'mount', hwy: 'highway', pkwy: 'parkway',
+  // 2026-09-20: directional abbreviations ("N. Decatur", "S Cobb" -- both
+  // real site names already in this database) previously tokenized to a
+  // bare "n"/"s", which almost never overlaps the spelled-out
+  // "north"/"south" a technician actually writes -- silently weakening a
+  // real match's score for no good reason. Single-letter tokens are
+  // unambiguous enough in this context (a site-name word list, not free
+  // prose) that this carries negligible risk of misreading something else.
+  n: 'north', s: 'south', e: 'east', w: 'west',
+};
 function tokenize(s) {
   return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => TOKEN_ALIASES[t] || t);
 }
@@ -66,6 +77,31 @@ function tokenize(s) {
 const MIN_RATIO = 0.4;
 const MAX_RATIO = 2.5;
 const SITE_MATCH_THRESHOLD = 0.65;
+
+// 2026-09-20: found via a real false positive on Mark's own timesheet --
+// "Lawrenceville Suwanee Kroger" (a real place, not yet in `sites` at
+// all) scored 0.667 against "Gwinnett County Kroger - Lawrenceville
+// Lilburn" (a DIFFERENT, unrelated Kroger) purely because "Lawrenceville"
+// and "Kroger" overlapped, even though "Suwanee" and "Lilburn" -- the
+// actual distinguishing place names -- share nothing. Generic chain/
+// site-type words like "Kroger" or "County" appear in dozens of this
+// state's site names and should never be able to carry a match on their
+// own; they're down-weighted here (not removed outright, since a real
+// match like "State Bridge Kroger" vs "Fulton County Kroger State
+// Bridge" should still get a little credit from the shared "Kroger") so
+// a match has to be driven by the genuinely distinctive place-name words.
+// Scoped to this function only -- other site-matching code elsewhere in
+// this app (Salesforce/BlueFolder imports) has its own independent copy
+// of this scoring and isn't touched by this fix.
+const GENERIC_TERM_WEIGHT = 0.15;
+const GENERIC_TERMS = new Set([
+  'kroger', 'publix', 'walmart', 'target', 'county', 'cnty', 'co',
+  'tag', 'office', 'dmv', 'mv', 'department', 'motor', 'vehicle',
+  'tax', 'collector', 'market', 'marketplace', 'store',
+]);
+function weightedTokenSum(tokens) {
+  return tokens.reduce((sum, t) => sum + (GENERIC_TERMS.has(t) ? GENERIC_TERM_WEIGHT : 1), 0);
+}
 
 function haversineMiles(lat1, lng1, lat2, lng2) {
   if ([lat1, lng1, lat2, lng2].some((v) => v == null || isNaN(v))) return null;
@@ -86,18 +122,62 @@ function isHomeLabel(rawLabel, homeAddress) {
   return homeAddress.toLowerCase().includes(label);
 }
 
-/** Best site match for a raw place name, scoped to the given candidate sites. */
+/**
+ * Best site match for a raw place name, scoped to the given candidate
+ * sites. Each site may carry a `.aliases` array (other colloquial names
+ * already taught to the system, e.g. via a previous positional
+ * resolution or a manually-added one) -- scored the same way as the
+ * site's own `.name`, taking the BEST result across name + every alias.
+ *
+ * 2026-09-20: added per Mark's real example -- a site's real `name` field
+ * is often generic or even actively misleading (a site's naming
+ * convention frequently follows the STREET it's on rather than the city/
+ * county it's actually in -- "Covington Highway Kroger" is really in
+ * Lithonia, not Covington), so a technician's own wording can fuzzy-match
+ * an ALIAS much better than it ever could the bare site name. Previously
+ * aliases only fed the exact-match fast path in evaluateMileageReport;
+ * a near-variant of a known alias (a typo, a different word order,
+ * dropped punctuation) fell all the way through to matching against just
+ * the site's own name, which is exactly the gap that let "Lawrenceville
+ * Suwanee Kroger" -- close to an existing alias, not identical to it --
+ * go unmatched even with a relevant alias already on file.
+ */
 function matchSiteByName(rawName, candidateSites) {
   const targetTokens = tokenize(rawName);
   if (!targetTokens.length) return null;
+  const targetWeight = weightedTokenSum(targetTokens);
   let best = null, bestScore = 0;
   for (const site of candidateSites) {
-    const siteTokens = tokenize(site.name);
-    const setA = new Set(targetTokens), setB = new Set(siteTokens);
-    const intersection = [...setA].filter((t) => setB.has(t)).length;
-    const smaller = Math.min(setA.size, setB.size);
-    const score = smaller > 0 ? intersection / smaller : 0;
-    if (score > bestScore) { bestScore = score; best = site; }
+    const namesToTry = [site.name, ...(site.aliases || [])];
+    for (const candidateName of namesToTry) {
+      const siteTokens = tokenize(candidateName);
+      const setA = new Set(targetTokens), setB = new Set(siteTokens);
+      const intersectionTokens = [...setA].filter((t) => setB.has(t));
+      const intersectionWeight = weightedTokenSum(intersectionTokens);
+      const siteWeight = weightedTokenSum(siteTokens);
+      const smallerWeight = Math.min(targetWeight, siteWeight);
+      const overlapScore = smallerWeight > 0 ? intersectionWeight / smallerWeight : 0;
+      // 2026-09-20: found via a second real false positive on the SAME
+      // technician's file -- a short, generic alias ("Lawrenceville
+      // Kroger", for a DIFFERENT, real site) that happens to be a pure
+      // SUBSET of a longer target's tokens ("Lawrenceville Suwanee
+      // Kroger") scores a perfect 1.0 on the overlap-coefficient above,
+      // regardless of how much of the target it actually explains --
+      // dividing by the SMALLER side means any short candidate fully
+      // contained in a longer name auto-wins, even missing the one word
+      // ("Suwanee") that actually distinguishes the real place. Also
+      // requiring targetCoverage (how much of what the TECHNICIAN typed
+      // this candidate accounts for) to clear the same bar closes this
+      // without reopening the original generic-word bug: a genuine short
+      // colloquial name (target IS the short side) still scores 1.0/1.0
+      // coverage against a longer official name, since coverage is
+      // computed against whichever side is actually the technician's own
+      // wording -- this only bites when the CANDIDATE is short relative
+      // to a longer, more specific target.
+      const targetCoverage = targetWeight > 0 ? intersectionWeight / targetWeight : 0;
+      const score = Math.min(overlapScore, targetCoverage);
+      if (score > bestScore) { bestScore = score; best = site; }
+    }
   }
   return best && bestScore >= SITE_MATCH_THRESHOLD ? best : null;
 }
@@ -232,13 +312,25 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // including aliases THIS function itself writes below once resolved
   // via the closed-ticket report -- so a name that had to be resolved the
   // hard way once is recognized instantly on every later timesheet.
+  //
+  // Also attaches each site's aliases as `.aliases` so matchSiteByName's
+  // fuzzy scoring can try them too, not just the exact-match path above --
+  // a site's real `name` is often generic or even misleading (naming
+  // frequently follows the street it's on, not the city/county it's
+  // actually in -- "Covington Highway Kroger" is really in Lithonia), so
+  // a near-variant of a known alias can score far better against that
+  // alias than against the bare site name alone.
   let aliasMap = {}; // lowercased alias -> site row
   if (candidateSites.length) {
     const { data: aliasRows } = await supabase
       .from('site_aliases').select('alias, site_id').in('site_id', candidateSites.map((s) => s.id));
     const siteById = Object.fromEntries(candidateSites.map((s) => [s.id, s]));
+    for (const s of candidateSites) s.aliases = [];
     for (const a of aliasRows || []) {
-      if (siteById[a.site_id]) aliasMap[a.alias.toLowerCase()] = siteById[a.site_id];
+      if (siteById[a.site_id]) {
+        aliasMap[a.alias.toLowerCase()] = siteById[a.site_id];
+        siteById[a.site_id].aliases.push(a.alias);
+      }
     }
   }
 
