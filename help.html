@@ -80,7 +80,7 @@
 <body>
 <header>
   <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.79 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>v9.84 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
@@ -160,7 +160,12 @@
     <p>Individual logins have been added per person.</p>
 
     <h3>Inbound Dispatch via Email</h3>
-    <p>Forward any dispatch list or trouble ticket email to <strong>dispatch@mcrdispatch.net</strong> and the app processes it automatically. A gold banner appears at the top when a new dispatch list arrives — tap <strong>Load</strong> to import it instantly.</p>
+    <p>Forward any dispatch list or trouble/maintenance ticket email to <strong>dispatch@mcrdispatch.net</strong>. What happens next depends on the type:</p>
+    <ul>
+      <li><strong>Trouble, maintenance, install, and site-survey tickets</strong> are added to that site's board entry automatically -- no action needed.</li>
+      <li><strong>The daily bulk restock dispatch list is not auto-processed onto the board.</strong> It's received and cached for the app to pick up. A gold banner appears at the top of the dispatch board saying a new list has been received -- tap <strong>Load</strong> to pull it into the Location Codes box, then <strong>Generate Dispatches</strong> as usual to actually create the day's stops.</li>
+    </ul>
+    <div class="note"><strong>Note:</strong> the banner checks whether the cached list's own date has already passed before showing it as "new." If it looks like an already-handled list (e.g. opening the app for the first time in a few days), you'll get a confirmation prompt before it reloads, since reprocessing an old list unnecessarily is easy to do by mistake. Reloading is safe either way -- any stop still open for a site gets updated in place rather than duplicated.</div>
 
     <h3>Trouble Ticket SMS Alerts</h3>
     <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an SMS alert fires automatically to configured recipients (set per-state, per-person, with active-hours windows in Admin → Notifications) with the WO number, site name, issue, and SLA deadline.</p>
@@ -256,8 +261,9 @@
     <p>Available on both the dispatch board and the State Console, once a board is generated for a real date.</p>
     <h3>Typed or spoken commands</h3>
     <p>Type or tap the mic and speak a plain-language instruction -- e.g. <em>"move stop 2 from Robert to Sean"</em> -- and tap <strong>Run</strong>. The assistant applies the change directly to the board and repaints the map. Voice input runs entirely in the browser; nothing is recorded or sent as audio.</p>
+    <div class="note"><strong>Note:</strong> moving a stop this way -- or applying an Analyze Routes suggestion below -- automatically re-sorts both the giving and receiving technician's remaining stops into a sensible driving order right away. No separate Sort click needed afterward.</div>
     <h3>🧭 Analyze Routes</h3>
-    <p>Scans the currently generated board and suggests specific single-stop swaps between two technicians where doing so would reduce total fleet mileage. Each suggestion shows the site, which tech it would move from/to, and the net mileage change, with its own <strong>Apply</strong> button -- apply just the ones that make sense, and tap again to revert (the button relabels itself). It won't suggest moving a stop onto someone marked unavailable that day.</p>
+    <p>Scans the currently generated board and suggests specific single-stop swaps between two technicians where doing so would reduce total fleet mileage, or meaningfully even out a lopsided day (one tech nearly idle while another is overloaded) even when the mileage math alone is close to neutral. Each suggestion shows the site, which tech it would move from/to, and the net mileage change, with its own <strong>Apply</strong> button -- apply just the ones that make sense, and tap again to revert (the button relabels itself). It won't suggest moving a stop onto someone marked unavailable that day, won't suggest a swap that would push the receiving tech into likely overtime for the day, and won't hand more than a couple of stops to the same tech in a single pass.</p>
     <div class="note"><strong>Note:</strong> suggestion quality depends on that state having a distance matrix built (Admin Panel → Distance Matrix). Haversine (free) is enough for reasonable suggestions; real driving-distance data (paid) sharpens them further. A state with no matrix built yet has no real distance data to suggest swaps from.</div>
   </section>
 
@@ -280,7 +286,7 @@
     <div class="step"><strong>Step 2.</strong> Paste the full trouble ticket email into the Location Codes field.</div>
     <div class="step"><strong>Step 3.</strong> Tap <strong>Generate Dispatches</strong>. The SLA end time is calculated automatically from the ticket's Earliest Start Permitted field.</div>
     <div class="step"><strong>Step 4.</strong> Tap <strong>✅ Messages</strong>. The tech message reads:</div>
-    <div class="msg-box">⚡ URGENT - Hey Nyzier, a trouble ticket for
+    <div class="msg-box">⚡ URGENT - Hey Randy, a trouble ticket for
 Cobb County Kroger Whitlock #455 just came in:
 
 1. Printer Jam (SLA ends Sat 1:27 PM)
@@ -309,10 +315,10 @@ Please acknowledge receipt.</div>
     <p>On Saturdays the availability board automatically marks everyone <strong>Not on call</strong> except the two scheduled on-call techs. Dispatch assignments only go to on-call techs.</p>
     <table>
       <tr><th>Saturdays</th><th>On-Call Techs</th><th>Comp Day</th></tr>
-      <tr><td>Odd (05/09, 05/23…)</td><td>Nyzier Moore + Sean Reich</td><td>Monday before</td></tr>
+      <tr><td>Odd (05/09, 05/23…)</td><td>Randy Thomas + Sean Reich</td><td>Monday before</td></tr>
       <tr><td>Even (05/16, 05/30…)</td><td>Omari Williams + Robert Medley</td><td>Thu before (Robert M.) / Mon before (Omari)</td></tr>
     </table>
-    <div class="note"><strong>Note:</strong> Robert Whitehead covers Savannah only and is not in the on-call rotation. He does not take a comp day.</div>
+    <div class="note"><strong>Note:</strong> Keontae Johnson covers Savannah only and is not in the on-call rotation. He does not take a comp day.</div>
   </section>
 
   <!-- ADMIN -->
@@ -480,7 +486,7 @@ Please acknowledge receipt.</div>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
       <li>Closing notes aren't currently available in the closed-ticket report, so full ticket history for a site still requires manually checking Salesforce.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 14, 2026 &nbsp;·&nbsp; v9.79</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 20, 2026 &nbsp;·&nbsp; v9.84</p>
   </section>
 
 </main>
