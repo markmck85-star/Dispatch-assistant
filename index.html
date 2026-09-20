@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.82 (blobs-160)</title>
+    <title>MCR Dispatch Hub v9.83 (blobs-161)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -317,7 +317,7 @@
     </script>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.82</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-160</div>
+        <h1>MCR Dispatch Hub v9.83</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-161</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -480,6 +480,11 @@
                      with plottable coordinates exists; the collapse state is
                      remembered in localStorage the same way the controls panel
                      does it. -->
+                <div id="resultsPanelLoading" style="display:flex; align-items:center; gap:10px; color:#888; font-size:13px; padding:30px 10px;">
+                    <span style="width:14px; height:14px; border:2px solid #444; border-top-color:#7ec8e3; border-radius:50%; display:inline-block; animation:resultsPanelSpin 0.8s linear infinite;"></span>
+                    Loading dispatch board…
+                </div>
+                <style>@keyframes resultsPanelSpin { to { transform: rotate(360deg); } }</style>
                 <div id="dispatchMapPanel" class="map-panel">
                     <div class="map-panel-head">
                         <span class="map-panel-title">&#x1F5FA;&#xFE0F; Map View</span>
@@ -3454,6 +3459,7 @@ function distanceMatrixStatus(state) {
                     : `No dispatches found for ${CURRENT_STATE} on ${dateLabel}. Check that a list has been loaded, or confirm the Dispatch Date.`;
                 resultsDiv.innerHTML = `<div class="error" style="color:red; padding:10px; border:1px solid red; border-radius:5px;">${emptyMessage}</div>`;
                 resultsDiv.classList.remove('hidden');
+                document.getElementById('resultsPanelLoading')?.remove();
                 if (unknownCodes.length > 0) setTimeout(() => showAddLocationPromptQueue(unknownCodes), 400);
                 return;
             }
@@ -4201,6 +4207,7 @@ function distanceMatrixStatus(state) {
             
             resultsDiv.innerHTML = html;
             resultsDiv.classList.remove('hidden');
+            document.getElementById('resultsPanelLoading')?.remove();
             if (preserveScroll) {
                 window.scrollTo(0, _savedScrollY);
             } else {
