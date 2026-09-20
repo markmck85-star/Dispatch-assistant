@@ -264,9 +264,42 @@
             .container { max-width: 2200px; }
             .tech-cards-grid { columns: 420px; column-gap: 20px; }
         }
+    
+        /* ── Fullscreen Boot/Splash Animation ── */
+        #appSplashOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 1;
+            transition: opacity 0.45s ease;
+            pointer-events: all;
+        }
+
+        #appSplashOverlay.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #appSplashVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
     </style>
 </head>
 <body>
+    <!-- Boot Animation Overlay -->
+    <div id="appSplashOverlay" aria-hidden="true">
+        <video id="appSplashVideo" autoplay muted loop playsinline preload="auto">
+            <source src="logo-loading.mp4" type="video/mp4">
+        </video>
+    </div>
+
     <div class="container">
         <h1>MCR Dispatch Hub v9.79</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-157</div>
         <div id="bootStatus" role="status" aria-live="polite">
@@ -1672,6 +1705,17 @@ function distanceMatrixStatus(state) {
             window.__bootLoading = false;
             const bar = document.getElementById('bootStatus');
             if (bar) bar.hidden = true;
+
+            // Fade out and release the splash video overlay
+            const splash = document.getElementById('appSplashOverlay');
+            const video = document.getElementById('appSplashVideo');
+            if (splash) {
+                splash.classList.add('fade-out');
+                setTimeout(() => {
+                    if (video) video.pause();
+                    splash.style.display = 'none';
+                }, 500);
+            }
         }
 
         // Kick off remote location load as early as possible.
