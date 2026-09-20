@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.83 (blobs-161)</title>
+    <title>MCR Dispatch Hub v9.85 (blobs-163)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -317,7 +317,7 @@
     </script>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.83</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-161</div>
+        <h1>MCR Dispatch Hub v9.85</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-163</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -2111,6 +2111,17 @@ function distanceMatrixStatus(state) {
                 // served later by an explicit button than by guessing from
                 // assignment rows that can exist for all kinds of reasons.
                 const today = new Date();
+                // 2026-09-20: no state ever has Sunday coverage (see
+                // isCoveredWorkDay's own "day === 0 -> never Sunday" rule,
+                // used server-side for the exact same reason) -- opening
+                // the app on a Sunday used to default straight to that
+                // empty day, showing no map and no technician tiles since
+                // nothing is ever dispatched then. Rolling forward to
+                // Monday here only changes the FALLBACK default; an
+                // explicit `handed` date (URL param or a pending date from
+                // sessionStorage, e.g. clicking through from a specific
+                // day) still wins below, unaffected by this.
+                if (today.getDay() === 0) today.setDate(today.getDate() + 1);
                 const y = today.getFullYear();
                 const m = String(today.getMonth() + 1).padStart(2, '0');
                 const d = String(today.getDate()).padStart(2, '0');
@@ -2151,25 +2162,31 @@ function distanceMatrixStatus(state) {
             return text.slice(match.index).replace(/^\s+/, '');
         }
 
-        function autoDetectDispatchDate(text) {
-            // Find all dates in MM/DD/YYYY format in the dispatch text
-            const dateMatches = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g) || [];
-            if (dateMatches.length === 0) return;
-
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            const todayStr = today.toISOString().split('T')[0];
-
-            // Count occurrences of each date
+        // 2026-09-20: extracted out of autoDetectDispatchDate so the inbound
+        // banner (checkForInboundDispatch, below) can also ask "what date is
+        // this text actually for" before deciding whether to present cached
+        // content as a genuinely NEW dispatch list. Returns null when no
+        // M/D/YYYY-style date appears anywhere in the text.
+        function extractMajorityDateStr(text) {
+            const dateMatches = (text || '').match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g) || [];
+            if (dateMatches.length === 0) return null;
             const counts = {};
             dateMatches.forEach(d => {
                 const parts = d.split('/');
                 const iso = parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0');
                 counts[iso] = (counts[iso] || 0) + 1;
             });
+            return Object.entries(counts).sort((a,b) => b[1]-a[1])[0][0];
+        }
 
-            // Find the majority date — most common date in the list
-            const majorityDate = Object.entries(counts).sort((a,b) => b[1]-a[1])[0][0];
+        function autoDetectDispatchDate(text) {
+            const majorityDate = extractMajorityDateStr(text);
+            if (!majorityDate) return;
+
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const todayStr = today.toISOString().split('T')[0];
+
             const dateInput = document.getElementById('dispatchDate');
             if (!dateInput) return;
 
@@ -4233,6 +4250,8 @@ function distanceMatrixStatus(state) {
         let _lastInboundKey = localStorage.getItem('lastSeenInboundKey') || null;
         let _inboundPollTimer = null;
         let _pendingInboundBody = null;
+        let _pendingInboundIsStale = false;
+        let _pendingInboundMajorityDate = null;
 
         function startInboundPolling() {
             checkForInboundDispatch();
@@ -4291,11 +4310,37 @@ function distanceMatrixStatus(state) {
 
                 // New dispatch — show banner
                 _pendingInboundBody = data.body;
+
+                // 2026-09-20: this endpoint just returns whatever the LATEST
+                // cached restock list is -- it has no idea whether the
+                // dispatcher's own browser has already loaded and acted on
+                // it days ago (the _lastInboundKey check above only tracks
+                // what THIS device has seen, not what's actually still
+                // outstanding). Over a weekend with no new list, that stale
+                // cached content gets presented as "New dispatch received"
+                // to anyone opening a fresh browser/device. Flag it here by
+                // comparing the list's own majority Restock-By date against
+                // today -- a list dated before today is very likely already
+                // fully processed, not a new one. Doesn't hide the banner
+                // (a genuinely new list occasionally has an odd date mix),
+                // just marks it so loadInboundDispatch() below can confirm
+                // before acting on it.
+                const majorityDate = extractMajorityDateStr(data.body);
+                const today = new Date(); today.setHours(0,0,0,0);
+                const todayStr = today.toISOString().split('T')[0];
+                _pendingInboundIsStale = !!(majorityDate && majorityDate < todayStr);
+                _pendingInboundMajorityDate = majorityDate;
+
                 const detail = document.getElementById('inboundBannerDetail');
                 if (detail) {
                     const states = (data.states || []).join(', ') || 'unknown';
                     const when = data.receivedAt ? new Date(data.receivedAt).toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}) : '';
-                    detail.textContent = `States: ${states}${when ? ' · received ' + when : ''}`;
+                    let text = `States: ${states}${when ? ' · received ' + when : ''}`;
+                    if (_pendingInboundIsStale) {
+                        const label = new Date(majorityDate + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+                        text += ` ⚠️ Dated ${label} — may already be loaded`;
+                    }
+                    detail.textContent = text;
                 }
                 const banner = document.getElementById('inboundBanner');
                 if (banner) banner.style.display = '';
@@ -4306,6 +4351,19 @@ function distanceMatrixStatus(state) {
 
         function loadInboundDispatch(bodyOverride) {
             var body = bodyOverride || _pendingInboundBody;
+            // 2026-09-20: bodyOverride is only ever passed by the internal
+            // re-fetch retry a few lines down (never by the banner's own
+            // Load button), so this guard only fires for a genuine banner
+            // click -- confirm before reprocessing a list whose own
+            // majority date has already passed, since that's very likely
+            // an already-handled list rather than a real new one.
+            if (!bodyOverride && _pendingInboundIsStale) {
+                const label = _pendingInboundMajorityDate
+                    ? new Date(_pendingInboundMajorityDate + 'T12:00:00').toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'})
+                    : 'an earlier date';
+                const proceed = confirm(`This dispatch list looks like it's dated ${label}, which has already passed — it may already be loaded. Load it again anyway?`);
+                if (!proceed) return;
+            }
             if (!body) {
                 fetch('/.netlify/functions/get-latest-dispatch')
                     .then(r => r.json())
