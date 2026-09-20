@@ -430,6 +430,9 @@
                 <a href="location-lookup.html" class="location-lookup-link" style="display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🔍 Location Lookup</a>
                 <a id="stateConsoleLink" href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
                 <a href="closing-email-reconstructor.html" class="closing-email-link" style="display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉️ Closing Notes</a>
+                <button type="button" onclick="generateFinalMessages()" class="messages-link" style="display:block; width:100%; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; border:none; cursor:pointer;">✅ Messages</button>
+                <a href="/admin.html" class="admin-panel-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
+                <a href="help.html" target="_blank" class="help-link" style="display:block; background:#181818; color:#aaa; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">❓ Help</a>
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
@@ -514,14 +517,6 @@
 
         <button type="button" id="showControlsBtn" onclick="toggleControls()" aria-label="Show controls">📁 Show Controls</button>
 
-        <div class="bottom-btns">
-            <a href="/admin.html" style="text-decoration:none;flex:1;" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">
-                <button class="big-btn" type="button" style="background:#6c757d;width:100%;">Admin Panel</button>
-            </a>
-            <a href="help.html" target="_blank" style="text-decoration:none;flex:1;">
-                <button class="big-btn" type="button" style="background:#444;width:100%;font-size:14px;">❓ Help</button>
-            </a>
-        </div>
     </div>
 
     <div id="printableReport"></div>
@@ -4214,14 +4209,6 @@ function distanceMatrixStatus(state) {
             html += renderActionSection(tomorrowEntries, '&#x2192; Pushed to Tomorrow This Session');
             html += renderActionSection(closedEntries,   '&#x2713; Completed / Removed Today');
 
-            const secondBtn = window.innerWidth >= 960
-                ? `<button class="big-btn" onclick="window.open('restock-tracker.html?state=' + CURRENT_STATE, '_blank')" style="background:#17a2b8; margin-top:0;">📊 Restock Tracker</button>`
-                : `<button class="big-btn" onclick="generateMobileReport()" style="background:#17a2b8; margin-top:0;">📄 Report</button>`;
-            html += `<div style="display:flex; gap:10px; margin-top:20px;">
-                        <button class="big-btn" onclick="generateFinalMessages()" style="background:#28a745; margin-top:0;">✅ Messages</button>
-                        ${secondBtn}
-                     </div>`;
-            
             resultsDiv.innerHTML = html;
             resultsDiv.classList.remove('hidden');
             document.getElementById('resultsPanelLoading')?.remove();
