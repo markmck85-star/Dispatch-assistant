@@ -363,12 +363,14 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     for (const [k, rows] of Object.entries(byPair)) siteSiteDist[k] = pickBest(rows).distance_mi;
   }
 
-  function resolvePlace(rawLabel) {
+  // 2026-09-21: split out of the old combined resolvePlace -- home/alias
+  // checks are unambiguous and free (no DB round trip), so they still run
+  // first. Fuzzy name-matching (matchSiteByName) is deliberately NOT
+  // called here anymore -- see the precedence rationale below.
+  function resolveHomeOrAlias(rawLabel) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
     const aliasHit = aliasMap[String(rawLabel || '').trim().toLowerCase()];
-    if (aliasHit) return { type: 'site', site: aliasHit };
-    const site = matchSiteByName(rawLabel, candidateSites);
-    return site ? { type: 'site', site } : null;
+    return aliasHit ? { type: 'site', site: aliasHit } : null;
   }
 
   function expectedMilesFor(fromPlace, toPlace) {
@@ -391,27 +393,36 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     return null;
   }
 
-  // ── Pass 1: resolve every leg endpoint via home/alias/token-match ──────
+  // ── Pass 1: home + exact alias only (unambiguous, no guessing) ─────────
   const resolved = legs.map((leg) => ({
     leg,
-    fromPlace: resolvePlace(leg.fromRaw),
-    toPlace: resolvePlace(leg.toRaw),
+    fromPlace: resolveHomeOrAlias(leg.fromRaw),
+    toPlace: resolveHomeOrAlias(leg.toRaw),
   }));
 
-  // ── Pass 2: for anything still unresolved, try the closed-ticket report
-  // ──────────────────────────────────────────────────────────────────────
-  // Idea: a technician's mileage log for a day is a sequence of real
-  // stops; the closed-ticket report (site_visits) is an independent
-  // record of the same day's real visits, in the same real order. If a
-  // day's stop COUNT matches its visit COUNT exactly, position-in-day is
-  // a strong signal for which visit an unrecognized name refers to --
-  // "third stop of the day" is exactly Mark's own framing. Deliberately
-  // conservative: a mismatched count for that date means SOMETHING isn't
-  // accounted for (very possibly a real OTC/testing-station stop, which
-  // never appears in this report at all -- the exact gap this whole
-  // feature was built to route around) and positional resolution is
-  // skipped entirely for that date rather than risk an off-by-one
-  // silently mis-mapping every stop after the gap.
+  // ── Pass 2: position against the closed-ticket report, BEFORE fuzzy
+  // ── name-matching is even attempted ─────────────────────────────────
+  // 2026-09-21 reordering, per Mark: with many technicians each writing
+  // stop names their own way, a naming-based matcher has no real ceiling
+  // on how many variations/misspellings it needs to keep learning --
+  // every fix so far has been reactive, one technician's timesheet at a
+  // time. Position doesn't have that problem: a technician's mileage log
+  // for a day is a sequence of real stops, and the closed-ticket report
+  // (site_visits) is an INDEPENDENT record of the same day's real
+  // visits, in the same real order -- it doesn't care what words anyone
+  // used. So position is tried FIRST now, ahead of fuzzy matching, since
+  // it's grounded in verified data rather than a probabilistic guess;
+  // fuzzy matching is demoted to the last resort, for whatever position
+  // genuinely can't reach.
+  //
+  // The one thing position can't do is replace fuzzy matching entirely:
+  // it only works when a day's stop COUNT matches its visit COUNT
+  // exactly. A mismatched count (an OTC/testing-station stop that never
+  // reaches this report, a sync lag, an errand mixed in) means SOMETHING
+  // isn't accounted for, and guessing which stop is the odd one out would
+  // risk silently mis-mapping everything after it -- so a mismatched day
+  // is skipped for position entirely and falls through to fuzzy matching
+  // for every leg on it instead, same as before this reordering.
   const unresolvedLabelsByDate = {};
   for (const r of resolved) {
     if (!r.fromPlace) (unresolvedLabelsByDate[r.leg.date] = unresolvedLabelsByDate[r.leg.date] || new Set()).add(r.leg.fromRaw);
@@ -429,7 +440,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       .gte('started_at', datesNeedingLookup[0] + 'T00:00:00Z')
       .lte('started_at', datesNeedingLookup[datesNeedingLookup.length - 1] + 'T23:59:59Z')
       .order('started_at', { ascending: true });
-    if (visitErr) console.error('[mileage-check] site_visits lookup failed (non-fatal, skipping positional resolution):', visitErr.message);
+    if (visitErr) console.error('[mileage-check] site_visits lookup failed (non-fatal, falls through to fuzzy matching):', visitErr.message);
 
     const visitsByDate = {};
     for (const v of visitRows || []) {
@@ -467,6 +478,19 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
         const site = labelToResolvedSite[`${r.leg.date}|${r.leg.toRaw}`];
         if (site) r.toPlace = { type: 'site', site };
       }
+    }
+  }
+
+  // ── Pass 3: fuzzy name-matching, now genuinely the last resort -- only
+  // ── for whatever neither the alias table nor position could reach ────
+  for (const r of resolved) {
+    if (!r.fromPlace) {
+      const site = matchSiteByName(r.leg.fromRaw, candidateSites);
+      if (site) r.fromPlace = { type: 'site', site };
+    }
+    if (!r.toPlace) {
+      const site = matchSiteByName(r.leg.toRaw, candidateSites);
+      if (site) r.toPlace = { type: 'site', site };
     }
   }
 
