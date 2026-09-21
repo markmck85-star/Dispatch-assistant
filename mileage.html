@@ -65,6 +65,11 @@
     border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer;
   }
   button:hover { background: #24407a; }
+  button.del {
+    background: transparent; color: #c98a8a; border-color: #5a3030;
+    padding: 4px 10px; font-size: 12px;
+  }
+  button.del:hover { background: #2a1010; color: #e05555; }
   #status {
     color: #ccc; font-size: 13px; min-height: 22px;
     padding: 8px 10px; background: #11151c; border-radius: 4px;
@@ -217,9 +222,9 @@ async function mcLoadReports() {
         `<div class="unmatched">${mcFmtDate(u.date)}: <strong>"${u.fromRaw}"</strong> → <strong>"${u.toRaw}"</strong> — claimed ${u.claimedMiles} mi `
         + `(${u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop'})</div>`
       ).join('');
-      return `<div class="card">`
+      return `<div class="card" data-id="${r.id}">`
         + `<div class="card-top"><strong>${r.technicianName || r.technician_name_raw || 'Unknown tech'}</strong>`
-        + `<span class="muted">period ending ${mcFmtDate(r.pay_period_end)} · ${r.source === 'email' ? 'email' : 'upload'}${r.source_filename ? ' · ' + r.source_filename : ''}</span></div>`
+        + `<span class="muted">period ending ${mcFmtDate(r.pay_period_end)} · ${r.source === 'email' ? 'email' : 'upload'}${r.source_filename ? ' · ' + r.source_filename : ''} · <button type="button" class="del" data-id="${r.id}">Delete</button></span></div>`
         + `<div style="margin-top:6px;">${r.matched_legs}/${r.total_legs} legs matched · claimed ${r.total_claimed_miles} mi vs expected ~${r.total_expected_miles} mi`
         + (unmatchedCount ? ` · ${unmatchedCount} unmatched` : '')
         + ` · <span class="${statusClass}">${statusText}</span></div>`
@@ -231,6 +236,29 @@ async function mcLoadReports() {
 }
 
 document.getElementById('refreshBtn').addEventListener('click', mcLoadReports);
+document.getElementById('list').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button.del');
+  if (!btn) return;
+  const id = btn.getAttribute('data-id');
+  const label = btn.closest('.card') && btn.closest('.card').querySelector('strong');
+  const who = label ? label.textContent : 'this report';
+  if (!id || !confirm('Delete the report for ' + who + '?')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/.netlify/functions/delete-mileage-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    mcLoadReports();
+  } catch (err) {
+    btn.disabled = false;
+    alert('Could not delete: ' + err.message);
+  }
+});
+
 document.getElementById('mcFileInput').addEventListener('change', (ev) => {
   const file = ev.target.files && ev.target.files[0];
   const statusEl = document.getElementById('status');
