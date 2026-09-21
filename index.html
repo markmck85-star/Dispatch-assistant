@@ -2847,6 +2847,14 @@ function distanceMatrixStatus(state) {
             await processDispatch(true);
         }
 
+        function canonicalSiteCode(code) {
+            if (!code) return code;
+            const up = String(code).trim().toUpperCase();
+            const loc = (typeof LOCATIONS !== 'undefined' && (LOCATIONS[up] || LOCATIONS[code])) || null;
+            if (loc && loc.code) return String(loc.code).toUpperCase();
+            return up;
+        }
+
         function parseInputs(text) {
             const urgencySelector = document.getElementById('urgencySelector');
             const isUrgent = urgencySelector && urgencySelector.value === 'urgent';
@@ -2905,7 +2913,8 @@ function distanceMatrixStatus(state) {
                     }
                 });
             }
-            return [...new Set(rawCodes)].map(c => ({ code: c, urgent: isUrgent }));
+            const resolved = [...new Set(rawCodes.map(canonicalSiteCode))];
+            return resolved.map(c => ({ code: c, urgent: isUrgent }));
         }
 
         async function processDispatch(auto) {
