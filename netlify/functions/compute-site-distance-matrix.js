@@ -81,6 +81,25 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Sites whose lat/lng were corrected after pairs were already written.
+// refreshMovedPins drops every blob key touching these codes so additive
+// treats them as new (~6×N elements) instead of a full-state rebuild.
+const MOVED_PINS = {
+  FL: ["FL1001", "FL1004", "FL1005", "FL1006", "FL1020", "FL1021", "FL1039"],
+};
+
+function stripRefreshCodes(matrix, codes) {
+  if (!matrix || !codes || !codes.length) return matrix || {};
+  const set = new Set(codes.map((c) => String(c).toUpperCase()));
+  const out = {};
+  for (const [k, v] of Object.entries(matrix)) {
+    const [a, b] = k.split("|");
+    if (set.has(a) || set.has(b)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 exports.handler = async (event) => {
   connectLambda(event);
 
@@ -96,6 +115,9 @@ exports.handler = async (event) => {
   const state = String(payload.state || "").trim().toUpperCase();
   if (!state || !/^[A-Z]{2}$/.test(state)) return json(400, { error: "Valid 2-letter state required" });
   const offset = Number.isInteger(payload.offset) ? payload.offset : 0;
+  const refreshCodes = Array.isArray(payload.refreshCodes) && payload.refreshCodes.length
+    ? payload.refreshCodes.map((c) => String(c).toUpperCase())
+    : (payload.refreshMovedPins ? (MOVED_PINS[state] || []) : []);
 
   // Dry-run cost preview (2026-09-07) -- Step 3 previously had NO real
   // preview at all, just a rough client-side estimate from a hardcoded
@@ -114,7 +136,7 @@ exports.handler = async (event) => {
   if (payload.dryRun === true) {
     const dryStore = getStore("dispatch");
     const dryExisting = await dryStore.get("distance-matrix/" + state, { type: "json" });
-    const dryExistingMatrix = (dryExisting && dryExisting.matrix) || {};
+    const dryExistingMatrix = stripRefreshCodes((dryExisting && dryExisting.matrix) || {}, refreshCodes);
 
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const { data: pSites, error: pSitesErr } = await supabasePreview
@@ -242,7 +264,7 @@ exports.handler = async (event) => {
   // resume call (offset>0) is continuing a build that already passed this
   // gate, not a new one, so it's allowed through regardless of cooldown.
   const COOLDOWN_HOURS = 24;
-  if (offset === 0) {
+  if (offset === 0 && refreshCodes.length === 0) {
     const cooldownKey = "distance-matrix-cooldown/site-site/" + state;
     const store2 = getStore("dispatch");
     const lastRun = await store2.get(cooldownKey, { type: "text" });
@@ -310,7 +332,7 @@ exports.handler = async (event) => {
     });
   }
 
-  const existingMatrix = (existing && existing.matrix) || {};
+  const existingMatrix = stripRefreshCodes((existing && existing.matrix) || {}, refreshCodes);
 
   // Incremental rebuild (2026-08-18, added after confirming a re-run
   // previously recomputed the ENTIRE state from scratch -- a real, recurring
