@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mileage Check — MCR Dispatch</title>
+<style>
+  :root {
+    --navy: #12203f;
+    --navy-2: #1c3466;
+    --bg: #0e1116;
+    --card: #171b22;
+    --border: #2a3140;
+    --text: #e8eaed;
+    --muted: #8b93a2;
+    --green: #4caf50;
+    --red: #e05555;
+    --amber: #ffa500;
+    --accent: #4a7fd6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    background: var(--navy);
+    padding: 22px 20px 18px;
+    border-bottom: 1px solid #2a3d6a;
+  }
+  header .inner { max-width: 880px; margin: 0 auto; }
+  header .tag {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #9fb3dc; margin-bottom: 4px;
+  }
+  header h1 { margin: 0; font-size: 24px; }
+  header p { margin: 8px 0 0; color: #c5d0e8; font-size: 14px; max-width: 640px; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 20px 64px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+  }
+  h2 { margin: 0 0 10px; font-size: 16px; color: #fff; }
+  p { margin: 0 0 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  ul { margin: 0 0 8px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  code {
+    background: #11151c; border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; font-size: 13px;
+  }
+  input[type=file] {
+    width: 100%; padding: 10px; margin: 8px 0 12px;
+    background: #11151c; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  button {
+    background: var(--navy-2); color: #fff; border: 1px solid #2a4a88;
+    border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+  }
+  button:hover { background: #24407a; }
+  #status {
+    color: #ccc; font-size: 13px; min-height: 22px;
+    padding: 8px 10px; background: #11151c; border-radius: 4px;
+    white-space: pre-wrap; word-break: break-word; margin-bottom: 4px;
+  }
+  .card {
+    background: #11151c; border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;
+  }
+  .card-top { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .flag {
+    padding: 6px 10px; background: #2a1010; border-left: 3px solid var(--red);
+    border-radius: 0 4px 4px 0; margin-top: 6px; font-size: 13px;
+  }
+  .unmatched {
+    padding: 6px 10px; background: #2a2000; border-left: 3px solid var(--amber);
+    border-radius: 0 4px 4px 0; margin-top: 6px; font-size: 13px; color: #ddd;
+  }
+  .ok { color: var(--green); font-weight: 600; }
+  .bad { color: var(--red); font-weight: 600; }
+  footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px; }
+  a { color: var(--accent); }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="inner">
+    <div class="tag">MCR Technical Service · for Mike</div>
+    <h1>Mileage Check</h1>
+    <p>A quick look at each technician’s biweekly mileage log — not an audit. It flags numbers that cannot be a real drive (a dropped digit, a backward odometer, 200 miles between two stores next door).</p>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>What you are looking at</h2>
+    <p class="muted">
+      Each hop on the Mileage sheet is compared to the known driving distance between those two stops.
+      Lunch detours and a mid-day bounce home stay quiet. A −2 mile leg or a 3× claim lights up.
+      Techs only write the city for home (e.g. Johns Creek), not the street.
+    </p>
+    <ul class="muted">
+      <li><span class="ok">looks fine</span> — claimed miles sit next to the matrix. Done.</li>
+      <li><span class="bad">flagged</span> — one hop is physically implausible. Read that line.</li>
+      <li>Yellow — a stop name we have not learned yet. Not an overcharge; we add an alias and it sticks.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>How to send timesheets for a test</h2>
+    <p>
+      Forward the usual <code>*_Expense_*.xlsx</code> file to
+      <a href="mailto:dispatch@mcrdispatch.net">dispatch@mcrdispatch.net</a>
+      (or upload below). A good test set is several techs who name stores differently —
+      “Perry Street” vs “Lawrenceville Tag Office,” city-only home, etc.
+    </p>
+    <p class="muted">Same mailbox the dispatch app already watches. Nothing new to learn on their side.</p>
+  </section>
+
+  <section>
+    <h2>Upload one file</h2>
+    <input type="file" id="mcFileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+    <div id="status">Ready.</div>
+  </section>
+
+  <section>
+    <h2>Recent reports</h2>
+    <button type="button" id="refreshBtn">Refresh</button>
+    <div id="list" style="margin-top:12px;">Loading…</div>
+  </section>
+</main>
+<footer>
+  <a href="/admin.html">Admin panel</a> · <a href="/">Dispatch board</a><br>
+  This page does not call Google Maps. It only reads distances already stored.
+</footer>
+<script>
+function mcExtractLegsFromGrid(grid) {
+  let technicianNameRaw = null;
+  for (const row of grid) {
+    if (row[0] && String(row[0]).trim().toUpperCase() === 'NAME:') {
+      technicianNameRaw = String(row[1] || '').trim();
+      break;
+    }
+  }
+  const WEEKDAYS = new Set(['sun','mon','tue','wed','thu','fri','sat']);
+  const blocks = [];
+  let current = null;
+  for (const row of grid) {
+    const a = row[0];
+    const aStr = typeof a === 'string' ? a.trim().toLowerCase() : null;
+    if (aStr && WEEKDAYS.has(aStr)) { current = { date: null, rows: [] }; blocks.push(current); }
+    if (!current) continue;
+    current.rows.push(row);
+    if (a instanceof Date && !isNaN(a) && !current.date) current.date = a;
+  }
+  const legs = [];
+  outer:
+  for (const block of blocks) {
+    if (!block.date) continue;
+    const dateStr = block.date.toISOString().slice(0, 10);
+    for (const row of block.rows) {
+      const b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
+      if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break outer;
+      const fromRaw = typeof b === 'string' ? b.trim() : '';
+      const toRaw = typeof d === 'string' ? d.trim() : '';
+      if (fromRaw && toRaw && typeof f === 'number') {
+        legs.push({
+          date: dateStr, fromRaw, toRaw,
+          odometerStart: typeof c === 'number' ? c : null,
+          odometerEnd: typeof e === 'number' ? e : null,
+          claimedMiles: f,
+        });
+      }
+    }
+  }
+  return { technicianNameRaw, legs };
+}
+
+function mcFmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function mcLoadReports() {
+  const el = document.getElementById('list');
+  el.textContent = 'Loading…';
+  try {
+    const res = await fetch('/.netlify/functions/get-mileage-reports?limit=25');
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    if (!data.reports.length) { el.innerHTML = '<div class="muted">No reports yet.</div>'; return; }
+    el.innerHTML = data.reports.map(r => {
+      const flagCount = (r.flagged_legs || []).length;
+      const unmatchedCount = (r.unmatched_legs || []).length;
+      const statusClass = flagCount > 0 ? 'bad' : 'ok';
+      const statusText = flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine');
+      const flagRows = (r.flagged_legs || []).map(f =>
+        `<div class="flag">${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> — `
+        + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
+        + (f.reason === 'negative_or_zero' ? ' — negative/zero mileage' : ` — ${f.ratio}x expected`)
+        + `</div>`
+      ).join('');
+      const unmatchedRows = (r.unmatched_legs || []).map(u =>
+        `<div class="unmatched">${mcFmtDate(u.date)}: <strong>"${u.fromRaw}"</strong> → <strong>"${u.toRaw}"</strong> — claimed ${u.claimedMiles} mi `
+        + `(${u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop'})</div>`
+      ).join('');
+      return `<div class="card">`
+        + `<div class="card-top"><strong>${r.technicianName || r.technician_name_raw || 'Unknown tech'}</strong>`
+        + `<span class="muted">period ending ${mcFmtDate(r.pay_period_end)} · ${r.source === 'email' ? 'email' : 'upload'}${r.source_filename ? ' · ' + r.source_filename : ''}</span></div>`
+        + `<div style="margin-top:6px;">${r.matched_legs}/${r.total_legs} legs matched · claimed ${r.total_claimed_miles} mi vs expected ~${r.total_expected_miles} mi`
+        + (unmatchedCount ? ` · ${unmatchedCount} unmatched` : '')
+        + ` · <span class="${statusClass}">${statusText}</span></div>`
+        + flagRows + unmatchedRows + `</div>`;
+    }).join('');
+  } catch (err) {
+    el.textContent = 'Error loading reports: ' + err.message;
+  }
+}
+
+document.getElementById('refreshBtn').addEventListener('click', mcLoadReports);
+document.getElementById('mcFileInput').addEventListener('change', (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  const statusEl = document.getElementById('status');
+  if (!file) return;
+  statusEl.textContent = 'Reading ' + file.name + '…';
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const sheetName = wb.SheetNames.find(n => /mileage/i.test(n)) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+      const parsed = mcExtractLegsFromGrid(grid);
+      if (!parsed.technicianNameRaw || !parsed.legs.length) {
+        statusEl.textContent = 'No NAME/legs found — is this the mileage-log template? (sheet: ' + sheetName + ')';
+        return;
+      }
+      statusEl.textContent = 'Checking ' + parsed.legs.length + ' legs for ' + parsed.technicianNameRaw + '…';
+      const res = await fetch('/.netlify/functions/process-mileage-timesheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          technicianNameRaw: parsed.technicianNameRaw,
+          legs: parsed.legs,
+          sourceFilename: file.name,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      const r = data.report || {};
+      statusEl.textContent = 'Done. ' + (r.matched_legs || 0) + '/' + (r.total_legs || parsed.legs.length)
+        + ' legs matched. Claimed ' + (r.total_claimed_miles || '—') + ' vs expected ~' + (r.total_expected_miles || '—')
+        + '. ' + ((r.flagged_legs || []).length) + ' flagged.';
+      mcLoadReports();
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+    }
+  };
+  reader.onerror = () => { statusEl.textContent = 'Could not read file.'; };
+  reader.readAsArrayBuffer(file);
+});
+
+mcLoadReports();
+</script>
+</body>
+</html>
