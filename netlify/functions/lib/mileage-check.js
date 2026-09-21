@@ -114,8 +114,12 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
 }
 
 /** True if rawLabel plausibly refers to the technician's own home base. */
+function normalizePlaceLabel(rawLabel) {
+  return String(rawLabel || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+}
+
 function isHomeLabel(rawLabel, homeAddress) {
-  const label = (rawLabel || '').trim().toLowerCase();
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label) return false;
   if (label === 'home' || label === 'office' || label === 'shop') return true;
   if (!homeAddress || label.length < 4) return false;
@@ -341,22 +345,48 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   const MODE_PRIORITY = { driving: 0, 'haversine-fallback': 1, haversine: 2 };
   const pickBest = (rows) => rows.slice().sort((a, b) => (MODE_PRIORITY[a.mode] ?? 9) - (MODE_PRIORITY[b.mode] ?? 9))[0];
 
+  // supabase-js / PostgREST default max-rows is 1000. GA alone has ~6k
+  // driving site-site pairs (table-wide ~19k). A single unpaged select
+  // silently truncated, so most real driving rows never made it into
+  // siteSiteDist and Mileage Check fell through to haversine-fallback
+  // even after a successful matrix build. Page until a short batch.
+  async function fetchAllRows(buildQuery) {
+    const pageSize = 1000;
+    const all = [];
+    for (let from = 0; from < 200000; from += pageSize) {
+      const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < pageSize) break;
+    }
+    return all;
+  }
+
   let techSiteDist = {};
   let siteSiteDist = {};
   if (techRow) {
-    const { data: t2s } = await supabase
-      .from('tech_site_distances').select('site_id, mode, distance_mi').eq('technician_id', techRow.id);
+    const t2s = await fetchAllRows(() =>
+      supabase.from('tech_site_distances').select('site_id, mode, distance_mi').eq('technician_id', techRow.id)
+    );
     const bySite = {};
-    for (const row of t2s || []) (bySite[row.site_id] = bySite[row.site_id] || []).push(row);
+    for (const row of t2s) (bySite[row.site_id] = bySite[row.site_id] || []).push(row);
     for (const [siteId, rows] of Object.entries(bySite)) techSiteDist[siteId] = pickBest(rows).distance_mi;
   }
   if (candidateSites.length) {
     const siteIds = candidateSites.map((s) => s.id);
-    const { data: s2s } = await supabase
-      .from('site_site_distances').select('site_a, site_b, mode, distance_mi')
-      .or(`site_a.in.(${siteIds.join(',')}),site_b.in.(${siteIds.join(',')})`);
+    // Two paged .in() queries instead of one giant .or(site_a.in, site_b.in)
+    // so we stay under PostgREST URL limits once a state has 100+ sites.
+    const [s2sA, s2sB] = await Promise.all([
+      fetchAllRows(() =>
+        supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi').in('site_a', siteIds)
+      ),
+      fetchAllRows(() =>
+        supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi').in('site_b', siteIds)
+      ),
+    ]);
     const byPair = {};
-    for (const row of s2s || []) {
+    for (const row of [...s2sA, ...s2sB]) {
       const k = [row.site_a, row.site_b].sort().join('|');
       (byPair[k] = byPair[k] || []).push(row);
     }
@@ -369,7 +399,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // called here anymore -- see the precedence rationale below.
   function resolveHomeOrAlias(rawLabel) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
-    const aliasHit = aliasMap[String(rawLabel || '').trim().toLowerCase()];
+    const aliasHit = aliasMap[normalizePlaceLabel(rawLabel).toLowerCase()];
     return aliasHit ? { type: 'site', site: aliasHit } : null;
   }
 
