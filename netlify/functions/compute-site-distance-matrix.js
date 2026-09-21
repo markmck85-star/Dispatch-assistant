@@ -60,7 +60,9 @@ const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const ORIGIN_BATCH = 8;   // origins per call
 const DEST_BATCH = 10;    // destinations per call -- 8x10 = 80 elements/call, under the 100-element cap
-const ORIGIN_BATCHES_PER_CALL = 2; // how many origin-batches to process per invocation, kept small to stay well under any function timeout
+// CA (~290 sites) timed out on chunk 0 when this was 2 (2026-09-21).
+// One origin-batch per invocation stays under Netlify's limit; admin.html still loops.
+const ORIGIN_BATCHES_PER_CALL = 1;
 const R_MI = 3958.8;
 
 function json(statusCode, obj) {
@@ -252,7 +254,9 @@ exports.handler = async (event) => {
         });
       }
     }
-    await store2.set(cooldownKey, new Date().toISOString());
+    // Cooldown is stamped AFTER the first chunk actually writes (see below).
+    // Stamping here on offset===0 meant a Netlify HTML/timeout on chunk 0
+    // locked the state for 24h and looked like a successful spend.
   }
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -494,6 +498,11 @@ exports.handler = async (event) => {
         .from("site_site_distances")
         .upsert(siteToSiteRows, { onConflict: "site_a,site_b,mode" });
       if (syncErr) supabaseSyncError = syncErr.message;
+    }
+
+    // Only lock the state after this invocation persisted something.
+    if (offset === 0 && siteToSiteRows.length && !supabaseSyncError) {
+      await store.set("distance-matrix-cooldown/site-site/" + state, new Date().toISOString());
     }
 
     return json(200, {
