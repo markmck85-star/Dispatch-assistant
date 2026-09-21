@@ -1517,6 +1517,8 @@ function sortStopsByDistance(tech) {
 
 /** Button handler: re-sort one tech's card (e.g. after a stop is reassigned to them) and re-render. */
 function resortTechStops(tech) {
+  if (window._lockedTechOrder) delete window._lockedTechOrder[tech];
+  if (window._lockedOrderCodes) delete window._lockedOrderCodes[tech];
   sortStopsByDistance(tech);
   renderReviewBoard(true);
 }
@@ -3745,7 +3747,26 @@ function distanceMatrixStatus(state) {
             // happened to list stops in -- see sortStopsByDistance for the
             // approach/caveats. Best-effort: a tech or stop missing
             // coordinates just keeps its original position.
-            Object.keys(assignments).forEach(tech => sortStopsByDistance(tech));
+            Object.keys(assignments).forEach(tech => {
+                if (window._lockedTechOrder && window._lockedTechOrder[tech]) return;
+                sortStopsByDistance(tech);
+            });
+            // Re-apply arrow order after a poll rebuild. New stops append.
+            if (window._lockedOrderCodes) {
+                Object.keys(window._lockedOrderCodes).forEach(function(tech) {
+                    if (!window._lockedTechOrder || !window._lockedTechOrder[tech]) return;
+                    const items = assignments[tech];
+                    if (!items || !items.length) return;
+                    const pref = window._lockedOrderCodes[tech] || [];
+                    const byCode = {};
+                    items.forEach(function(it){ byCode[it.code] = it; });
+                    const next = [];
+                    pref.forEach(function(code){ if (byCode[code]) { next.push(byCode[code]); delete byCode[code]; } });
+                    Object.keys(byCode).forEach(function(code){ next.push(byCode[code]); });
+                    assignments[tech] = next;
+                    window._lockedOrderCodes[tech] = next.map(function(i){ return i.code; });
+                });
+            }
 
             // Phase 2 Stage 2: persist this dispatch generation as the initial
             // assignment record for each stop. Best-effort/non-blocking -- see
@@ -4502,11 +4523,20 @@ function distanceMatrixStatus(state) {
             }
         }
 
+        function lockTechStopOrder(tech) {
+            window._lockedTechOrder = window._lockedTechOrder || {};
+            window._lockedOrderCodes = window._lockedOrderCodes || {};
+            window._lockedTechOrder[tech] = true;
+            const arr = window.currentAssignments && window.currentAssignments[tech];
+            if (arr) window._lockedOrderCodes[tech] = arr.map(function(i){ return i.code; });
+        }
+
         function moveStop(tech, index, direction) {
             const arr = window.currentAssignments[tech];
             const newIndex = index + direction;
             if (newIndex < 0 || newIndex >= arr.length) return; 
             [arr[index], arr[newIndex]] = [arr[newIndex], arr[index]];
+            lockTechStopOrder(tech);
             renderReviewBoard(true);
         }
 
@@ -4515,6 +4545,7 @@ function distanceMatrixStatus(state) {
             const arr = window.currentAssignments[tech];
             const item = arr.splice(index, 1)[0];
             arr.unshift(item);
+            lockTechStopOrder(tech);
             renderReviewBoard(true);
         }
 
@@ -4863,7 +4894,7 @@ function distanceMatrixStatus(state) {
             const item = window.currentAssignments[oldTech][index];
             window.currentAssignments[oldTech].splice(index, 1);
             if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
-            window.currentAssignments[newTech].unshift(item);
+            window.currentAssignments[newTech].push(item);
             syncAssignmentToSupabase(newTech, item, 'planned', 'manual');
             // Auto-sort the receiving tech's card so the reassigned stop slots
             // into route order instead of just sitting at the top of the list.
@@ -5017,7 +5048,7 @@ function distanceMatrixStatus(state) {
                     movedStop.needsFallbackAssignment = false;
                     movedStop.noSavedDefault = false;
                     if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
-                    window.currentAssignments[newTech].unshift(movedStop);
+                    window.currentAssignments[newTech].push(movedStop);
                     // Persist THIS assignment as a manual override so it's honored on
                     // reprocess/reload -- without this, neither modal button survives
                     // logout+login when primary+fallback are both unavailable, since
