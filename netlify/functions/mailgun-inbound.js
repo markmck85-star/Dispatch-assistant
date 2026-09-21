@@ -160,7 +160,7 @@ function stripHtml(html) {
 // ── State detection ───────────────────────────────────────────────────────────
 
 function detectStates(text) {
-  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID","AL"];
+  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID","AL","CA"];
   const found = new Set();
   const lines = text.split(/\n/).map(l => l.trim());
   for (const line of lines) {
@@ -168,13 +168,17 @@ function detectStates(text) {
     for (const s of KNOWN) {
       if (line === s || line.startsWith(s+"\t") || line.startsWith(s+" ")) found.add(s);
     }
-    // Extract state prefix from site codes like IN1006, GA1045 etc
+    // Extract state prefix from site codes like IN1006, GA1045, CA1352
     const siteCodes = line.match(/\b([A-Z]{2})(\d{3,5})(?![A-Z\d])/g) || [];
     for (const sc of siteCodes) {
       const state = sc.substring(0, 2);
       if (KNOWN.includes(state)) found.add(state);
     }
+    // Loomis/ATM short tags on CA lists (KG7, KN5 349, "KG7 – CA - Rancho...")
+    if (/\bK[A-Z]\d{1,3}\b/.test(line) && /(^|\b)CA(\b|\s|\s*-)/.test(line)) found.add("CA");
+    if (/[–-]\s*CA\s*[–-]/.test(line) || /\bCA\s*-\s*[A-Z]/.test(line)) found.add("CA");
   }
+  if (/\bCA\d{3,5}\b/.test(text) || /\bK[A-Z]\d{1,3}\s+\d{2,4}\b/.test(text)) found.add("CA");
   return [...found].sort();
 }
 
@@ -195,7 +199,7 @@ function detectStates(text) {
 // expected result for the majority of tickets, not a failure.
 function detectRoutedState(toHeader) {
   if (!toHeader) return null;
-  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID","AL"];
+  const KNOWN = ["GA","FL","NC","SC","MI","IN","OH","NV","IL","MN","WV","OR","CO","ID","AL","CA"];
   const m = String(toHeader).match(/\b([A-Za-z]{2})sstdispatch@/i);
   if (!m) return null;
   const code = m[1].toUpperCase();
@@ -215,6 +219,7 @@ const STATE_TIMEZONES = {
   IL: 'America/Chicago',
   MN: 'America/Chicago',
   NV: 'America/Los_Angeles',
+  CA: 'America/Los_Angeles',
   OR: 'America/Los_Angeles',
   CO: 'America/Denver',
   ID: 'America/Boise',
@@ -1016,9 +1021,13 @@ function parseEmailBody(text, receivedAt, subject) {
     };
   }
 
-  if (/Dispatch List/i.test(text) || /Restock Report/i.test(text) || /Restock By/i.test(text)) {
-    // Count site codes like GA1007, IN1061 etc as proxy for item count
-    const siteCodes = (text.match(/\b[A-Z]{2}\d{3,5}\b/g) || []);
+  const looksLikeNewCaOrLoomisList = /Consumables Needed/i.test(text) && /Restock By/i.test(text)
+    || /today'?s dispatch list/i.test(text)
+    || (/\bCA\d{3,5}\b/.test(text) && /\b(LF|LR|RF|RR|Journal)\b/i.test(text))
+    || (/\bK[A-Z]\d{1,3}\b/.test(text) && /[–-]\s*CA\s*[–-]/.test(text));
+  if (/Dispatch List/i.test(text) || /Restock Report/i.test(text) || /Restock By/i.test(text) || looksLikeNewCaOrLoomisList) {
+    // Count site codes like GA1007, IN1061, CA1352 and Loomis shorts KG7
+    const siteCodes = (text.match(/\b[A-Z]{2}\d{3,5}\b/g) || []).concat(text.match(/\bK[A-Z]\d{1,3}\b/g) || []);
     const uniqueSites = new Set(siteCodes);
     const count = uniqueSites.size || (text.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || []).length;
     const states = detectStates(text);
@@ -1434,7 +1443,11 @@ exports.handler = async (event) => {
     // file (Dispatch List / Restock Report / Restock By) before accepting
     // the Re: reply-skip -- a real ticket reply/comment won't match any of
     // these, but Dontez's reply-style dispatch-list forward will.
-    const looksLikeBulkDispatchList = /Dispatch List/i.test(effectiveBody) || /Restock Report/i.test(effectiveBody) || /Restock By/i.test(effectiveBody);
+    const looksLikeBulkDispatchList = /Dispatch List/i.test(effectiveBody) || /Restock Report/i.test(effectiveBody) || /Restock By/i.test(effectiveBody)
+      || (/Consumables Needed/i.test(effectiveBody) && /Restock By/i.test(effectiveBody))
+      || /today'?s dispatch list/i.test(effectiveBody)
+      || (/\bCA\d{3,5}\b/.test(effectiveBody) && /\b(LF|LR|RF|RR|Journal)\b/i.test(effectiveBody))
+      || (/\bK[A-Z]\d{1,3}\b/.test(effectiveBody) && /[–-]\s*CA\s*[–-]/.test(effectiveBody));
     const isReplyOnly = rawSubjectIsReply && !looksLikeBulkDispatchList;
     if (rawSubjectIsReply && looksLikeBulkDispatchList) {
       console.log(`[mailgun-inbound] Re:-prefixed email ("${subject}") matched bulk-dispatch-list signature -- NOT treating as a reply, parsing normally`);
@@ -1458,7 +1471,7 @@ exports.handler = async (event) => {
       const subj = subject.replace(/^(Fwd?:|Re:)\s*/i, '').trim();
       const woMatch = subj.match(/\b(\d{8,})\b/);
       const woNum = woMatch ? woMatch[1] : '';
-      const stateMatch = subj.match(/\b(GA|FL|NC|SC|MI|IN|OH|NV|IL|MN|WV|OR)\b/);
+      const stateMatch = subj.match(/\b(GA|FL|NC|SC|MI|IN|OH|NV|IL|MN|WV|OR|CO|ID|AL|CA)\b/);
       const stateCode = stateMatch ? stateMatch[1] : '';
       let siteName = '';
       if (stateCode) {
