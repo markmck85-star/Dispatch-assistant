@@ -6247,6 +6247,32 @@ ${content}</body></html>`;
             const el = document.getElementById('sourceEmailOverlay');
             if (el) el.remove();
         }
+
+        function viewClosingNoteFromHistory(i) {
+            const v = _siteHistoryState && _siteHistoryState.visits && _siteHistoryState.visits[i];
+            if (!v || !v.closing_note) return;
+            let overlay = document.getElementById('sourceEmailOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'sourceEmailOverlay';
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;';
+                overlay.onclick = function(e) { if (e.target === overlay) overlay.style.display = 'none'; };
+                overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:8px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;">
+                    <button onclick="document.getElementById('sourceEmailOverlay').style.display='none'" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#666;">✕</button>
+                    <div id="sourceEmailBody"></div>
+                </div>`;
+                document.body.appendChild(overlay);
+            }
+            const body = document.getElementById('sourceEmailBody');
+            const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+            body.innerHTML = `
+                <div style="font-weight:600;font-size:16px;margin-bottom:6px;padding-right:24px;">📝 Closing Note</div>
+                <div style="font-size:12px;color:#666;margin-bottom:12px;">${escapeHtml(date)} · ${escapeHtml(v.tech_name_raw || '')}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>
+                <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(v.closing_note)}</div>
+            `;
+            overlay.style.display = 'flex';
+        }
+
         async function viewSourceEmail(inboundEmailId) {
             let overlay = document.getElementById('sourceEmailOverlay');
             if (!overlay) {
@@ -6281,7 +6307,7 @@ ${content}</body></html>`;
         function renderSiteHistoryBody() {
             const body = document.getElementById('siteHistoryBody');
             const st = _siteHistoryState;
-            let html = st.visits.map(v => {
+            let html = st.visits.map((v, i) => {
                 const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
                 const dur = v.duration_min != null ? Math.round(v.duration_min) + ' min' : '';
                 const isRestockLike = v.is_restock || /preventative/i.test(v.remediation || '');
@@ -6299,11 +6325,15 @@ ${content}</body></html>`;
                         ? `<div><button onclick="viewSourceEmail('${v.inbound_email_id}')" style="background:none;border:none;padding:0;color:#1a56c4;font-weight:600;text-decoration:underline;cursor:pointer;font-size:inherit;">${v.appointment_number}</button></div>`
                         : `<div style="color:#333;font-weight:600;">${v.appointment_number}</div>`)
                     : '';
+                const noteBtn = v.closing_note
+                    ? `<button type="button" onclick="viewClosingNoteFromHistory(${i})" style="background:none;border:none;padding:0;margin-top:4px;color:#1b7a3d;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">📝 View Note</button>`
+                    : '';
                 return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
                     <div><strong>${date}</strong> — <span style="color:${kindColor};">${kindLabel}</span>${dur ? ' · ' + dur : ''}</div>
                     <div style="color:#555;">${v.tech_name_raw || 'Unknown tech'}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}${reviewNote}</div>
                     ${saDisplay}
                     ${v.wo_number ? `<div style="color:#999;font-size:11px;">WO ${v.wo_number}</div>` : ''}
+                    ${noteBtn}
                 </div>`;
             }).join('');
 
