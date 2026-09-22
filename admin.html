@@ -290,6 +290,11 @@
                 <button class="big-btn save-btn" id="restoreBtn" onclick="restoreBackup()">Restore from File</button>
             </div>
             <div class="form-section" style="margin-top:15px;">
+                <h2>BlueFolder Archive</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Browse the closed BlueFolder service requests that have been backed up into the database (testing-station / OTC notes). This is the staging archive — most rows are not yet linked to a site code.</p>
+                <a class="big-btn" href="bluefolder.html" style="display:inline-block;text-align:center;text-decoration:none;background:#7a3b1e;color:#fff;">📁 Open BlueFolder Archive</a>
+            </div>
+            <div class="form-section" style="margin-top:15px;">
                 <h2>Audit Default Technicians</h2>
                 <p style="font-size:14px;color:#555;margin-bottom:10px;">Compare current default technician assignments against the distance matrix. Flags locations where a closer tech exists and fills in any missing defaults. Requires the distance matrix to be built for this state.</p>
                 <button class="big-btn" style="background:#6f42c1;color:white;" id="auditBtn" onclick="auditDefaultTechs()">🔍 Audit Default Techs</button>
@@ -747,7 +752,9 @@
                             each click walks further back and reports what it actually found, since BlueFolder history
                             has some known gaps from past cleanup and there's no way to know the real depth in advance.
                         </p>
+                        <a class="big-btn" href="bluefolder.html" style="display:inline-block;text-align:center;text-decoration:none;background:#2e7d32;color:#fff;margin-bottom:8px;">📁 Open BlueFolder Archive</a>
                         <button class="big-btn" id="bfBackfillBtn" onclick="bfRunBackfillChunk()" style="background:#7a3b1e;">Run Backfill Chunk (~6 months further back)</button>
+                        <button class="big-btn" id="bfAttachProbeBtn" onclick="bfProbeAttachments()" style="background:#1565c0;margin-top:8px;">Probe attachments (count + size estimate)</button>
                         <div id="bfBackfillStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin-top:10px;"></div>
                     </div>
                 </div>
@@ -3069,6 +3076,40 @@ ${mergeCellsXml}
                 bfLoadStatus();
             } catch (err) {
                 statusEl.textContent = 'Error: ' + err.message + ' (safe to try again -- nothing already saved is lost).';
+            }
+            btn.disabled = false;
+        }
+
+        async function bfProbeAttachments() {
+            const btn = document.getElementById('bfAttachProbeBtn');
+            const statusEl = document.getElementById('bfBackfillStatus');
+            btn.disabled = true;
+            statusEl.textContent = 'Listing BlueFolder attachments (no files are saved)…';
+            try {
+                const res = await fetch('/.netlify/functions/bluefolder-attachments-probe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                });
+                const data = await res.json();
+                if (!res.ok && !data.listed) throw new Error((data.errors && data.errors.join('; ')) || data.error || ('HTTP ' + res.status));
+                const exts = data.extCounts
+                    ? Object.entries(data.extCounts).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([k,v]) => k + ':' + v).join(', ')
+                    : '';
+                let msg = 'Attachments probe (nothing downloaded into storage)\n';
+                msg += 'Listed ' + (data.listed || 0) + '  ·  files ' + (data.files || 0) + '  ·  links ' + (data.links || 0);
+                if (data.apiTotalCount != null) msg += '  ·  API totalCount ' + data.apiTotalCount;
+                msg += '\nPosted ' + (data.earliestPosted || '—') + ' to ' + (data.latestPosted || '—');
+                if (exts) msg += '\nTypes: ' + exts;
+                if (data.sampleOk) {
+                    msg += '\nSampled ' + data.sampleOk + ' files = ' + (data.sampleBytesPretty || data.sampleBytes + ' bytes');
+                    msg += '\nEstimated all files: ' + (data.estimatedTotalPretty || 'unknown');
+                }
+                if (data.note) msg += '\n\n' + data.note;
+                if (data.errors && data.errors.length) msg += '\n\nErrors: ' + data.errors.slice(0, 8).join('; ');
+                statusEl.textContent = msg;
+            } catch (err) {
+                statusEl.textContent = 'Probe error: ' + err.message;
             }
             btn.disabled = false;
         }
