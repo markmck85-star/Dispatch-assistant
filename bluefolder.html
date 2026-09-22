@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlueFolder Archive — MCR Dispatch</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 16px;
+        background: #14161a; color: #e8e8e8;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .subtitle { color: #9aa0a6; font-size: 14px; margin-bottom: 14px; }
+    a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; }
+    .filters {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 14px; margin: 12px 0;
+    }
+    .filters label { font-size: 13px; color: #b8bcc2; }
+    select, input[type=text], input[type=date] {
+        background: #14161a; color: #e8e8e8; border: 1px solid #3a3e46;
+        border-radius: 6px; padding: 8px 10px; font-size: 14px;
+    }
+    input[type=text] { flex: 1; min-width: 180px; }
+    button {
+        background: #2a2a3e; color: #ccc; border: 1px solid #555;
+        border-radius: 6px; padding: 8px 10px; font-size: 13px; cursor: pointer;
+    }
+    .stats {
+        display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px;
+    }
+    .stat {
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 8px;
+        padding: 8px 12px; font-size: 12.5px; color: #b8bcc2;
+    }
+    .stat b { color: #e8e8e8; }
+    .card {
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 8px 14px;
+    }
+    .row {
+        padding: 12px 0; border-bottom: 1px solid #22252b; font-size: 13.5px;
+    }
+    .row:last-child { border-bottom: none; }
+    .muted { color: #7a7f87; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: #c7cad1; }
+    .badge {
+        display: inline-block; font-size: 11px; font-weight: 700;
+        padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+    }
+    .badge.yes { color: #7edb8e; background: #16321f; }
+    .badge.no { color: #c9a227; background: #2a230e; }
+    .note {
+        white-space: pre-wrap; font-size: 13px; line-height: 1.45;
+        margin-top: 8px; color: #d5d8de; background: #181a1f;
+        border: 1px solid #2c2f36; border-radius: 6px; padding: 10px;
+    }
+    .empty, .loading { text-align: center; color: #7a7f87; padding: 28px 0; }
+    .warn {
+        background: #3d2f00; border: 1px solid #6b5200; color: #f0c060;
+        border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px;
+    }
+</style>
+</head>
+<body>
+    <a href="/" class="back-link">← Back to Dispatch Tool</a>
+    <h1>📁 BlueFolder Archive</h1>
+    <div class="subtitle">Closed BlueFolder service requests (OTC / testing-station notes) pulled into the staging table. This is the backup — it is not the same as Salesforce site-visit history.</div>
+
+    <div class="warn" id="matchWarn" style="display:none;"></div>
+    <div class="stats" id="stats"></div>
+
+    <div class="filters">
+        <label>State:</label>
+        <select id="stateFilter"><option value="">All</option></select>
+        <label>Match:</label>
+        <select id="matchFilter">
+            <option value="all">All rows</option>
+            <option value="unmatched">Unmatched to a site</option>
+            <option value="matched">Matched to a site</option>
+        </select>
+        <input type="text" id="searchInput" placeholder="Search location, city, note, SR #…" autocomplete="off">
+    </div>
+    <div class="filters">
+        <label>From:</label>
+        <input type="date" id="dateFrom">
+        <label>To:</label>
+        <input type="date" id="dateTo">
+        <button type="button" id="clearBtn">Clear filters</button>
+    </div>
+
+    <div id="output" class="loading">Loading…</div>
+
+<script>
+const stateFilter = document.getElementById('stateFilter');
+const matchFilter = document.getElementById('matchFilter');
+const searchInput = document.getElementById('searchInput');
+const dateFrom = document.getElementById('dateFrom');
+const dateTo = document.getElementById('dateTo');
+const output = document.getElementById('output');
+const statsEl = document.getElementById('stats');
+const matchWarn = document.getElementById('matchWarn');
+
+let feed = { rows: [], hasMore: false, total: 0 };
+let debounce = null;
+
+const STATES = ['AR','CO','GA','IL','IN','LA','MI','MN','NC','NV','OH','OR','SC','WV'];
+for (const st of STATES) {
+    const opt = document.createElement('option');
+    opt.value = st; opt.textContent = st;
+    stateFilter.appendChild(opt);
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function decodeEntities(s) {
+    if (!s) return '';
+    return String(s)
+        .replace(/&#x0D;|&#13;|\r/gi, '\n')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#x0A;/gi, '\n');
+}
+function fmtDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function queryString(offset) {
+    const parts = ['offset=' + offset];
+    if (stateFilter.value) parts.push('state=' + encodeURIComponent(stateFilter.value));
+    if (matchFilter.value && matchFilter.value !== 'all') parts.push('match=' + encodeURIComponent(matchFilter.value));
+    const q = searchInput.value.trim();
+    if (q) parts.push('q=' + encodeURIComponent(q));
+    if (dateFrom.value) parts.push('from=' + encodeURIComponent(dateFrom.value));
+    if (dateTo.value) parts.push('to=' + encodeURIComponent(dateTo.value));
+    return parts.join('&');
+}
+
+async function loadStatus() {
+    try {
+        const res = await fetch('/.netlify/functions/get-bluefolder-sync-status');
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'status failed');
+        const matchedGuess = Math.max(0, (data.totalRows || 0) - (data.needsReviewCount || 0));
+        statsEl.innerHTML = `
+            <div class="stat"><b>${(data.totalRows || 0).toLocaleString()}</b> rows backed up</div>
+            <div class="stat"><b>${matchedGuess.toLocaleString()}</b> linked to a site</div>
+            <div class="stat"><b>${(data.needsReviewCount || 0).toLocaleString()}</b> still unmatched</div>
+            <div class="stat">Closed ${fmtDate(data.earliestClosed)} – ${fmtDate(data.latestClosed)}</div>
+            <div class="stat">Last sync ${data.lastSyncedAt ? new Date(data.lastSyncedAt).toLocaleString() : '—'}</div>
+        `;
+        if ((data.needsReviewCount || 0) > 0) {
+            matchWarn.style.display = '';
+            matchWarn.textContent = 'Almost none of these rows are attached to a sites record yet. The sync writes a staging table (bluefolder_service_requests) with site_id left empty on purpose. A separate matching pass was planned but has not been wired, so Location Lookup / Visit History will not show this archive under a site code.';
+        }
+    } catch (err) {
+        statsEl.innerHTML = `<div class="stat">Could not load sync status: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+async function loadRows(offset) {
+    if (offset === 0) output.innerHTML = '<div class="loading">Loading…</div>';
+    try {
+        const res = await fetch('/.netlify/functions/get-bluefolder-requests?' + queryString(offset));
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        if (offset === 0) feed.rows = data.rows || [];
+        else feed.rows = feed.rows.concat(data.rows || []);
+        feed.hasMore = !!data.hasMore;
+        feed.total = data.total;
+        render();
+    } catch (err) {
+        output.innerHTML = `<div class="empty" style="color:#ff9a9a;">Error: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function render() {
+    if (!feed.rows.length) {
+        output.innerHTML = '<div class="empty">No BlueFolder rows match those filters.</div>';
+        return;
+    }
+    let html = `<div class="card"><div class="muted" style="padding:8px 0 4px;">Showing ${feed.rows.length.toLocaleString()} of ${feed.total.toLocaleString()}</div>`;
+    html += feed.rows.map((r, i) => {
+        const matched = !!r.siteId;
+        const loc = [r.locationName, r.city, r.state, r.postalCode].filter(Boolean).join(', ');
+        const note = decodeEntities(r.note || r.description || '');
+        const preview = note.length > 220 ? note.slice(0, 220) + '…' : note;
+        return `<div class="row">
+            <div><strong>${escapeHtml(fmtDate(r.closedAt) || 'No close date')}</strong>
+                <span class="badge ${matched ? 'yes' : 'no'}">${matched ? 'Matched ' + escapeHtml(r.siteCode || '') : 'Not linked to a site'}</span>
+            </div>
+            <div>${escapeHtml(loc || r.customerName || 'Unknown location')}</div>
+            <div class="mono">SR ${escapeHtml(r.serviceRequestId || '')}${r.externalId ? ' · ' + escapeHtml(r.externalId) : ''}${r.status ? ' · ' + escapeHtml(r.status) : ''}</div>
+            ${r.address ? `<div class="muted">${escapeHtml(r.address)}</div>` : ''}
+            ${matched && r.siteName ? `<div class="muted">Site: ${escapeHtml(r.siteState || '')} ${escapeHtml(r.siteCode)} — ${escapeHtml(r.siteName)}</div>` : ''}
+            ${preview ? `<div class="note" id="note-${i}">${escapeHtml(preview)}</div>` : ''}
+            ${note.length > 220 ? `<button type="button" onclick="toggleNote(${i})">Show full note</button>` : ''}
+        </div>`;
+    }).join('');
+    if (feed.hasMore) {
+        html += `<button type="button" id="moreBtn" style="width:100%;margin:10px 0;" onclick="loadMore()">Load more (${(feed.total - feed.rows.length).toLocaleString()} remaining)</button>`;
+    }
+    html += '</div>';
+    output.innerHTML = html;
+}
+
+function toggleNote(i) {
+    const r = feed.rows[i];
+    const el = document.getElementById('note-' + i);
+    if (!el || !r) return;
+    const note = decodeEntities(r.note || r.description || '');
+    if (el.dataset.full === '1') {
+        el.textContent = note.length > 220 ? note.slice(0, 220) + '…' : note;
+        el.dataset.full = '0';
+    } else {
+        el.textContent = note;
+        el.dataset.full = '1';
+    }
+}
+
+async function loadMore() {
+    const btn = document.getElementById('moreBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    await loadRows(feed.rows.length);
+}
+
+function rerun() {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => loadRows(0), 250);
+}
+
+stateFilter.addEventListener('change', rerun);
+matchFilter.addEventListener('change', rerun);
+searchInput.addEventListener('input', rerun);
+dateFrom.addEventListener('change', rerun);
+dateTo.addEventListener('change', rerun);
+document.getElementById('clearBtn').addEventListener('click', () => {
+    stateFilter.value = '';
+    matchFilter.value = 'all';
+    searchInput.value = '';
+    dateFrom.value = '';
+    dateTo.value = '';
+    loadRows(0);
+});
+
+loadStatus();
+loadRows(0);
+</script>
+</body>
+</html>
