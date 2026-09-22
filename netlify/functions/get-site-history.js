@@ -4,11 +4,38 @@
 // clicking a location name shows its recent visits (restocks + trouble
 // calls) pulled from site_visits, populated by the Closed Tickets import
 // (2026-07-22). Read-only.
+//
+// 2026-09-22: also surface tickets that arrived by email but never got a
+// site_visits row (testing-station / TechWeb / SOS sites that are not in
+// the Salesforce closed-ticket report). Deduped by WO against existing
+// visits so kiosk sites don't show the same job twice.
 
 const { createClient } = require('@supabase/supabase-js');
 
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+}
+
+function ticketAsVisit(t) {
+  const detail = [t.issue_detail, t.description].filter(Boolean).join(' — ');
+  return {
+    started_at: t.received_at,
+    ended_at: null,
+    duration_min: null,
+    tech_name_raw: t.technician_name || null,
+    remediation: t.issue_category || t.ticket_kind || 'Service',
+    remediation_detail: detail || null,
+    is_restock: t.ticket_kind === 'restock',
+    wo_number: t.wo_number || null,
+    appointment_number: null,
+    needs_review: !!t.needs_review,
+    ticket_id: t.id,
+    closing_note: t.description || null,
+    inbound_email_id: t.inbound_email_id || null,
+    source: 'email_ticket',
+    ticket_status: t.status || null,
+    ticket_kind: t.ticket_kind || null,
+  };
 }
 
 exports.handler = async (event) => {
@@ -36,14 +63,6 @@ exports.handler = async (event) => {
     .range(offset, offset + PAGE_SIZE - 1);
   if (visitsErr) return json(500, { ok: false, error: visitsErr.message });
 
-  // 2026-08-25: click-through from an SA number to its actual source email.
-  // Only ever possible for the ~5% of visits that trace back to a real
-  // individually-emailed ticket (trouble/maintenance/individual-restock) --
-  // tickets.inbound_email_id has 100% coverage on those (confirmed
-  // 2026-08-24), but the other ~95% (routine bulk-restock-list volume)
-  // never had their own ticket row OR their own email to begin with, so
-  // there's genuinely nothing to link for most rows. inboundEmailId comes
-  // back null for those -- the frontend just doesn't render a click target.
   const visitTicketIds = [...new Set((visits || []).map((v) => v.ticket_id).filter(Boolean))];
   let inboundEmailIdByTicketId = {};
   if (visitTicketIds.length) {
@@ -57,15 +76,40 @@ exports.handler = async (event) => {
   const visitsWithEmail = (visits || []).map((v) => ({
     ...v,
     inbound_email_id: v.ticket_id ? (inboundEmailIdByTicketId[v.ticket_id] || null) : null,
+    source: 'site_visit',
   }));
 
-  // Related shipments: rma_shipments.site_id is only populated on a small
-  // fraction of real rows (the inbound RMA email parser was never wired
-  // up to resolve it the way the closed-ticket import now does for
-  // site_visits) -- so cross-reference by WO number against the visits
-  // just fetched instead, plus a direct site_id match as a belt-and-
-  // suspenders check for the rows that do have it.
-  const woNumbers = [...new Set((visits || []).map((v) => v.wo_number).filter(Boolean))];
+  // Email tickets with no matching closed-ticket visit (testing locations).
+  let extraFromTickets = [];
+  if (offset === 0) {
+    const { data: ticketRows, error: allTickErr } = await supabase
+      .from('tickets')
+      .select('id, wo_number, ticket_kind, status, issue_category, issue_detail, description, received_at, inbound_email_id, needs_review')
+      .eq('site_id', site.id)
+      .order('received_at', { ascending: false, nullsFirst: false })
+      .limit(200);
+    if (allTickErr) return json(500, { ok: false, error: allTickErr.message });
+
+    const { data: visitWos, error: woErr } = await supabase
+      .from('site_visits')
+      .select('wo_number')
+      .eq('site_id', site.id)
+      .not('wo_number', 'is', null);
+    if (woErr) return json(500, { ok: false, error: woErr.message });
+    const visitWoSet = new Set((visitWos || []).map((r) => String(r.wo_number)));
+
+    extraFromTickets = (ticketRows || [])
+      .filter((t) => !t.wo_number || !visitWoSet.has(String(t.wo_number)))
+      .map(ticketAsVisit);
+  }
+
+  const merged = [...extraFromTickets, ...visitsWithEmail].sort((a, b) => {
+    const da = a.started_at ? new Date(a.started_at).getTime() : 0;
+    const db = b.started_at ? new Date(b.started_at).getTime() : 0;
+    return db - da;
+  });
+
+  const woNumbers = [...new Set(merged.map((v) => v.wo_number).filter(Boolean))];
   let shipments = [];
   if (woNumbers.length) {
     const { data: byWo, error: shipErr } = await supabase
@@ -77,14 +121,18 @@ exports.handler = async (event) => {
     shipments = byWo || [];
   }
 
+  const visitCount = totalVisits != null ? totalVisits : visitsWithEmail.length;
+  const extraCount = extraFromTickets.length;
+  const totalShownBase = visitCount + extraCount;
+
   return json(200, {
     ok: true,
     site: { name: site.name, state: site.state, code: site.site_code },
-    visits: visitsWithEmail,
+    visits: merged,
     shipments,
     offset,
     pageSize: PAGE_SIZE,
-    totalVisits: totalVisits != null ? totalVisits : visitsWithEmail.length,
-    hasMore: offset + visitsWithEmail.length < (totalVisits != null ? totalVisits : 0),
+    totalVisits: totalShownBase,
+    hasMore: offset + visitsWithEmail.length < visitCount,
   });
 };
