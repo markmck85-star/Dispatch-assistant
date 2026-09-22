@@ -429,19 +429,19 @@ function showNoteOverlay(v) {
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'closingNoteOverlay';
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
-        document.body.appendChild(overlay);
     }
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;height:100dvh;background:rgba(0,0,0,0.55);z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding:10px;padding-top:max(10px,env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
+    document.body.appendChild(overlay);
+    overlay.scrollTop = 0;
     const dateSource = v.started_at || v.ended_at;
     const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
-    overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:12px 12px 0 0;max-width:640px;width:100%;max-height:80vh;overflow:auto;padding:18px 18px 24px;position:relative;">
+    overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:10px;max-width:640px;width:100%;max-height:calc(100dvh - 20px);overflow:auto;padding:18px 16px 20px;position:relative;box-sizing:border-box;">
         <button type="button" onclick="document.getElementById('closingNoteOverlay').style.display='none'" style="position:absolute;top:10px;right:10px;border:none;background:#eee;border-radius:16px;width:32px;height:32px;font-size:18px;cursor:pointer;">×</button>
         <div style="font-weight:700;font-size:16px;margin-bottom:4px;padding-right:28px;">✏️ Closing Note</div>
         <div style="font-size:12px;color:#666;margin-bottom:12px;">${escapeHtml(date)} · ${escapeHtml(v.tech_name_raw || '')}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>
         <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(v.closing_note)}</div>
     </div>`;
-    overlay.style.display = 'flex';
 }
 
 function fmtDate(iso) {

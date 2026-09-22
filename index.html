@@ -6255,14 +6255,16 @@ ${content}</body></html>`;
             if (!overlay) {
                 overlay = document.createElement('div');
                 overlay.id = 'sourceEmailOverlay';
-                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;';
                 overlay.onclick = function(e) { if (e.target === overlay) overlay.style.display = 'none'; };
-                overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:8px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;position:relative;">
-                    <button onclick="document.getElementById('sourceEmailOverlay').style.display='none'" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;cursor:pointer;color:#666;">✕</button>
+                overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:10px;max-width:640px;width:100%;max-height:calc(100dvh - 20px);overflow-y:auto;padding:18px 16px 20px;position:relative;box-sizing:border-box;margin:0;">
+                    <button onclick="document.getElementById('sourceEmailOverlay').style.display='none'" style="position:absolute;top:10px;right:10px;background:#eee;border:none;border-radius:16px;width:32px;height:32px;font-size:18px;cursor:pointer;color:#333;">✕</button>
                     <div id="sourceEmailBody"></div>
                 </div>`;
-                document.body.appendChild(overlay);
             }
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;height:100dvh;background:rgba(0,0,0,0.55);z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding:10px;padding-top:max(10px,env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
+            overlay.onclick = function(e) { if (e.target === overlay) overlay.style.display = 'none'; };
+            document.body.appendChild(overlay);
+            overlay.scrollTop = 0;
             const body = document.getElementById('sourceEmailBody');
             const date = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
             body.innerHTML = `
@@ -6270,7 +6272,6 @@ ${content}</body></html>`;
                 <div style="font-size:12px;color:#666;margin-bottom:12px;">${escapeHtml(date)} · ${escapeHtml(v.tech_name_raw || '')}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>
                 <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(v.closing_note)}</div>
             `;
-            overlay.style.display = 'flex';
         }
 
         async function viewSourceEmail(inboundEmailId) {
