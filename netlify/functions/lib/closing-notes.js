@@ -41,18 +41,24 @@ const LIST_VIEW_URL = 'https://iti4dmv.my.site.com/dispatchconsole/s/recordlist/
 // technician's note is ever amended after the fact, this can be manually
 // cleared for that one record -- not expected to happen often enough to
 // need automatic re-checking.
-async function getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState) {
+async function getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState, maxAttempts) {
   const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
 
-  const baseQuery = () => supabase
-    .from('site_visits')
-    .select('appointment_number, closing_note_attempts')
-    .is('closing_note', null)
-    .eq('closing_note_is_blank', false)
-    .not('appointment_number', 'is', null)
-    .gte('started_at', cutoff)
-    .order('closing_note_attempts', { ascending: true })
-    .order('started_at', { ascending: false });
+  const baseQuery = () => {
+    let q = supabase
+      .from('site_visits')
+      .select('appointment_number, closing_note_attempts')
+      .is('closing_note', null)
+      .eq('closing_note_is_blank', false)
+      .not('appointment_number', 'is', null)
+      .gte('started_at', cutoff)
+      .order('closing_note_attempts', { ascending: true })
+      .order('started_at', { ascending: false });
+    if (maxAttempts != null) {
+      q = q.or(`closing_note_attempts.is.null,closing_note_attempts.lt.${maxAttempts}`);
+    }
+    return q;
+  };
 
   const toTargets = (rows) => (rows || []).map((r) => ({
     appointmentNumber: r.appointment_number,
@@ -197,7 +203,8 @@ async function runClosingNotesPass(page, supabase, options = {}) {
   const summary = { attempted: 0, succeeded: 0, blank: 0, notFound: 0, failed: 0, stoppedByDeadline: false, errors: [] };
 
   try {
-    const targets = await getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState);
+    const maxAttempts = options.maxAttempts ?? null;
+    const targets = await getSaNumbersNeedingNotes(supabase, daysBack, limit, priorityState, maxAttempts);
     if (!targets.length) return summary;
 
     console.log(`[closing-notes] ${targets.length} candidate record(s) found, ${Math.round((deadlineAt - Date.now()) / 1000)}s time budget.`);
