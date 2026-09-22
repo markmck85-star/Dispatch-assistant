@@ -777,6 +777,85 @@ function parseMaintenanceDueDate(description, receivedAt) {
   return null;
 }
 
+// 2026-09-22: Loomis armored-truck-meet tracking. A "Big Kahuna" (cash-
+// side) trouble ticket with issue_category "Armored Truck Meet" isn't a
+// normal 4-business-hour SLA item -- the tech can't legally/operationally
+// open the cash vault alone, so the real "deadline" is whenever MCR and
+// Loomis's regional branch land on a mutually-available date/time over a
+// multi-day email negotiation (see the many "Loomis confirms Wednesday
+// 8/26 @ 10am" / "we cannot support another meet ... reschedule" threads
+// in inbound_emails). Leaving these on the same sla_4h clock as a
+// touchscreen failure was pure false-overdue noise -- confirmed live
+// 2026-09-22: the one Armored Truck Meet ticket in the table had
+// deadline_source sla_4h despite being blocked on Loomis. These two
+// helpers extract that negotiation status straight out of the email
+// thread instead of leaving it buried in reply-all chains.
+
+function isArmoredTruckMeetCategory(issueCategory) {
+  return (issueCategory || '').trim().toLowerCase() === 'armored truck meet';
+}
+
+// Every real example seen quotes the ENTIRE prior thread below the new
+// reply text (Outlook-style "From: ... Sent: ... To: ... Subject:" blocks,
+// or "On <date>, X wrote:") -- scanning the whole body risks picking up an
+// OLDER proposed/declined date from earlier in the same thread instead of
+// this reply's own. Cuts at the first quote/forward marker, same style as
+// the existing forwardMarkers detection above, and returns just the new
+// top-of-reply text.
+function extractTopOfReply(text) {
+  if (!text) return '';
+  const markers = [
+    /\r?\n\s*From:\s*.+/i,
+    /\bOn\s+.{3,60}\s+wrote:/i,
+    /_{5,}/,
+    /[-–—]{3,}\s*(?:Forwarded|Original)\s*[Mm]essage\s*[-–—]{3,}/i,
+  ];
+  let cut = text.length;
+  for (const m of markers) {
+    const idx = text.search(m);
+    if (idx !== -1 && idx < cut) cut = idx;
+  }
+  return text.slice(0, cut).trim();
+}
+
+// Best-effort classification of a single reply's new text into where the
+// Loomis meet negotiation stands, plus a best-effort confirmed date/time
+// if one is stated in a recognizable "M/D[/YY] @ H:MMam/pm" style (covers
+// every real example seen: "Loomis confirms Tuesday, 8/25 @ 10am", "added
+// to our route for meet tomorrow @ 10:00am", "we could accommodate a tech
+// meet tomorrow, 8/21 @ 10:00am"). Falls back to a status with no
+// confirmedAt when the reply confirms/declines but the date is stated in
+// a form this doesn't parse (e.g. purely "tomorrow" with no matching
+// digits, or a day name with no date) -- same "best guess over losing it
+// silently" approach used throughout this file (see
+// parseMaintenanceDueDate above). NOT anchored to the site's own
+// timezone (unlike calculateSlaDeadline) -- good enough for a status
+// badge/reference timestamp, not a business-hours SLA computation.
+function parseLoomisMeetReply(topText) {
+  if (!topText) return { status: null, confirmedAt: null };
+
+  let status = null;
+  if (/\b(cannot support|cannot accommodate|unable to (?:support|accommodate)|won.?t make it|due to (?:staffing|other projects))\b/i.test(topText)) {
+    status = 'needs_reschedule';
+  } else if (/\b(confirms?|added to (?:our|the) route|we (?:can|could) (?:accommodate|support)|yes[,.]?\s*(?:that works|we can))\b/i.test(topText)) {
+    status = 'confirmed';
+  } else if (/\b(can we meet|can you accommodate|would it be possible|are you able to meet|do you have (?:any )?availability)\b/i.test(topText)) {
+    status = 'proposed';
+  }
+
+  let confirmedAt = null;
+  const dtM = topText.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s*(?:@|at)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (dtM) {
+    const [, moStr, dyStr, yrStr, hStr, minStr, ampm] = dtM;
+    let hour = parseInt(hStr, 10) % 12;
+    if (/pm/i.test(ampm)) hour += 12;
+    const yr = yrStr ? (yrStr.length === 2 ? 2000 + parseInt(yrStr, 10) : parseInt(yrStr, 10)) : new Date().getFullYear();
+    const d = new Date(Date.UTC(yr, parseInt(moStr, 10) - 1, parseInt(dyStr, 10), hour, parseInt(minStr || '0', 10)));
+    if (!isNaN(d.getTime())) confirmedAt = d;
+  }
+  return { status, confirmedAt };
+}
+
 // `d` is now always a genuine UTC instant (post-2026-08-15 fix), so this
 // must explicitly project it into the site's own timezone for display --
 // it can no longer rely on the server's default tz matching.
@@ -1587,6 +1666,52 @@ exports.handler = async (event) => {
         else inboundEmailId = data.id;
       }
 
+      // 2026-09-22: Loomis meet negotiation tracking -- runs for EVERY
+      // email (reply-only included; this deliberately sits ahead of the
+      // isReplyOnly-gated dispatch parsing below, since that's exactly
+      // where the "Loomis confirms..." / "we cannot support..." replies
+      // this depends on live) whose subject carries a matching WO number
+      // against an OPEN ticket already categorized "Armored Truck Meet".
+      // Never creates a ticket here -- the original dispatch email always
+      // arrives first and creates it via the normal trouble-ticket path
+      // further down, same as every other ticket category.
+      try {
+        const woInSubjectM = subject.match(/\b(\d{8,})\b/);
+        if (woInSubjectM) {
+          const { data: meetTicket, error: meetTicketErr } = await supabase
+            .from('tickets')
+            .select('id, loomis_meet_status')
+            .eq('wo_number', woInSubjectM[1])
+            .eq('issue_category', 'Armored Truck Meet')
+            .eq('status', 'open')
+            .maybeSingle();
+          if (meetTicketErr) {
+            console.error('[mailgun-inbound] Loomis meet ticket lookup failed:', meetTicketErr.message);
+          } else if (meetTicket) {
+            const topText = extractTopOfReply(effectiveBody);
+            const { status: parsedStatus, confirmedAt } = parseLoomisMeetReply(topText);
+            const meetUpdateFields = { loomis_meet_last_contact_at: receivedAt.toISOString() };
+            // Never downgrade an already-confirmed meet back to 'proposed'
+            // off a routine follow-up with no confirm/decline language of
+            // its own (e.g. a same-day ETA check-in quoting "can we meet"
+            // from earlier in the thread) -- only a genuine new signal, or
+            // a still-blank status, moves it forward.
+            if (parsedStatus && (parsedStatus !== 'proposed' || meetTicket.loomis_meet_status !== 'confirmed')) {
+              meetUpdateFields.loomis_meet_status = parsedStatus;
+            }
+            if (parsedStatus === 'confirmed' && confirmedAt) {
+              meetUpdateFields.loomis_meet_confirmed_at = confirmedAt.toISOString();
+            }
+            const { error: meetUpdateErr } = await supabase
+              .from('tickets').update(meetUpdateFields).eq('id', meetTicket.id);
+            if (meetUpdateErr) console.error('[mailgun-inbound] Loomis meet status update failed:', meetUpdateErr.message);
+            else console.log(`[mailgun-inbound] Loomis meet WO ${woInSubjectM[1]}: status -> ${meetUpdateFields.loomis_meet_status || '(unchanged: ' + (meetTicket.loomis_meet_status || 'none') + ')'}${confirmedAt ? ', confirmed_at ' + confirmedAt.toISOString() : ''}`);
+          }
+        }
+      } catch (meetEx) {
+        console.error('[mailgun-inbound] Loomis meet tracking error (non-fatal):', meetEx.message);
+      }
+
       // 2026-09-20: technician mileage sanity-check -- Mike forwards each
       // tech's biweekly expense/mileage .xlsx as it comes in
       // (FieldPilot-standardized filename, e.g.
@@ -1985,6 +2110,10 @@ exports.handler = async (event) => {
         ticketAlreadyExisted = !!preExistingTicket;
 
         const isInstallOrSurvey = ['install', 'site_survey'].includes(parsed.ticketKind);
+        // 2026-09-22: see the isArmoredTruckMeetCategory/parseLoomisMeetReply
+        // block above -- this ticket kind isn't a response-time SLA either,
+        // same reasoning as install/site_survey just above.
+        const isArmoredTruckMeet = isArmoredTruckMeetCategory(parsed.issueCategory);
 
         const ticketRow = {
           wo_number: parsed.woNum,
@@ -2007,10 +2136,18 @@ exports.handler = async (event) => {
           // receipt-anchored 4-hour calculation that has nothing to do
           // with the real scheduled appointment (earliest_start_at,
           // already captured above). Trouble tickets are unaffected.
-          sla_ends_at: isInstallOrSurvey ? null : (parsed.slaEnd || null),
+          sla_ends_at: (isInstallOrSurvey || isArmoredTruckMeet) ? null : (parsed.slaEnd || null),
           deadline_source: dispatchType === 'maintenance'
             ? 'restock_requested'
-            : (isInstallOrSurvey ? 'scheduled_appointment' : 'sla_4h'),
+            : (isArmoredTruckMeet ? 'loomis_meet' : (isInstallOrSurvey ? 'scheduled_appointment' : 'sla_4h')),
+          // 2026-09-22: the original dispatch email creating this ticket
+          // has no Loomis reply on it yet by definition -- starts the
+          // negotiation state machine at awaiting_response, moved forward
+          // by the reply-tracking block near the top of this handler as
+          // the thread progresses. Null for every non-Armored-Truck-Meet
+          // ticket.
+          loomis_meet_status: isArmoredTruckMeet ? 'awaiting_response' : null,
+          loomis_meet_last_contact_at: isArmoredTruckMeet ? receivedAt.toISOString() : null,
           // 2026-09-16: routedState (from the email's own To: header, see
           // detectRoutedState above) rides alongside the existing fields
           // here rather than getting its own column -- same pattern as

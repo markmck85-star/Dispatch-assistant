@@ -87,7 +87,7 @@ exports.handler = async (event) => {
     // here no matter what SMS notification hours are configured.
     const { data, error } = await supabase
       .from("tickets")
-      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, earliest_start_at, received_at, status")
+      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, earliest_start_at, received_at, status, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at")
       .or("ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true")
       .eq("status", "open")
       .order("received_at", { ascending: false });
@@ -133,8 +133,14 @@ exports.handler = async (event) => {
         // tickets get this treatment -- install/site_survey never did.
         // slaEndsAt (raw email value) is left in place alongside it rather
         // than overwritten, so nothing else reading this endpoint breaks.
+        // 2026-09-22: an "Armored Truck Meet" ticket isn't a response-time
+        // SLA item -- it's blocked on a multi-day Loomis scheduling
+        // negotiation (see loomis_meet_status/mailgun-inbound.js), so the
+        // normal 4-business-hour computation would just be false-overdue
+        // noise for it, same reasoning as install/site_survey above.
+        const isArmoredTruckMeet = (t.issue_category || '').trim().toLowerCase() === 'armored truck meet';
         let computedSlaDeadline = null;
-        if (t.ticket_kind === "trouble" && t.received_at) {
+        if (t.ticket_kind === "trouble" && !isArmoredTruckMeet && t.received_at) {
           try {
             computedSlaDeadline = computeSlaDeadline(t.received_at, t.address, state);
           } catch (e) {
@@ -164,6 +170,13 @@ exports.handler = async (event) => {
           earliestStartAt: t.earliest_start_at,
           computedSlaDeadline,
           receivedAt: t.received_at,
+          // 2026-09-22: null for every ticket except Armored Truck Meet --
+          // lets the frontend show a "Loomis: confirmed Fri 9/26 @ 10am" /
+          // "Awaiting Loomis (proposed, no reply Xd)" badge in place of an
+          // SLA countdown for this one category.
+          loomisMeetStatus: t.loomis_meet_status || null,
+          loomisMeetConfirmedAt: t.loomis_meet_confirmed_at || null,
+          loomisMeetLastContactAt: t.loomis_meet_last_contact_at || null,
         };
       });
 
