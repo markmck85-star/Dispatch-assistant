@@ -1,15 +1,16 @@
 /**
  * netlify/functions/bluefolder-attachments-probe.js
  *
- * Read-only volume check for BlueFolder attachments BEFORE we pull binaries
- * into Supabase Storage. Lists Service Request attachments (api.bluefolder.com)
- * and samples a handful of downloads for Content-Length.
+ * BlueFolder will not list attachments globally — list.aspx requires a
+ * serviceRequestId (error 400 "servicerequestId is missing or invalid").
+ * This probe therefore samples SRs we already stored in
+ * bluefolder_service_requests, lists attachments per id, and estimates
+ * volume from that rate. No files are saved.
  *
- * POST {}  or  POST { maxPages?: number, sampleDownloads?: number, postedOn?: 'YYYY-MM-DD' }
- *
- * Does not write files. Safe to re-run.
+ * POST { sampleSrs?: number, sampleDownloads?: number }
  */
 
+const { createClient } = require('@supabase/supabase-js');
 const { XMLParser } = require('fast-xml-parser');
 
 const BF_ATTACH_BASE = 'https://api.bluefolder.com/api/2.0';
@@ -68,20 +69,56 @@ exports.handler = async (event) => {
     catch { return json(400, { error: 'Invalid JSON body' }); }
   }
 
-  const maxPages = Math.min(50, Math.max(1, parseInt(payload.maxPages || '30', 10) || 30));
-  const sampleDownloads = Math.min(25, Math.max(0, parseInt(payload.sampleDownloads || '12', 10) || 12));
-  const perPage = 100;
-  const postedOn = payload.postedOn ? String(payload.postedOn) : null;
+  const sampleSrs = Math.min(120, Math.max(10, parseInt(payload.sampleSrs || '60', 10) || 60));
+  const sampleDownloads = Math.min(20, Math.max(0, parseInt(payload.sampleDownloads || '10', 10) || 10));
+
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return json(500, { error: 'Supabase env vars not configured' });
+  }
+
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  const { count: totalSrs } = await supabase
+    .from('bluefolder_service_requests')
+    .select('id', { count: 'exact', head: true });
+
+  const half = Math.ceil(sampleSrs / 2);
+  const [{ data: recentRows, error: recentErr }, { data: olderRows, error: olderErr }] = await Promise.all([
+    supabase.from('bluefolder_service_requests')
+      .select('service_request_id, date_time_closed, customer_location_name')
+      .not('service_request_id', 'is', null)
+      .order('date_time_closed', { ascending: false, nullsFirst: false })
+      .limit(half),
+    supabase.from('bluefolder_service_requests')
+      .select('service_request_id, date_time_closed, customer_location_name')
+      .not('service_request_id', 'is', null)
+      .order('date_time_closed', { ascending: true, nullsFirst: false })
+      .limit(half),
+  ]);
+  if (recentErr || olderErr) {
+    return json(500, { error: (recentErr || olderErr).message });
+  }
+
+  const seen = new Set();
+  const srs = [];
+  for (const r of [...(recentRows || []), ...(olderRows || [])]) {
+    const id = String(r.service_request_id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    srs.push(r);
+  }
 
   const summary = {
     ok: true,
     host: BF_ATTACH_BASE,
+    mode: 'per-service-request sample (global list is not allowed by BlueFolder)',
+    totalSrsInDb: totalSrs || 0,
+    srsSampled: 0,
+    srsWithFiles: 0,
+    srsWithLinksOnly: 0,
     listed: 0,
-    apiTotalCount: null,
-    pagesFetched: 0,
     files: 0,
     links: 0,
-    byParentType: {},
     extCounts: {},
     earliestPosted: null,
     latestPosted: null,
@@ -89,72 +126,63 @@ exports.handler = async (event) => {
     sampleBytes: 0,
     sampleOk: 0,
     sampleFailed: 0,
+    estimatedFiles: null,
     estimatedTotalBytes: null,
     estimatedTotalPretty: null,
     errors: [],
   };
 
-  try {
-    for (let page = 1; page <= maxPages; page++) {
-      let xml = `<request><attachmentList>` +
-        `<type>ServiceRequest</type>` +
-        `<includeExternalLinks>true</includeExternalLinks>` +
-        `<page>${page}</page>` +
-        `<perPage>${perPage}</perPage>`;
-      if (postedOn) xml += `<postedOn>${postedOn}</postedOn>`;
-      xml += `</attachmentList></request>`;
-
-      let resp;
-      try {
-        resp = await bfAttachRequest('attachments/list.aspx', xml);
-      } catch (e) {
-        summary.errors.push(`list page ${page}: ${e.message}`);
-        break;
-      }
-
-      const wrap = resp?.attachments || {};
-      if (page === 1 && wrap['@_totalCount'] != null) {
-        summary.apiTotalCount = parseInt(wrap['@_totalCount'], 10) || 0;
-      }
-      const items = asArray(wrap.attachment);
-      summary.pagesFetched = page;
-      if (!items.length) break;
-
-      for (const a of items) {
-        summary.listed += 1;
-        const isLink = String(a.isExternalLink) === 'true' || String(a.isExternalLink) === '1';
-        if (isLink) summary.links += 1;
-        else summary.files += 1;
-        const ptype = String(a.parentType || 'ServiceRequest');
-        summary.byParentType[ptype] = (summary.byParentType[ptype] || 0) + 1;
-        const name = String(a.fileName || '');
-        const ext = (name.split('.').pop() || '').toLowerCase();
-        if (ext && ext !== name.toLowerCase()) {
-          summary.extCounts[ext] = (summary.extCounts[ext] || 0) + 1;
-        }
-        const posted = a.postedOn ? String(a.postedOn) : null;
-        if (posted) {
-          if (!summary.earliestPosted || posted < summary.earliestPosted) summary.earliestPosted = posted;
-          if (!summary.latestPosted || posted > summary.latestPosted) summary.latestPosted = posted;
-        }
-        if (!isLink && a.token && summary.sample.length < sampleDownloads) {
-          summary.sample.push({
-            fileName: name,
-            parentId: a.parentId != null ? String(a.parentId) : null,
-            postedOn: posted,
-            token: String(a.token),
-            bytes: null,
-          });
-        }
-      }
-
-      if (items.length < perPage) break;
-      if (summary.apiTotalCount != null && summary.listed >= summary.apiTotalCount) break;
+  for (const sr of srs) {
+    const sid = String(sr.service_request_id);
+    let resp;
+    try {
+      resp = await bfAttachRequest(
+        'attachments/list.aspx',
+        `<request><attachmentList>` +
+          `<type>ServiceRequest</type>` +
+          `<serviceRequestId>${sid}</serviceRequestId>` +
+          `<includeExternalLinks>true</includeExternalLinks>` +
+          `<page>1</page><perPage>100</perPage>` +
+        `</attachmentList></request>`
+      );
+    } catch (e) {
+      summary.errors.push(`SR ${sid}: ${e.message}`);
+      continue;
     }
-  } catch (e) {
-    summary.ok = false;
-    summary.errors.push(e.message);
-    return json(500, summary);
+    summary.srsSampled += 1;
+    const items = asArray(resp?.attachments?.attachment);
+    if (!items.length) continue;
+
+    let fileCount = 0;
+    let linkCount = 0;
+    for (const a of items) {
+      summary.listed += 1;
+      const isLink = String(a.isExternalLink) === 'true' || String(a.isExternalLink) === '1';
+      if (isLink) { summary.links += 1; linkCount += 1; }
+      else { summary.files += 1; fileCount += 1; }
+      const name = String(a.fileName || '');
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (ext && ext !== name.toLowerCase()) {
+        summary.extCounts[ext] = (summary.extCounts[ext] || 0) + 1;
+      }
+      const posted = a.postedOn ? String(a.postedOn) : null;
+      if (posted) {
+        if (!summary.earliestPosted || posted < summary.earliestPosted) summary.earliestPosted = posted;
+        if (!summary.latestPosted || posted > summary.latestPosted) summary.latestPosted = posted;
+      }
+      if (!isLink && a.token && summary.sample.length < sampleDownloads) {
+        summary.sample.push({
+          fileName: name,
+          parentId: sid,
+          location: sr.customer_location_name || null,
+          postedOn: posted,
+          token: String(a.token),
+          bytes: null,
+        });
+      }
+    }
+    if (fileCount) summary.srsWithFiles += 1;
+    else if (linkCount) summary.srsWithLinksOnly += 1;
   }
 
   for (const s of summary.sample) {
@@ -167,6 +195,7 @@ exports.handler = async (event) => {
       if (!url) {
         summary.sampleFailed += 1;
         summary.errors.push(`no redirect for ${s.fileName}`);
+        delete s.token;
         continue;
       }
       const head = await fetch(url, { method: 'HEAD' });
@@ -190,22 +219,23 @@ exports.handler = async (event) => {
     delete s.token;
   }
 
-  if (summary.sampleOk > 0 && summary.files > 0) {
-    const avg = summary.sampleBytes / summary.sampleOk;
-    summary.estimatedTotalBytes = Math.round(avg * summary.files);
-    summary.estimatedTotalPretty = fmtBytes(summary.estimatedTotalBytes);
+  if (summary.srsSampled > 0 && summary.totalSrsInDb > 0) {
+    const filesPerSr = summary.files / summary.srsSampled;
+    summary.estimatedFiles = Math.round(filesPerSr * summary.totalSrsInDb);
+    if (summary.sampleOk > 0) {
+      const avg = summary.sampleBytes / summary.sampleOk;
+      summary.estimatedTotalBytes = Math.round(avg * summary.estimatedFiles);
+      summary.estimatedTotalPretty = fmtBytes(summary.estimatedTotalBytes);
+    }
   }
 
   summary.sampleBytesPretty = fmtBytes(summary.sampleBytes);
-  summary.note = summary.apiTotalCount != null && summary.listed < summary.apiTotalCount
-    ? `Listed ${summary.listed} of API totalCount ${summary.apiTotalCount} (hit maxPages=${maxPages}). Re-run with a higher maxPages or postedOn window if you need the rest.`
-    : null;
+  summary.note = `BlueFolder requires serviceRequestId on attachment list. Sampled ${summary.srsSampled} of ${summary.totalSrsInDb} backed-up SRs (half newest, half oldest). Estimates assume the sample rate holds across the rest.`;
 
   console.log('BlueFolder attachments probe:', JSON.stringify({
-    listed: summary.listed,
-    apiTotalCount: summary.apiTotalCount,
+    srsSampled: summary.srsSampled,
     files: summary.files,
-    links: summary.links,
+    estimatedFiles: summary.estimatedFiles,
     estimatedTotalPretty: summary.estimatedTotalPretty,
     errors: summary.errors.length,
   }));
