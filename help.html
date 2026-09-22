@@ -95,6 +95,7 @@
   <a href="#ai-assistant">AI Assistant</a>
   <a href="#session-actions">Session Actions</a>
   <a href="#urgent">Urgent / Trouble Ticket</a>
+  <a href="#armored-meet">Armored Truck Meets</a>
   <a href="#unknown">Unknown Codes</a>
   <a href="#saturday">Saturday On-Call</a>
   <a href="#admin">Admin Panel</a>
@@ -125,6 +126,9 @@
   <!-- WHAT'S NEW -->
   <section id="whats-new">
     <h2>🆕 What's New</h2>
+
+    <h3>Armored Truck Meet Tracking (cash-side tickets)</h3>
+    <p>A "Big Kahuna" (cash-side) trouble ticket that needs an armored-carrier technician on site no longer runs against the standard 4-hour SLA clock -- the app now tracks the real back-and-forth negotiation with the carrier's regional branch instead. See <a href="#armored-meet">Armored Truck Meets</a> below for the full explanation.</p>
 
     <h3>State Console</h3>
     <p>A separate at-a-glance page for one state at a time -- <strong>📍 State Console</strong> from the dispatch board, or navigate to <code>state.html</code> directly. Shows who's out today, a map of any saved date's routes (independent of whatever date the dispatch board has open), recent trouble/maintenance tickets, and closed-ticket sync status, without needing to run a full dispatch. Remembers the last state you viewed there. See <a href="#state-console">State Console</a> below for the full rundown.</p>
@@ -292,6 +296,36 @@ Cobb County Kroger Whitlock #455 just came in:
 1. Printer Jam (SLA ends Sat 1:27 PM)
 
 Please acknowledge receipt.</div>
+  </section>
+
+  <!-- ARMORED TRUCK MEETS -->
+  <section id="armored-meet">
+    <h2>Armored Truck Meets (Cash-Side Tickets)</h2>
+    <p>A "Big Kahuna" (cash-handling) kiosk has a locked cash vault behind a separate door from the printer/consumables side. Only an armored-carrier technician (Loomis in Michigan and Oregon; Brinks in Indiana -- the carrier varies by state) can open or operate that vault's lock. An MCR tech can't do it alone, so whenever a ticket needs the vault opened, MCR has to schedule a "meet" -- a time both an MCR tech and a carrier tech will be on site together -- over an email back-and-forth with that carrier's regional branch.</p>
+    <div class="note"><strong>Note:</strong> this only applies to the specific line item that needs the vault open. A printer jam or consumables call at the same BK site doesn't need a carrier meet -- that side has its own door and doesn't require anyone but MCR.</div>
+
+    <h3>Why this ticket type is handled differently</h3>
+    <p>A normal trouble ticket's deadline is the app's standard 4-business-hour SLA. That doesn't make sense for an Armored Truck Meet ticket -- the real deadline is whatever date/time both sides actually land on, which can take anywhere from same-day to a couple of weeks depending on the carrier's own route capacity. Holding these to a 4-hour clock would just mark them "overdue" almost immediately for no real reason.</p>
+
+    <h3>What the app does automatically (live now)</h3>
+    <div class="step"><strong>1. Detects it.</strong> Any ticket whose issue category is "Armored Truck Meet" is automatically exempted from the standard SLA calculation the moment it's created.</div>
+    <div class="step"><strong>2. Tracks the negotiation.</strong> Every reply on that ticket's email thread -- from MCR, the carrier, or Neumo relaying either side -- is read automatically and the ticket's status is updated:
+      <ul>
+        <li><span class="badge badge-amber">Awaiting Response</span> -- the original request went out, nobody's replied yet.</li>
+        <li><span class="badge badge-blue">Proposed</span> -- a date/time has been suggested by either side, not yet agreed.</li>
+        <li><span class="badge badge-green">Confirmed</span> -- both sides have agreed on a date/time.</li>
+        <li><span class="badge badge-red">Needs Reschedule</span> -- the carrier couldn't accommodate the proposed time and a new one is needed.</li>
+      </ul>
+    </div>
+    <div class="note"><strong>Note:</strong> this reads the plain language of each reply (phrases like "confirms," "we cannot accommodate," "added to our route"), so it's a best-effort read of the conversation, not a guarantee -- always worth a quick glance at the actual thread before treating a status as final.</div>
+
+    <h3>What's planned, not live yet</h3>
+    <ul>
+      <li>A visible badge/status on the dispatch board itself, in place of the SLA countdown, showing where a given ticket's negotiation stands.</li>
+      <li>A toast alert when a new Armored Truck Meet ticket comes in, with a button to send the initial scheduling request straight from the app.</li>
+      <li>A per-state/branch carrier contact directory (regional office, contact name, phone, email) so the app knows who to address -- built for Michigan (Detroit and Grand Rapids branches) and Oregon (Portland) so far; other states get added as their contacts are gathered.</li>
+    </ul>
+    <div class="note"><strong>Note:</strong> Georgia has no cash-side units, so this workflow doesn't come up in Mark's own territory -- it's new coordination overhead specific to states with Big Kahuna kiosks.</div>
   </section>
 
   <!-- UNKNOWN CODES -->
@@ -486,7 +520,7 @@ Please acknowledge receipt.</div>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
       <li>Closing notes aren't currently available in the closed-ticket report, so full ticket history for a site still requires manually checking Salesforce.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 20, 2026 &nbsp;·&nbsp; v9.84</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 22, 2026 &nbsp;·&nbsp; v9.84</p>
   </section>
 
 </main>
