@@ -309,11 +309,18 @@ function renderStateFeed() {
         const hasNote = !!v.closing_note;
         const q = noteSearchInput.value.trim();
         const snippet = (q && v.closing_note) ? noteSnippet(v.closing_note, q) : '';
-        return `<div class="visit-row${hasNote ? '' : ' no-note'}" ${hasNote ? `onclick="generateEmailFromFeed(${i})"` : ''}>
+        const preview = (!q && hasNote) ? escapeHtml(String(v.closing_note).trim().slice(0, 160)) + (v.closing_note.length > 160 ? '…' : '') : '';
+        return `<div class="visit-row${hasNote ? '' : ' no-note'}">
+            <div ${hasNote ? `onclick="viewClosingNoteFromFeed(${i})"` : ''}>
             <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')} · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span>
             ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
             <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
-            ${snippet ? `<div class="muted" style="margin-top:4px;font-size:12.5px;">…${snippet}…</div>` : ''}
+            </div>
+            ${snippet ? `<div class="muted" style="margin-top:4px;font-size:12.5px;">…${snippet}…</div>` : (preview ? `<div class="muted" style="margin-top:6px;font-size:12.5px;white-space:pre-wrap;">${preview}</div>` : '')}
+            ${hasNote ? `<div style="margin-top:8px;">
+                <button type="button" class="secondary-btn" style="margin:0 8px 0 0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();viewClosingNoteFromFeed(${i})">View note</button>
+                <button type="button" class="secondary-btn" style="margin:0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();generateEmailFromFeed(${i})">Reconstruct email</button>
+            </div>` : ''}
         </div>`;
     }).join('');
     if (feedState.hasMore) {
@@ -327,6 +334,8 @@ function generateEmailFromFeed(i) {
     generateEmailFromVisit(feedState.visits[i], feedState.visits[i].site_name || '');
 }
 
+let historyState = null; // { site, visits, hasMore, totalVisits }
+
 async function selectSite(site) {
     searchInput.value = site.name;
     resultsDropdown.classList.remove('open');
@@ -336,34 +345,103 @@ async function selectSite(site) {
         const res = await fetch(`/.netlify/functions/get-site-history?code=${encodeURIComponent(site.site_code)}`);
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-        siteVisits = data.visits || [];
-        renderVisitList(site, data.visits || []);
+        historyState = {
+            site,
+            visits: data.visits || [],
+            hasMore: !!data.hasMore,
+            totalVisits: data.totalVisits,
+        };
+        siteVisits = historyState.visits;
+        renderVisitList();
     } catch (err) {
         output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading history: ${err.message}</div>`;
     }
 }
 
-function renderVisitList(site, visits) {
+async function loadMoreHistory() {
+    if (!historyState || !historyState.site) return;
+    const btn = document.getElementById('loadMoreHistoryBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        const res = await fetch(`/.netlify/functions/get-site-history?code=${encodeURIComponent(historyState.site.site_code)}&offset=${historyState.visits.length}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        historyState.visits = historyState.visits.concat(data.visits || []);
+        historyState.hasMore = !!data.hasMore;
+        historyState.totalVisits = data.totalVisits;
+        siteVisits = historyState.visits;
+        renderVisitList();
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Error loading more — tap to retry'; }
+    }
+}
+
+function renderVisitList() {
+    const site = historyState.site;
+    const visits = historyState.visits;
     let html = `<div class="card">
         <h2>${escapeHtml(site.name)}</h2>
-        <div class="meta">${escapeHtml(site.state)} · ${escapeHtml(site.site_code || '')}</div>
-        <h3 class="section-label">Pick a Visit to Reconstruct</h3>`;
+        <div class="meta">${escapeHtml(site.state)} · ${escapeHtml(site.site_code || '')}${historyState.totalVisits != null ? ` · ${historyState.totalVisits} visits` : ''}</div>
+        <h3 class="section-label">Visit notes</h3>`;
     if (!visits.length) {
         html += '<div class="empty-state">No visit history for this site yet.</div>';
     } else {
         html += visits.map((v, i) => {
             const dateSource = v.started_at || v.ended_at;
             const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
-            const hasNote = !!v.closing_note;
-            return `<div class="visit-row${hasNote ? '' : ' no-note'}" ${hasNote ? `onclick="generateEmail(${i})"` : ''}>
-                <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')}
-                ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
-                <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+            const hasNote = !!(v.closing_note && String(v.closing_note).trim());
+            const preview = hasNote ? escapeHtml(String(v.closing_note).trim().slice(0, 180)) + (v.closing_note.length > 180 ? '…' : '') : '';
+            return `<div class="visit-row${hasNote ? '' : ' no-note'}">
+                <div onclick="${hasNote ? `viewClosingNote(${i})` : ''}">
+                    <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')}
+                    ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
+                    <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+                </div>
+                ${preview ? `<div class="muted" style="margin-top:6px;font-size:12.5px;white-space:pre-wrap;line-height:1.4;">${preview}</div>` : ''}
+                ${hasNote ? `<div style="margin-top:8px;">
+                    <button type="button" class="secondary-btn" style="margin:0 8px 0 0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();viewClosingNote(${i})">View note</button>
+                    <button type="button" class="secondary-btn" style="margin:0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();generateEmail(${i})">Reconstruct email</button>
+                </div>` : ''}
             </div>`;
         }).join('');
     }
+    if (historyState.hasMore) {
+        html += `<button id="loadMoreHistoryBtn" style="width:100%;margin-top:10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;" onclick="loadMoreHistory()">Load more visits${historyState.totalVisits != null ? ` (${historyState.totalVisits - historyState.visits.length} remaining)` : ''}</button>`;
+    }
     html += `</div>`;
     output.innerHTML = html;
+}
+
+function viewClosingNote(i) {
+    const v = (historyState && historyState.visits[i]) || siteVisits[i] || (feedState && feedState.visits[i]);
+    if (!v || !v.closing_note) return;
+    showNoteOverlay(v);
+}
+
+function viewClosingNoteFromFeed(i) {
+    const v = feedState && feedState.visits[i];
+    if (!v || !v.closing_note) return;
+    showNoteOverlay(v);
+}
+
+function showNoteOverlay(v) {
+    let overlay = document.getElementById('closingNoteOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'closingNoteOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.body.appendChild(overlay);
+    }
+    const dateSource = v.started_at || v.ended_at;
+    const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:12px 12px 0 0;max-width:640px;width:100%;max-height:80vh;overflow:auto;padding:18px 18px 24px;position:relative;">
+        <button type="button" onclick="document.getElementById('closingNoteOverlay').style.display='none'" style="position:absolute;top:10px;right:10px;border:none;background:#eee;border-radius:16px;width:32px;height:32px;font-size:18px;cursor:pointer;">×</button>
+        <div style="font-weight:700;font-size:16px;margin-bottom:4px;padding-right:28px;">✏️ Closing Note</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px;">${escapeHtml(date)} · ${escapeHtml(v.tech_name_raw || '')}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>
+        <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(v.closing_note)}</div>
+    </div>`;
+    overlay.style.display = 'flex';
 }
 
 function fmtDate(iso) {
