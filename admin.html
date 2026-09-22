@@ -3097,8 +3097,13 @@ ${mergeCellsXml}
                     ? Object.entries(data.extCounts).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([k,v]) => k + ':' + v).join(', ')
                     : '';
                 let msg = 'Attachments probe (nothing downloaded into storage)\n';
+                if (data.srsSampled != null) {
+                    msg += 'Sampled ' + data.srsSampled + ' of ' + (data.totalSrsInDb || 0) + ' SRs';
+                    msg += '  ·  SRs with files ' + (data.srsWithFiles || 0);
+                    msg += '\n';
+                }
                 msg += 'Listed ' + (data.listed || 0) + '  ·  files ' + (data.files || 0) + '  ·  links ' + (data.links || 0);
-                if (data.apiTotalCount != null) msg += '  ·  API totalCount ' + data.apiTotalCount;
+                if (data.estimatedFiles != null) msg += '  ·  estimated files across archive ' + data.estimatedFiles;
                 msg += '\nPosted ' + (data.earliestPosted || '—') + ' to ' + (data.latestPosted || '—');
                 if (exts) msg += '\nTypes: ' + exts;
                 if (data.sampleOk) {
