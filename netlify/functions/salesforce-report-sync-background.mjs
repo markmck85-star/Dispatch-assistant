@@ -76,6 +76,24 @@ const { performImport } = perfImportPkg;
 import closingNotesPkg from './lib/closing-notes.js';
 const { runClosingNotesPass } = closingNotesPkg;
 
+
+function easternHourNow() {
+  const hourStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).format(new Date());
+  return parseInt(hourStr, 10);
+}
+
+// 8 PM – 6 AM America/New_York: no new tech notes are being written, so
+// spend the cycle backfilling older uncaptured notes instead of re-downloading
+// the closed-ticket report.
+function isNightNotesBackfillWindow() {
+  const hour = easternHourNow();
+  return hour >= 20 || hour < 6;
+}
+
 const REPORT_URL = process.env.SALESFORCE_REPORT_URL
   || 'https://iti4dmv.my.site.com/dispatchconsole/s/report/00OVN000003SjTV2A0/completed-service-appointments?queryScope=mru';
 
@@ -437,6 +455,52 @@ export default async (req, context) => {
         console.log('Fallback navigation threw (often benign):', navErr.message);
       }
       await page.waitForTimeout(2000);
+    }
+
+    const nightBackfill = isNightNotesBackfillWindow();
+    if (nightBackfill) {
+      console.log(`[salesforce-report-sync] Night window (ET hour ${easternHourNow()}) -- skipping report download/import and running closing-notes backfill (90-day lookback).`);
+      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      let notesSummary = null;
+      try {
+        const settingsStore = getStore('dispatch');
+        const settings = (await settingsStore.get('settings/global', { type: 'json' })) || {};
+        if (settings.closingNotesEnabled === true) {
+          const TARGET_TOTAL_ELAPSED_MS = 12 * 60 * 1000;
+          const deadlineAt = functionStartTime + TARGET_TOTAL_ELAPSED_MS;
+          await setStage('Night closing-notes backfill');
+          notesSummary = await runClosingNotesPass(page, supabase, {
+            daysBack: 90,
+            limit: 100,
+            deadlineAt,
+            priorityState,
+            maxAttempts: 8,
+          });
+          console.log(`[closing-notes] Night backfill complete: ${notesSummary.succeeded} succeeded, ${notesSummary.blank || 0} blank, ${notesSummary.notFound} not found, ${notesSummary.failed} failed (of ${notesSummary.attempted} attempted${notesSummary.stoppedByDeadline ? ', stopped early by time budget' : ''}).`);
+          if (notesSummary.failed > 0) {
+            await sendAlert(
+              `Closing-notes night backfill: ${notesSummary.failed} failure(s)`,
+              `Night backfill hit ${notesSummary.failed} failure(s) out of ${notesSummary.attempted}:\n\n` +
+                notesSummary.errors.slice(0, 10).map(e => `${e.saNumber || '(pass-level)'}: ${e.error}`).join('\n')
+            );
+          }
+        } else {
+          console.log('[closing-notes] Night backfill skipped -- closingNotesEnabled is not true in settings.');
+        }
+      } catch (notesErr) {
+        console.error('[closing-notes] Night backfill threw:', notesErr);
+        notesSummary = { attempted: 0, succeeded: 0, notFound: 0, failed: 0, errors: [{ saNumber: null, error: notesErr.message }] };
+      }
+      await recordSuccess({
+        nightBackfill: true,
+        totalRows: 0,
+        inserted: 0,
+        skippedExisting: 0,
+        needsReview: 0,
+        rowErrors: 0,
+        closingNotes: notesSummary,
+      });
+      return;
     }
     // 2026-08-08 v5: Export button lives INSIDE an iframe on the Experience
     // Cloud report page. Confirmed by the successful local-sync-watchdog run
