@@ -4974,6 +4974,99 @@ function distanceMatrixStatus(state) {
             setTimeout(function() { if (document.getElementById('reassign-prompt')) div.remove(); }, 12000);
         }
 
+        // 2026-09-23: cash-side (Big Kahuna) service calls at some sites need
+        // a scheduled meet with an armored carrier (Loomis, Brinks, etc.)
+        // before the ticket can be completed -- see loomis-armored-truck-
+        // meets notes. Which tickets actually trigger this is still being
+        // narrowed down (categorization is inconsistent -- some real
+        // carrier-meet tickets arrive as plain "Cash Dispenser," and not
+        // every cash-side site needs one at all, e.g. Augusta's Peach
+        // Orchard tag office). So for now this is a standalone, reusable
+        // prompt -- NOT yet wired to any automatic ticket-arrival trigger.
+        // Whatever detection logic gets settled on can call this directly
+        // once decided, same as reassignStop() calls showReassignPrompt().
+        //
+        // Mirrors showReassignPrompt's structure/style above, plus one
+        // extra choice: unlike a tech reassignment (which either sticks or
+        // doesn't), this prompt can be permanently silenced per-site via
+        // "Don't ask again," persisted as sites.skip_armored_meet_prompt.
+        // A plain "Not this time" only dismisses THIS instance -- it does
+        // not touch that flag, so the same site can still prompt again on
+        // its next cash-side ticket.
+        function showArmoredMeetPrompt(code, locName, ticketInfo) {
+            var existing = document.getElementById('armored-meet-prompt');
+            if (existing) existing.remove();
+
+            var loc = LOCATIONS[code] || {};
+            if (loc.skipArmoredMeetPrompt) return; // dispatcher already opted this site out
+
+            var state = code.substring(0, 2);
+            var woLabel = (ticketInfo && ticketInfo.woNumber) ? (' (WO ' + ticketInfo.woNumber + ')') : '';
+
+            var div = document.createElement('div');
+            div.id = 'armored-meet-prompt';
+            div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #ffa500;border-radius:8px;padding:14px 18px;z-index:9999;width:min(92vw,420px);box-shadow:0 4px 20px rgba(0,0,0,0.5);font-size:14px;color:#f0f0f0;';
+            div.innerHTML = '<div style="margin-bottom:10px;"><strong>' + code + '</strong> — ' + locName + '</div>' +
+                '<div style="margin-bottom:12px;color:#ccc;">This looks like it may need a carrier (armored truck) meet scheduled before it can be completed' + woLabel + '.</div>' +
+                '<div style="display:flex;gap:10px;margin-bottom:10px;">' +
+                '<button id="amp-yes" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Yes, start scheduling</button>' +
+                '<button id="amp-no" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Not this time</button>' +
+                '</div>' +
+                '<div style="text-align:center;">' +
+                '<button id="amp-never" style="background:transparent;color:#888;border:none;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;">Don\u2019t ask again for this location</button>' +
+                '</div>';
+            document.body.appendChild(div);
+
+            document.getElementById('amp-no').onclick = function() { div.remove(); };
+
+            document.getElementById('amp-yes').onclick = function() {
+                div.remove();
+                // 2026-09-23: the actual send-request flow (emailing the
+                // carrier's regional contact from loomis_contacts) isn't
+                // built yet -- this just acknowledges the choice for now.
+                // Wire the real send here once that piece exists.
+                showToast('Scheduling flow coming soon -- handle the carrier request the usual way for now.');
+            };
+
+            document.getElementById('amp-never').onclick = function() {
+                div.remove();
+                fetch('/.netlify/functions/save-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: code,
+                        state: state,
+                        name: loc.name || locName || '',
+                        address: loc.address || '',
+                        primaryTech: loc.primaryTech || loc.defaultTech || '',
+                        fallbackTech: loc.fallbackTech || '',
+                        contractorOverride: !!loc.contractorOverride,
+                        contractorName: loc.contractorName || '',
+                        machineType: loc.machineType || 'SK',
+                        remote: !!loc.remote,
+                        skipArmoredMeetPrompt: true
+                    })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        loc.skipArmoredMeetPrompt = true;
+                        showToast('\u2705 Won\u2019t ask again for ' + code + '.');
+                    } else {
+                        showToast('\u26a0\ufe0f Could not save -- may still ask again next time.');
+                    }
+                })
+                .catch(function() {
+                    showToast('\u26a0\ufe0f Could not save -- may still ask again next time.');
+                });
+            };
+
+            // Auto-dismiss after 20 seconds -- a bit longer than the
+            // reassign prompt (12s) since this one has three choices to
+            // read instead of one.
+            setTimeout(function() { if (document.getElementById('armored-meet-prompt')) div.remove(); }, 20000);
+        }
+
         function showFallbackAssignmentQueue(items, availableTechs) {
             if (!items || items.length === 0) return;
             // Filter out items that no longer belong to the current state
