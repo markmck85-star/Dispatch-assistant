@@ -370,7 +370,7 @@
   <div style="margin:6px 0 2px 0;">
     <label style="color:#ccc;font-size:12px;cursor:pointer;">
       <input type="checkbox" id="dm-force-geocode" style="margin-right:5px;">
-      Force re-geocode (re-processes records that already have coordinates — use after correcting an address)
+      Force re-geocode (only needed if an address was corrected somewhere other than this admin panel, e.g. directly in the database -- a normal edit here already clears the old coordinates automatically, so this box can usually stay unchecked)
     </label>
   </div>
 
@@ -397,20 +397,22 @@
     One-time per state — costs scale with site count squared, not tech count, so this is priced separately from
     Step 2. Requires Step 1 (geocoding) already done. Adds to the same matrix Step 2 builds; doesn't overwrite it.
   </p>
+  <p style="color:#aaa;font-size:12px;margin:0 0 8px 0;">
+    <strong style="color:#f0f0f0;">Incremental (default, both boxes below unchecked):</strong> only fills in pairs
+    involving sites that are brand new since the last build. Plainly put -- if a site already has SOME pairs on
+    file from an earlier build, incremental won't go back and add its missing pairs, even if it was never paired
+    with every other site. It guarantees a site has been touched at least once, not that it's fully paired. A site
+    that's only ever shown up as the destination half of a pair can permanently miss pairs toward sites earlier in
+    the list, even after incremental reports "0 new, done."
+  </p>
   <label style="display:flex;align-items:center;gap:6px;color:#aaa;font-size:12px;margin-bottom:8px;">
     <input type="checkbox" id="dm-site-full-rebuild">
-    Full rebuild (recompute every pair, not just new sites -- see note below on why incremental can leave gaps)
+    Full rebuild — recomputes every pair from scratch, not just new sites (guaranteed complete coverage; use this before relying on the data for route optimization)
   </label>
   <label style="display:flex;align-items:center;gap:6px;color:#aaa;font-size:12px;margin-bottom:8px;">
     <input type="checkbox" id="dm-site-refresh-moved">
-    Refresh moved pins only (FL twins we just relocated — drops those pairs, additive-fills them; not a full rebuild)
+    Refresh moved pins only — just the FL twins we relocated: drops those specific pairs and lets incremental refill them (cheaper than a full rebuild, leaves everything else alone)
   </label>
-  <p style="color:#886;font-size:11px;margin:0 0 8px 0;">
-    Incremental only guarantees each site has been touched at least once, not that it's paired with every other
-    site -- a site that's only ever been a destination can permanently miss pairs toward sites earlier in the
-    list, even after incremental reports "0 new, done." Check this box for a true one-time full rebuild once you
-    want guaranteed complete coverage (e.g. before relying on this data for route optimization).
-  </p>
   <div class="dm-row">
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
