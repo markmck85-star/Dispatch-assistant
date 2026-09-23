@@ -69,6 +69,21 @@
  * covered in Supabase (even if Blobs never knew about it) is correctly
  * treated as known, not new. Applied identically to the dry-run preview
  * and the real build so the estimate and the actual spend always agree.
+ *
+ * v4 (2026-09-23): FIXED a real coverage bug found live on the CA build --
+ * the Supabase `sites` query below had no explicit sort order. Postgres
+ * does NOT guarantee a stable row order without one; a state that finishes
+ * in a single call never noticed, but CA's build got interrupted and
+ * resumed multiple times (network drops), and each resumed call can fetch
+ * the 290 sites back in a DIFFERENT order than the previous call. Since
+ * the origin/destination batching below assumes a stable site ordering
+ * across chunks (each chunk's `offset` refers to a position in that
+ * ordering), a reshuffled order between chunks silently produces gaps --
+ * confirmed live: every one of CA's 290 sites got touched at least once,
+ * but only 22,105 of the possible 41,905 unique pairs (about 53%) actually
+ * got computed. Fixed by adding an explicit `.order("site_code")` to the
+ * sites query, so the ordering is identical and deterministic across every
+ * chunk of a build, resumed or not.
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
@@ -204,11 +219,12 @@ exports.handler = async (event) => {
       .from("sites")
       .select("id, site_code, lat, lng")
       .eq("state", state)
-      .eq("active", true); // BUG FIX (2026-09-07): soft-deleted sites (delete-location.js
+      .eq("active", true) // BUG FIX (2026-09-07): soft-deleted sites (delete-location.js
       // sets active:false, never hard-deletes -- see that file's own comment on why)
       // were never excluded here, so a deleted site kept showing up in every future
       // build forever. Confirmed via direct query: sites.active is always true/false,
       // never null, so this filter is safe with no edge cases.
+      .order("site_code", { ascending: true }); // v4 (2026-09-23): see top-of-file comment -- deterministic ordering across chunks
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
 
     const pLocEntries = (pSites || [])
@@ -388,7 +404,8 @@ exports.handler = async (event) => {
     .from("sites")
     .select("id, site_code, lat, lng")
     .eq("state", state)
-    .eq("active", true); // BUG FIX (2026-09-07): see matching comment in the dryRun branch above
+    .eq("active", true) // BUG FIX (2026-09-07): see matching comment in the dryRun branch above
+    .order("site_code", { ascending: true }); // v4 (2026-09-23): see top-of-file comment -- deterministic ordering across chunks
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
 
   const locEntries = (sites || [])
