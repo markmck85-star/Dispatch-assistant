@@ -77,18 +77,34 @@ async function computeMissingPairs(supabase, state) {
   const ids = geocoded.map((s) => s.id);
 
   const existingKeys = new Set();
-  const CHUNK = 150; // same defensive .in() batching as get-sites-needing-matrix.js, for larger states
+  const CHUNK = 150; // .in() batching for larger states -- keeps each query's id-list size reasonable
+  const PAGE_SIZE = 1000; // v2 (2026-09-23) BUG FIX: Supabase/PostgREST caps a single query's rows
+  // at 1000 by default -- CA has 22,105 existing pairs, so the very first
+  // un-paginated attempt at this silently truncated to ~1000 rows per
+  // chunk, making almost every real pair look "missing" and inflating the
+  // gap-fill estimate to $202 (nearly a full rebuild) instead of the true
+  // ~$99 for the actual 19,800-pair gap. Every query here now loops with
+  // an explicit .range() until a page comes back shorter than PAGE_SIZE,
+  // guaranteeing the full result set is read regardless of size.
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     if (!chunk.length) continue;
-    const { data: rows, error: distErr } = await supabase
-      .from("site_site_distances")
-      .select("site_a, site_b")
-      .or(`site_a.in.(${chunk.join(",")}),site_b.in.(${chunk.join(",")})`);
-    if (distErr) throw new Error("site_site_distances fetch failed: " + distErr.message);
-    for (const row of rows || []) {
-      const [a, b] = row.site_a < row.site_b ? [row.site_a, row.site_b] : [row.site_b, row.site_a];
-      existingKeys.add(a + "|" + b);
+    let page = 0;
+    for (;;) {
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data: rows, error: distErr } = await supabase
+        .from("site_site_distances")
+        .select("site_a, site_b")
+        .or(`site_a.in.(${chunk.join(",")}),site_b.in.(${chunk.join(",")})`)
+        .range(from, to);
+      if (distErr) throw new Error("site_site_distances fetch failed: " + distErr.message);
+      for (const row of rows || []) {
+        const [a, b] = row.site_a < row.site_b ? [row.site_a, row.site_b] : [row.site_b, row.site_a];
+        existingKeys.add(a + "|" + b);
+      }
+      if (!rows || rows.length < PAGE_SIZE) break;
+      page++;
     }
   }
 

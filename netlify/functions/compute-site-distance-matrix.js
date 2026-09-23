@@ -154,24 +154,45 @@ async function getSupabaseKnownCodes(supabase, state, siteIdByCode, refreshCodes
   // paired with sites in another state's list is not expected in practice
   // (site-to-site builds are per-state), but querying by id on both sides
   // covers it correctly either way without assuming same-state pairing.
-  const { data: rows, error } = await supabase
-    .from("site_site_distances")
-    .select("site_a, site_b")
-    .or(`site_a.in.(${ids.join(",")}),site_b.in.(${ids.join(",")})`);
+  //
+  // v4 (2026-09-23) BUG FIX: this was a single unpaginated query -- Supabase
+  // caps a single response at 1000 rows by default. Never bit FL (only 4,090
+  // pairs spread evenly across 127 sites meant even a truncated 1000-row
+  // page still touched nearly every site at least once), but the same
+  // pattern in the new backfill-site-distance-gaps.js DID produce a real
+  // wrong cost estimate on CA (22,105 pairs -> most rows silently dropped),
+  // so this is fixed here too before it causes a similar miss on a future
+  // larger state. Pages through with .range() until a page comes back
+  // shorter than PAGE_SIZE.
+  const PAGE_SIZE = 1000;
+  let page = 0;
+  for (;;) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const { data: rows, error } = await supabase
+      .from("site_site_distances")
+      .select("site_a, site_b")
+      .or(`site_a.in.(${ids.join(",")}),site_b.in.(${ids.join(",")})`)
+      .range(from, to);
 
-  if (error) {
-    // Best-effort supplement -- if this query fails for any reason, fall
-    // back to Blobs-only knownCodes rather than blocking the whole preview
-    // or build. Logged so a real, recurring failure here doesn't go unnoticed.
-    console.error("[compute-site-distance-matrix] Supabase known-pairs lookup failed (continuing with Blobs-only known set):", error.message);
-    return known;
-  }
+    if (error) {
+      // Best-effort supplement -- if this query fails for any reason, fall
+      // back to whatever's already in `known` rather than blocking the
+      // whole preview or build. Logged so a real, recurring failure here
+      // doesn't go unnoticed.
+      console.error("[compute-site-distance-matrix] Supabase known-pairs lookup failed (continuing with partial/Blobs-only known set):", error.message);
+      break;
+    }
 
-  for (const row of rows || []) {
-    const codeA = codeById[row.site_a];
-    const codeB = codeById[row.site_b];
-    if (codeA && !refreshSet.has(codeA)) known.add(codeA);
-    if (codeB && !refreshSet.has(codeB)) known.add(codeB);
+    for (const row of rows || []) {
+      const codeA = codeById[row.site_a];
+      const codeB = codeById[row.site_b];
+      if (codeA && !refreshSet.has(codeA)) known.add(codeA);
+      if (codeB && !refreshSet.has(codeB)) known.add(codeB);
+    }
+
+    if (!rows || rows.length < PAGE_SIZE) break;
+    page++;
   }
   return known;
 }
