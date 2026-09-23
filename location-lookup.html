@@ -425,7 +425,7 @@ function closeSourceEmail() {
 // which isn't part of that email at all. Reuses the same overlay/close
 // plumbing since no note text needs fetching (it's already in the visit
 // object), just a different body render.
-function viewClosingNoteInline(noteText, title) {
+function viewClosingNoteInline(noteText, title, meta) {
     let overlay = document.getElementById('sourceEmailOverlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -445,6 +445,7 @@ function viewClosingNoteInline(noteText, title) {
     const body = document.getElementById('sourceEmailBody');
     body.innerHTML = `
         <div style="font-weight:600;font-size:18px;margin-bottom:12px;padding-right:28px;">${escapeHtml(title || '📝 Closing Note')}</div>
+        ${meta ? `<div style="font-size:12px;color:#888;margin-bottom:12px;">${escapeHtml(meta)}</div>` : ''}
         <div style="white-space:pre-wrap;font-size:17px;line-height:1.55;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(clean)}</div>
     `;
 }
@@ -478,13 +479,14 @@ function renderHistory() {
                 ? `<div class="mono"><button onclick="viewSourceEmail('${v.inbound_email_id}')" style="background:none;border:none;padding:0;color:#5b9bff;font-weight:600;text-decoration:underline;cursor:pointer;font-size:inherit;font-family:inherit;">${escapeHtml(v.appointment_number)}</button></div>`
                 : `<div class="mono" style="color:#e8e8e8;font-weight:600;">${escapeHtml(v.appointment_number)}</div>`)
             : '';
+        const metaStr = [date, v.tech_name_raw, v.wo_number ? ((v.source === 'bluefolder' ? 'BF ' : 'WO ') + v.wo_number) : null].filter(Boolean).join(' · ');
         return `<div class="visit-row">
             <div><strong>${date}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span>${dur ? ' · ' + dur : ''}</div>
             <div class="muted">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}${reviewNote}</div>
             ${saDisplay}
             ${v.wo_number ? `<div class="mono">${v.source === 'bluefolder' ? 'BF ' : 'WO '}${escapeHtml(v.wo_number)}${v.ticket_status ? ' · ' + escapeHtml(v.ticket_status) : ''}</div>` : ''}
             ${v.source === 'email_ticket' && v.inbound_email_id ? `<button onclick="viewSourceEmail('${v.inbound_email_id}')" style="background:none;border:none;padding:0;margin-top:4px;color:#5b9bff;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">✉️ View ticket email</button>` : ''}
-            ${v.closing_note ? `<button onclick="viewClosingNoteInline(decodeURIComponent('${encodeURIComponent(v.closing_note).replace(/'/g, '%27')}'), '${v.source === 'bluefolder' ? '📁 BlueFolder note' : '📝 Closing Note'}')" style="background:none;border:none;padding:0;margin-top:4px;color:#7edb8e;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">${v.source === 'bluefolder' ? '📁 View BlueFolder note' : '📝 View Note'}</button>` : ''}
+            ${v.closing_note ? `<button onclick="viewClosingNoteInline(decodeURIComponent('${encodeURIComponent(v.closing_note).replace(/'/g, '%27')}'), '${v.source === 'bluefolder' ? '📁 BlueFolder note' : '📝 Closing Note'}', decodeURIComponent('${encodeURIComponent(metaStr).replace(/'/g, '%27')}'))" style="background:none;border:none;padding:0;margin-top:4px;color:#7edb8e;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">${v.source === 'bluefolder' ? '📁 View BlueFolder note' : '📝 View Note'}</button>` : ''}
         </div>`;
     }).join('');
 
