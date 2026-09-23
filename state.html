@@ -799,10 +799,33 @@ async function loadConsole(state, isRetry) {
             }).join('<br>') + `</div>`
           : '';
 
+        // 2026-09-23: for an "Armored Truck Meet" ticket, t.dueAt is just
+        // Neumo's raw email-stated deadline (the same unreliable field
+        // computedSlaDeadline exists elsewhere to replace) -- showing it
+        // plainly as "Due: <time>" implies a real deadline when the
+        // ticket is actually blocked on a multi-day carrier scheduling
+        // negotiation, not a response-time clock. Found live 2026-09-23
+        // testing that workflow: a ticket correctly exempted from the SLA
+        // computation still showed a bare "Due: Sep 21, 8:00 PM" here,
+        // with nothing indicating it was meaningless for this category.
+        // Swaps that line for the real loomis_meet_status instead, same
+        // wording the future dispatch-board badge is meant to use.
+        const loomisDueLine = t.loomisMeetStatus
+          ? `<div class="meta">🚚 ${
+              t.loomisMeetStatus === 'confirmed'
+                ? (t.loomisMeetConfirmedAt ? 'Carrier meet confirmed: <strong>' + fmtDateTime(t.loomisMeetConfirmedAt) + '</strong>' : 'Carrier meet confirmed (see thread for time)')
+                : t.loomisMeetStatus === 'needs_reschedule'
+                  ? 'Carrier meet needs reschedule'
+                  : t.loomisMeetStatus === 'proposed'
+                    ? 'Carrier meet: date proposed, awaiting confirmation'
+                    : 'Awaiting carrier response to schedule a meet'
+            }</div>`
+          : `<div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDateOnly((t.dueAt || '').slice(0, 10)) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>`;
+
         return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
           <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
-          <div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDateOnly((t.dueAt || '').slice(0, 10)) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>
+          ${loomisDueLine}
           <div class="meta">${statusBadge}</div>
           ${relatedTicketTag}
           ${shipmentTag}

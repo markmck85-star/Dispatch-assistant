@@ -118,9 +118,23 @@ async function loadLog() {
     }
     listEl.innerHTML = entries.map(e => {
       const kindClass = (e.ticketKind || 'trouble').toLowerCase();
-      const deadline = e.slaEndsAt
-        ? `SLA: ${fmtDate(e.slaEndsAt)}`
-        : (e.dueAt ? `Due: ${fmtDate(e.dueAt)}` : '');
+      // 2026-09-23: same fix as state.html -- e.dueAt for an "Armored
+      // Truck Meet" ticket is just Neumo's raw, already-known-unreliable
+      // email deadline, and showing it as a plain "Due: <time>" implies a
+      // real clock that isn't there; the ticket is actually blocked on a
+      // carrier scheduling negotiation. Swaps in the real
+      // loomis_meet_status instead when present.
+      const deadline = e.loomisMeetStatus
+        ? (e.loomisMeetStatus === 'confirmed'
+            ? (e.loomisMeetConfirmedAt ? `🚚 Confirmed: ${fmtDate(e.loomisMeetConfirmedAt)}` : '🚚 Confirmed (see thread for time)')
+            : e.loomisMeetStatus === 'needs_reschedule'
+              ? '🚚 Needs reschedule'
+              : e.loomisMeetStatus === 'proposed'
+                ? '🚚 Date proposed'
+                : '🚚 Awaiting carrier response')
+        : (e.slaEndsAt
+            ? `SLA: ${fmtDate(e.slaEndsAt)}`
+            : (e.dueAt ? `Due: ${fmtDate(e.dueAt)}` : ''));
       return `
         <div class="entry ${kindClass}">
           <span class="wo">WO ${e.woNumber || '—'}</span>
