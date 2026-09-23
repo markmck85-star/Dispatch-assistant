@@ -11,10 +11,27 @@
   @media (min-width: 1100px) {
     .container { max-width: 1320px; }
     body { padding: 20px 28px 40px; }
+    .month-grid { min-width: 0; grid-template-columns: repeat(7, minmax(120px, 1fr)); }
+    .day-cell { min-height: 110px; padding: 6px; }
+    .cell-date { font-size: 13px; margin-bottom: 5px; }
+    .day-block {
+      font-size: 13px; font-weight: 600; line-height: 1.35;
+      padding: 4px 7px; margin-bottom: 4px;
+      white-space: normal;
+      text-shadow: 0 1px 1px rgba(0,0,0,0.45);
+    }
+    .day-block .block-note { font-size: 12px; opacity: 1; }
+    .day-block .synced { font-size: 11px; }
+    .company-banner {
+      font-size: 13px; padding: 5px 7px; white-space: normal;
+    }
+    .dow-header { font-size: 13px; padding: 8px 2px; }
   }
   @media (min-width: 1500px) {
     .container { max-width: 1600px; }
     body { padding: 24px 36px 48px; }
+    .day-block { font-size: 14px; }
+    .company-banner { font-size: 14px; }
   }
 
   .back-link { display: inline-block; color: #007bff; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
