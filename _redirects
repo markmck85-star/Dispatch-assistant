@@ -1,16 +1,15 @@
 /restore.html    /restore.html    200
 /admin.html      /admin.html      200
 /calendar.html   /calendar.html   200
+/location-lookup.html    /location-lookup.html    200
+/location-lookup         /location-lookup.html    200
+/restock-tracker.html    /restock-tracker.html    200
+/restock-tracker         /restock-tracker.html    200
+/shipments.html          /shipments.html          200
+/mileage.html            /mileage.html            200
+/help.html               /help.html               200
+/bluefolder.html         /bluefolder.html         200
 
-# Direct-link shortcuts for the state console, e.g. mcrdispatch.net/Georgia
-# or mcrdispatch.net/GA -- added 2026-07-27 for phone-homescreen shortcuts.
-# Only ever reached for paths that don't match a real file on disk (Netlify
-# checks actual files first), so this can't shadow admin/calendar/state/etc.
 /:state          /state.html?state=:state    200
-
-# Same shortcut pattern for the watchdog log, added 2026-08-12 --
-# mcrdispatch.net/watchdog/GA -> watchdog-log.html?state=GA. Two-segment
-# path so it doesn't collide with the single-segment /:state rule above.
 /watchdog/:state /watchdog-log.html?state=:state    200
-
 /*               /index.html      200
