@@ -2560,27 +2560,35 @@ exports.handler = async (event) => {
         // matching a subject already alerted on today gets its SMS
         // suppressed here -- the first (real) list for a given subject
         // still alerts normally; only same-thread follow-ups are skipped.
-        let alreadyAlertedThisThread = false;
-        if (rawSubjectIsReply && normalizedSubject) {
-          const dayStart = new Date(receivedAt); dayStart.setUTCHours(0, 0, 0, 0);
-          const dayEnd = new Date(receivedAt); dayEnd.setUTCHours(23, 59, 59, 999);
-          const { data: priorToday, error: priorErr } = await supabase
-            .from('inbound_emails')
-            .select('id, subject')
-            .eq('classified_as', 'dispatch_list')
-            .gte('received_at', dayStart.toISOString())
-            .lte('received_at', dayEnd.toISOString());
-          if (priorErr) {
-            console.error('[mailgun-inbound] Same-thread dispatch-list lookup failed (non-fatal, alerting normally):', priorErr.message);
-          } else {
-            alreadyAlertedThisThread = (priorToday || []).some(row =>
-              row.id !== inboundEmailId &&
-              (row.subject || '').replace(/^\s*(re|fwd?)\s*:\s*/i, '').trim().toLowerCase() === normalizedSubject
-            );
-          }
-        }
-        if (alreadyAlertedThisThread) {
-          console.log(`[mailgun-inbound] Dispatch-list SMS skipped: same-day reply-all on an already-alerted thread ("${subject}").`);
+        // v2 (2026-09-23): replaced with a persistent per-list-date "was an
+        // SMS actually sent" record. The 2026-09-17 version above only
+        // checked whether ANY email with a matching subject had arrived
+        // earlier TODAY (classified_as='dispatch_list' in inbound_emails) --
+        // it assumed that meant an alert had already gone out, but it never
+        // actually confirmed one had. Real case that surfaced this
+        // (2026-09-23): Dontez's "Re: Dispatch List for 9/23/26" was the
+        // FIRST email for that list -- no SMS had ever gone out for 9/23 --
+        // yet it's plausible for this same subject-matching mechanism to
+        // suppress a genuine first alert in other orderings (e.g. an
+        // earlier same-subject email that itself got suppressed for some
+        // other reason, or arrived a few minutes into a new UTC day
+        // relative to a late-night list), since "seen earlier today" was
+        // never actually tied to whether a text went out.
+        //
+        // Fixed by tracking real sends directly, keyed on normalizedSubject
+        // itself (which already embeds the list's date, e.g. "dispatch
+        // list for 9/23/26" -- so this doubles as the per-list-date key
+        // Mark asked for) rather than a same-calendar-day window. Persists
+        // across days (Blobs, not scoped to "today"), so it correctly
+        // covers a list whose Fwd: and Re: land on different UTC days, and
+        // it's the literal rule requested: alert once per list date; a
+        // Re: on that same list is only suppressed once a real send is
+        // already on record for it.
+        const alertedKey = 'dispatch-list/alerted-subjects';
+        const alertedMap = (await store.get(alertedKey, { type: 'json' })) || {};
+        const alreadyAlertedThisList = normalizedSubject ? !!alertedMap[normalizedSubject] : false;
+        if (alreadyAlertedThisList) {
+          console.log(`[mailgun-inbound] Dispatch-list SMS skipped: already sent for this list ("${subject}", first sent ${alertedMap[normalizedSubject]}).`);
           throw { __skipDispatchListAlert: true };
         }
 
@@ -2632,6 +2640,17 @@ exports.handler = async (event) => {
             console.log(`[mailgun-inbound] Dispatch-list SMS to ${addr.trim()}: ${ok ? 'sent' : 'failed'}`);
           }
           await store.set('dispatch-list/last-notified-hash', bodyHash);
+          // v2 (2026-09-23): mark this list's subject as actually alerted,
+          // regardless of whether dlRecipients was empty (e.g. every
+          // recipient outside their hours window) -- an empty recipient
+          // list still means the content itself was processed and this
+          // exact list shouldn't re-trigger review on a later Re:. Only
+          // records real *content* dedup key (normalizedSubject), separate
+          // from the bodyHash immediate-resend guard above.
+          if (normalizedSubject) {
+            alertedMap[normalizedSubject] = receivedAt.toISOString();
+            await store.setJSON(alertedKey, alertedMap);
+          }
         }
       } catch (dlSmsEx) {
         if (!dlSmsEx || !dlSmsEx.__skipDispatchListAlert) {
