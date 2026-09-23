@@ -507,6 +507,11 @@
     let resumedFromInterrupted = false;
     try {
       while (!done) {
+        // 2026-09-23: brief pause before a resumed chunk (not the first) --
+        // found live on Idaho: firing the next chunk immediately can read
+        // Blobs before the previous chunk's write has propagated, silently
+        // losing that chunk's results even though it was already billed.
+        if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
         dmSetStatus('Building site-to-site matrix for ' + state + '… (batch ' + offset + (lastResult && lastResult.totalBatches ? ' of ' + lastResult.totalBatches : '') + ')');
         const res = await fetch('/.netlify/functions/compute-site-distance-matrix', {
           method: 'POST',
@@ -665,6 +670,9 @@
     let resumedFromInterrupted = false;
     try {
       while (!done) {
+        // 2026-09-23: see the matching comment in dmBuildSiteMatrix above --
+        // same Blobs read-after-write race, same fix.
+        if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
         dmSetStatus('Filling missing pairs for ' + state + '… (' + offset + (lastResult && lastResult.totalPairs ? ' of ' + lastResult.totalPairs : '') + ' processed)');
         const res = await fetch('/.netlify/functions/backfill-site-distance-gaps', {
           method: 'POST',
@@ -901,6 +909,9 @@
     let resumedFromInterrupted = false;
     try {
       while (!done) {
+        // 2026-09-23: see the matching comment in dmBuildSiteMatrix above --
+        // same Blobs read-after-write race, same fix.
+        if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
         dmSetStatus('Building ' + label + ' matrix for ' + state + '… (tech ' + offset + (lastResult && lastResult.totalBatches ? ' of ' + lastResult.totalBatches : '') + ')');
         const res = await fetch('/.netlify/functions/compute-distance-matrix', {
           method: 'POST',
