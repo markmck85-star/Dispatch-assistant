@@ -80,7 +80,7 @@ exports.handler = async (event) => {
 
       const { data: sites, error: sitesErr } = await supabase
         .from("sites")
-        .select("id, site_code, state, name, address, county, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id")
+        .select("id, site_code, state, name, address, county, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id, skip_armored_meet_prompt")
         .eq("state", state);
 
       if (sitesErr) throw sitesErr;
@@ -118,6 +118,12 @@ exports.handler = async (event) => {
           contractorName: s.contractor_name || "",
           machineType: s.machine_type || "SK",
           remote: !!s.remote,
+          // 2026-09-23: dispatcher-set opt-out of the "schedule a carrier
+          // meet?" prompt for this specific site (e.g. Augusta Peach
+          // Orchard, which handles its cash side internally). Per-site,
+          // not per-state -- see save-location.js and the prompt's own
+          // "don't ask again" option in index.html.
+          skipArmoredMeetPrompt: !!s.skip_armored_meet_prompt,
           ...(s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : {}),
         };
         result[s.site_code] = record;

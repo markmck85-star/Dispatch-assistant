@@ -38,6 +38,23 @@ exports.handler = async (event) => {
     updatedAt: new Date().toISOString(),
   };
 
+  // 2026-09-23: unlike every other field above, this one is deliberately
+  // OMITTED from `record` entirely when the caller doesn't send it --
+  // every other boolean here (contractorOverride, remote) defaults to
+  // false/unset whenever a payload doesn't include it, which is fine for
+  // them since every existing caller (admin edit, reassign-permanent
+  // prompt, fallback-assignment prompt) always sends the FULL location
+  // record on every save. Doing the same for skipArmoredMeetPrompt would
+  // mean any one of those unrelated saves -- editing a primary tech in
+  // Admin, say -- would silently flip a dispatcher's earlier "don't ask
+  // again for this site" choice back off, since none of those call sites
+  // know or care about this field. Only including it in `record` when
+  // truly present in the payload means the merge below (`{...prev,
+  // ...record}`) leaves the site's existing value alone otherwise.
+  if (payload.skipArmoredMeetPrompt !== undefined) {
+    record.skipArmoredMeetPrompt = Boolean(payload.skipArmoredMeetPrompt);
+  }
+
   const store = getDispatchStore();
   const key = "locations/" + state;
 
@@ -117,6 +134,7 @@ exports.handler = async (event) => {
               contractor_override: !!merged.contractorOverride,
               contractor_name: merged.contractorName || null,
               remote: !!merged.remote,
+              skip_armored_meet_prompt: !!merged.skipArmoredMeetPrompt,
               primary_tech_id: primaryTechId,
               fallback_tech_id: fallbackTechId,
             };
