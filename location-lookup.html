@@ -74,7 +74,8 @@
             <option value="">All states</option>
         </select>
         <div class="search-wrap">
-            <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off">
+            <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off" style="padding-right:32px;">
+            <button type="button" id="searchClearBtn" aria-label="Clear search" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#888;font-size:18px;line-height:1;cursor:pointer;padding:4px;">✕</button>
             <div class="results-dropdown" id="resultsDropdown"></div>
         </div>
     </div>
@@ -188,6 +189,13 @@ function runSearch() {
     const q = searchInput.value.trim().toLowerCase();
     const st = stateFilter.value;
     activeIndex = -1;
+    // 2026-09-23: picking a suggested result fills the whole box with
+    // "CODE - Name" (see selectSite below) -- searching again previously
+    // meant backspacing the entire thing first. This button just clears
+    // the box and re-runs the same empty-query path runSearch already
+    // has (state-browse or the "select a state" prompt), so it's not a
+    // separate reset path to maintain.
+    searchClearBtn.style.display = searchInput.value ? 'block' : 'none';
     if (!q) {
         // 2026-09-12: previously an empty box with a state picked just
         // listed that state's sites alphabetically in the dropdown -- Mark
@@ -225,6 +233,12 @@ function runSearch() {
 
 searchInput.addEventListener('input', runSearch);
 searchInput.addEventListener('focus', runSearch);
+const searchClearBtn = document.getElementById('searchClearBtn');
+searchClearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    runSearch();
+    searchInput.focus();
+});
 stateFilter.addEventListener('change', async () => {
     await loadTechsForState(stateFilter.value);
     runSearch();
