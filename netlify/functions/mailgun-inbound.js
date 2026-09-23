@@ -1185,6 +1185,26 @@ function parseEmailBody(text, receivedAt, subject) {
     const issueCategory = getField('Line Item Issue Category');
     const issueDetail = getField('Line Item Issue Detail');
     const issue = [issueCategory, issueDetail].filter(Boolean).join(' – ') || 'See email for details';
+    // 2026-09-23: every trouble-ticket email that names a real kiosk
+    // states its machine type right there ("SST Type: BK 6500", "SST
+    // Type: BIG HOKU 7000", etc.) -- previously this whole field was
+    // thrown away entirely; "SST\s+Type" was only ever used as a
+    // stop-boundary in getField's regex (to keep OTHER fields from
+    // swallowing it), never actually captured itself. That meant the
+    // "new location from ticket" toast (showAddLocationPromptForTicket in
+    // index.html) had no way to know a brand-new site was cash-handling
+    // and always defaulted its Machine Type dropdown to SK, silently
+    // relying on the dispatcher to notice and correct it by hand. Found
+    // 2026-09-23 while looking into exactly that gap. Normalizes the raw
+    // value to this app's own SK/SB/BK vocabulary; returns null for
+    // anything that doesn't confidently map (e.g. Indiana's "BIG HOKU
+    // 7000" family, which has no equivalent in this app's machine-type
+    // set at all yet) rather than guessing wrong.
+    const sstTypeRaw = getField('SST Type');
+    let sstType = null;
+    if (/^\s*BK\b/i.test(sstTypeRaw)) sstType = 'BK';
+    else if (/^\s*SB\b/i.test(sstTypeRaw) || /surfboard/i.test(sstTypeRaw)) sstType = 'SB';
+    else if (/^\s*SK\b/i.test(sstTypeRaw)) sstType = 'SK';
     // Added for Supabase tickets table (Stage 1) -- not previously extracted,
     // does not change alertBody/SMS text which still uses the combined `issue` above.
     const lineItemDescription = getField('Line Item Description');
@@ -1279,6 +1299,7 @@ function parseEmailBody(text, receivedAt, subject) {
       description: lineItemDescription || null,
       earliestStartRaw: earliestStartRaw || null,
       dueDateRaw: dueDateRaw || null,
+      sstType,
       ticketKind: isSiteSurvey ? 'site_survey' : (isInstallCategory ? 'install' : 'trouble'),
       isLineItemAddition,
     };
@@ -2154,7 +2175,7 @@ exports.handler = async (event) => {
           // rawSiteCode/rawIssue, and null for the vast majority of
           // tickets where this routing convention doesn't apply, which
           // fits a jsonb bag better than a mostly-empty new column.
-          attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null, routedState },
+          attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null, routedState, rawSstType: parsed.sstType || null },
           source: 'email',
           inbound_email_id: inboundEmailId,
         };

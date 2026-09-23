@@ -56,7 +56,8 @@
  * -> { unmatched: [ { ticketId, woNumber, siteText, suggestedName,
  *                      suggestedCode, autoSuggested, suggestedCodeType,
  *                      possibleExistingSite, suggestedAddress,
- *                      issueCategory, issueDetail, receivedAt } ] }
+ *                      suggestedMachineType, issueCategory, issueDetail,
+ *                      receivedAt } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
 
@@ -136,6 +137,15 @@ exports.handler = async (event) => {
         .replace(/^[A-Z]{2}\s*[-\u2013]\s*/, "")
         .trim();
       const rawSiteCode = (t.attributes && t.attributes.rawSiteCode) || "";
+      // 2026-09-23: rawSstType is only present on trouble tickets whose
+      // email named a machine type the parser could confidently map to
+      // this app's SK/SB/BK vocabulary (see mailgun-inbound.js) -- null
+      // for maintenance tickets (which never carry an SST Type field at
+      // all), and for anything the parser couldn't confidently map (e.g.
+      // Indiana's "BIG HOKU" family, which has no equivalent here yet).
+      // The frontend toast falls back to its existing SK/OTHER default
+      // when this is absent, same as before this existed.
+      const suggestedMachineType = (t.attributes && t.attributes.rawSstType) || null;
       const subject = (t.inbound_emails && t.inbound_emails.subject) || "";
       const isTestingStation = /\bK2D\b/i.test(subject);
       const isOtc = /\bOTC\b/i.test(subject);
@@ -213,6 +223,7 @@ exports.handler = async (event) => {
         possibleExistingSite,
         isTestingStation,
         suggestedAddress: t.address || "",
+        suggestedMachineType,
         issueCategory: t.issue_category,
         issueDetail: t.issue_detail,
         receivedAt: t.received_at,
