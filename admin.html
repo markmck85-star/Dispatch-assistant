@@ -185,6 +185,8 @@
                 <input type="text" id="techRegion" placeholder="e.g. Southeast">
                 <label for="techStartLocation">Start Location (home address for drive time)</label>
                 <input type="text" id="techStartLocation" placeholder="123 Main St, City, ST 12345" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;">
+                <label for="techAdditionalStates">Additional states <span style="color:#888;font-weight:400;font-size:12px;">(other boards this tech should appear on — do not create a second record)</span></label>
+                <input type="text" id="techAdditionalStates" placeholder="e.g. GA, NC" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;" autocomplete="off">
                 <div class="checkbox-row">
                     <input type="checkbox" id="techActive" checked>
                     <label for="techActive" style="margin:0;font-weight:400;">Active</label>
@@ -1685,6 +1687,9 @@
                     '<div class="card-title">' + esc(displayName) + (tech.active === false ? ' <span style="color:#dc3545;">(inactive)</span>' : '') + '</div>' +
                     '<div class="card-detail">Phone: ' + esc(tech.phone || '—') + ' | Email: ' + esc(tech.email || '—') + '</div>' +
                     '<div class="card-detail">Address: ' + esc(tech.homeAddress || 'not set') + '</div>' +
+                    ((tech.additionalStates && tech.additionalStates.length)
+                        ? '<div class="card-detail">Also covers: ' + esc(tech.additionalStates.join(', ')) + '</div>'
+                        : '') +
                     '<div class="card-detail">SMS: ' + esc(tech.smsAddress || 'not set') + '</div>' +
                     '<div class="card-actions">' +
                     '<button class="edit-btn" onclick="editTechnician(\'' + escAttr(techKey) + '\')">Edit</button>' +
@@ -1711,6 +1716,7 @@
             document.getElementById('techSmsAddress').value = '';
             document.getElementById('techRegion').value = '';
             document.getElementById('techStartLocation').value = '';
+            document.getElementById('techAdditionalStates').value = '';
             document.getElementById('techActive').checked = true;
             document.getElementById('techFormTitle').textContent = 'Add Technician';
             document.getElementById('techClearBtn').textContent = 'Clear Form';
@@ -1725,6 +1731,7 @@
             document.getElementById('techEmail').value = tech.email || '';
             document.getElementById('techRegion').value = tech.region || '';
             document.getElementById('techStartLocation').value = tech.homeAddress || '';
+            document.getElementById('techAdditionalStates').value = (tech.additionalStates || []).join(', ');
             document.getElementById('techActive').checked = tech.active !== false;
             document.getElementById('techFormTitle').textContent = 'Edit Technician — ' + tech.name;
             document.getElementById('techClearBtn').textContent = '+ Add New Technician Instead';
@@ -1744,9 +1751,18 @@
             if (!name) { showToast('Technician name is required.', 'error'); return; }
 
             var isEdit = document.getElementById('techName').disabled;
+            var slug = name.toLowerCase().replace(/\s+/g, '-');
+            var existingTech = techniciansData[slug] || {};
+            var homeState = existingTech.state || currentState;
+            var extraRaw = document.getElementById('techAdditionalStates').value.trim();
+            var additionalStates = extraRaw
+                ? extraRaw.toUpperCase().split(/[^A-Z]+/).filter(function (s) { return s.length === 2 && s !== homeState; })
+                : [];
             var payload = {
                 name: name,
                 state: currentState,
+                homeState: homeState,
+                additionalStates: additionalStates,
                 phone: document.getElementById('techPhone').value.trim(),
                 email: document.getElementById('techEmail').value.trim(),
                 region: document.getElementById('techRegion').value.trim(),
