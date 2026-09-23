@@ -85,7 +85,8 @@
         <label>State:</label>
         <select id="stateFilter"><option value="">All states</option></select>
         <div class="search-wrap">
-            <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off">
+            <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off" style="padding-right:32px;">
+            <button type="button" id="searchClearBtn" aria-label="Clear search" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#888;font-size:18px;line-height:1;cursor:pointer;padding:4px;">✕</button>
             <div class="results-dropdown" id="resultsDropdown"></div>
         </div>
     </div>
@@ -234,6 +235,9 @@ loadSites();
 function runSearch() {
     const q = searchInput.value.trim().toLowerCase();
     const st = stateFilter.value;
+    // Same "picking a suggestion fills the whole box" annoyance Location
+    // Lookup's search had -- same fix, same reasoning, applied here too.
+    searchClearBtn.style.display = searchInput.value ? 'block' : 'none';
     if (!q) {
         resultsDropdown.classList.remove('open'); resultsDropdown.innerHTML = '';
         emailCard.innerHTML = '';
@@ -262,6 +266,12 @@ function runSearch() {
     });
 }
 searchInput.addEventListener('input', runSearch);
+const searchClearBtn = document.getElementById('searchClearBtn');
+searchClearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    runSearch();
+    searchInput.focus();
+});
 stateFilter.addEventListener('change', async () => {
     await loadTechsForState(stateFilter.value);
     runSearch();
