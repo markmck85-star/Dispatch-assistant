@@ -30,11 +30,36 @@ function ticketAsVisit(t) {
     appointment_number: null,
     needs_review: !!t.needs_review,
     ticket_id: t.id,
-    closing_note: t.description || null,
+    // Dispatch-email body is not a closing note. Keep it in
+    // remediation_detail so the UI does not label it "Closing Note".
+    closing_note: null,
     inbound_email_id: t.inbound_email_id || null,
     source: 'email_ticket',
     ticket_status: t.status || null,
     ticket_kind: t.ticket_kind || null,
+  };
+}
+
+function bfAsVisit(sr) {
+  const note = sr.detailed_description || sr.description || null;
+  const when = sr.date_time_closed || sr.date_time_created;
+  return {
+    started_at: when,
+    ended_at: sr.date_time_closed || null,
+    duration_min: null,
+    tech_name_raw: null,
+    remediation: sr.type || sr.status || 'BlueFolder',
+    remediation_detail: sr.description || null,
+    is_restock: /\b(prevent|preventative|restock)\b/i.test(String(sr.type || '') + ' ' + String(sr.description || '')),
+    wo_number: sr.service_request_id ? String(sr.service_request_id) : null,
+    appointment_number: null,
+    needs_review: !!sr.needs_review,
+    ticket_id: null,
+    closing_note: note,
+    inbound_email_id: null,
+    source: 'bluefolder',
+    ticket_status: sr.status || null,
+    ticket_kind: sr.type || null,
   };
 }
 
@@ -103,7 +128,19 @@ exports.handler = async (event) => {
       .map(ticketAsVisit);
   }
 
-  const merged = [...extraFromTickets, ...visitsWithEmail].sort((a, b) => {
+  let extraFromBf = [];
+  if (offset === 0) {
+    const { data: bfRows, error: bfErr } = await supabase
+      .from('bluefolder_service_requests')
+      .select('service_request_id, description, detailed_description, status, type, date_time_created, date_time_closed, needs_review')
+      .eq('site_id', site.id)
+      .order('date_time_closed', { ascending: false, nullsFirst: false })
+      .limit(500);
+    if (bfErr) return json(500, { ok: false, error: bfErr.message });
+    extraFromBf = (bfRows || []).map(bfAsVisit);
+  }
+
+  const merged = [...extraFromTickets, ...extraFromBf, ...visitsWithEmail].sort((a, b) => {
     const da = a.started_at ? new Date(a.started_at).getTime() : 0;
     const db = b.started_at ? new Date(b.started_at).getTime() : 0;
     return db - da;
@@ -122,7 +159,7 @@ exports.handler = async (event) => {
   }
 
   const visitCount = totalVisits != null ? totalVisits : visitsWithEmail.length;
-  const extraCount = extraFromTickets.length;
+  const extraCount = extraFromTickets.length + extraFromBf.length;
   const totalShownBase = visitCount + extraCount;
 
   return json(200, {
