@@ -297,7 +297,7 @@ exports.handler = async (event) => {
     // rather than a permanent, undismissable flag in this list.
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -409,8 +409,21 @@ exports.handler = async (event) => {
       // its zip via slaCalculator.js) added alongside it. Only trouble
       // tickets get one -- maintenance/restock and bulk-list entries don't
       // carry a 4-hour SLA at all.
+      //
+      // 2026-09-23: also excludes "Armored Truck Meet" tickets, same as
+      // get-watchdog-log.js -- these are blocked on a carrier scheduling
+      // negotiation, not a response-time SLA, so a computed 4-hour
+      // deadline here would just falsely trip the "⏰ SLA deadline" flag
+      // this page shows elsewhere (see isTicketFlagged below). Found live
+      // 2026-09-23: a test ticket's raw due_at (the very email-stated
+      // deadline this whole computedSlaDeadline effort exists to replace)
+      // was still showing as a plain "Due: <time>" with no indication it
+      // was meaningless for this ticket type -- loomisMeetStatus is
+      // exposed here now so the frontend can show the real carrier-
+      // negotiation status in its place instead.
+      const isArmoredTruckMeet = (t.issue_category || '').trim().toLowerCase() === 'armored truck meet';
       let computedSlaDeadline = null;
-      if (t.ticket_kind === 'trouble' && t.received_at) {
+      if (t.ticket_kind === 'trouble' && !isArmoredTruckMeet && t.received_at) {
         try {
           computedSlaDeadline = computeSlaDeadline(t.received_at, t.address, state);
         } catch (e) {
@@ -430,6 +443,9 @@ exports.handler = async (event) => {
         receivedAt: t.received_at,
         dueAt,
         computedSlaDeadline,
+        loomisMeetStatus: t.loomis_meet_status || null,
+        loomisMeetConfirmedAt: t.loomis_meet_confirmed_at || null,
+        loomisMeetLastContactAt: t.loomis_meet_last_contact_at || null,
         status,
         closedOn,
         openShipment: openShipmentsBySite[t.site_id] || null,
