@@ -351,6 +351,7 @@
     <option value="IN">IN — Indiana</option>
     <option value="MI">MI — Michigan</option>
     <option value="MN">MN — Minnesota</option>
+    <option value="MS">MS — Mississippi</option>
     <option value="NC">NC — North Carolina (9 locations)</option>
     <option value="NV">NV — Nevada</option>
     <option value="OH">OH — Ohio</option>
@@ -1245,7 +1246,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['AL', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV']
+                ? ['AL', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'MS', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV']
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');
