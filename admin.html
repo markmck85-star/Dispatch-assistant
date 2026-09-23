@@ -490,6 +490,7 @@
     let offset = 0;
     let done = false;
     let lastResult = null;
+    let resumedFromInterrupted = false;
     try {
       while (!done) {
         dmSetStatus('Building site-to-site matrix for ' + state + '… (batch ' + offset + (lastResult && lastResult.totalBatches ? ' of ' + lastResult.totalBatches : '') + ')');
@@ -499,7 +500,49 @@
           body: JSON.stringify({ state, offset, adminSecret, fullRebuild, refreshMovedPins }),
         });
         const data = await res.json();
-        if (!data.ok) { dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : '')); return; }
+        if (!data.ok) {
+          // 2026-09-23: the orphaned-build guard (offset:0 hitting a state
+          // with real saved progress from an earlier interrupted session)
+          // used to just dead-end here -- the backend already tells the
+          // caller exactly where to resume (resumeOffset) so nothing is
+          // re-billed, but this code never actually used it, so every
+          // retry hit the same wall. Found live on a real CA build with
+          // 2,312 already-billed elements on the line. Now: on first
+          // encountering this (offset was still 0, this is a genuine
+          // resume case, not a mid-run failure), confirm with the user and
+          // continue the loop from resumeOffset instead of stopping.
+          if (offset === 0 && !resumedFromInterrupted && typeof data.resumeOffset === 'number') {
+            const resumeMsg =
+              'An interrupted ' + state + ' build already has ' + (data.priorElementsUsed || 0) +
+              ' billed elements saved from an earlier session.\n\n' +
+              'Resume from where it left off (recommended -- won\'t re-bill that work)?\n\n' +
+              'Cancel instead discards it and starts completely over (re-bills everything).';
+            if (confirm(resumeMsg)) {
+              resumedFromInterrupted = true;
+              offset = data.resumeOffset;
+              continue;
+            }
+            if (!confirm('Really discard ' + (data.priorElementsUsed || 0) + ' already-billed elements and start over? This cannot be undone.')) {
+              dmSetStatus('Cancelled -- interrupted build left as-is, safe to resume later.');
+              return;
+            }
+            // User explicitly chose to discard and start fresh.
+            offset = 0;
+            const forceRes = await fetch('/.netlify/functions/compute-site-distance-matrix', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state, offset, adminSecret, fullRebuild, refreshMovedPins, force: true }),
+            });
+            const forceData = await forceRes.json();
+            if (!forceData.ok) { dmSetStatus('❌ ' + (forceData.error || 'Unknown error')); return; }
+            lastResult = forceData;
+            done = forceData.done;
+            if (!done) offset = forceData.nextOffset;
+            continue;
+          }
+          dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
+          return;
+        }
         lastResult = data;
         done = data.done;
         if (!done) offset = data.nextOffset;
