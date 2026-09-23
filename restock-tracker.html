@@ -1116,8 +1116,9 @@ function lastVisitCell(loc) {
   // safely embedded inside this inline onclick attribute without breaking
   // it. openApptAndCopy decodes it back before use.
   const encodedNote = loc.lastVisitClosingNote ? encodeURIComponent(loc.lastVisitClosingNote) : '';
+  const siteCodeArg = loc.siteCode ? `'${loc.siteCode}'` : 'null';
   const apptHtml = loc.lastVisitEmailId
-    ? `<button onclick="openApptAndCopy('${loc.lastVisitEmailId}', '${loc.lastVisitAppt}', '${encodedNote}')" style="background:none;border:none;padding:0;color:var(--info-tc);font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
+    ? `<button onclick="openApptAndCopy('${loc.lastVisitEmailId}', '${loc.lastVisitAppt}', '${encodedNote}', ${siteCodeArg})" style="background:none;border:none;padding:0;color:var(--info-tc);font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;">${loc.lastVisitAppt}</button>`
     : `<span style="font-size:12px;font-weight:400;color:var(--muted);font-family:'Courier New',monospace;">${loc.lastVisitAppt}</span>`;
   return `${dateStr}<br>${apptHtml}`;
 }
@@ -1168,10 +1169,10 @@ function fallbackCopy(appt) {
 // note when one's been captured, falling back to the original dispatch
 // email for anything not yet captured -- same safety-net pattern used
 // elsewhere in this project.
-function openApptAndCopy(inboundEmailId, appt, encodedNote) {
+function openApptAndCopy(inboundEmailId, appt, encodedNote, siteCode) {
   copyApptNumber(appt);
   if (encodedNote) {
-    viewClosingNoteInline(appt, decodeURIComponent(encodedNote));
+    viewClosingNoteInline(appt, decodeURIComponent(encodedNote), siteCode);
   } else {
     viewSourceEmail(inboundEmailId);
   }
@@ -1179,7 +1180,19 @@ function openApptAndCopy(inboundEmailId, appt, encodedNote) {
 
 // Reuses the exact same modal overlay as viewSourceEmail below, for visual
 // consistency -- just with the already-known note text instead of a fetch.
-function viewClosingNoteInline(appt, note) {
+//
+// 2026-09-23: added the "Confirm restocked" button here -- Mark's workflow
+// checking overdue-but-visited sites was: open the note, read it, see it
+// plainly states a restock happened (some closing notes do this even
+// though the ticket itself wasn't categorized as a restock), then have no
+// way to actually record that without leaving this page. Reuses the exact
+// same mark-site-restocked.js action / site_manual_restock_confirmations
+// table state.html's version already uses (see its markSiteRestockedFromModal
+// -- restock-tracker.html never actually had this despite an old comment
+// there claiming it did). Only shown when siteCode is available AND we're
+// on live (Supabase-backed) data -- a manually-uploaded xlsx has no real
+// site_id behind its rows for mark-site-restocked.js to attach to.
+function viewClosingNoteInline(appt, note, siteCode) {
   let overlay = document.getElementById('sourceEmailOverlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -1192,10 +1205,30 @@ function viewClosingNoteInline(appt, note) {
     document.body.appendChild(overlay);
   }
   const body = document.getElementById('sourceEmailBody');
+  const canConfirm = siteCode && currentIsLive;
   body.innerHTML = `
       <div style="font-weight:600;font-size:16px;margin-bottom:12px;padding-right:24px;color:#1a1a1a;">Closing Note — ${escapeHtml(appt)}</div>
       <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;color:#1a1a1a;">${escapeHtml(note)}</div>
+      ${canConfirm ? `<button onclick="confirmRestockedFromNote('${siteCode}')" style="margin-top:16px;background:#1e7e34;color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;font-size:13px;cursor:pointer;">✓ Confirm ${escapeHtml(siteCode)} restocked</button>` : ''}
   `;
+}
+
+async function confirmRestockedFromNote(siteCode) {
+  if (!confirm(`Mark ${siteCode} as restocked today, based on this note?`)) return;
+  const note = prompt('Optional note (e.g. "confirmed via closing note on a trouble ticket"):', '') || null;
+  try {
+    const res = await fetch('/.netlify/functions/mark-site-restocked', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_code: siteCode, note }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    alert(`${siteCode} marked as restocked. Refresh the dashboard to see it drop off the overdue list.`);
+    closeSourceEmail();
+  } catch (err) {
+    alert('Failed to mark restocked: ' + err.message);
+  }
 }
 
 // Mirrors index.html/state.html's source-email viewer exactly, added here
@@ -1239,6 +1272,7 @@ function adaptLiveResponse(data, state) {
   const toDate = s => s ? new Date(s) : null;
   const locs = (data.locations || []).map(item => ({
     loc: `${item.site_code} — ${item.name}`,
+    siteCode: item.site_code,
     shortName: item.name,
     count: item.count,
     avg: item.avg,
