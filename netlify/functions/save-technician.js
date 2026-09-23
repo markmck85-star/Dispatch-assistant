@@ -28,6 +28,23 @@ function getDispatchStore() {
   return getStore("dispatch");
 }
 
+function parseAdditionalStates(raw, homeState) {
+  const home = String(homeState || "").trim().toUpperCase();
+  let list = [];
+  if (Array.isArray(raw)) list = raw;
+  else if (typeof raw === "string") list = raw.split(/[^A-Za-z]+/);
+  const out = [];
+  const seen = new Set();
+  for (const part of list) {
+    const s = String(part || "").trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(s) || s === home || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+
 async function geocodeAddress(address, apiKey) {
   if (!apiKey || !address || address.trim().length < 8) return null;
   if (/\bTBD\b|PLACEHOLDER/i.test(address)) return null;
@@ -69,6 +86,7 @@ exports.handler = async (event) => {
 
   const state = String(payload.state || payload.region || "").trim().toUpperCase();
   if (!state) return json(400, { error: "State/region is required" });
+  const homeState = String(payload.homeState || state).trim().toUpperCase();
 
   const homeAddress = String(payload.homeAddress || "").trim();
 
@@ -102,9 +120,11 @@ exports.handler = async (event) => {
     }
   }
 
+  const additionalStates = parseAdditionalStates(payload.additionalStates, homeState);
   const record = {
     name,
-    state,
+    state: homeState,
+    additionalStates,
     phone: String(payload.phone || "").trim(),
     email: String(payload.email || "").trim(),
     homeAddress,
@@ -150,7 +170,8 @@ exports.handler = async (event) => {
             const techRow = {
               slug,
               name,
-              home_state: state,
+              home_state: homeState,
+              additional_states: additionalStates,
               phone: merged.phone || null,
               email: merged.email || null,
               sms_address: merged.smsAddress || null,
