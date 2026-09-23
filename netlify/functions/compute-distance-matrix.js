@@ -25,14 +25,36 @@
  *
  * Two modes:
  *   haversine (default, free) — straight-line distance using stored lat/lng.
- *     Fast, no external API call. Always a full rebuild (it's free either
- *     way, so there's no reason to do partial haversine runs).
+ *     Fast, no external API call. Always a full SWEEP (every tech x site
+ *     pair is checked), but as of v4 below it no longer means a full
+ *     REBUILD -- real driving data already on file for a pair is preserved,
+ *     not overwritten.
  *
  *   driving (optional, costs ~$5–$6 per full GA+FL refresh) — actual drive
  *     distance + duration via Google Maps Distance Matrix API.
  *     Batches 25 locations per API request (5 techs × 25 = 125 elements/call,
  *     well under the 625-element limit per request). Pass additive: true to
  *     only price/query pairs missing from the existing cached matrix.
+ *
+ * v4 (2026-09-23): FIXED a real bug found live by Mark -- haversine mode's
+ * "always a full rebuild (it's free either way)" was true in the sense
+ * that it's harmless to WASTE (no Google billing), but it was never
+ * harmless to the DATA: it unconditionally overwrote the entire Blobs
+ * matrix with fresh haversine entries for every pair, silently destroying
+ * any real driving-mode distances (with duration) that a previous paid
+ * build had already put there for those same pairs. Confirmed live for
+ * FL: a same-day "Build (Straight-Line, Free)" run wiped a prior driving
+ * build's data completely, so the very next additive driving build had
+ * nothing valid left to reuse and had to fully re-query and re-bill all
+ * 889 tech x site pairs ($4.45) instead of just the handful of genuinely
+ * new ones. This also meant simply adding a new site or tech and running
+ * the free build (a very natural thing to do) carried the same silent
+ * risk for every state, not just FL. Fixed by having haversine mode read
+ * the existing matrix first and preserve any pair already on file as
+ * real ("driving" type) data, only writing a fresh haversine value for a
+ * pair that doesn't already have one -- so haversine mode is now purely
+ * gap-filling on top of whatever driving data already exists, never a
+ * downgrade of it.
  *
  * POST /.netlify/functions/compute-distance-matrix
  * Body: { state: "GA", mode: "haversine"|"driving", additive?: true, adminSecret?: "..." }
@@ -270,17 +292,33 @@ exports.handler = async (event) => {
     failedPairs: [],
   };
 
-  // ── HAVERSINE MODE (always a full rebuild -- it's free) ────────────────
+  // ── HAVERSINE MODE (always a full SWEEP -- it's free -- but as of v4
+  // never a full REBUILD: real driving data already on file is preserved) ──
   if (mode === "haversine") {
+    const existingForHaversine = await store.get("distance-matrix/" + state, { type: "json" });
+    const existingMatrixForHaversine = (existingForHaversine && existingForHaversine.matrix) || {};
+    let preservedDrivingCount = 0;
     for (const [techKey, tech] of techEntries) {
       for (const [locCode, loc] of locEntries) {
+        const key = techKey + "|" + locCode;
+        const existingEntry = existingMatrixForHaversine[key];
+        // v4 (2026-09-23): a real driving-mode result for this exact pair
+        // is kept as-is instead of being overwritten by a fresh (strictly
+        // worse) straight-line estimate -- see the top-of-file v4 comment
+        // for the FL incident that surfaced this.
+        if (existingEntry && existingEntry.type === "driving") {
+          matrix[key] = existingEntry;
+          preservedDrivingCount++;
+          continue;
+        }
         const mi = haversineDistance(tech.lat, tech.lng, loc.lat, loc.lng);
-        matrix[techKey + "|" + locCode] = {
+        matrix[key] = {
           distanceMi: Math.round(mi * 10) / 10,
           type: "haversine",
         };
       }
     }
+    meta.preservedDrivingCount = preservedDrivingCount;
   }
 
   // ── DRIVING MODE (Google Maps Distance Matrix API) ─────────────────────
