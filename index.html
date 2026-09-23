@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.85 (blobs-163)</title>
+    <title>MCR Dispatch Hub v9.86 (blobs-164)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -317,7 +317,7 @@
     </script>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.85</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-163</div>
+        <h1>MCR Dispatch Hub v9.86</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-164</div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -3999,7 +3999,7 @@ function distanceMatrixStatus(state) {
             // Store route data globally so popover can access it
             if (!window.techRouteData) window.techRouteData = {};
 
-            function renderTechCard(tech, items, techNumber) {
+            function renderTechCard(tech, items, techNumber, sectionMode) {
                 const techStart = TECHS[tech] ? (TECHS[tech].startLocation || '') : '';
                 const stops = items.map(i => encodeURIComponent(LOCATIONS[i.code].address)).join('/');
                 const mapLink = `https://www.google.com/maps/dir/${encodeURIComponent(techStart)}/${stops}`;
@@ -4011,28 +4011,75 @@ function distanceMatrixStatus(state) {
                 // built for this state, straight-line estimate otherwise) --
                 // no live API call, since this is just reading numbers
                 // that are already sitting in _dmCache from page load.
+                //
+                // 2026-09-23 (three fixes together, all found the same night
+                // testing FL's new site-to-site matrix):
+                //
+                // 1. sectionMode: this same `items` array (the tech's FULL,
+                //    unfiltered stop list) is passed in regardless of
+                //    whether the card is being drawn under "Today" or
+                //    "Tomorrow" -- the old code always skipped
+                //    isSameDay===false stops, which is correct for a
+                //    "Today" card (excludes stops pushed to a later date)
+                //    but wrong for a "Tomorrow" card: a tech who lands in
+                //    the tomorrow bucket has, BY DEFINITION, zero same-day
+                //    stops, so the old filter always skipped every single
+                //    one of them -- their card's total was guaranteed to
+                //    show 0 mi regardless of how many stops they actually
+                //    had. Confirmed live: Allen Levinsky and Marcus
+                //    Covington's FL cards, both pushed to 9/23, both
+                //    showing "0 mi total" even though each still has a
+                //    real stop to drive to. sectionMode flips which side of
+                //    isSameDay this card should be summing.
+                //
+                // 2. Return-home leg: previously only summed stop-to-stop
+                //    legs (home->stop1 counted, but the final stop->home
+                //    leg never did) -- correctly reflects a multi-stop
+                //    route's OWN internal distance for comparison purposes,
+                //    but understates what the tech actually drives that
+                //    day, and for a single-stop day meant the whole figure
+                //    was just the one-way trip. Technician-to-site distance
+                //    is already treated as symmetric everywhere else in
+                //    this codebase (site_site_distances/tech_site_distances
+                //    have no direction column), so the same cached value
+                //    used for home->firstStop is reused for lastStop->home.
+                //
+                // 3. Label: makes explicit which stops the total actually
+                //    covers whenever it's not simply "every stop on this
+                //    card" (e.g. a mixed-day tech card, still shown as one
+                //    card under Today, only ever summed its today stops).
                 let totalMi = 0, totalDurMin = 0, anyRealDuration = false, allLegsReal = true;
-                let prevCode = null;
-                // 2026-09-19 fix: was iterating every item regardless of
-                // isSameDay, so a stop pushed to a later date (still sitting
-                // in this tech's array) got counted into today's mileage/
-                // drive-time total and chained into the "from prev stop"
-                // math for whatever came after it -- exactly the map's own
-                // fleetMi calc already deliberately excludes (see the
-                // 2026-08-27 comment on the map's futurePts split). Skipping
-                // non-same-day items here brings this total back in line
-                // with what the map actually shows.
+                let prevCode = null, lastIncludedCode = null, includedCount = 0;
+                const wantTomorrow = sectionMode === 'tomorrow';
                 for (const item of items) {
-                    if (item.isSameDay === false) continue;
+                    // 'today' (or unspecified, preserving old single-section
+                    // behavior): include unless explicitly pushed (false).
+                    // 'tomorrow': include unless explicitly same-day (true) --
+                    // undefined counts as "not today" here, matching the
+                    // same leniency the techsTomorrow bucket filter itself uses.
+                    const matchesSection = wantTomorrow ? (item.isSameDay !== true) : (item.isSameDay !== false);
+                    if (!matchesSection) continue;
                     const leg = getCachedLegInfo(tech, prevCode, item.code);
                     totalMi += leg.distanceMi;
                     if (leg.durationMin != null) { totalDurMin += leg.durationMin; anyRealDuration = true; }
                     if (!leg.isReal) allLegsReal = false;
                     prevCode = item.code;
+                    lastIncludedCode = item.code;
+                    includedCount++;
                 }
-                const routeSummary = items.length
-                    ? `${Math.round(totalMi * 10) / 10} mi${anyRealDuration ? ' · ~' + Math.round(totalDurMin) + ' min drive' : ''}` +
-                      `${allLegsReal ? '' : ' <span title="Some legs are straight-line estimates -- real driving data not built for this state/pair yet" style="cursor:help;">(est.)</span>'}`
+                if (lastIncludedCode) {
+                    const returnLeg = getCachedLegInfo(tech, null, lastIncludedCode);
+                    totalMi += returnLeg.distanceMi;
+                    if (returnLeg.durationMin != null) { totalDurMin += returnLeg.durationMin; anyRealDuration = true; }
+                    if (!returnLeg.isReal) allLegsReal = false;
+                }
+                const scopeLabel = includedCount !== items.length
+                    ? ` <span style="color:#888;">(${includedCount} of ${items.length} stops, ${wantTomorrow ? 'tomorrow' : 'today'})</span>`
+                    : '';
+                const routeSummary = includedCount
+                    ? `${Math.round(totalMi * 10) / 10} mi round trip${anyRealDuration ? ' · ~' + Math.round(totalDurMin) + ' min drive' : ''}` +
+                      `${allLegsReal ? '' : ' <span title="Some legs are straight-line estimates -- real driving data not built for this state/pair yet" style="cursor:help;">(est.)</span>'}` +
+                      scopeLabel
                     : '';
 
                 let cardHtml = `<div class="tech-card">
@@ -4200,15 +4247,27 @@ function distanceMatrixStatus(state) {
                 // Show section dividers
                 html += `<div style="font-size:11px;font-weight:bold;color:#ff6b6b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Today — Action Required</div>`;
                 html += `<div class="tech-cards-grid">`;
-                techsSameDay.forEach(tech => { html += renderTechCard(tech, assignments[tech], allTechsOrdered.indexOf(tech) + 1); });
+                techsSameDay.forEach(tech => { html += renderTechCard(tech, assignments[tech], allTechsOrdered.indexOf(tech) + 1, 'today'); });
                 html += `</div>`;
                 html += `<div style="font-size:11px;font-weight:bold;color:#007bff;text-transform:uppercase;letter-spacing:0.06em;margin:16px 0 8px;">Tomorrow</div>`;
                 html += `<div class="tech-cards-grid">`;
-                techsTomorrow.forEach(tech => { html += renderTechCard(tech, assignments[tech], allTechsOrdered.indexOf(tech) + 1); });
+                techsTomorrow.forEach(tech => { html += renderTechCard(tech, assignments[tech], allTechsOrdered.indexOf(tech) + 1, 'tomorrow'); });
                 html += `</div>`;
             } else {
                 html += `<div class="tech-cards-grid">`;
-                allTechsOrdered.forEach((tech, i) => { html += renderTechCard(tech, assignments[tech], i + 1); });
+                // 2026-09-23: this branch renders every tech in one list with
+                // no visible Today/Tomorrow divider, but a tech can still be
+                // an all-pushed (techsTomorrow-type) tech even here -- e.g.
+                // whenever sameDayItems.length === 0 (no urgent/restockUrgent
+                // items anywhere today) but someone still has stops pushed to
+                // tomorrow. Same per-tech mode determination as the split
+                // branch above (not just a flat 'today' default), or this
+                // branch would silently reintroduce the exact 0-mi bug the
+                // split branch above was just fixed for.
+                allTechsOrdered.forEach((tech, i) => {
+                    const mode = techsSameDay.includes(tech) ? 'today' : 'tomorrow';
+                    html += renderTechCard(tech, assignments[tech], i + 1, mode);
+                });
                 html += `</div>`;
             }
 
