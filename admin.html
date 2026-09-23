@@ -419,6 +419,19 @@
     <button class="dm-btn orange" onclick="dmBuildSiteMatrix()">🗺️ Build Site-to-Site Matrix</button>
   </div>
 
+  <!-- Gap-fill (2026-09-23) -- for a state whose site-to-site coverage is
+       incomplete (e.g. from an interrupted/resumed build before the
+       ordering fix above existed), this queries ONLY the specific pairs
+       still missing instead of a full rebuild -- never re-bills pairs
+       already on file. See backfill-site-distance-gaps.js. -->
+  <div class="dm-row" style="margin-top:6px;">
+    <button class="dm-btn orange" onclick="dmFillGaps()">🩹 Fill Missing Pairs Only</button>
+  </div>
+  <p style="color:#888;font-size:11px;margin:4px 0 0 0;">
+    Use this if a state's site-to-site coverage looks incomplete (e.g. after an interrupted build) --
+    it finds and queries only the specific pairs still missing, at no extra cost for pairs already on file.
+  </p>
+
   <!-- Manual usage correction (2026-09-07) -- rare, one-off use only. The
        monthly usage counter didn't exist until today, so real usage from
        earlier this same month (e.g. an accidental build) never got
@@ -601,6 +614,106 @@
       }
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
+    }
+  };
+
+  // Gap-fill (2026-09-23) -- see backfill-site-distance-gaps.js. Same
+  // dry-run -> confirm -> chunked-loop -> resume-on-interruption shape as
+  // dmBuildSiteMatrix above, but only ever queries pairs that are actually
+  // missing, so it's safe to run any time without risking a duplicate bill.
+  window.dmFillGaps = async function () {
+    const state = dmState();
+
+    dmSetStatus('Checking which pairs are missing for ' + state + '…');
+    let preview;
+    try {
+      const previewRes = await fetch('/.netlify/functions/backfill-site-distance-gaps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, dryRun: true }),
+      });
+      preview = await previewRes.json();
+      if (!preview.ok) { dmSetStatus('❌ ' + (preview.error || 'Could not preview cost')); return; }
+    } catch (e) {
+      dmSetStatus('❌ Network error checking cost: ' + e.message);
+      return;
+    }
+
+    if (preview.missingPairCount === 0) {
+      dmSetStatus('✅ ' + state + ' already has complete site-to-site coverage (' + preview.siteCount + ' sites) -- nothing to fill.');
+      return;
+    }
+
+    const costLine = preview.estimatedCost > 0
+      ? '$' + preview.estimatedCost.toFixed(2) + ' (' + preview.billableElements + ' billable elements after ' + preview.freeElementsRemainingThisMonth + ' free-tier elements remaining this month)'
+      : '$0.00 (fully covered by this month\'s remaining free tier)';
+    const confirmMsg =
+      '🩹 FILL MISSING PAIRS FOR ' + state + '\n\n' +
+      preview.siteCount + ' sites, ' + preview.missingPairCount + ' pair(s) currently missing.\n' +
+      'Estimated cost: ' + costLine + '\n\n' +
+      'This only queries the specific pairs that don\'t already exist -- nothing already on file gets re-billed.\n' +
+      'Runs in small chunks so it can take a couple minutes for a large gap -- keep this tab open while it works.\n\n' +
+      'DOUBLE-CHECK THE STATE ABOVE IS CORRECT BEFORE CONTINUING.';
+    if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
+    const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+    if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
+
+    let offset = 0;
+    let done = false;
+    let lastResult = null;
+    let resumedFromInterrupted = false;
+    try {
+      while (!done) {
+        dmSetStatus('Filling missing pairs for ' + state + '… (' + offset + (lastResult && lastResult.totalPairs ? ' of ' + lastResult.totalPairs : '') + ' processed)');
+        const res = await fetch('/.netlify/functions/backfill-site-distance-gaps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, offset, adminSecret }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          if (offset === 0 && !resumedFromInterrupted && typeof data.resumeOffset === 'number') {
+            const resumeMsg =
+              'An interrupted ' + state + ' gap-fill already has ' + (data.priorElementsUsed || 0) +
+              ' billed elements saved from an earlier session.\n\n' +
+              'Resume from where it left off (recommended -- won\'t re-bill that work)?\n\n' +
+              'Cancel instead discards it and starts completely over (re-bills that portion).';
+            if (confirm(resumeMsg)) {
+              resumedFromInterrupted = true;
+              offset = data.resumeOffset;
+              continue;
+            }
+            if (!confirm('Really discard ' + (data.priorElementsUsed || 0) + ' already-billed elements and start over? This cannot be undone.')) {
+              dmSetStatus('Cancelled -- interrupted gap-fill left as-is, safe to resume later.');
+              return;
+            }
+            offset = 0;
+            const forceRes = await fetch('/.netlify/functions/backfill-site-distance-gaps', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state, offset, adminSecret, force: true }),
+            });
+            const forceData = await forceRes.json();
+            if (!forceData.ok) { dmSetStatus('❌ ' + (forceData.error || 'Unknown error')); return; }
+            lastResult = forceData;
+            done = forceData.done;
+            if (!done) offset = forceData.nextOffset;
+            continue;
+          }
+          dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to ' + offset + ' pairs was saved -- rerun to resume.)' : ''));
+          return;
+        }
+        lastResult = data;
+        done = data.done;
+        if (!done) offset = data.nextOffset;
+      }
+      dmSetStatus(
+        '✅ Gap-fill complete for ' + state + '.\n' +
+        lastResult.totalPairs + ' missing pair(s) filled, ' + lastResult.elementsUsed + ' API elements used.' +
+        (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (see function logs)' : '')
+      );
+    } catch (e) {
+      dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to ' + offset + ' pairs was saved -- rerun to resume.)' : ''));
     }
   };
 
