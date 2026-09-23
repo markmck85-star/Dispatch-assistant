@@ -416,6 +416,7 @@ async function viewSourceEmail(inboundEmailId) {
 function closeSourceEmail() {
     const overlay = document.getElementById('sourceEmailOverlay');
     if (overlay) overlay.remove();
+    document.body.style.overflow = '';
 }
 
 // 2026-09-12: separate from viewSourceEmail -- clicking the SA number still
@@ -435,13 +436,16 @@ function viewClosingNoteInline(noteText, title) {
         </div>`;
         document.body.appendChild(overlay);
     }
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;height:100dvh;background:rgba(0,0,0,0.55);z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding:10px;padding-top:max(10px,env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
+    overlay.style.cssText = 'position:fixed;inset:0;width:100vw;height:100dvh;background:rgba(0,0,0,0.6);z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;padding:12px;padding-top:max(12px,env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
     document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+    window.scrollTo(0, 0);
     overlay.scrollTop = 0;
+    const clean = String(noteText || '').replace(/&#x0D;|&#x0A;|&#13;|&#10;/gi, '\n');
     const body = document.getElementById('sourceEmailBody');
     body.innerHTML = `
-        <div style="font-weight:600;font-size:16px;margin-bottom:12px;padding-right:24px;">${escapeHtml(title || '📝 Closing Note')}</div>
-        <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(noteText)}</div>
+        <div style="font-weight:600;font-size:18px;margin-bottom:12px;padding-right:28px;">${escapeHtml(title || '📝 Closing Note')}</div>
+        <div style="white-space:pre-wrap;font-size:17px;line-height:1.55;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(clean)}</div>
     `;
 }
 
