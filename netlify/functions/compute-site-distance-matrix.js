@@ -154,7 +154,14 @@ exports.handler = async (event) => {
       .filter((s) => s.lat != null && s.lng != null)
       .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
 
-    const pSiteCodePattern = new RegExp("^" + state + "\\d+$");
+    // 2026-09-23: was "^" + state + "\\d+$" -- see the matching fix and
+    // comment on the real-build siteCodePattern further down in this file
+    // for the full reasoning. Testing stations (T-codes) and OTC sites
+    // (C-codes) are supposed to be part of this matrix too (confirmed),
+    // so they need to be recognized here as well, or every incremental
+    // preview after the first would keep reporting them as "new" forever
+    // instead of "already known."
+    const pSiteCodePattern = new RegExp("^" + state + "[A-Z]?\\d+$");
     const pKnownCodes = new Set();
     for (const key of Object.keys(dryExistingMatrix)) {
       const [a, b] = key.split("|");
@@ -363,7 +370,19 @@ exports.handler = async (event) => {
   // code as "known" when it appears in a genuine SITE-TO-SITE pair -- i.e.
   // both sides of the key match this state's site-code pattern (state
   // abbreviation + digits, e.g. "GA1001"), which no tech key ever does.
-  const siteCodePattern = new RegExp("^" + state + "\\d+$");
+  // 2026-09-23: confirmed testing stations (T-codes, e.g. MIT051) and OTC
+  // sites (C-codes, e.g. OHC003) are meant to be part of this matrix too
+  // -- this pattern previously only matched a plain numeric code
+  // ("^" + state + "\\d+$"), so those sites could never register as
+  // "known" here even after a real build included them (they were always
+  // correctly present in locEntries/newSites -- this pattern only feeds
+  // the known-vs-new incremental split, so the effect was silent, not a
+  // hard failure: every incremental run after the first would keep
+  // treating every T/C-code site as brand new again, recomputing and
+  // re-billing its pairs on every future incremental build instead of
+  // skipping the ones already covered. The optional [A-Z]? covers both
+  // namespaces with one change.
+  const siteCodePattern = new RegExp("^" + state + "[A-Z]?\\d+$");
   const knownCodes = new Set();
   for (const key of Object.keys(existingMatrix)) {
     const [a, b] = key.split("|");

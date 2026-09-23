@@ -97,7 +97,21 @@ exports.handler = async (event) => {
 
   const siteIdByCode = Object.fromEntries((sites || []).map((s) => [s.site_code, s.id]));
   const techIdBySlug = Object.fromEntries((techs || []).map((t) => [t.slug, t.id]));
-  const siteCodePattern = new RegExp('^' + state + '\\d+$');
+  // 2026-09-23: was '^' + state + '\\d+$', which only matches a plain
+  // numeric site code (MI1051) -- MCR's own T-code and C-code namespaces
+  // (MIT051 for testing stations, OHC003 for kiosk-less OTC locations --
+  // see site-code-conventions notes) have one letter between the state
+  // and the digits, so a tech-to-testing-station pair like
+  // "joe-burton|MIT051" matched NEITHER side under the old pattern (a
+  // tech slug is lowercase-hyphenated, so it was never going to match
+  // this regardless) and fell all the way through to the final "neither
+  // side matches" skip branch -- confirmed live: 376 of MI's blob entries
+  // were being silently dropped this way, all tech-to-T-code pairs. The
+  // optional [A-Z]? covers both namespaces with one change; a tech slug
+  // can never accidentally match this (slugs are lowercase, this pattern
+  // only accepts uppercase), so this can't misclassify a real tech-to-
+  // site pair as unresolvable in the other direction.
+  const siteCodePattern = new RegExp('^' + state + '[A-Z]?\\d+$');
 
   // Fallback for a code the blob remembers but sites.site_code no longer
   // has -- a renumbered/merged site from one of the collision-cleanup
