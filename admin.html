@@ -863,33 +863,100 @@
     }
 
     dmSetStatus('Building ' + label + ' matrix for ' + state + '…');
-    try {
-      const res = await fetch('/.netlify/functions/compute-distance-matrix', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state, mode, additive, adminSecret }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        const { meta } = data;
-        const additiveLine = meta.additive
-          ? '\n' + meta.addedCount + ' new pairs queried, ' + meta.reusedCount + ' reused free, ' + meta.prunedCount + ' dropped (inactive tech/removed site)'
-          : '';
-        const costLine = meta.elementsBilledThisRun
-          ? '\n' + meta.elementsBilledThisRun + ' elements billed this run, ' + meta.monthlyElementsUsedTotal + ' total used this month'
-          : '';
-        dmSetStatus(
-          '✅ Matrix built for ' + state + ' (' + mode + (meta.additive ? ', additive' : '') + ').\n' +
-          data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations' +
-          additiveLine + costLine + '\n' +
-          'Computed: ' + meta.computedAt +
-          (meta.failedPairs?.length ? '\n⚠️ ' + meta.failedPairs.length + ' failed pairs (haversine fallback used)' : '')
-        );
-      } else {
-        dmSetStatus('❌ ' + (data.error || 'Unknown error'));
+    if (mode !== 'driving') {
+      // Haversine: still a single call, no chunking needed (no Google API calls).
+      try {
+        const res = await fetch('/.netlify/functions/compute-distance-matrix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, mode, additive }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const { meta } = data;
+          dmSetStatus(
+            '✅ Matrix built for ' + state + ' (' + mode + ').\n' +
+            data.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations' +
+            (meta.preservedDrivingCount ? '\n' + meta.preservedDrivingCount + ' existing real driving distance(s) preserved, not overwritten' : '') +
+            '\nComputed: ' + meta.computedAt
+          );
+        } else {
+          dmSetStatus('❌ ' + (data.error || 'Unknown error'));
+        }
+      } catch (e) {
+        dmSetStatus('❌ Network error: ' + e.message);
       }
+      return;
+    }
+
+    // Driving mode: chunked/resumable (v5, 2026-09-23) -- same
+    // dry-run -> confirm -> loop -> resume-on-interruption shape as
+    // dmBuildSiteMatrix and dmFillGaps, since this now spans multiple
+    // calls for a state the size of CA. See compute-distance-matrix.js's
+    // own v5 comment for why this became necessary.
+    let offset = 0;
+    let done = false;
+    let lastResult = null;
+    let resumedFromInterrupted = false;
+    try {
+      while (!done) {
+        dmSetStatus('Building ' + label + ' matrix for ' + state + '… (tech ' + offset + (lastResult && lastResult.totalBatches ? ' of ' + lastResult.totalBatches : '') + ')');
+        const res = await fetch('/.netlify/functions/compute-distance-matrix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, mode, additive, offset, adminSecret }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          if (offset === 0 && !resumedFromInterrupted && typeof data.resumeOffset === 'number') {
+            const resumeMsg =
+              'An interrupted ' + state + ' drive-time build already has ' + (data.priorElementsUsed || 0) +
+              ' billed elements saved from an earlier session.\n\n' +
+              'Resume from where it left off (recommended -- won\'t re-bill that work)?\n\n' +
+              'Cancel instead discards it and starts completely over (re-bills that portion).';
+            if (confirm(resumeMsg)) {
+              resumedFromInterrupted = true;
+              offset = data.resumeOffset;
+              continue;
+            }
+            if (!confirm('Really discard ' + (data.priorElementsUsed || 0) + ' already-billed elements and start over? This cannot be undone.')) {
+              dmSetStatus('Cancelled -- interrupted build left as-is, safe to resume later.');
+              return;
+            }
+            offset = 0;
+            const forceRes = await fetch('/.netlify/functions/compute-distance-matrix', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state, mode, additive, offset, adminSecret, force: true }),
+            });
+            const forceData = await forceRes.json();
+            if (!forceData.ok) { dmSetStatus('❌ ' + (forceData.error || 'Unknown error')); return; }
+            lastResult = forceData;
+            done = forceData.done;
+            if (!done) offset = forceData.nextOffset;
+            continue;
+          }
+          dmSetStatus('❌ ' + (data.error || 'Unknown error') + (offset > 0 ? '\n(Progress up to tech ' + offset + ' was saved -- rerun to resume.)' : ''));
+          return;
+        }
+        lastResult = data;
+        done = data.done;
+        if (!done) offset = data.nextOffset;
+      }
+      const { meta } = lastResult;
+      const additiveLine = meta.additive
+        ? '\n' + (meta.elementsUsed - (meta.prunedCount || 0)) + ' pair(s) queried/reused, ' + (meta.prunedCount || 0) + ' dropped (inactive tech/removed site)'
+        : '';
+      dmSetStatus(
+        '✅ Matrix built for ' + state + ' (' + mode + (meta.additive ? ', additive' : '') + ').\n' +
+        lastResult.entryCount + ' pairs: ' + meta.techCount + ' techs × ' + meta.locationCount + ' locations' +
+        additiveLine + '\n' +
+        meta.elementsBilledThisRun + ' elements billed this run, ' + meta.monthlyElementsUsedTotal + ' total used this month\n' +
+        'Computed: ' + meta.computedAt +
+        (meta.failedPairs?.length ? '\n⚠️ ' + meta.failedPairs.length + ' failed pairs (haversine fallback used)' : '')
+      );
     } catch (e) {
-      dmSetStatus('❌ Network error: ' + e.message);
+      dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to tech ' + offset + ' was saved -- rerun to resume.)' : ''));
     }
   };
 })();
