@@ -85,6 +85,7 @@ exports.handler = async (event) => {
         result[t.slug] = {
           name: t.name,
           state: t.home_state,
+          additionalStates: Array.isArray(t.additional_states) ? t.additional_states : [],
           phone: t.phone || "",
           email: t.email || "",
           homeAddress: t.home_address || "",
