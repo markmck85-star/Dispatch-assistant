@@ -30,10 +30,15 @@
   .entry .meta { color:#aaa; font-size:0.9rem; }
   .entry .desc { color:#ccc; font-size:0.9rem; margin-top:6px; white-space:pre-wrap; }
   #empty { color:#888; padding:20px 0; }
+  .back-btn {
+    display: block; background: #6c757d; color: #fff; text-align: center; padding: 12px;
+    border-radius: 8px; font-weight: bold; font-size: 15px; text-decoration: none; margin-top: 16px;
+  }
 </style>
 </head>
 <body>
 
+<a href="/" class="back-btn" style="margin-top:0;margin-bottom:14px;">← Back to Dispatch Tool</a>
 <h1>Watchdog Log</h1>
 <div>
   <select id="stateSelect">
@@ -57,6 +62,7 @@
 </div>
 <div id="status"></div>
 <div id="list"></div>
+<a href="/" class="back-btn">← Back to Dispatch Tool</a>
 
 <script>
 const stateSelect = document.getElementById('stateSelect');
