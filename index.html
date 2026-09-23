@@ -5445,11 +5445,12 @@ function distanceMatrixStatus(state) {
                 </select>
                 <div id="alp-tech-status" style="font-size:11px;color:#8ab;margin:0 0 8px;min-height:14px;"></div>
                 <select id="alp-machinetype" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:12px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
-                    <option value="SK" ${!ticket.isTestingStation ? 'selected' : ''}>SK — Small Kahuna (default)</option>
-                    <option value="SB">SB — Surfboard</option>
-                    <option value="BK">BK — Big Kahuna (cash)</option>
-                    <option value="OTHER" ${ticket.isTestingStation ? 'selected' : ''}>Other — testing/OTC, no restock cycle</option>
+                    <option value="SK" ${(!ticket.suggestedMachineType && !ticket.isTestingStation) ? 'selected' : ''}>SK — Small Kahuna (default)</option>
+                    <option value="SB" ${ticket.suggestedMachineType === 'SB' ? 'selected' : ''}>SB — Surfboard</option>
+                    <option value="BK" ${ticket.suggestedMachineType === 'BK' ? 'selected' : ''}>BK — Big Kahuna (cash)</option>
+                    <option value="OTHER" ${(!ticket.suggestedMachineType && ticket.isTestingStation) ? 'selected' : ''}>Other — testing/OTC, no restock cycle</option>
                 </select>
+                ${ticket.suggestedMachineType ? '<div style="font-size:11px;color:#8ab;margin:-8px 0 12px;">Machine type pre-filled from the ticket\'s own SST Type field -- please verify before saving.</div>' : ''}
                 <div style="display:flex;gap:10px;">
                     <button id="alp-save" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Save &amp; reprocess</button>
                     <button id="alp-skip" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Skip for now</button>
