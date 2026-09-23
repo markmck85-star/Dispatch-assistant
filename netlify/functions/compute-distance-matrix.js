@@ -28,12 +28,12 @@
  *     Fast, no external API call. Always a full SWEEP (every tech x site
  *     pair is checked), but as of v4 below it no longer means a full
  *     REBUILD -- real driving data already on file for a pair is preserved,
- *     not overwritten.
+ *     not overwritten. Always completes in one call -- no Google API calls,
+ *     so no chunking needed.
  *
  *   driving (optional, costs ~$5–$6 per full GA+FL refresh) — actual drive
  *     distance + duration via Google Maps Distance Matrix API.
- *     Batches 25 locations per API request (5 techs × 25 = 125 elements/call,
- *     well under the 625-element limit per request). Pass additive: true to
+ *     Batches DEST_BATCH destinations per API call. Pass additive: true to
  *     only price/query pairs missing from the existing cached matrix.
  *
  * v4 (2026-09-23): FIXED a real bug found live by Mark -- haversine mode's
@@ -42,22 +42,41 @@
  * harmless to the DATA: it unconditionally overwrote the entire Blobs
  * matrix with fresh haversine entries for every pair, silently destroying
  * any real driving-mode distances (with duration) that a previous paid
- * build had already put there for those same pairs. Confirmed live for
- * FL: a same-day "Build (Straight-Line, Free)" run wiped a prior driving
- * build's data completely, so the very next additive driving build had
- * nothing valid left to reuse and had to fully re-query and re-bill all
- * 889 tech x site pairs ($4.45) instead of just the handful of genuinely
- * new ones. This also meant simply adding a new site or tech and running
- * the free build (a very natural thing to do) carried the same silent
- * risk for every state, not just FL. Fixed by having haversine mode read
- * the existing matrix first and preserve any pair already on file as
- * real ("driving" type) data, only writing a fresh haversine value for a
- * pair that doesn't already have one -- so haversine mode is now purely
- * gap-filling on top of whatever driving data already exists, never a
- * downgrade of it.
+ * build had already put there for those same pairs. Fixed by having
+ * haversine mode read the existing matrix first and preserve any pair
+ * already on file as real ("driving" type) data.
+ *
+ * v5 (2026-09-23): FIXED a real timeout bug found live on CA (15 techs x
+ * 290 sites = 4,350 elements, ~435 individual Google calls needed). This
+ * function's driving mode previously ran as ONE continuous call with no
+ * chunking, unlike compute-site-distance-matrix.js (Step 3), which was
+ * already redesigned this way back on 2026-07-25 for the exact same
+ * reason ("a full state takes far longer than Netlify's function
+ * execution limit"). GA/FL's smaller tech rosters happened to finish
+ * inside the limit; CA's didn't, and got killed mid-flight by Netlify's
+ * own timeout (returns an HTML error page, not JSON -- the "Unexpected
+ * token '<'" error Mark saw). Nothing partial was lost or double-billable
+ * (the old code only wrote results at the very end, so a mid-flight kill
+ * saved nothing either way), but real Google spend for whatever calls
+ * completed before the cutoff was still real and unrecoverable. Driving
+ * mode (both additive and full-rebuild) is now chunked and resumable,
+ * mirroring compute-site-distance-matrix.js's proven design: one TECH
+ * processed per invocation (matching that file's "CA timed out at 2
+ * origin-batches, 1 is safe" finding), progress persisted to Blobs between
+ * calls, results written to Supabase as each tech completes (not only at
+ * the end) so an interruption never loses or re-bills completed work, and
+ * the same orphaned-build guard (409 + resumeOffset) admin.html's
+ * generalized resume-confirm flow already knows how to handle. Also adds
+ * explicit `.order()` to the sites/technicians queries -- the same
+ * ordering-instability class of bug fixed in compute-site-distance-
+ * matrix.js v4, now relevant here too since this function spans multiple
+ * calls for the first time.
  *
  * POST /.netlify/functions/compute-distance-matrix
- * Body: { state: "GA", mode: "haversine"|"driving", additive?: true, adminSecret?: "..." }
+ * Body: { state: "GA", mode: "haversine"|"driving", additive?: true,
+ *         offset?: 0, adminSecret?: "...", force?: true }
+ * offset is only meaningful for mode:"driving" -- haversine always
+ * completes in a single call regardless of what's passed.
  *
  * Requires env var: GOOGLE_MAPS_API_KEY (only for driving mode)
  *
@@ -71,7 +90,8 @@ const { createClient } = require("@supabase/supabase-js");
 const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require("./distance-matrix-usage.js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
-const DEST_BATCH = 10; // destinations per Distance Matrix API call (9 techs × 10 = 90 elements, under 100-element limit)
+const DEST_BATCH = 10; // destinations per Distance Matrix API call
+const TECH_BATCHES_PER_CALL = 1; // techs (each with their own full destination sweep) processed per invocation -- see v5 comment above
 const R_MI = 3958.8;  // Earth radius in miles
 
 function json(statusCode, obj) {
@@ -96,6 +116,52 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Queries one tech's full (or missing-only, for additive) destination list
+// against Google, DEST_BATCH destinations per call. Returns the new matrix
+// entries and any failures -- never throws, failures are recorded and
+// fall back to haversine like the rest of this codebase does.
+async function queryTechAgainstDestinations(apiKey, techKey, tech, destCodes, locMap, failedPairs) {
+  const results = {};
+  for (let i = 0; i < destCodes.length; i += DEST_BATCH) {
+    const batchCodes = destCodes.slice(i, i + DEST_BATCH);
+    const destinations = batchCodes.map((code) => { const l = locMap.get(code); return `${l.lat},${l.lng}`; }).join("|");
+    const url = MATRIX_URL +
+      "?origins=" + encodeURIComponent(`${tech.lat},${tech.lng}`) +
+      "&destinations=" + encodeURIComponent(destinations) +
+      "&units=imperial&key=" + apiKey;
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status !== "OK") {
+        failedPairs.push({ techKey, batchStart: i, reason: "API status: " + data.status });
+      } else {
+        const row = data.rows[0];
+        row.elements.forEach((el, di) => {
+          const locCode = batchCodes[di];
+          const key = techKey + "|" + locCode;
+          if (el.status === "OK") {
+            results[key] = {
+              distanceMi: Math.round((el.distance.value / 1609.34) * 10) / 10,
+              durationMin: Math.round(el.duration.value / 60),
+              distanceText: el.distance.text,
+              durationText: el.duration.text,
+              type: "driving",
+            };
+          } else {
+            failedPairs.push({ techKey, locCode, reason: "Element status: " + el.status });
+            const loc = locMap.get(locCode);
+            results[key] = { distanceMi: Math.round(haversineDistance(tech.lat, tech.lng, loc.lat, loc.lng) * 10) / 10, type: "haversine-fallback" };
+          }
+        });
+      }
+    } catch (err) {
+      failedPairs.push({ techKey, batchStart: i, reason: "Network error: " + err.message });
+    }
+    await sleep(150);
+  }
+  return results;
+}
+
 exports.handler = async (event) => {
   connectLambda(event);
 
@@ -114,24 +180,17 @@ exports.handler = async (event) => {
 
   const mode = payload.mode === "driving" ? "driving" : "haversine";
   const additive = mode === "driving" && payload.additive === true;
+  const offset = Number.isInteger(payload.offset) ? payload.offset : 0;
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (mode === "driving" && !apiKey)
     return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set (required for driving mode)" });
 
-  // Dry-run cost preview (2026-09-07) -- admin.html's Step 2 UI already
-  // called this endpoint with dryRun:true expecting a free, password-free
-  // preview, but that path never actually existed here: without this
-  // early return, a dryRun call fell straight into the password gate
-  // below with no adminSecret attached, silently counting as a WRONG
-  // password attempt against the shared 5-try lockout on every single
-  // preview click. Handled entirely before the password/lockout section --
-  // reading site/tech counts and the existing matrix is free (Supabase +
-  // Blobs reads only), no Google API call, nothing written.
+  // Dry-run cost preview -- free, no password needed, no API call to Google.
   if (payload.dryRun === true && mode === "driving") {
     const dryStore = getStore("dispatch");
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const [{ data: pSites, error: pSitesErr }, { data: pTechs, error: pTechsErr }] = await Promise.all([
-      supabasePreview.from("sites").select("site_code").eq("state", state).eq("active", true), // BUG FIX (2026-09-07): matches technicians' existing active-filter convention below -- sites never had it, so soft-deleted sites kept showing up in every build
+      supabasePreview.from("sites").select("site_code").eq("state", state).eq("active", true),
       supabasePreview.from("technicians").select("slug").eq("home_state", state).eq("active", true),
     ]);
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
@@ -142,8 +201,6 @@ exports.handler = async (event) => {
 
     let elementCount;
     if (additive) {
-      // Mirror the real additive build's "what's actually missing" count,
-      // without querying Google -- just compares against the existing matrix.
       const existing = await dryStore.get("distance-matrix/" + state, { type: "json" });
       const existingMatrix = (existing && existing.matrix) || {};
       const siteCodes = new Set((pSites || []).map((s) => s.site_code));
@@ -160,78 +217,53 @@ exports.handler = async (event) => {
 
     const usedThisMonth = await getMonthlyElementsUsed(dryStore);
     const preview = estimateCost(elementCount, usedThisMonth);
-    return json(200, { ok: true, state, mode, additive, elementCount, ...preview });
+    return json(200, { ok: true, state, mode, additive, elementCount, techCount, siteCount, ...preview });
   }
 
-  // Same paid-action gate as compute-site-distance-matrix.js (2026-08-18).
-  // Both functions check the same DISTANCE_MATRIX_ADMIN_PASSWORD and share
-  // the same brute-force lockout counter below (2026-09-02) -- guessing
-  // against either endpoint counts against the same limit, since they
-  // guard the same secret.
+  // Password gate -- shared lockout with compute-site-distance-matrix.js.
+  // Only re-checked on a genuine fresh start (offset 0); a resume call
+  // still must present the password on every request, just skips the
+  // lockout bookkeeping since it already passed once.
   if (mode === "driving") {
     const requiredSecret = process.env.DISTANCE_MATRIX_ADMIN_PASSWORD;
     if (!requiredSecret) {
       return json(500, { error: "DISTANCE_MATRIX_ADMIN_PASSWORD is not configured -- refusing to run a paid build until it is set." });
     }
-
-    // Brute-force lockout (2026-09-02): shared across compute-distance-matrix.js
-    // and compute-site-distance-matrix.js via the same Blobs key, since both
-    // check the same password. A few wrong guesses locks out ALL driving-mode
-    // builds (both functions) for 24h -- makes even a short admin password
-    // impractical to brute-force (a 4-digit PIN is 10,000 combos; 5 guesses
-    // then a 24h lockout means an attacker gets ~5 guesses/day, not 10,000/minute).
     const authStore = getStore("dispatch");
     const failKey = "distance-matrix-failed-attempts";
     const MAX_FAILED_ATTEMPTS = 5;
     const LOCKOUT_HOURS = 24;
-    const failData = (await authStore.get(failKey, { type: "json" })) || { count: 0, lockedUntil: null };
-
-    if (failData.lockedUntil && Date.now() < new Date(failData.lockedUntil).getTime()) {
-      const minsLeft = Math.ceil((new Date(failData.lockedUntil).getTime() - Date.now()) / 60000);
-      return json(429, {
-        error: `Too many incorrect admin-secret attempts -- locked out for ${minsLeft} more minute(s) (shared lockout across both distance-matrix build functions).`,
-      });
-    }
-
-    if (String(payload.adminSecret || "") !== requiredSecret) {
-      const newCount = (failData.count || 0) + 1;
-      const update = { count: newCount, lockedUntil: null };
-      let msg;
-      if (newCount >= MAX_FAILED_ATTEMPTS) {
-        update.lockedUntil = new Date(Date.now() + LOCKOUT_HOURS * 3600 * 1000).toISOString();
-        update.count = 0;
-        msg = `Incorrect admin secret. Too many failed attempts -- locked out for ${LOCKOUT_HOURS} hours.`;
-      } else {
-        msg = `Incorrect admin secret. ${MAX_FAILED_ATTEMPTS - newCount} attempt(s) remaining before a ${LOCKOUT_HOURS}-hour lockout.`;
+    if (offset === 0) {
+      const failData = (await authStore.get(failKey, { type: "json" })) || { count: 0, lockedUntil: null };
+      if (failData.lockedUntil && Date.now() < new Date(failData.lockedUntil).getTime()) {
+        const minsLeft = Math.ceil((new Date(failData.lockedUntil).getTime() - Date.now()) / 60000);
+        return json(429, { error: `Too many incorrect admin-secret attempts -- locked out for ${minsLeft} more minute(s) (shared lockout across both distance-matrix build functions).` });
       }
-      await authStore.setJSON(failKey, update);
-      return json(401, { error: msg });
-    }
-
-    // Correct password -- clear any accumulated failed-attempt count.
-    if (failData.count) await authStore.setJSON(failKey, { count: 0, lockedUntil: null });
-
-    // Additive builds only touch a handful of new pairs -- the 24h
-    // "already ran" cooldown below exists to prevent repeat FULL-price
-    // rebuilds, so it doesn't apply to additive. A much shorter loop-guard
-    // applies to additive instead, just to catch a genuine runaway/stuck
-    // loop -- not a cost concern, additive builds are cheap by design.
-    if (additive) {
-      const ADDITIVE_COOLDOWN_MINUTES = 2;
-      const addCooldownKey = "distance-matrix-cooldown/additive/" + state;
-      const lastAdd = await authStore.get(addCooldownKey, { type: "text" });
-      if (lastAdd) {
-        const minsSince = (Date.now() - new Date(lastAdd).getTime()) / 60000;
-        if (minsSince < ADDITIVE_COOLDOWN_MINUTES) {
-          return json(429, {
-            error: `An additive build for ${state} already ran ${minsSince.toFixed(1)} min ago -- please wait ${(ADDITIVE_COOLDOWN_MINUTES - minsSince).toFixed(1)} more minute(s) before running it again (loop-guard, not a cost concern).`,
-          });
+      if (String(payload.adminSecret || "") !== requiredSecret) {
+        const newCount = (failData.count || 0) + 1;
+        const update = { count: newCount, lockedUntil: null };
+        let msg;
+        if (newCount >= MAX_FAILED_ATTEMPTS) {
+          update.lockedUntil = new Date(Date.now() + LOCKOUT_HOURS * 3600 * 1000).toISOString();
+          update.count = 0;
+          msg = `Incorrect admin secret. Too many failed attempts -- locked out for ${LOCKOUT_HOURS} hours.`;
+        } else {
+          msg = `Incorrect admin secret. ${MAX_FAILED_ATTEMPTS - newCount} attempt(s) remaining before a ${LOCKOUT_HOURS}-hour lockout.`;
         }
+        await authStore.setJSON(failKey, update);
+        return json(401, { error: msg });
       }
-      await authStore.set(addCooldownKey, new Date().toISOString());
+      if (failData.count) await authStore.setJSON(failKey, { count: 0, lockedUntil: null });
+    } else {
+      if (String(payload.adminSecret || "") !== requiredSecret) {
+        return json(401, { error: "Incorrect or missing admin secret for this paid operation." });
+      }
     }
 
-    if (!additive) {
+    // Cooldown (full rebuild only, same as before) -- additive has no
+    // cooldown since it's cheap by design and resuming needs to bypass it
+    // anyway. Only checked at a genuine fresh start.
+    if (offset === 0 && !additive) {
       const COOLDOWN_HOURS = 24;
       const cooldownStore = getStore("dispatch");
       const cooldownKey = "distance-matrix-cooldown/tech-site/" + state;
@@ -239,12 +271,9 @@ exports.handler = async (event) => {
       if (lastRun) {
         const hoursSince = (Date.now() - new Date(lastRun).getTime()) / 36e5;
         if (hoursSince < COOLDOWN_HOURS) {
-          return json(429, {
-            error: `A driving-mode tech-to-site build for ${state} already ran ${hoursSince.toFixed(1)}h ago -- please wait ${(COOLDOWN_HOURS - hoursSince).toFixed(1)}h before running it again.`,
-          });
+          return json(429, { error: `A driving-mode tech-to-site build for ${state} already ran ${hoursSince.toFixed(1)}h ago -- please wait ${(COOLDOWN_HOURS - hoursSince).toFixed(1)}h before running it again.` });
         }
       }
-      await cooldownStore.set(cooldownKey, new Date().toISOString());
     }
   }
 
@@ -252,13 +281,14 @@ exports.handler = async (event) => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
-    supabase.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true), // BUG FIX (2026-09-07)
-    supabase.from("technicians").select("id, slug, lat, lng, active").eq("home_state", state),
+    supabase.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true)
+      .order("site_code", { ascending: true }), // v5 (2026-09-23): deterministic ordering across chunks, same fix as compute-site-distance-matrix.js v4
+    supabase.from("technicians").select("id, slug, lat, lng, active").eq("home_state", state)
+      .order("slug", { ascending: true }), // v5: same reasoning, techs are now also chunked across calls
   ]);
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
   if (techsErr) return json(500, { error: "technicians fetch failed: " + techsErr.message });
 
-  // Filter to entries that have geocoded coords and are active
   const techEntries = (techs || [])
     .filter((t) => t.lat != null && t.lng != null && t.active !== false)
     .map((t) => [t.slug, { lat: t.lat, lng: t.lng }]);
@@ -266,262 +296,118 @@ exports.handler = async (event) => {
     .filter((s) => s.lat != null && s.lng != null)
     .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
 
-  // 2026-09-15: id lookups for the Supabase sync at the end -- kept
-  // separate from techEntries/locEntries (iterated elsewhere as
-  // [key, latlng] pairs) to avoid touching any of that already-working logic.
   const siteIdByCode = Object.fromEntries((sites || []).map((s) => [s.site_code, s.id]));
   const techIdBySlug = Object.fromEntries((techs || []).map((t) => [t.slug, t.id]));
 
-  if (techEntries.length === 0)
-    return json(400, {
-      error: "No techs with lat/lng found for " + state + ". Run geocode-addresses first.",
-    });
-  if (locEntries.length === 0)
-    return json(400, {
-      error: "No locations with lat/lng found for " + state + ". Run geocode-addresses first.",
-    });
+  if (techEntries.length === 0) return json(400, { error: "No techs with lat/lng found for " + state + ". Run geocode-addresses first." });
+  if (locEntries.length === 0) return json(400, { error: "No locations with lat/lng found for " + state + ". Run geocode-addresses first." });
 
-  const matrix = {};
-  const meta = {
-    state,
-    mode,
-    additive,
-    computedAt: new Date().toISOString(),
-    techCount: techEntries.length,
-    locationCount: locEntries.length,
-    failedPairs: [],
-  };
-
-  // ── HAVERSINE MODE (always a full SWEEP -- it's free -- but as of v4
-  // never a full REBUILD: real driving data already on file is preserved) ──
+  // ── HAVERSINE MODE: unchanged, single call, no chunking needed (no
+  // Google API calls at all) ──────────────────────────────────────────────
   if (mode === "haversine") {
     const existingForHaversine = await store.get("distance-matrix/" + state, { type: "json" });
     const existingMatrixForHaversine = (existingForHaversine && existingForHaversine.matrix) || {};
+    const matrix = {};
     let preservedDrivingCount = 0;
     for (const [techKey, tech] of techEntries) {
       for (const [locCode, loc] of locEntries) {
         const key = techKey + "|" + locCode;
         const existingEntry = existingMatrixForHaversine[key];
-        // v4 (2026-09-23): a real driving-mode result for this exact pair
-        // is kept as-is instead of being overwritten by a fresh (strictly
-        // worse) straight-line estimate -- see the top-of-file v4 comment
-        // for the FL incident that surfaced this.
         if (existingEntry && existingEntry.type === "driving") {
           matrix[key] = existingEntry;
           preservedDrivingCount++;
           continue;
         }
         const mi = haversineDistance(tech.lat, tech.lng, loc.lat, loc.lng);
-        matrix[key] = {
-          distanceMi: Math.round(mi * 10) / 10,
-          type: "haversine",
-        };
+        matrix[key] = { distanceMi: Math.round(mi * 10) / 10, type: "haversine" };
       }
     }
-    meta.preservedDrivingCount = preservedDrivingCount;
+    const meta = {
+      state, mode, additive: false,
+      computedAt: new Date().toISOString(),
+      techCount: techEntries.length,
+      locationCount: locEntries.length,
+      failedPairs: [],
+      preservedDrivingCount,
+    };
+    await store.setJSON("distance-matrix/" + state, { meta, matrix });
+    return json(200, { ok: true, state, mode, additive: false, entryCount: Object.keys(matrix).length, meta, done: true });
   }
 
-  // ── DRIVING MODE (Google Maps Distance Matrix API) ─────────────────────
-  if (mode === "driving" && !additive) {
-    const origins = techEntries
-      .map(([, t]) => `${t.lat},${t.lng}`)
-      .join("|");
+  // ── DRIVING MODE: chunked by tech, resumable ────────────────────────────
+  const existing = await store.get("distance-matrix/" + state, { type: "json" });
+  const existingMatrix = (existing && existing.matrix) || {};
 
-    for (let i = 0; i < locEntries.length; i += DEST_BATCH) {
-      const batch = locEntries.slice(i, i + DEST_BATCH);
-      const destinations = batch.map(([, l]) => `${l.lat},${l.lng}`).join("|");
-
-      const url =
-        MATRIX_URL +
-        "?origins=" +
-        encodeURIComponent(origins) +
-        "&destinations=" +
-        encodeURIComponent(destinations) +
-        "&units=imperial" +
-        "&key=" +
-        apiKey;
-
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (data.status !== "OK") {
-          meta.failedPairs.push({
-            batchStart: i,
-            reason: "API status: " + data.status,
-          });
-          continue;
-        }
-
-        data.rows.forEach((row, ti) => {
-          const [techKey] = techEntries[ti];
-          row.elements.forEach((el, di) => {
-            const [locCode] = batch[di];
-            if (el.status === "OK") {
-              matrix[techKey + "|" + locCode] = {
-                distanceMi: Math.round((el.distance.value / 1609.34) * 10) / 10,
-                durationMin: Math.round(el.duration.value / 60),
-                distanceText: el.distance.text,
-                durationText: el.duration.text,
-                type: "driving",
-              };
-            } else {
-              meta.failedPairs.push({
-                techKey,
-                locCode,
-                reason: "Element status: " + el.status,
-              });
-              // Fall back to haversine for this pair
-              const [, tech] = techEntries[ti];
-              const [, loc] = batch[di];
-              const mi = haversineDistance(tech.lat, tech.lng, loc.lat, loc.lng);
-              matrix[techKey + "|" + locCode] = {
-                distanceMi: Math.round(mi * 10) / 10,
-                type: "haversine-fallback",
-              };
-            }
-          });
-        });
-      } catch (err) {
-        meta.failedPairs.push({
-          batchStart: i,
-          reason: "Network error: " + err.message,
-        });
-      }
-
-      // Brief pause between API batches
-      if (i + DEST_BATCH < locEntries.length) await sleep(150);
-    }
+  // Orphaned-build guard -- same shape as compute-site-distance-matrix.js,
+  // so admin.html's existing generalized resume-confirm flow handles this
+  // function too without any UI changes needed.
+  if (offset === 0 && !payload.force && existing && existing.meta && existing.meta.techToSite && existing.meta.techToSite.inProgress) {
+    const tf = existing.meta.techToSite;
+    return json(409, {
+      error: `An interrupted ${state} drive-time build already has ${tf.elementsUsed || 0} billed elements saved (from a previous session that didn't finish). Resume it with offset:${tf.lastOffset || 0} to avoid re-billing that work, or pass force:true to discard it and start completely over.`,
+      resumeOffset: tf.lastOffset || 0,
+      priorElementsUsed: tf.elementsUsed || 0,
+    });
   }
 
-  // ── DRIVING MODE, ADDITIVE (only new tech/site pairs) ───────────────────
-  if (mode === "driving" && additive) {
-    const existing = await store.get("distance-matrix/" + state, { type: "json" });
-    const existingMatrix = (existing && existing.matrix) || {};
+  const techMap = new Map(techEntries);
+  const locMap = new Map(locEntries);
 
-    const techMap = new Map(techEntries);
-    const locMap = new Map(locEntries);
+  // Resume partial progress between calls.
+  const priorPartial = (offset > 0 && existing && existing.meta && existing.meta.techToSite && existing.meta.techToSite.partialMatrix) || {};
+  let matrix = { ...priorPartial };
+  const priorFailed = (offset > 0 && existing && existing.meta && existing.meta.techToSite && existing.meta.techToSite.failedPairs) || [];
+  const failedPairs = [...priorFailed];
+  let elementsUsed = (offset > 0 && existing && existing.meta && existing.meta.techToSite && existing.meta.techToSite.elementsUsed) || 0;
+  const elementsUsedBeforeThisChunk = elementsUsed;
+  let prunedCount = (offset > 0 && existing && existing.meta && existing.meta.techToSite && existing.meta.techToSite.prunedCount) || 0;
 
-    // Carry over an existing pair ONLY if it's a real, successfully-priced
-    // driving result AND its tech/site both still exist and are active.
-    // Bug found 2026-09-02: originally this carried over ANY existing entry
-    // regardless of type, so a pair already in the matrix from a free
-    // haversine (straight-line) build looked "already covered" and additive
-    // mode would never actually query it for real drive time -- meaning
-    // once a state had ever had a free full build run, additive driving
-    // mode would silently keep reusing those straight-line estimates
-    // forever and never price anyone for real. haversine and
-    // haversine-fallback entries are now treated as needing a real query,
-    // same as a pair that's fully missing. A tech/site that no longer
-    // exists or is inactive is still dropped for free either way.
-    let prunedCount = 0;
+  // On a fresh start, carry over whatever's still valid from the existing
+  // (pre-this-build) matrix so additive mode's "already covered" pairs
+  // don't get re-billed, and drop pairs whose tech/site no longer exists.
+  if (offset === 0) {
+    matrix = {};
     for (const [key, val] of Object.entries(existingMatrix)) {
       const [techKey, locCode] = key.split("|");
-      if (!techMap.has(techKey) || !locMap.has(locCode)) {
-        prunedCount++;
-        continue;
-      }
-      if (val.type === "driving") {
-        matrix[key] = val;
-      }
-      // else: haversine / haversine-fallback -- leave out of `matrix` so it
-      // falls into the "missing" set below and gets a real driving query.
+      if (!techMap.has(techKey) || !locMap.has(locCode)) { prunedCount++; continue; }
+      if (additive && val.type === "driving") matrix[key] = val;
+      // non-additive (full rebuild): nothing carried over, everything gets re-queried.
+      // additive + non-driving existing entry: left out, falls into "missing" below.
     }
-
-    // Find every pair that SHOULD exist but doesn't yet (new tech, new
-    // site, or both), grouped by tech so each tech only needs one origin
-    // per API call.
-    const missingByTech = new Map(); // techKey -> [locCode, ...]
-    for (const [techKey] of techEntries) {
-      for (const [locCode] of locEntries) {
-        const key = techKey + "|" + locCode;
-        if (!matrix[key]) {
-          if (!missingByTech.has(techKey)) missingByTech.set(techKey, []);
-          missingByTech.get(techKey).push(locCode);
-        }
-      }
-    }
-
-    let addedCount = 0;
-    for (const [techKey, missingLocCodes] of missingByTech) {
-      const tech = techMap.get(techKey);
-      for (let i = 0; i < missingLocCodes.length; i += DEST_BATCH) {
-        const batchCodes = missingLocCodes.slice(i, i + DEST_BATCH);
-        const destinations = batchCodes
-          .map((code) => { const l = locMap.get(code); return `${l.lat},${l.lng}`; })
-          .join("|");
-
-        const url =
-          MATRIX_URL +
-          "?origins=" + encodeURIComponent(`${tech.lat},${tech.lng}`) +
-          "&destinations=" + encodeURIComponent(destinations) +
-          "&units=imperial" +
-          "&key=" + apiKey;
-
-        try {
-          const res = await fetch(url);
-          const data = await res.json();
-
-          if (data.status !== "OK") {
-            meta.failedPairs.push({ techKey, batchStart: i, reason: "API status: " + data.status });
-          } else {
-            const row = data.rows[0];
-            row.elements.forEach((el, di) => {
-              const locCode = batchCodes[di];
-              const key = techKey + "|" + locCode;
-              if (el.status === "OK") {
-                matrix[key] = {
-                  distanceMi: Math.round((el.distance.value / 1609.34) * 10) / 10,
-                  durationMin: Math.round(el.duration.value / 60),
-                  distanceText: el.distance.text,
-                  durationText: el.duration.text,
-                  type: "driving",
-                };
-              } else {
-                meta.failedPairs.push({ techKey, locCode, reason: "Element status: " + el.status });
-                const loc = locMap.get(locCode);
-                const mi = haversineDistance(tech.lat, tech.lng, loc.lat, loc.lng);
-                matrix[key] = { distanceMi: Math.round(mi * 10) / 10, type: "haversine-fallback" };
-              }
-              addedCount++;
-            });
-          }
-        } catch (err) {
-          meta.failedPairs.push({ techKey, batchStart: i, reason: "Network error: " + err.message });
-        }
-
-        await sleep(150);
-      }
-    }
-
-    meta.addedCount = addedCount;
-    meta.prunedCount = prunedCount;
-    meta.reusedCount = Object.keys(matrix).length - addedCount;
   }
 
-  // Monthly usage tracking (2026-09-07) -- only real driving-mode builds
-  // bill Google; haversine is free and never touches this counter. Full
-  // rebuild bills every tech x site pair regardless of prior state;
-  // additive only bills addedCount (the pairs actually queried this run).
-  if (mode === "driving") {
-    const elementsBilledThisRun = additive ? meta.addedCount : techEntries.length * locEntries.length;
-    const usageStore = getStore("dispatch");
-    meta.elementsBilledThisRun = elementsBilledThisRun;
-    meta.monthlyElementsUsedTotal = await addMonthlyElementsUsed(usageStore, elementsBilledThisRun);
+  const chunkTechs = techEntries.slice(offset, offset + TECH_BATCHES_PER_CALL);
+
+  for (const [techKey, tech] of chunkTechs) {
+    let destCodes;
+    if (additive) {
+      destCodes = locEntries.map(([code]) => code).filter((code) => !matrix[techKey + "|" + code]);
+    } else {
+      destCodes = locEntries.map(([code]) => code);
+    }
+    if (!destCodes.length) continue; // this tech already fully covered
+    const results = await queryTechAgainstDestinations(apiKey, techKey, tech, destCodes, locMap, failedPairs);
+    for (const [key, val] of Object.entries(results)) {
+      matrix[key] = val;
+      elementsUsed++;
+    }
   }
 
-  await store.setJSON("distance-matrix/" + state, { meta, matrix });
+  const nextOffset = offset + chunkTechs.length;
+  const done = nextOffset >= techEntries.length;
 
-  // Supabase sync (2026-09-15) -- same approach as
-  // compute-site-distance-matrix.js: Blobs above stays the operational
-  // source of truth for this function's own additive-mode "what's already
-  // covered" comparison (untouched, to avoid any risk to the cost-safety
-  // logic above), this just ALSO writes the full current `matrix` (every
-  // entry, not just this run's new ones -- additive mode's `matrix` already
-  // combines carried-over + newly-added, and re-upserting an unchanged
-  // carried-over row is harmless) into tech_site_distances so reads have
-  // current data. Best-effort: reported but never fails the response, since
-  // the Blobs write (and any real Google spend) already succeeded.
+  const elementsBilledThisChunk = elementsUsed - elementsUsedBeforeThisChunk;
+  let monthlyElementsUsedTotal = null;
+  if (elementsBilledThisChunk > 0) {
+    monthlyElementsUsedTotal = await addMonthlyElementsUsed(store, elementsBilledThisChunk);
+  }
+
+  // Write to Supabase as each chunk completes, not only at the end -- so
+  // an interruption partway through never loses or needs to re-bill
+  // whichever techs already finished. Blobs (below) remains this
+  // function's own resume/orphaned-build bookkeeping; this is purely an
+  // additive parallel write, same pattern as compute-site-distance-
+  // matrix.js's own Supabase sync.
   const techToSiteRows = [];
   const supabaseSyncSkipped = [];
   for (const [key, entry] of Object.entries(matrix)) {
@@ -532,31 +418,78 @@ exports.handler = async (event) => {
     techToSiteRows.push({
       technician_id: techId,
       site_id: siteId,
-      // tech_site_distances.mode CHECK only allows 'haversine'/'driving' --
-      // same normalization as the site-to-site writer.
       mode: entry.type === "driving" ? "driving" : "haversine",
       distance_mi: entry.distanceMi,
       duration_min: entry.durationMin ?? null,
-      computed_at: meta.computedAt,
+      computed_at: new Date().toISOString(),
     });
   }
   let supabaseSyncError = null;
-  const UPSERT_BATCH = 500;
-  for (let i = 0; i < techToSiteRows.length; i += UPSERT_BATCH) {
-    const batch = techToSiteRows.slice(i, i + UPSERT_BATCH);
-    const { error: syncErr } = await supabase
-      .from("tech_site_distances")
-      .upsert(batch, { onConflict: "technician_id,mode,site_id" });
-    if (syncErr) { supabaseSyncError = syncErr.message; break; }
+  if (techToSiteRows.length) {
+    const UPSERT_BATCH = 500;
+    for (let i = 0; i < techToSiteRows.length; i += UPSERT_BATCH) {
+      const batch = techToSiteRows.slice(i, i + UPSERT_BATCH);
+      const { error: syncErr } = await supabase
+        .from("tech_site_distances")
+        .upsert(batch, { onConflict: "technician_id,mode,site_id" });
+      if (syncErr) { supabaseSyncError = syncErr.message; break; }
+    }
   }
 
-  return json(200, {
-    ok: true,
+  if (done) {
+    const meta = {
+      ...((existing && existing.meta) || {}),
+      state, mode, additive,
+      computedAt: new Date().toISOString(),
+      techCount: techEntries.length,
+      locationCount: locEntries.length,
+      failedPairs,
+      elementsUsed,
+      prunedCount,
+      elementsBilledThisRun: elementsUsed,
+      monthlyElementsUsedTotal,
+    };
+    delete meta.techToSite; // build finished -- clear the in-progress scratch data
+    await store.setJSON("distance-matrix/" + state, { meta, matrix });
+
+    if (!additive) {
+      await store.set("distance-matrix-cooldown/tech-site/" + state, new Date().toISOString());
+    }
+
+    return json(200, {
+      ok: true, done: true, state, mode, additive,
+      entryCount: Object.keys(matrix).length,
+      meta,
+      supabaseSync: { written: techToSiteRows.length, skipped: supabaseSyncSkipped.length, error: supabaseSyncError },
+    });
+  }
+
+  // Not done: persist progress for the next call to resume, without
+  // touching the caller's view of "the real matrix" (that only updates on
+  // done, mirroring compute-site-distance-matrix.js's own convention).
+  const mergedMeta = {
+    ...((existing && existing.meta) || {}),
     state,
-    mode,
-    additive,
-    entryCount: Object.keys(matrix).length,
-    meta,
+    techToSite: {
+      inProgress: true,
+      mode, additive,
+      techCount: techEntries.length,
+      locationCount: locEntries.length,
+      elementsUsed,
+      failedPairs,
+      partialMatrix: matrix,
+      prunedCount,
+      lastOffset: nextOffset,
+    },
+  };
+  await store.setJSON("distance-matrix/" + state, { meta: mergedMeta, matrix: existingMatrix });
+
+  return json(200, {
+    ok: true, done: false, nextOffset,
+    totalBatches: techEntries.length,
+    elementsUsed,
+    elementsBilledThisChunk,
+    monthlyElementsUsedTotal,
     supabaseSync: { written: techToSiteRows.length, skipped: supabaseSyncSkipped.length, error: supabaseSyncError },
   });
 };
