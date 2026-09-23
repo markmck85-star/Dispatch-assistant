@@ -500,13 +500,58 @@
         done = data.done;
         if (!done) offset = data.nextOffset;
       }
-      dmSetStatus(
+      const buildSuccessMsg =
         '✅ Site-to-site matrix built for ' + state + '.\n' +
         lastResult.siteCount + ' sites, ' + lastResult.newEntryCount + ' pairs computed, ' + lastResult.elementsUsed + ' API elements used.\n' +
         'Total matrix now has ' + lastResult.totalEntryCount + ' entries (tech-to-site + site-to-site combined).' +
         (lastResult.failedCount ? '\n⚠️ ' + lastResult.failedCount + ' failed pairs (haversine fallback used)' : '') +
-        (lastResult.newSiteCodesForDebug ? '\n[debug] new sites this run: ' + lastResult.newSiteCodesForDebug.join(', ') : '')
-      );
+        (lastResult.newSiteCodesForDebug ? '\n[debug] new sites this run: ' + lastResult.newSiteCodesForDebug.join(', ') : '');
+      dmSetStatus(buildSuccessMsg + '\n\nMigrating to the database…');
+
+      // 2026-09-23: previously the build only ever wrote to the Blobs
+      // cache (distance-matrix/{STATE}) -- getting it into the live
+      // Supabase tables (site_site_distances/tech_site_distances, what
+      // get-distance.js and get-distance-matrix.js actually read from)
+      // required a separate, easy-to-forget manual trigger
+      // (migrate-distance-matrix-to-supabase.js). Blobs still has to be
+      // the intermediate step -- a full state build runs in chunks across
+      // many calls, longer than one function invocation allows, and
+      // Blobs is what lets it resume between chunks -- but there's no
+      // reason the migration itself has to wait for a second, separate
+      // click. It's a pure Supabase read/write (no Google API cost) and
+      // already idempotent (upserts on the same keys), so running it
+      // automatically the moment the build finishes is no riskier than
+      // running it manually a minute later -- worst case (a dropped
+      // connection mid-migration) leaves it exactly where a forgotten
+      // manual step would have: safe to just re-run.
+      try {
+        const migrateRes = await fetch('/.netlify/functions/migrate-distance-matrix-to-supabase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, commit: true }),
+        });
+        const migrateData = await migrateRes.json();
+        if (!migrateData.ok) {
+          const errDetail = (migrateData.writeErrors && migrateData.writeErrors.length)
+            ? migrateData.writeErrors.map((e) => e.table + ' batch ' + e.batchStart + ': ' + e.error).join('; ')
+            : (migrateData.error || 'unknown error');
+          dmSetStatus(
+            buildSuccessMsg + '\n\n⚠️ Build succeeded, but the database migration failed: ' + errDetail +
+            '\nThe data is safe in Blobs -- re-run the migration separately once this is resolved.'
+          );
+        } else {
+          dmSetStatus(
+            buildSuccessMsg + '\n✅ Migrated to database: ' +
+            migrateData.migrated.siteToSite + ' site-to-site + ' + migrateData.migrated.techToSite + ' tech-to-site rows written' +
+            (migrateData.skippedCount ? ' (' + migrateData.skippedCount + ' skipped -- see server logs)' : '') + '.'
+          );
+        }
+      } catch (migrateErr) {
+        dmSetStatus(
+          buildSuccessMsg + '\n\n⚠️ Build succeeded, but the database migration request failed: ' + migrateErr.message +
+          '\nThe data is safe in Blobs -- re-run the migration separately once this is resolved.'
+        );
+      }
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message + (offset > 0 ? '\n(Progress up to batch ' + offset + ' was saved -- rerun to resume.)' : ''));
     }
