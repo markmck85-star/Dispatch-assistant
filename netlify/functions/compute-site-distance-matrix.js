@@ -51,6 +51,24 @@
  * New matrix entry key format: "{siteCodeA}|{siteCodeB}" (alphabetical
  * order not enforced -- lookups should check both orderings, same as the
  * existing tech-to-site convention).
+ *
+ * v3 (2026-09-23): FIXED a real duplicate-billing bug found by Mark. Since
+ * 2026-09-23's auto-migrate-to-Supabase addition, a completed build's real
+ * results live in TWO places: the Blobs cache here (distance-matrix/{STATE})
+ * AND site_site_distances in Supabase. But the incremental "known vs new"
+ * check below (knownCodes/pKnownCodes) only ever looked at the Blobs
+ * matrix -- it had no idea Supabase might already hold pairs the Blobs
+ * cache doesn't (e.g. an older build, a Blobs cache that got cleared/reset,
+ * or data that only ever entered Supabase through the migration path).
+ * Confirmed live: FL had 4,090 real pairs already in Supabase, but a
+ * dry-run still reported "127 sites, 127 new" -- a full, ~$42 rebuild of
+ * data that mostly already existed, because Blobs' own copy of the FL
+ * matrix didn't have those keys. Fixed by also querying
+ * site_site_distances for this state's site codes and merging any site
+ * that appears in EITHER source into knownCodes -- so a site already
+ * covered in Supabase (even if Blobs never knew about it) is correctly
+ * treated as known, not new. Applied identically to the dry-run preview
+ * and the real build so the estimate and the actual spend always agree.
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
@@ -100,6 +118,49 @@ function stripRefreshCodes(matrix, codes) {
   return out;
 }
 
+// v3 (2026-09-23): pulls the set of site codes for this state that already
+// have at least one real pair recorded in Supabase's site_site_distances --
+// the authoritative store now that builds auto-migrate there. Used to
+// supplement (never replace) the Blobs-derived knownCodes set, so a site
+// already covered in Supabase is never re-billed just because the Blobs
+// cache doesn't happen to know about it. refreshCodes (moved-pin site
+// codes) are excluded here too, mirroring stripRefreshCodes' treatment of
+// the Blobs matrix -- a site whose pin moved should still be treated as
+// needing fresh pairs even if Supabase has stale ones on file for it.
+async function getSupabaseKnownCodes(supabase, state, siteIdByCode, refreshCodes) {
+  const codeById = Object.fromEntries(Object.entries(siteIdByCode).map(([code, id]) => [id, code]));
+  const ids = Object.values(siteIdByCode);
+  if (!ids.length) return new Set();
+
+  const refreshSet = new Set((refreshCodes || []).map((c) => String(c).toUpperCase()));
+  const known = new Set();
+
+  // site_a/site_b are both FKs into sites.id -- a state's own sites can be
+  // paired with sites in another state's list is not expected in practice
+  // (site-to-site builds are per-state), but querying by id on both sides
+  // covers it correctly either way without assuming same-state pairing.
+  const { data: rows, error } = await supabase
+    .from("site_site_distances")
+    .select("site_a, site_b")
+    .or(`site_a.in.(${ids.join(",")}),site_b.in.(${ids.join(",")})`);
+
+  if (error) {
+    // Best-effort supplement -- if this query fails for any reason, fall
+    // back to Blobs-only knownCodes rather than blocking the whole preview
+    // or build. Logged so a real, recurring failure here doesn't go unnoticed.
+    console.error("[compute-site-distance-matrix] Supabase known-pairs lookup failed (continuing with Blobs-only known set):", error.message);
+    return known;
+  }
+
+  for (const row of rows || []) {
+    const codeA = codeById[row.site_a];
+    const codeB = codeById[row.site_b];
+    if (codeA && !refreshSet.has(codeA)) known.add(codeA);
+    if (codeB && !refreshSet.has(codeB)) known.add(codeB);
+  }
+  return known;
+}
+
 exports.handler = async (event) => {
   connectLambda(event);
 
@@ -141,7 +202,7 @@ exports.handler = async (event) => {
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const { data: pSites, error: pSitesErr } = await supabasePreview
       .from("sites")
-      .select("site_code, lat, lng")
+      .select("id, site_code, lat, lng")
       .eq("state", state)
       .eq("active", true); // BUG FIX (2026-09-07): soft-deleted sites (delete-location.js
       // sets active:false, never hard-deletes -- see that file's own comment on why)
@@ -153,6 +214,7 @@ exports.handler = async (event) => {
     const pLocEntries = (pSites || [])
       .filter((s) => s.lat != null && s.lng != null)
       .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
+    const pSiteIdByCode = Object.fromEntries((pSites || []).map((s) => [s.site_code, s.id]));
 
     // 2026-09-23: was "^" + state + "\\d+$" -- see the matching fix and
     // comment on the real-build siteCodePattern further down in this file
@@ -170,6 +232,12 @@ exports.handler = async (event) => {
         pKnownCodes.add(b);
       }
     }
+    // v3 (2026-09-23): supplement with Supabase's own record of already-computed
+    // pairs, so a site the Blobs cache doesn't know about (but Supabase does,
+    // via the auto-migration added last night) doesn't get billed again.
+    const pSupabaseKnown = await getSupabaseKnownCodes(supabasePreview, state, pSiteIdByCode, refreshCodes);
+    for (const code of pSupabaseKnown) pKnownCodes.add(code);
+
     const pFullRebuild = !!payload.fullRebuild || pKnownCodes.size === 0;
     const pNewSites = pFullRebuild ? pLocEntries : pLocEntries.filter(([code]) => !pKnownCodes.has(code));
     const pKnownSites = pFullRebuild ? [] : pLocEntries.filter(([code]) => pKnownCodes.has(code));
@@ -391,6 +459,14 @@ exports.handler = async (event) => {
       knownCodes.add(b);
     }
   }
+  // v3 (2026-09-23): same Supabase-supplement fix as the dry-run branch
+  // above -- see the top-of-file comment and getSupabaseKnownCodes() for
+  // the full reasoning. Without this, a real build (not just the preview)
+  // would re-fetch and re-bill pairs Supabase already has on file whenever
+  // the Blobs cache didn't happen to know about them.
+  const supabaseKnown = await getSupabaseKnownCodes(supabase, state, siteIdByCode, refreshCodes);
+  for (const code of supabaseKnown) knownCodes.add(code);
+
   const fullRebuild = !!payload.fullRebuild || knownCodes.size === 0;
   const newSites = fullRebuild ? locEntries : locEntries.filter(([code]) => !knownCodes.has(code));
   const knownSites = fullRebuild ? [] : locEntries.filter(([code]) => knownCodes.has(code));
