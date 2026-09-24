@@ -1530,11 +1530,7 @@
         function onStateChange() {
             currentState = document.getElementById('stateSelect').value;
             localStorage.setItem('lastAdminState', currentState);
-            // Keep Distance Matrix state dropdown in sync
-            var dmSel = document.getElementById('dm-state');
-            if (dmSel && dmSel.querySelector('option[value="' + currentState + '"]')) {
-                dmSel.value = currentState;
-            }
+            // Matrix state is independent. Do not copy header last-used state (often ID) into Drive-Time.
             clearLocForm();
             clearTechForm();
             loadLocations();
