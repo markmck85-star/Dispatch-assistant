@@ -229,7 +229,7 @@
     const qs = new URLSearchParams();
     qs.set('mailbox', mailbox);
     qs.set('limit', '50');
-    if (stateSelect.value) qs.set('state', stateSelect.value);
+    if (stateSelect.value && mailbox !== 'dispatch') qs.set('state', stateSelect.value);
     if (parseSelect.value) qs.set('parseStatus', parseSelect.value);
     if (qInput.value.trim()) qs.set('query', qInput.value.trim());
     try {
@@ -263,30 +263,57 @@
 
   const STATE_RE = 'CA|CO|FL|GA|ID|IL|IN|MI|MN|NC|NV|OH|OR|SC|WV';
 
+  function isSurfboardCode(code) {
+    return /^(FL|NC)/i.test(code);
+  }
+
   function parseDispatchList(text) {
-    const flat = String(text).replace(/\s+/g, ' ').trim();
+    // Same approach as index.html parseFormCounts: walk site codes, take a
+    // window after each code, require a restock-by date, then map counts
+    // LF/LR/Journal for surfboards (FL/NC) and LF/LR/RF/RR/Journal otherwise.
+    const flat = String(text || '').replace(/\s+/g, ' ').trim();
     const header = /State\s+Location\s+LF\s+LR\s+RF\s+RR\s+Journal/i;
     const hm = flat.match(header);
-    if (!hm) return null;
-    const intro = flat.slice(0, hm.index).trim();
-    let rest = flat.slice(hm.index + hm[0].length).replace(/^\s*Consumables Needed\s*(Restock By:?\s*)?/i, '').trim();
-    const rowRe = new RegExp(
-      '\\b(' + STATE_RE + ')\\s+(.+?)\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s*(.*?)(?=\\s+(?:' + STATE_RE + ')\\s+|$)',
-      'g'
-    );
+    const intro = hm ? flat.slice(0, hm.index).trim() : '';
+    const body = hm ? flat.slice(hm.index) : flat;
+    if (!hm && !/Dispatch List|Restock By|Consumables Needed/i.test(body)) return null;
+
+    const codeRe = /\b(?:[A-Z]{2}\d{3,5}|K[A-Z]\d{1,3})\b/g;
+    const dateRe = /\b(\d{1,2}\/\d{1,2}\/\d{2,4})\b/;
+    const consumablesRe = /\b(Journal Paper|Left Forms|Right Forms|Ribbon|P\d Forms)[^\d]*/gi;
     const rows = [];
-    let m;
-    while ((m = rowRe.exec(rest))) {
-      let extra = (m[8] || '').trim();
-      let by = '';
-      const dm = extra.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})\s*$/);
-      if (dm) { by = dm[1]; extra = extra.slice(0, dm.index).trim(); }
-      extra = extra.replace(/^Consumables Needed\s*/i, '').replace(/^Restock By:?\s*/i, '');
+    const seen = {};
+    let match;
+    while ((match = codeRe.exec(body)) !== null) {
+      const code = match[0];
+      if (seen[code]) continue;
+      const win = body.slice(match.index + code.length, match.index + code.length + 300);
+      const dateMatch = win.match(dateRe);
+      if (!dateMatch) continue;
+      const nums = [...win.replace(dateRe, '').matchAll(/(?<![\/.\d])(-?\d{1,4})(?![\/.\d])/g)]
+        .map((x) => parseInt(x[1], 10))
+        .filter((n) => n <= 9999 && n >= -99 && n !== 0);
+      const sb = isSurfboardCode(code);
+      if (sb ? nums.length < 2 : nums.length < 4) continue;
+      const textUpToDate = win.slice(0, win.indexOf(dateMatch[0]));
+      const consumablesMatch = textUpToDate.match(consumablesRe);
+      const consumablesStr = consumablesMatch
+        ? consumablesMatch.map((x) => x.trim()).join(', ').replace(/,\s*,/g, ',').trim()
+        : '';
+      const lookback = body.slice(Math.max(0, match.index - 90), match.index);
+      const locM = lookback.match(new RegExp('\\b(' + STATE_RE + ')\\s+(.+)$'));
+      const locName = (locM ? locM[2] : lookback).replace(/\s+/g, ' ').replace(/^[-–\s]+|[-–\s]+$/g, '');
       rows.push({
-        state: m[1], loc: m[2].replace(/\s+/g, ' ').trim(),
-        lf: m[3], lr: m[4], rf: m[5], rr: m[6], journal: m[7],
-        cons: extra, by
+        state: locM ? locM[1] : (code.match(/^([A-Z]{2})/) || ['', ''])[1],
+        loc: (locName + ' - ' + code).replace(/^\s*-\s*/, ''),
+        lf: nums[0], lr: nums[1],
+        rf: sb ? '—' : (nums[2] != null ? nums[2] : ''),
+        rr: sb ? '—' : (nums[3] != null ? nums[3] : ''),
+        journal: sb ? (nums[2] != null ? nums[2] : '') : (nums[4] != null ? nums[4] : ''),
+        cons: consumablesStr,
+        by: dateMatch[1]
       });
+      seen[code] = true;
     }
     if (rows.length < 2) return null;
     let html = '';
