@@ -83,6 +83,16 @@ let allShipments = [];
 let allTechnicians = [];
 let needsReturnOnly = false;
 
+function shipmentNeedsReturn(s) {
+    if (s.returnedAt) return false;
+    if (s.returnBrokenPart) return true;
+    const details = String(s.requestDetails || '');
+    if (/call\s*tag/i.test(details)) return true;
+    if (s.inboundTracking) return true;
+    return false;
+}
+
+
 // 2026-08-27: same source-email viewer as index.html/state.html/
 // location-lookup.html -- see get-rma-shipments.js for why a shipment can
 // carry two different candidate emails.
@@ -212,7 +222,7 @@ function render() {
         rows = rows.filter(s => String(s.technicianId) === String(techVal)
             || (techName && s.warehouseName && s.warehouseName.toLowerCase().includes(techName.toLowerCase())));
     }
-    if (needsReturnOnly) rows = rows.filter(s => s.returnBrokenPart && !s.returnedAt);
+    if (needsReturnOnly) rows = rows.filter(s => shipmentNeedsReturn(s));
 
     const content = document.getElementById('content');
     if (!rows.length) {
@@ -234,7 +244,7 @@ function render() {
         const inT = s.inboundTracking ? `<div class="mono"><span class="muted" style="font-family:inherit;">In:</span> ${upsLink(s.inboundTracking)}</div>` : '';
         let returnCell = '<span class="muted">—</span>';
         let actionCell = '';
-        if (s.returnBrokenPart) {
+        if (shipmentNeedsReturn(s) || s.returnedAt) {
             if (s.returnedAt) {
                 returnCell = `<span class="badge returned">✓ Returned ${fmtDate(s.returnedAt)}</span>`;
                 actionCell = `<button class="action-btn undo" onclick="markReturned('${s.id}', false)">Undo</button>`;
