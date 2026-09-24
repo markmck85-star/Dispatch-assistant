@@ -140,6 +140,8 @@ exports.handler = async (event) => {
 
   if (mailbox === "review") {
     q = q.eq("parse_status", "failed");
+  } else if (mailbox === "testing") {
+    q = q.or("subject.ilike.%K2D%,body_text.ilike.%K2D%,subject.ilike.%testing station%,body_text.ilike.%testing station%");
   } else if (mailbox && mailbox !== "all" && MAILBOXES[mailbox]) {
     q = q.in("classified_as", MAILBOXES[mailbox]);
     if (mailbox === "other") q = q.neq("parse_status", "failed");
