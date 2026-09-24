@@ -360,6 +360,30 @@
     <option value="WV">WV — West Virginia</option>
   </select>
 
+  <!-- Quick Add (2026-09-24) -- simplified, guarded flow for adding ONE new
+       technician or ONE new location to an already-built state, without
+       exposing Full Rebuild / Force re-geocode / any of the options that
+       can trigger an expensive full-state repricing. Built for TJ, who
+       doesn't need (or want) to understand those distinctions -- adding a
+       single item only ever prices that one item against everything else
+       already on file (linear cost), never the whole state again
+       (squared cost). Under the hood this just calls the same
+       geocode/build/gap-fill endpoints the advanced controls below use,
+       with the safe parameters locked in.
+  -->
+  <div style="margin:0 0 16px 0;padding:12px;background:#0d2818;border-radius:6px;border:1px solid #1e5c34;">
+    <h4 style="margin:0 0 4px 0;color:#8fd9a8;font-size:14px;">➕ Quick Add (new technician or location)</h4>
+    <p style="color:#9bc9a8;font-size:11px;margin:0 0 10px 0;">
+      Use this after adding ONE new technician or ONE new location to a state that's already built out.
+      Only prices that one new item -- cheap, safe, no options to get wrong.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="dm-btn" style="background:#2e7d4f;flex:1;min-width:160px;" onclick="dmQuickAdd('tech')">🧑‍🔧 I added a new technician</button>
+      <button class="dm-btn" style="background:#2e7d4f;flex:1;min-width:160px;" onclick="dmQuickAdd('location')">📍 I added a new location</button>
+    </div>
+    <div id="dm-quickadd-status" class="dm-status" style="margin-top:8px;">Ready.</div>
+  </div>
+
   <!-- Step 1: Geocode addresses (one-time, idempotent) -->
   <p style="color:#aaa;font-size:12px;margin:0 0 6px 0;">
     <strong style="color:#f0f0f0;">Step 1</strong> — Geocode addresses (first-time setup or after adding new locations/techs).
@@ -826,6 +850,102 @@
       }
     } catch (e) {
       dmSetStatus('❌ Network error: ' + e.message);
+    }
+  };
+
+  // Quick Add (2026-09-24) -- guided, safe-by-default flow for adding a
+  // single new technician or location. Always additive, never full
+  // rebuild, never force. Runs geocode -> drive-time (linear cost: just
+  // the new item against everything existing) -> for a new location only,
+  // also site-to-site gap-fill (also linear: just that one site's missing
+  // pairs). Reuses the same chunked-loop-with-resume-confirm shape as the
+  // advanced buttons below, just with locked parameters and a single
+  // combined status area so TJ never has to see a checkbox.
+  function qaSetStatus(msg) {
+    document.getElementById('dm-quickadd-status').textContent = msg;
+  }
+
+  async function qaRunChunkedBuild(url, baseBody, adminSecret, label, offsetField) {
+    let offset = 0, done = false, lastResult = null, resumedFromInterrupted = false;
+    while (!done) {
+      if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
+      qaSetStatus(label + '… (' + offset + (lastResult && (lastResult.totalBatches || lastResult.totalPairs) ? ' of ' + (lastResult.totalBatches || lastResult.totalPairs) : '') + ')');
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...baseBody, [offsetField]: offset, adminSecret }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        if (offset === 0 && !resumedFromInterrupted && typeof data.resumeOffset === 'number') {
+          resumedFromInterrupted = true;
+          offset = data.resumeOffset;
+          continue;
+        }
+        throw new Error(data.error || 'Unknown error during ' + label);
+      }
+      lastResult = data;
+      done = data.done;
+      if (!done) offset = data.nextOffset;
+    }
+    return lastResult;
+  }
+
+  window.dmQuickAdd = async function (kind) {
+    const state = dmState();
+    const noun = kind === 'tech' ? 'technician' : 'location';
+    if (!confirm('Add the new ' + noun + ' in ' + state + ' to the matrix?\n\nThis only prices that one new ' + noun + ' against everything already built -- cheap, and nothing else gets touched or re-billed.')) {
+      qaSetStatus('Cancelled.');
+      return;
+    }
+    const adminSecret = prompt('Distance Matrix admin password (needed for the drive-time step):') || '';
+    if (!adminSecret) { qaSetStatus('Cancelled -- no admin password entered.'); return; }
+
+    try {
+      qaSetStatus('Step 1 of ' + (kind === 'tech' ? '2' : '3') + ': geocoding the new ' + noun + '…');
+      const geoRes = await fetch('/.netlify/functions/geocode-addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, type: kind === 'tech' ? 'techs' : 'locations', force: false }),
+      });
+      const geoData = await geoRes.json();
+      if (!geoData.ok) throw new Error(geoData.error || 'Geocoding failed');
+      const geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
+      if (geoResult.geocoded === 0) {
+        qaSetStatus('⚠️ Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
+        return;
+      }
+
+      qaSetStatus('Step 2 of ' + (kind === 'tech' ? '2' : '3') + ': adding real drive-time for the new ' + noun + '…');
+      const driveResult = await qaRunChunkedBuild(
+        '/.netlify/functions/compute-distance-matrix',
+        { state, mode: 'driving', additive: true },
+        adminSecret,
+        'Adding drive-time',
+        'offset'
+      );
+
+      let siteResult = null;
+      if (kind === 'location') {
+        qaSetStatus('Step 3 of 3: adding site-to-site distances for the new location…');
+        siteResult = await qaRunChunkedBuild(
+          '/.netlify/functions/backfill-site-distance-gaps',
+          { state },
+          adminSecret,
+          'Adding site-to-site pairs',
+          'offset'
+        );
+      }
+
+      const meta = driveResult.meta || {};
+      qaSetStatus(
+        '✅ Done -- new ' + noun + ' added to the ' + state + ' matrix.\n' +
+        'Geocoded: ' + geoResult.geocoded + '\n' +
+        'Drive-time elements billed: ' + (meta.elementsBilledThisRun ?? driveResult.elementsUsed ?? 0) +
+        (siteResult ? '\nSite-to-site pairs added: ' + siteResult.totalPairs + ' (' + siteResult.elementsUsed + ' elements billed)' : '')
+      );
+    } catch (e) {
+      qaSetStatus('❌ ' + e.message);
     }
   };
 
