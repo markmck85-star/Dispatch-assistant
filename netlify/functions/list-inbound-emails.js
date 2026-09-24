@@ -142,6 +142,14 @@ exports.handler = async (event) => {
     q = q.eq("parse_status", "failed");
   } else if (mailbox === "testing") {
     q = q.or("subject.ilike.%K2D%,body_text.ilike.%K2D%,subject.ilike.%testing station%,body_text.ilike.%testing station%");
+  } else if (mailbox === "otc") {
+    q = q.or("subject.ilike.%- OTC -%,subject.ilike.% OTC -%,body_text.ilike.%- OTC -%,subject.ilike.%over-the-counter%,subject.ilike.%over the counter%");
+  } else if (mailbox === "armored") {
+    // Original ticket + the multi-day Loomis/Brinks scheduling chain
+    // (almost all classified reply/ignored). Subject stays
+    // "Armored Truck Meet" across RE:/FW:; carrier replies often
+    // arrive from *@loomis.com or an SRS rewrite that still contains it.
+    q = q.or("subject.ilike.%Armored Truck%,body_text.ilike.%Armored Truck Meet%,sender.ilike.%loomis.com%,sender.ilike.%brinks.com%,subject.ilike.%Brinks Meet%");
   } else if (mailbox && mailbox !== "all" && MAILBOXES[mailbox]) {
     q = q.in("classified_as", MAILBOXES[mailbox]);
     if (mailbox === "other") q = q.neq("parse_status", "failed");
