@@ -110,6 +110,21 @@
     display: block; font-family: -apple-system, Segoe UI, sans-serif;
     font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; margin-bottom: 2px;
   }
+  #mailPaper table.dlist {
+    width: 100%; border-collapse: collapse; font-family: -apple-system, Segoe UI, sans-serif;
+    font-size: 12px; margin: 10px 0 16px; background: #fff;
+  }
+  #mailPaper table.dlist th {
+    text-align: left; background: #1aa3a8; color: #fff; padding: 5px 6px; font-weight: 700;
+    position: sticky; top: 0;
+  }
+  #mailPaper table.dlist td { border-bottom: 1px solid #e6e1d6; padding: 5px 6px; vertical-align: top; }
+  #mailPaper table.dlist tr:nth-child(even) td { background: #f3fbfb; }
+  #mailPaper table.dlist .nums { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #mailPaper .sec {
+    font-family: -apple-system, Segoe UI, sans-serif; font-weight: 800; font-size: 13px;
+    background: #7ef0f5; color: #113; display: inline-block; padding: 3px 8px; margin: 12px 0 6px;
+  }
   @media (max-width: 800px) {
     .layout { flex-direction: column; }
     .boxes { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
@@ -179,6 +194,8 @@
   const qInput = document.getElementById('q');
   if (params.get('state')) stateSelect.value = params.get('state').toUpperCase();
   if (params.get('query')) qInput.value = params.get('query');
+  if (mailbox === 'dispatch' && !params.get('parseStatus')) parseSelect.value = 'parsed';
+  if (params.get('parseStatus')) parseSelect.value = params.get('parseStatus');
 
   document.querySelectorAll('#boxes button').forEach((btn) => {
     if (btn.dataset.box === mailbox) btn.classList.add('active');
@@ -186,6 +203,10 @@
     btn.onclick = () => {
       mailbox = btn.dataset.box;
       document.querySelectorAll('#boxes button').forEach((b) => b.classList.toggle('active', b === btn));
+      if (mailbox === 'dispatch') {
+        parseSelect.value = 'parsed';
+        if (/dispatch\s*list/i.test(qInput.value)) qInput.value = '';
+      }
       loadList();
     };
   });
@@ -240,8 +261,56 @@
     }
   }
 
+  const STATE_RE = 'CA|CO|FL|GA|ID|IL|IN|MI|MN|NC|NV|OH|OR|SC|WV';
+
+  function parseDispatchList(text) {
+    const flat = String(text).replace(/\s+/g, ' ').trim();
+    const header = /State\s+Location\s+LF\s+LR\s+RF\s+RR\s+Journal/i;
+    const hm = flat.match(header);
+    if (!hm) return null;
+    const intro = flat.slice(0, hm.index).trim();
+    let rest = flat.slice(hm.index + hm[0].length).replace(/^\s*Consumables Needed\s*(Restock By:?\s*)?/i, '').trim();
+    const rowRe = new RegExp(
+      '\\b(' + STATE_RE + ')\\s+(.+?)\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s+(-?\\d{1,5})\\s*(.*?)(?=\\s+(?:' + STATE_RE + ')\\s+|$)',
+      'g'
+    );
+    const rows = [];
+    let m;
+    while ((m = rowRe.exec(rest))) {
+      let extra = (m[8] || '').trim();
+      let by = '';
+      const dm = extra.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})\s*$/);
+      if (dm) { by = dm[1]; extra = extra.slice(0, dm.index).trim(); }
+      extra = extra.replace(/^Consumables Needed\s*/i, '').replace(/^Restock By:?\s*/i, '');
+      rows.push({
+        state: m[1], loc: m[2].replace(/\s+/g, ' ').trim(),
+        lf: m[3], lr: m[4], rf: m[5], rr: m[6], journal: m[7],
+        cons: extra, by
+      });
+    }
+    if (rows.length < 2) return null;
+    let html = '';
+    if (intro) html += '<div class="field">' + escapeHtml(intro) + '</div>';
+    html += '<div class="sec">DISPATCH LIST</div>';
+    html += '<div style="overflow-x:auto"><table class="dlist"><thead><tr>' +
+      '<th>State</th><th>Location</th><th class="nums">LF</th><th class="nums">LR</th>' +
+      '<th class="nums">RF</th><th class="nums">RR</th><th class="nums">Journal</th>' +
+      '<th>Consumables</th><th>Restock by</th></tr></thead><tbody>';
+    for (const r of rows) {
+      html += '<tr><td>' + escapeHtml(r.state) + '</td><td>' + escapeHtml(r.loc) + '</td>' +
+        '<td class="nums">' + r.lf + '</td><td class="nums">' + r.lr + '</td>' +
+        '<td class="nums">' + r.rf + '</td><td class="nums">' + r.rr + '</td>' +
+        '<td class="nums">' + r.journal + '</td><td>' + escapeHtml(r.cons) + '</td>' +
+        '<td>' + escapeHtml(r.by) + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    return html;
+  }
+
   function formatNatural(text) {
     if (!text) return '<span style="color:#888">(empty body)</span>';
+    const table = parseDispatchList(text);
+    if (table) return table;
     let t = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     // Dispatch lists often collapse to "CA San Luis Obispo" runs.
     t = t.replace(/\n(?=(CA|CO|FL|GA|ID|IL|IN|MI|MN|NC|NV|OH|OR|SC|WV)\b)/g, '\n\n');
