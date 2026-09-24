@@ -17,8 +17,8 @@
  * at the same location object -- so a pasted/parsed dispatch-list code
  * that no longer has its own `sites` row still resolves correctly instead
  * of silently failing to match or (worse) recreating a duplicate site.
- * Only aliases matching the site-code pattern (e.g. GA1018) are used this
- * way; free-text name aliases are left alone since they're not something
+ * Code-style aliases (GA1018, CA ATM tags KS8 / KN6, and 3-letter tags KEP / KAY)
+ * are folded in as extra keys.  free-text name aliases are left alone since they're not something
  * index.html ever looks up as a key. A real site_code always wins if it's
  * still live -- alias keys never overwrite an existing entry.
  *
@@ -45,7 +45,7 @@
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
 
-const SITE_CODE_PATTERN = /^[A-Z]{2}\d+$/;
+const SITE_CODE_PATTERN = /^(?:[A-Z]{2}\d+|K[A-Z]{2})$/;
 
 function getDispatchStore() {
   return getStore("dispatch");
