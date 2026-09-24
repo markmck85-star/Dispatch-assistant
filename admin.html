@@ -894,15 +894,13 @@
   window.dmQuickAdd = async function (kind) {
     const state = dmState();
     const noun = kind === 'tech' ? 'technician' : 'location';
-    if (!confirm('Add the new ' + noun + ' in ' + state + ' to the matrix?\n\nThis only prices that one new ' + noun + ' against everything already built -- cheap, and nothing else gets touched or re-billed.')) {
-      qaSetStatus('Cancelled.');
-      return;
-    }
-    const adminSecret = prompt('Distance Matrix admin password (needed for the drive-time step):') || '';
-    if (!adminSecret) { qaSetStatus('Cancelled -- no admin password entered.'); return; }
 
+    // Geocode first -- free, and the cost preview below can't be accurate
+    // for a brand-new item until it actually has coordinates (the
+    // site-to-site cost check only counts already-geocoded sites).
+    qaSetStatus('Geocoding the new ' + noun + '…');
+    let geoResult;
     try {
-      qaSetStatus('Step 1 of ' + (kind === 'tech' ? '2' : '3') + ': geocoding the new ' + noun + '…');
       const geoRes = await fetch('/.netlify/functions/geocode-addresses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -910,13 +908,62 @@
       });
       const geoData = await geoRes.json();
       if (!geoData.ok) throw new Error(geoData.error || 'Geocoding failed');
-      const geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
+      geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
       if (geoResult.geocoded === 0) {
         qaSetStatus('⚠️ Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
         return;
       }
+    } catch (e) {
+      qaSetStatus('❌ ' + e.message);
+      return;
+    }
 
-      qaSetStatus('Step 2 of ' + (kind === 'tech' ? '2' : '3') + ': adding real drive-time for the new ' + noun + '…');
+    qaSetStatus('Checking cost…');
+    let driveEst, siteEst = null;
+    try {
+      const driveRes = await fetch('/.netlify/functions/compute-distance-matrix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, mode: 'driving', additive: true, dryRun: true }),
+      });
+      driveEst = await driveRes.json();
+      if (!driveEst.ok) throw new Error(driveEst.error || 'Could not check drive-time cost');
+
+      if (kind === 'location') {
+        const siteRes = await fetch('/.netlify/functions/backfill-site-distance-gaps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state, dryRun: true }),
+        });
+        siteEst = await siteRes.json();
+        if (!siteEst.ok) throw new Error(siteEst.error || 'Could not check site-to-site cost');
+      }
+    } catch (e) {
+      qaSetStatus('❌ ' + e.message);
+      return;
+    }
+
+    const totalCost = (driveEst.estimatedCost || 0) + (siteEst ? (siteEst.estimatedCost || 0) : 0);
+    const costLines = [
+      'Drive-time: ' + driveEst.elementCount + ' element(s), $' + (driveEst.estimatedCost || 0).toFixed(2),
+    ];
+    if (siteEst) costLines.push('Site-to-site: ' + siteEst.missingPairCount + ' pair(s), $' + (siteEst.estimatedCost || 0).toFixed(2));
+
+    const confirmMsg =
+      'Add the new ' + noun + ' in ' + state + ' to the matrix?\n\n' +
+      '(' + noun.charAt(0).toUpperCase() + noun.slice(1) + ' already geocoded.)\n\n' +
+      costLines.join('\n') + '\n' +
+      'Total estimated cost: $' + totalCost.toFixed(2) + '\n\n' +
+      'This only prices that one new ' + noun + ' against everything already built -- nothing else gets touched or re-billed.';
+    if (!confirm(confirmMsg)) {
+      qaSetStatus('Cancelled -- the new ' + noun + ' is geocoded and saved, just not priced into the matrix yet. Safe to run Quick Add again later.');
+      return;
+    }
+    const adminSecret = prompt('Distance Matrix admin password (needed for the drive-time step):') || '';
+    if (!adminSecret) { qaSetStatus('Cancelled -- no admin password entered. The new ' + noun + ' is geocoded and saved, just not priced into the matrix yet.'); return; }
+
+    try {
+      qaSetStatus((kind === 'location' ? 'Step 1 of 2' : 'Adding') + ': drive-time for the new ' + noun + '…');
       const driveResult = await qaRunChunkedBuild(
         '/.netlify/functions/compute-distance-matrix',
         { state, mode: 'driving', additive: true },
@@ -927,7 +974,7 @@
 
       let siteResult = null;
       if (kind === 'location') {
-        qaSetStatus('Step 3 of 3: adding site-to-site distances for the new location…');
+        qaSetStatus('Step 2 of 2: site-to-site distances for the new location…');
         siteResult = await qaRunChunkedBuild(
           '/.netlify/functions/backfill-site-distance-gaps',
           { state },
