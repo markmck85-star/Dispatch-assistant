@@ -72,6 +72,7 @@
   }
   .pill.trouble { background: #3a1515; color: #fca5a5; }
   .pill.restock { background: #13233d; color: #93c5fd; }
+  .pill.dispatch { background: #0f2f28; color: #7edb8e; }
   .pill.maintenance { background: #3a2a10; color: #fcd34d; }
   .pill.rma { background: #2a1a3a; color: #d8b4fe; }
   .pill.other, .pill.notes { background: #2a2a2a; color: #bbb; }
@@ -84,6 +85,31 @@
   .read h2 { font-size: 1.05rem; margin: 0 0 6px; }
   .read .who { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
   #status { color: var(--muted); padding: 16px; }
+  #mailOverlay {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,.55); padding: 12px;
+    align-items: center; justify-content: center;
+  }
+  #mailOverlay.open { display: flex; }
+  #mailPaper {
+    background: #f7f4ee; color: #1a1a1a;
+    width: min(720px, 100%); max-height: 90vh; overflow: auto;
+    border-radius: 10px; padding: 22px 22px 28px; position: relative;
+    box-shadow: 0 16px 50px rgba(0,0,0,.45);
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  #mailPaper .x {
+    position: absolute; top: 10px; right: 12px; border: none; background: none;
+    font-size: 22px; cursor: pointer; color: #666;
+  }
+  #mailPaper .subj { font-family: -apple-system, Segoe UI, sans-serif; font-weight: 700; font-size: 17px; padding-right: 28px; }
+  #mailPaper .who { font-family: -apple-system, Segoe UI, sans-serif; color: #666; font-size: 13px; margin: 6px 0 14px; }
+  #mailPaper .body { font-size: 15px; line-height: 1.55; }
+  #mailPaper .field { margin: 0 0 10px; }
+  #mailPaper .field b {
+    display: block; font-family: -apple-system, Segoe UI, sans-serif;
+    font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; margin-bottom: 2px;
+  }
   @media (max-width: 800px) {
     .layout { flex-direction: column; }
     .boxes { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
@@ -126,7 +152,8 @@
   <nav class="boxes" id="boxes">
     <button data-box="all" class="active">All</button>
     <button data-box="trouble">Trouble</button>
-    <button data-box="restock">Restock / lists</button>
+    <button data-box="dispatch">Dispatch lists</button>
+    <button data-box="restock">Same-day restock</button>
     <button data-box="maintenance">Maintenance</button>
     <button data-box="rma">RMA / parts</button>
     <button data-box="notes">Replies / notes</button>
@@ -134,7 +161,13 @@
     <button data-box="review">Unparsed archive</button>
   </nav>
   <div class="list" id="list"><div id="status">Loading…</div></div>
-  <div class="read" id="read">Select a message.</div>
+  <div class="read" id="read">Select a message. Tap a row for the full letter.</div>
+</div>
+<div id="mailOverlay" onclick="if(event.target===this) closeMailOverlay()">
+  <div id="mailPaper">
+    <button class="x" type="button" onclick="closeMailOverlay()">✕</button>
+    <div id="mailPaperInner">Loading…</div>
+  </div>
 </div>
 <script>
   const params = new URLSearchParams(location.search);
@@ -207,22 +240,63 @@
     }
   }
 
+  function formatNatural(text) {
+    if (!text) return '<span style="color:#888">(empty body)</span>';
+    let t = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    // Dispatch lists often collapse to "CA San Luis Obispo" runs.
+    t = t.replace(/\n(?=(CA|CO|FL|GA|ID|IL|IN|MI|MN|NC|NV|OH|OR|SC|WV)\b)/g, '\n\n');
+    const labelRe = /^(Work Order Number|Priority|Earliest Start Permitted|Earliest Start|Due Date|Location|Address|Phone|Account Name|PC Name|SST Type|SST Name|Line Item Issue Category|Line Item Issue Detail|Line Item Description|Line Item Number|Out of Service|Device Errors|Consumable Counts|Restock SST|SST ID|ATM ID)\s*:\s*(.*)$/i;
+    const lines = t.split('\n');
+    let html = '';
+    let buf = [];
+    function flushBuf() {
+      if (!buf.length) return;
+      html += '<div class="field">' + escapeHtml(buf.join('\n')) + '</div>';
+      buf = [];
+    }
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      const m = line.match(labelRe);
+      if (m) {
+        flushBuf();
+        html += '<div class="field"><b>' + escapeHtml(m[1]) + '</b>' + escapeHtml(m[2] || '') + '</div>';
+      } else {
+        buf.push(line);
+      }
+    }
+    flushBuf();
+    return html;
+  }
+
   async function openMail(id) {
     selectedId = id;
     document.querySelectorAll('.row').forEach((r) => r.classList.toggle('active', r.dataset.id === id));
     const pane = document.getElementById('read');
+    const paper = document.getElementById('mailPaperInner');
     pane.textContent = 'Opening…';
+    paper.textContent = 'Loading…';
+    document.getElementById('mailOverlay').classList.add('open');
     try {
       const r = await fetch('/.netlify/functions/get-source-email?id=' + encodeURIComponent(id), { cache: 'no-store' });
       const data = await r.json();
       if (!data.ok) throw new Error(data.error || 'open failed');
+      const who = escapeHtml(data.sender || '') + ' · ' + fmtWhen(data.receivedAt);
       pane.innerHTML = `<h2>${escapeHtml(data.subject)}</h2>
-        <div class="who">${escapeHtml(data.sender || '')} · ${fmtWhen(data.receivedAt)}</div>
+        <div class="who">${who}</div>
         <div>${escapeHtml(data.bodyText || '(empty body)')}</div>`;
+      paper.innerHTML = `<div class="subj">${escapeHtml(data.subject)}</div>
+        <div class="who">${who}</div>
+        <div class="body">${formatNatural(data.bodyText)}</div>`;
     } catch (err) {
       pane.textContent = 'Could not open message: ' + err.message;
+      paper.textContent = pane.textContent;
     }
   }
+
+  function closeMailOverlay() {
+    document.getElementById('mailOverlay').classList.remove('open');
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMailOverlay(); });
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, (c) => ({
