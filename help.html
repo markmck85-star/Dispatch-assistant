@@ -80,7 +80,7 @@
 <body>
 <header>
   <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.84 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>v9.86 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
@@ -120,12 +120,16 @@
       <tr><td>Check for stale/unaddressed trouble tickets</td><td><strong>Watchdog Log</strong> (button next to the state selector, or <code>/watchdog/:state</code>) -- every open trouble/install/site-survey ticket for a state, sorted by urgency.</td></tr>
       <tr><td>Undo something I just did</td><td><strong>↩ Undo</strong> in the Session Actions list at the bottom -- only works until you refresh the page. See <a href="#session-actions">Session Actions</a>.</td></tr>
       <tr><td>Add/edit a location or technician</td><td><strong>Admin Panel</strong> → Locations or Technicians tab. See <a href="#admin">Admin Panel</a>.</td></tr>
+      <tr><td>Add a single new tech/location to the distance matrix</td><td>Just save them with a real address -- a prompt offers to add them right there, or use <strong>➕ Quick Add</strong> on the Distance Matrix tab any time after. See <a href="#admin">Admin Panel</a>.</td></tr>
     </table>
   </section>
 
   <!-- WHAT'S NEW -->
   <section id="whats-new">
     <h2>🆕 What's New</h2>
+
+    <h3>Quick Add for the Distance Matrix</h3>
+    <p>Saving a new technician or location (or editing one's address) on the Admin Panel now offers to add it to that state's distance matrix right then -- a small popup with an <strong>Add to matrix</strong> button, no need to know the Distance Matrix tab exists. It shows the real price before anything runs (typically a dollar or less for one tech or one site, since it only prices that one new item against everything already built), asks for the admin password, then handles geocoding, drive-time, and -- for a new location -- site-to-site distances automatically. The same guided flow is also available any time from the Distance Matrix tab itself under <strong>➕ Quick Add</strong>, without needing to have just saved something. See <a href="#admin">Admin Panel</a> for the full rundown, including how this differs from the state-wide build tools.</p>
 
     <h3>Armored Truck Meet Tracking (cash-side tickets)</h3>
     <p>A "Big Kahuna" (cash-side) trouble ticket that needs an armored-carrier technician on site no longer runs against the standard 4-hour SLA clock -- the app now tracks the real back-and-forth negotiation with the carrier's regional branch instead. See <a href="#armored-meet">Armored Truck Meets</a> below for the full explanation.</p>
@@ -143,7 +147,7 @@
     <p>The app now computes the real SLA itself, rather than relying on the ticket's stated priority -- 4 business hours, 8am-5pm, in the site's own local timezone, honoring Saturday coverage where it applies and excluding it where it doesn't. Email-stated deadlines still apply for same-day restock requests and scheduled site-survey meet times.</p>
 
     <h3>More states online</h3>
-    <p>Idaho, Alabama, and California have all been added since the last update. California in particular is a large territory -- 290 locations and 15 technicians -- so if you're covering it for the first time, the State Console is the fastest way to get oriented before touching the full dispatch workflow.</p>
+    <p>Idaho, Mississippi, Oregon, Nevada, Ohio, Indiana, and California have all been added since the last update, alongside the existing GA/FL/CO/MI/SC/NC/MN/IL/WV coverage. California in particular is a large territory -- 290 locations and 15 technicians -- so if you're covering it for the first time, the State Console is the fastest way to get oriented before touching the full dispatch workflow.</p>
 
     <h3>Map View</h3>
     <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to see every tech's route plotted geographically, color-coded per tech, with a legend showing stop counts. Useful for spotting stops that are geographically close but assigned to different techs -- something that isn't always obvious from the text list alone, especially for anyone covering a state they don't know well.</p>
@@ -241,7 +245,7 @@
     <h2>Map View</h2>
     <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to plot every tech's stops geographically. Each tech gets a distinct color, matching the dot next to their name on their card. Tap any pin for that stop's site name, address, and distance from the previous stop.</p>
     <p>The legend below the map lists each tech with their stop count and lets you toggle their route on/off. Stops without saved coordinates are listed separately under the map ("Not plotted") rather than silently dropped.</p>
-    <p>Distance figures use the real site-to-site driving-distance matrix where it's been built for that state (GA has the most complete coverage); elsewhere, or for specific pairs the matrix build didn't resolve, distances fall back to straight-line and are marked <strong>(est.)</strong>.</p>
+    <p>Distance figures use the real site-to-site driving-distance matrix where it's been built for that state; elsewhere, or for specific pairs the matrix build didn't resolve, distances fall back to straight-line and are marked <strong>(est.)</strong>.</p>
     <div class="note"><strong>Note:</strong> whether the map is shown or hidden persists across a page refresh.</div>
   </section>
 
@@ -364,11 +368,13 @@ Please acknowledge receipt.</div>
       <li>Search by site code, name, or address.</li>
       <li>Edit any location to set Primary Tech, Fallback Tech, and Machine Type (SK/SB/BK).</li>
       <li>Add new locations manually.</li>
+      <li>Saving a new location, or editing one's address, prompts to add it to that state's distance matrix right there -- see <strong>Quick Add</strong> under the Distance Matrix Tab below.</li>
     </ul>
     <h3>Technicians Tab</h3>
     <ul>
       <li>Add, edit, or remove technicians for any state. Changes take effect immediately.</li>
       <li>Set each tech's carrier and SMS address here to enable the direct-Send feature on dispatch cards.</li>
+      <li>Saving a new technician, or editing their home address, prompts to add them to their home state's distance matrix right there -- see <strong>Quick Add</strong> below.</li>
     </ul>
     <h3>Backup Tab</h3>
     <ul>
@@ -381,11 +387,11 @@ Please acknowledge receipt.</div>
       <li>Each recipient can be scoped to specific states (or all), with their own active-hours window and timezone -- outside that window, they're queued for a digest instead of texted immediately.</li>
     </ul>
     <h3>Distance Matrix Tab</h3>
-    <ul>
-      <li>Builds real driving-distance data via the Google Maps API -- either tech-to-site (cheaper, ~$3-6/state) or the fuller site-to-site matrix (~$23-45 for a state GA's size), which also powers Map View's real distance labels and route sorting.</li>
-      <li>Both driving-mode builds require a separate admin password beyond your regular login, and are limited to one build per state per 24 hours -- these are one-time-per-state builds in normal use, not something to re-run casually.</li>
-      <li>A haversine (straight-line) mode is also available, free and instant, as a fallback for states without a real matrix yet.</li>
-    </ul>
+    <p>Builds real driving-distance data via the Google Maps API. Two kinds of data get built: <strong>tech-to-site</strong> (each technician's drive time to every location -- powers nearest-tech suggestions) and <strong>site-to-site</strong> (every location's drive time to every other location -- powers Map View's real distance labels and route-order suggestions). Both are one-time builds per state in normal use, not something to re-run casually.</p>
+    <p><strong>➕ Quick Add</strong> -- the fast, safe way to add ONE new technician or ONE new location to a state that's already built out. Shows the real price before anything runs (typically well under a dollar, since it only prices that one new item against everything already on file), asks for the admin password, then handles geocoding and drive-time automatically -- plus site-to-site for a new location. No Full Rebuild, Force re-geocode, or other options to get wrong. This is the same flow offered automatically after saving a technician or location on their respective tabs (see above) -- Quick Add here is for running it again later, or for anyone who dismissed that prompt.</p>
+    <p>The rest of the tab is the advanced, state-wide toolset -- <strong>Geocode Locations/Techs/All</strong>, <strong>Build (Straight-Line, Free)</strong> and <strong>Build (Drive-Time)</strong> for the full tech-to-site matrix, <strong>Build Site-to-Site Matrix</strong> for the full state, and <strong>Fill Missing Pairs Only</strong> to top up a state's site-to-site coverage if it's ever incomplete (cheaper than a full rebuild -- only queries pairs that don't already exist). These carry real cost for anything beyond a single state's worth of new sites/techs, so Quick Add above is the better choice for routine one-at-a-time additions.</p>
+    <p>Both driving-mode builds (advanced and Quick Add alike) require a separate admin password beyond your regular login.</p>
+    <p>A haversine (straight-line) mode is also available, free and instant, as a fallback or a first pass before paying for real drive-time.</p>
     <h3>Closed Tickets Tab</h3>
     <ul>
       <li>Manually upload a Salesforce closed-ticket export, or trigger the automated sync on demand with Refresh Now.</li>
@@ -451,6 +457,8 @@ Please acknowledge receipt.</div>
           <li>State-scoped location + technician management</li>
           <li>Notification recipients with per-person hours/timezone</li>
           <li>Site-to-site + tech-to-site distance matrix builds (password + cooldown protected)</li>
+          <li>Quick Add -- one-item, price-shown-first matrix updates, prompted automatically after saving a tech/location</li>
+          <li>Fill Missing Pairs Only -- tops up incomplete site-to-site coverage without a full rebuild</li>
           <li>Closed-ticket sync (manual or automatic)</li>
           <li>Repeat-issue and unmatched-site detection tools</li>
           <li>Backup and restore per state</li>
@@ -504,7 +512,7 @@ Please acknowledge receipt.</div>
     <h3>Longer Term</h3>
     <ul>
       <li>Per-dispatcher logins with individually configurable state coverage.</li>
-      <li>Site-to-site distance matrix coverage for states beyond GA.</li>
+      <li>Full site-to-site and tech-to-site distance matrix coverage for the remaining smaller states.</li>
       <li>Bundled/opportunistic restock suggestions when a tech is already near a site approaching its threshold.</li>
     </ul>
   </section>
@@ -516,11 +524,11 @@ Please acknowledge receipt.</div>
       <li>SLA calculation requires the Earliest Start Permitted field to be present in the ticket email.</li>
       <li>NC and SC share the GA location database in admin — separate NC/SC databases not yet implemented.</li>
       <li>Undo is session-only — refreshing the page clears session action history (though the board itself now reloads correctly on refresh).</li>
-      <li>Map View / route-sorting shows real driving distance only where the site-to-site matrix has been built (GA has the most complete coverage) -- other states, and any specific pairs the build didn't resolve, fall back to straight-line distance, marked "(est.)".</li>
+      <li>Map View / route-sorting shows real driving distance only where the site-to-site matrix has been built for that state -- a handful of smaller states are still pending; elsewhere, and for any specific pairs a build didn't resolve, distances fall back to straight-line, marked "(est.)".</li>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
       <li>Closing notes aren't currently available in the closed-ticket report, so full ticket history for a site still requires manually checking Salesforce.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 22, 2026 &nbsp;·&nbsp; v9.84</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 24, 2026 &nbsp;·&nbsp; v9.86</p>
   </section>
 
 </main>
