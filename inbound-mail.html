@@ -96,15 +96,23 @@
   #mailOverlay.open { display: flex; }
   #mailPaper {
     background: #f7f4ee; color: #1a1a1a;
-    width: min(720px, 100%); max-height: 90vh; overflow: auto;
-    border-radius: 10px; padding: 22px 22px 28px; position: relative;
+    width: min(980px, 94vw); height: min(880px, 92vh); max-height: 92vh;
+    display: flex; flex-direction: column;
+    border-radius: 10px; padding: 18px 20px 8px; position: relative;
     box-shadow: 0 16px 50px rgba(0,0,0,.45);
     font-family: Georgia, 'Times New Roman', serif;
+    overflow: hidden;
+  }
+  #mailPaperInner {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 4px 8px 28px 0;
   }
   #mailPaper .x {
-    position: absolute; top: 10px; right: 12px; border: none; background: none;
-    font-size: 22px; cursor: pointer; color: #666;
+    position: sticky; top: 0; float: right; z-index: 5;
+    border: none; background: #f7f4ee; font-size: 22px; cursor: pointer; color: #666;
+    margin: -4px -4px 0 0;
   }
+  #mailPaper .body, #mailPaper .field { white-space: pre-wrap; }
   #mailPaper .subj { font-family: -apple-system, Segoe UI, sans-serif; font-weight: 700; font-size: 17px; padding-right: 28px; }
   #mailPaper .who { font-family: -apple-system, Segoe UI, sans-serif; color: #666; font-size: 13px; margin: 6px 0 14px; }
   #mailPaper .body { font-size: 15px; line-height: 1.55; }
@@ -352,16 +360,29 @@
   }
 
   function stripPreamble(text) {
-    let t = String(text || '');
+    let t = String(text || '').replace(/\u2014/g, '-');
     const hello = t.search(/Hello,\s*here is today's dispatch list/i);
-    if (hello >= 0) return t.slice(hello).trim();
-    const subjects = [...t.matchAll(/Subject:\s*(?:Re:\s*|Fwd?:\s*)*[^\n]*Dispatch List[^\n]*/gi)];
-    if (subjects.length) t = t.slice(subjects[subjects.length - 1].index + subjects[subjects.length - 1][0].length);
-    const placed = t.search(/DISPATCHES NEEDING PLACED|Hello,\s*here is/i);
+    if (hello >= 0) t = t.slice(hello);
+    t = t.replace(/\s*[-\u2014]{2,}\s*Original message\s*[-\u2014]*/gi, '\n');
+    t = t.replace(/\s+(From:|Sent:|To:|Cc:|Subject:|Date:|CAUTION:)\s+/g, '\n$1 ');
+    if (hello < 0) {
+      const subjects = [...t.matchAll(/Subject:\s*.+/gi)];
+      if (subjects.length) {
+        const last = subjects[subjects.length - 1];
+        t = t.slice(last.index + last[0].length);
+      }
+    }
+    const placed = t.search(/DISPATCHES NEEDING PLACED/i);
     const header = t.search(/State\s+Location\s+LF\s+LR/i);
-    if (placed >= 0 && (header < 0 || placed < header)) return t.slice(placed).trim();
-    if (header >= 0) return t.slice(header).trim();
-    return t.trim();
+    if (placed >= 0 && (header < 0 || placed < header) && /dispatch list/i.test(t)) {
+      /* keep Taylor intro above the table */
+    } else if (hello < 0 && header >= 0 && /dispatch list/i.test(t.slice(0, header))) {
+      /* keep */
+    }
+    t = t.replace(/\nCAUTION:[\s\S]*$/i, '');
+    t = t.replace(/This email originated from an External Source[\s\S]*$/i, '');
+    t = t.replace(/Please use proper judgment[\s\S]*$/i, '');
+    return t.replace(/\n{3,}/g, '\n\n').trim();
   }
 
   function formatNatural(text) {
