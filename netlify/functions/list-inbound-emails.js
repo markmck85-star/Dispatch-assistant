@@ -121,6 +121,7 @@ exports.handler = async (event) => {
   const state = String(params.state || "").trim().toUpperCase();
   const query = String(params.query || "").trim();
   const parseStatus = String(params.parseStatus || "").trim().toLowerCase();
+  const onDate = String(params.date || "").trim();
 
   let limit = parseInt(params.limit, 10);
   if (!Number.isFinite(limit) || limit <= 0) limit = DEFAULT_LIMIT;
@@ -156,6 +157,14 @@ exports.handler = async (event) => {
   }
   if (parseStatus && ["parsed", "failed", "ignored", "pending"].includes(parseStatus)) {
     q = q.eq("parse_status", parseStatus);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(onDate)) {
+    // Calendar day in Eastern (EDT -04 most of the dispatch season).
+    const start = onDate + "T00:00:00-04:00";
+    const [y, m, d] = onDate.split("-").map(Number);
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    const nextStr = next.toISOString().slice(0, 10) + "T00:00:00-04:00";
+    q = q.gte("received_at", start).lt("received_at", nextStr);
   }
 
   const terms = query.split(/\s+/).filter(Boolean).slice(0, 6);
