@@ -74,6 +74,8 @@
   .pill.restock { background: #13233d; color: #93c5fd; }
   .pill.dispatch { background: #0f2f28; color: #7edb8e; }
   .pill.testing { background: #3b2f10; color: #fde68a; }
+  .pill.armored { background: #2a2410; color: #f5d0a0; }
+  .pill.otc { background: #1a2a3a; color: #93c5fd; }
   .pill.maintenance { background: #3a2a10; color: #fcd34d; }
   .pill.rma { background: #2a1a3a; color: #d8b4fe; }
   .pill.other, .pill.notes { background: #2a2a2a; color: #bbb; }
@@ -169,6 +171,8 @@
     <button data-box="all" class="active">All</button>
     <button data-box="trouble">Trouble</button>
     <button data-box="testing">Testing stations</button>
+    <button data-box="armored">Armored meets</button>
+    <button data-box="otc">OTC / POD</button>
     <button data-box="dispatch">Dispatch lists</button>
     <button data-box="restock">Same-day restock</button>
     <button data-box="maintenance">Maintenance</button>
@@ -209,6 +213,9 @@
       if (mailbox === 'dispatch') {
         parseSelect.value = 'parsed';
         if (/dispatch\s*list/i.test(qInput.value)) qInput.value = '';
+      }
+      if (mailbox === 'armored' || mailbox === 'testing' || mailbox === 'otc') {
+        parseSelect.value = '';
       }
       selectedId = null;
       closeMailOverlay();
