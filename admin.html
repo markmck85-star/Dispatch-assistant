@@ -1360,6 +1360,71 @@
             }, 3000);
         }
 
+        // Action toast (2026-09-24) -- like showToast but stays up longer,
+        // includes a button, and doesn't auto-dismiss while the pointer is
+        // over it. Used to offer Quick Add right after saving a
+        // technician or location, without forcing the user to go find the
+        // Distance Matrix tab themselves.
+        function showActionToast(msg, actionLabel, onAction) {
+            var container = document.getElementById('toastContainer');
+            var toast = document.createElement('div');
+            toast.className = 'toast info';
+            toast.style.maxWidth = '340px';
+
+            var msgEl = document.createElement('div');
+            msgEl.textContent = msg;
+            msgEl.style.marginBottom = '8px';
+            toast.appendChild(msgEl);
+
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+
+            var dismissBtn = document.createElement('button');
+            dismissBtn.textContent = 'Not now';
+            dismissBtn.style.cssText = 'background:transparent;border:1px solid rgba(255,255,255,0.5);color:white;padding:5px 10px;border-radius:5px;font-size:12px;cursor:pointer;';
+            dismissBtn.onclick = function() { removeToast(); };
+            row.appendChild(dismissBtn);
+
+            var actionBtn = document.createElement('button');
+            actionBtn.textContent = actionLabel;
+            actionBtn.style.cssText = 'background:white;color:#1e5c34;border:none;padding:5px 12px;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;';
+            actionBtn.onclick = function() { removeToast(); onAction(); };
+            row.appendChild(actionBtn);
+
+            toast.appendChild(row);
+            container.appendChild(toast);
+            toast.offsetHeight;
+            toast.classList.add('show');
+
+            var dismissTimer = setTimeout(removeToast, 15000);
+            toast.addEventListener('mouseenter', function() { clearTimeout(dismissTimer); });
+
+            function removeToast() {
+                clearTimeout(dismissTimer);
+                toast.classList.remove('show');
+                setTimeout(function() { if (toast.parentNode) container.removeChild(toast); }, 300);
+            }
+        }
+
+        // Jumps to the Distance Matrix tab, pre-selects the right state,
+        // and runs Quick Add -- the bridge between "just saved a
+        // technician/location" and the guided flow that already lives
+        // there. Falls back gracefully if the state isn't in that
+        // dropdown's list (shouldn't normally happen, but the two lists
+        // have drifted before).
+        function dmQuickAddFromToast(kind, state) {
+            var stateSelect = document.getElementById('dm-state');
+            var hasOption = stateSelect && Array.prototype.some.call(stateSelect.options, function(o) { return o.value === state; });
+            if (typeof switchTab === 'function') switchTab('distancematrix');
+            if (hasOption) {
+                stateSelect.value = state;
+            } else {
+                showToast(state + ' isn\'t in the Distance Matrix state list yet -- add it there first, then use Quick Add.', 'error');
+                return;
+            }
+            if (typeof dmQuickAdd === 'function') dmQuickAdd(kind);
+        }
+
         // --- LOGIN ---
         async function doLogin() {
             var username = document.getElementById('loginUser').value.trim();
@@ -2013,6 +2078,19 @@
                     showToast('Location saved, but colloquial names failed: ' + aliasErr.message, 'error');
                 }
 
+                // 2026-09-24: offer Quick Add right here -- an address add
+                // or edit is exactly the case Quick Add exists for
+                // (geocode + linear-cost drive-time/site-to-site for just
+                // this one site), and someone editing from this tab has no
+                // reason to already know the Distance Matrix tab exists.
+                if (payload.address) {
+                    showActionToast(
+                        (isEdit ? 'Add this location\'s new address' : 'Add ' + code) + ' to the ' + currentState + ' distance matrix?',
+                        'Add to matrix',
+                        function() { dmQuickAddFromToast('location', currentState); }
+                    );
+                }
+
                 clearLocForm();
                 await loadLocations();
             } catch (e) {
@@ -2182,6 +2260,20 @@
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
                 showToast(isEdit ? 'Technician updated' : 'Technician added', 'success');
+
+                // 2026-09-24: same Quick Add offer as saveLocation above.
+                // Uses homeState (the tech's actual state), not
+                // currentState (the tab they happened to be viewing) --
+                // those can differ, e.g. adding a tech while on a
+                // neighboring state's tab.
+                if (payload.homeAddress) {
+                    showActionToast(
+                        (isEdit ? 'Add this technician\'s new address' : 'Add ' + name) + ' to the ' + homeState + ' distance matrix?',
+                        'Add to matrix',
+                        function() { dmQuickAddFromToast('tech', homeState); }
+                    );
+                }
+
                 clearTechForm();
                 await loadTechnicians();
             } catch (e) {
