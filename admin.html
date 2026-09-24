@@ -345,6 +345,7 @@
 
   <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px;">State</label>
   <select id="dm-state" class="dm-select">
+    <option value="" selected disabled>Select a state — required</option>
     <option value="CA">CA — California (290 locations, placeholder)</option>
     <option value="CO">CO — Colorado</option>
     <option value="FL">FL — Florida (93 locations)</option>
@@ -481,7 +482,12 @@
 <script>
 (function () {
   function dmState() {
-    return document.getElementById('dm-state').value;
+    const v = document.getElementById('dm-state').value;
+    if (!v) {
+      dmSetStatus('Pick a state in the Distance Matrix panel first. It does not follow the admin header and will not default to CA/ID.');
+      throw new Error('Distance Matrix state not selected');
+    }
+    return v;
   }
   function dmSetStatus(msg) {
     document.getElementById('dm-status').textContent = msg;
@@ -817,7 +823,12 @@
 <script>
 (function () {
   function dmState() {
-    return document.getElementById('dm-state').value;
+    const v = document.getElementById('dm-state').value;
+    if (!v) {
+      dmSetStatus('Pick a state in the Distance Matrix panel first. It does not follow the admin header and will not default to CA/ID.');
+      throw new Error('Distance Matrix state not selected');
+    }
+    return v;
   }
   function dmSetStatus(msg) {
     document.getElementById('dm-status').textContent = msg;
