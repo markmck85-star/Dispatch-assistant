@@ -95,7 +95,11 @@ function inferState(row) {
   return null;
 }
 
-function mailboxFor(classifiedAs) {
+function mailboxFor(classifiedAs, parseStatus) {
+  // Failed parses used to land in Other and bury the catch-all
+  // (surveys, armored-truck threads, odd Neumo types). Those stay
+  // in their own "review" mailbox.
+  if (parseStatus === "failed") return "review";
   const c = classifiedAs || "unknown";
   for (const [box, kinds] of Object.entries(MAILBOXES)) {
     if (kinds.includes(c)) return box;
@@ -133,8 +137,11 @@ exports.handler = async (event) => {
     .order("received_at", { ascending: false })
     .limit(fetchLimit);
 
-  if (mailbox && mailbox !== "all" && MAILBOXES[mailbox]) {
+  if (mailbox === "review") {
+    q = q.eq("parse_status", "failed");
+  } else if (mailbox && mailbox !== "all" && MAILBOXES[mailbox]) {
     q = q.in("classified_as", MAILBOXES[mailbox]);
+    if (mailbox === "other") q = q.neq("parse_status", "failed");
   }
   if (parseStatus && ["parsed", "failed", "ignored", "pending"].includes(parseStatus)) {
     q = q.eq("parse_status", parseStatus);
@@ -165,7 +172,7 @@ exports.handler = async (event) => {
       receivedAt: row.received_at,
       classifiedAs: row.classified_as,
       parseStatus: row.parse_status,
-      mailbox: mailboxFor(row.classified_as),
+      mailbox: mailboxFor(row.classified_as, row.parse_status),
       inferredState,
       bodySnippet: snippet,
       truncated,
