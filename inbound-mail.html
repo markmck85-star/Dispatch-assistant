@@ -149,7 +149,14 @@
 <header>
   <a class="back" href="/">← Dispatch</a>
   <h1>Inbound Mail</h1>
-  <span class="hint">Read-only copy of what Mailgun stored. No send. Bodies are cleaned of quoted chains.</span>
+  <span class="hint">Read-only copy of what Mailgun stored. No send.</span>
+  <select id="parseSelect" title="Parse status (rarely needed)" style="margin-left:auto;font-size:12px;opacity:.75;">
+    <option value="">Parse: any</option>
+    <option value="parsed">Parse: parsed</option>
+    <option value="failed">Parse: failed</option>
+    <option value="pending">Parse: pending</option>
+    <option value="ignored">Parse: ignored</option>
+  </select>
 </header>
 <div class="toolbar">
   <select id="stateSelect">
@@ -163,13 +170,8 @@
     <option value="OR">OR</option><option value="SC">SC</option>
     <option value="WV">WV</option>
   </select>
-  <select id="parseSelect">
-    <option value="">Any parse status</option>
-    <option value="parsed">Parsed</option>
-    <option value="failed">Failed</option>
-    <option value="pending">Pending</option>
-    <option value="ignored">Ignored</option>
-  </select>
+  <input type="date" id="dateSelect" title="Show mail received on this date">
+  <button type="button" class="ghost" id="clearDate" title="Clear date">All dates</button>
   <input type="search" id="q" placeholder="Search WO, site, subject…" style="flex:1;min-width:160px;">
   <button id="go">Search</button>
   <button class="ghost" id="refresh">Refresh</button>
@@ -206,9 +208,11 @@
 
   const stateSelect = document.getElementById('stateSelect');
   const parseSelect = document.getElementById('parseSelect');
+  const dateSelect = document.getElementById('dateSelect');
   const qInput = document.getElementById('q');
   if (params.get('state')) stateSelect.value = params.get('state').toUpperCase();
   if (params.get('query')) qInput.value = params.get('query');
+  if (params.get('date')) dateSelect.value = params.get('date');
   if (mailbox === 'dispatch' && !params.get('parseStatus')) parseSelect.value = 'parsed';
   if (params.get('parseStatus')) parseSelect.value = params.get('parseStatus');
 
@@ -236,6 +240,12 @@
   qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadList(); });
   stateSelect.onchange = () => { closeMailOverlay(); loadList(); };
   parseSelect.onchange = () => { closeMailOverlay(); loadList(); };
+  dateSelect.onchange = () => { closeMailOverlay(); loadList(); };
+  document.getElementById('clearDate').onclick = () => {
+    dateSelect.value = '';
+    closeMailOverlay();
+    loadList();
+  };
 
   function fmtWhen(iso) {
     if (!iso) return '';
@@ -253,6 +263,7 @@
       qs.set('state', stateSelect.value);
     }
     if (parseSelect.value) qs.set('parseStatus', parseSelect.value);
+    if (dateSelect.value) qs.set('date', dateSelect.value);
     if (qInput.value.trim()) qs.set('query', qInput.value.trim());
     try {
       const r = await fetch('/.netlify/functions/list-inbound-emails?' + qs.toString(), { cache: 'no-store' });
