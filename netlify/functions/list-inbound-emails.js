@@ -16,7 +16,8 @@ const MAX_SNIPPET_CHARS = 900;
 
 const MAILBOXES = {
   trouble: ["trouble"],
-  restock: ["dispatch_list", "restock_sameday"],
+  dispatch: ["dispatch_list"],
+  restock: ["restock_sameday"],
   maintenance: ["maintenance"],
   rma: ["rma_shipping"],
   notes: ["closing_note_email", "reply"],
