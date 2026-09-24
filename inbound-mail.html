@@ -334,8 +334,22 @@
     return html;
   }
 
+  function stripPreamble(text) {
+    let t = String(text || '');
+    const hello = t.search(/Hello,\s*here is today's dispatch list/i);
+    if (hello >= 0) return t.slice(hello).trim();
+    const subjects = [...t.matchAll(/Subject:\s*(?:Re:\s*|Fwd?:\s*)*[^\n]*Dispatch List[^\n]*/gi)];
+    if (subjects.length) t = t.slice(subjects[subjects.length - 1].index + subjects[subjects.length - 1][0].length);
+    const placed = t.search(/DISPATCHES NEEDING PLACED|Hello,\s*here is/i);
+    const header = t.search(/State\s+Location\s+LF\s+LR/i);
+    if (placed >= 0 && (header < 0 || placed < header)) return t.slice(placed).trim();
+    if (header >= 0) return t.slice(header).trim();
+    return t.trim();
+  }
+
   function formatNatural(text) {
     if (!text) return '<span style="color:#888">(empty body)</span>';
+    text = stripPreamble(text);
     const table = parseDispatchList(text);
     if (table) return table;
     let t = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
