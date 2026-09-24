@@ -58,8 +58,21 @@ exports.handler = async (event) => {
       .maybeSingle();
     if (fetchErr) return json(500, { error: "Site lookup failed: " + fetchErr.message });
     if (!placeholder) return json(400, { error: "No site found for that id" });
-    if (!placeholder.is_placeholder) return json(400, { error: "That site is not a placeholder" });
-    if (!placeholder.promotion_candidate_code) {
+
+    // 2026-09-24: confirming the same toast twice (processDispatch re-fetches
+    // pending promotions right after a successful rename) used to 400 with
+    // "That site is not a placeholder". If this row already carries the
+    // requested real code, treat it as done so the UI can drain the queue
+    // instead of showing a failure modal for a promote that already stuck.
+    const requestedCode = String(payload.realCode || placeholder.promotion_candidate_code || "").trim().toUpperCase();
+    if (!placeholder.is_placeholder) {
+      const already = String(placeholder.site_code || "").trim().toUpperCase();
+      if (requestedCode && already === requestedCode) {
+        return json(200, { ok: true, alreadyPromoted: true, site: { id: placeholder.id, site_code: placeholder.site_code } });
+      }
+      return json(400, { error: "That site is not a placeholder" });
+    }
+    if (!placeholder.promotion_candidate_code && !requestedCode) {
       return json(400, { error: "That placeholder has no pending promotion" });
     }
 
@@ -73,7 +86,7 @@ exports.handler = async (event) => {
     }
 
     // action === 'confirm'
-    const realCode = placeholder.promotion_candidate_code;
+    const realCode = requestedCode || placeholder.promotion_candidate_code;
 
     // Safety check mirroring the duplicate-address confirm() in index.html's
     // "new location from ticket" toast -- the real code should never

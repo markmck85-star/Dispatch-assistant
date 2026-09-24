@@ -889,6 +889,26 @@ function formatSlaDeadline(d, timezone) {
 function parseEmailBody(text, receivedAt, subject) {
   if (!receivedAt) receivedAt = new Date();
 
+  function stripMarkdownWrap(value) {
+    // BlueMail / HTML-to-text often leaves *bold* wrappers on every field.
+    // That produced this morning's watchdog SMS: "WO: *00153024", "Site: *",
+    // "Issue: *Technician Request", "* – *Retrofit".
+    if (value == null) return '';
+    let s = String(value).replace(/\r/g, '').trim();
+    s = s.replace(/^\*+|\*+$/g, '').trim();
+    s = s.replace(/\*\s*$/gm, '').replace(/^\s*\*/gm, '').trim();
+    s = s.replace(/\s{2,}/g, ' ');
+    return s;
+  }
+  function smsFieldLooksUnresolved(value) {
+    const s = stripMarkdownWrap(value);
+    if (!s) return true;
+    if (s === '*' || s === '-' || s === '–') return true;
+    if (/^\*[^*]*\*$/.test(String(value).trim())) return true;
+    if (/\*\s*[–-]\s*\*/.test(s)) return true;
+    return false;
+  }
+
   const getField = (label) => {
     // Stop at next Neumo field label (word(s) followed by colon at start of a segment).
     // Capture group is zero-or-more (not one-or-more) so a genuinely blank field
@@ -1179,11 +1199,11 @@ function parseEmailBody(text, receivedAt, subject) {
 
   // 3. Trouble ticket
   if (/Work Order Number:/i.test(text) || /Work Order #/i.test(text)) {
-    const woNum = getField('Work Order Number') || getField('Work Order #');
-    const pcName = getField('PC Name');
-    const account = getField('Account Name');
-    const issueCategory = getField('Line Item Issue Category');
-    const issueDetail = getField('Line Item Issue Detail');
+    const woNum = stripMarkdownWrap(getField('Work Order Number') || getField('Work Order #'));
+    const pcName = stripMarkdownWrap(getField('PC Name'));
+    const account = stripMarkdownWrap(getField('Account Name'));
+    const issueCategory = stripMarkdownWrap(getField('Line Item Issue Category'));
+    const issueDetail = stripMarkdownWrap(getField('Line Item Issue Detail'));
     const issue = [issueCategory, issueDetail].filter(Boolean).join(' – ') || 'See email for details';
     // 2026-09-23: every trouble-ticket email that names a real kiosk
     // states its machine type right there ("SST Type: BK 6500", "SST
@@ -1271,6 +1291,12 @@ function parseEmailBody(text, receivedAt, subject) {
 
     let alertBody = `🚨 WO: ${woNum}\nSite: ${siteTrunc}`;
     if (issue && issue !== 'See email for details') alertBody += `\nIssue: ${issue}`;
+    const smsBlocked = smsFieldLooksUnresolved(woNum) || smsFieldLooksUnresolved(siteTrunc) ||
+      (issue && issue !== 'See email for details' && smsFieldLooksUnresolved(issue));
+    if (smsBlocked) {
+      console.warn(`[mailgun-inbound] Watchdog SMS suppressed for WO ${woNum || '?'}: unresolved template fields`, { siteTrunc, issue });
+      alertBody = null;
+    }
     if (isInstallCategory && apptStr) {
       alertBody += `\nScheduled: ${apptStr}`;
     } else {
