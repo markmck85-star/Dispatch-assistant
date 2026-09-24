@@ -111,12 +111,12 @@
     font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; margin-bottom: 2px;
   }
   #mailPaper table.dlist {
-    width: 100%; border-collapse: collapse; font-family: -apple-system, Segoe UI, sans-serif;
+    width: 100%; min-width: 620px; border-collapse: separate; border-spacing: 0; font-family: -apple-system, Segoe UI, sans-serif;
     font-size: 12px; margin: 10px 0 16px; background: #fff;
   }
   #mailPaper table.dlist th {
     text-align: left; background: #1aa3a8; color: #fff; padding: 5px 6px; font-weight: 700;
-    position: sticky; top: 0;
+    position: sticky; top: 0; z-index: 3; box-shadow: 0 1px 0 #14888c;
   }
   #mailPaper table.dlist td { border-bottom: 1px solid #e6e1d6; padding: 5px 6px; vertical-align: top; }
   #mailPaper table.dlist tr:nth-child(even) td { background: #f3fbfb; }
@@ -327,7 +327,7 @@
     let html = '';
     if (intro) html += '<div class="field">' + escapeHtml(intro) + '</div>';
     html += '<div class="sec">DISPATCH LIST</div>';
-    html += '<div style="overflow-x:auto"><table class="dlist"><thead><tr>' +
+    html += '<table class="dlist"><thead><tr>' +
       '<th>State</th><th>Location</th><th class="nums">LF</th><th class="nums">LR</th>' +
       '<th class="nums">RF</th><th class="nums">RR</th><th class="nums">Journal</th>' +
       '<th>Consumables</th><th>Restock by</th></tr></thead><tbody>';
@@ -338,7 +338,7 @@
         '<td class="nums">' + r.journal + '</td><td>' + escapeHtml(r.cons) + '</td>' +
         '<td>' + escapeHtml(r.by) + '</td></tr>';
     }
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     return html;
   }
 
