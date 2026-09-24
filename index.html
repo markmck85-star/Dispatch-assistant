@@ -1658,6 +1658,12 @@ function sortTechsByDistance(techNames, locCode, state) {
  *   selectedVal — optional: the value to pre-select
  *   excludeSet  — optional Set of names to exclude (e.g. already-primary tech)
  */
+function currentTechHomeOption(techName, locCode, state) {
+  const dist = getTechDistance(techName, locCode, state);
+  const label = dist && dist.label ? " \u2014 " + dist.label + " from home" : "";
+  return '<option value="" disabled>Now: ' + techName + label + "</option>";
+}
+
 function buildTechOptions(techNames, locCode, state, selectedVal, excludeSet) {
   const sorted = sortTechsByDistance(techNames, locCode, state);
   return sorted
@@ -4213,6 +4219,7 @@ function distanceMatrixStatus(state) {
                                 <div style="margin-left:auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
                                     <select class="control-btn" onchange="reassignStop('${tech}', ${index}, this.value)" style="padding:2px;">
                                         <option value="" disabled selected>Reassign</option>
+                                        ${currentTechHomeOption(tech, item.code, CURRENT_STATE)}
                                         ${buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false && !currentUnavailableTechs.has(t)), item.code, CURRENT_STATE, '', new Set([tech]))}
                                     </select>
                                     <div style="display:flex;gap:3px;">
