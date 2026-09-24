@@ -188,6 +188,7 @@
   const params = new URLSearchParams(location.search);
   let mailbox = params.get('mailbox') || 'all';
   let selectedId = params.get('id') || null;
+  let openSelectedOnce = !!params.get('id');
 
   const stateSelect = document.getElementById('stateSelect');
   const parseSelect = document.getElementById('parseSelect');
@@ -207,6 +208,8 @@
         parseSelect.value = 'parsed';
         if (/dispatch\s*list/i.test(qInput.value)) qInput.value = '';
       }
+      selectedId = null;
+      closeMailOverlay();
       loadList();
     };
   });
@@ -214,8 +217,8 @@
   document.getElementById('go').onclick = loadList;
   document.getElementById('refresh').onclick = loadList;
   qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadList(); });
-  stateSelect.onchange = loadList;
-  parseSelect.onchange = loadList;
+  stateSelect.onchange = () => { closeMailOverlay(); loadList(); };
+  parseSelect.onchange = () => { closeMailOverlay(); loadList(); };
 
   function fmtWhen(iso) {
     if (!iso) return '';
@@ -255,7 +258,12 @@
       list.querySelectorAll('.row').forEach((row) => {
         row.onclick = () => openMail(row.dataset.id);
       });
-      if (selectedId) openMail(selectedId);
+      if (openSelectedOnce && selectedId) {
+        openSelectedOnce = false;
+        openMail(selectedId);
+      } else if (selectedId) {
+        list.querySelectorAll('.row').forEach((r) => r.classList.toggle('active', r.dataset.id === selectedId));
+      }
     } catch (err) {
       list.innerHTML = '<div id="status">Could not load mail: ' + escapeHtml(err.message) + '</div>';
     }
