@@ -5329,7 +5329,61 @@ function distanceMatrixStatus(state) {
             });
         }
 
-        function showAddLocationPrompt(code, onComplete) {
+
+        // When an unknown dispatch-list code has a restock/maintenance/trouble
+        // email on file (GA Singleton case), pull Location + Address into the
+        // add-site toast. No inbound mail for that state → fields stay blank.
+        function parseNeumoLocationFields(text) {
+            if (!text) return {};
+            const loc = text.match(/Location:\s*([^\n\r]+)/i);
+            const addr = text.match(/Address:\s*([\s\S]*?)(?=\n\s*(?:Phone:|Line Item|Account Name|SST Name|PC Name|Work Order)|$)/i);
+            let name = loc ? loc[1].trim() : '';
+            name = name.replace(/^[A-Z]{2}\s*[-–]\s*/, '');
+            const address = addr ? addr[1].replace(/\s+/g, ' ').replace(/United States/gi, '').trim().replace(/[\s,]+$/, '') : '';
+            return { name, address };
+        }
+        async function prefillAddLocationFromEmail(code) {
+            const nameEl = document.getElementById('alp-name');
+            const addrEl = document.getElementById('alp-address');
+            const status = document.getElementById('alp-status');
+            if (!nameEl || !addrEl || !code) return;
+            const stateFromCode = /^[A-Z]{2}\d/.test(code) ? code.slice(0, 2) : '';
+            const known = ['CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
+            const state = (known.includes(stateFromCode) ? stateFromCode : (typeof CURRENT_STATE === 'string' ? CURRENT_STATE : '')).toUpperCase();
+            if (status) status.textContent = 'Looking for a restock/ticket email…';
+            const boxes = ['restock', 'maintenance', 'trouble'];
+            try {
+                for (const box of boxes) {
+                    const qs = new URLSearchParams({ mailbox: box, query: code, limit: '8' });
+                    if (state && known.includes(state)) qs.set('state', state);
+                    const res = await fetch('/.netlify/functions/list-inbound-emails?' + qs.toString());
+                    const data = await res.json();
+                    const emails = (data && data.emails) || [];
+                    for (const em of emails) {
+                        const hay = ((em.subject || '') + '\n' + (em.bodySnippet || ''));
+                        if (!hay.toUpperCase().includes(String(code).toUpperCase())) continue;
+                        const parsed = parseNeumoLocationFields(hay);
+                        if (parsed.name && !nameEl.value) nameEl.value = parsed.name;
+                        if (parsed.address && !addrEl.value) addrEl.value = parsed.address;
+                        if (parsed.name || parsed.address) {
+                            if (status) status.textContent = 'Pre-filled from ' + box + ' email — verify before saving.';
+                            return;
+                        }
+                        const subjBits = (em.subject || '').split(' - ');
+                        if (subjBits.length >= 5 && !nameEl.value) {
+                            nameEl.value = subjBits[subjBits.length - 2].trim();
+                            if (status) status.textContent = 'Name pre-filled from email subject — add the street address.';
+                            return;
+                        }
+                    }
+                }
+                if (status) status.textContent = 'No matching restock/ticket email found. Paste the address from the list or Salesforce.';
+            } catch (err) {
+                if (status) status.textContent = '';
+            }
+        }
+
+                function showAddLocationPrompt(code, onComplete) {
             var existing = document.getElementById('add-location-prompt');
             if (existing) existing.remove();
 
@@ -5359,6 +5413,7 @@ function distanceMatrixStatus(state) {
                 </div>
                 <div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
             document.body.appendChild(div);
+            prefillAddLocationFromEmail(code);
 
             document.getElementById('alp-cancel').onclick = function() { div.remove(); if (onComplete) onComplete(); };
             document.getElementById('alp-save').onclick = function() {
