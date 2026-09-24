@@ -2906,8 +2906,16 @@ function distanceMatrixStatus(state) {
             let rawCodes = text.toUpperCase().replace(/,/g, ' ').replace(/\n/g, ' ').split(/\s+/).filter(c => c.match(new RegExp('^' + validPrefixes + '[A-Z]?\\d+$')));
             // CA Loomis short tags (KG7, KN5) plus "Name - CA1352" already covered by prefix CA
             if (CURRENT_STATE === 'CA') {
+                // Digit tags (KS8, KN6) are unambiguous. 3-letter tags (KEP)
+                // are only harvested when already aliased -- otherwise
+                // toUpperCase() turns "Ken Caryl King Soopers" into a fake KEN.
                 const loomis = text.toUpperCase().match(/\b(?:K[A-Z]\d{1,3}|K[A-Z]{2})\b/g) || [];
-                loomis.forEach(c => { if (!rawCodes.includes(c)) rawCodes.push(c); });
+                loomis.forEach(c => {
+                    const known = typeof LOCATIONS !== 'undefined' && LOCATIONS[c];
+                    if (/^K[A-Z]\d/.test(c) || known) {
+                        if (!rawCodes.includes(c)) rawCodes.push(c);
+                    }
+                });
             }
 
             // NV fallback: if no NV codes found, look for machine numbers ONLY after "NV" state lines
