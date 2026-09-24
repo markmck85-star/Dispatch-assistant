@@ -329,7 +329,7 @@
                 <div class="top-row">
                     <div>
                         <label>Region:</label>
-                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateRestockLink(); updateStateConsoleLink();">
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateInboundMailLink(); updateRestockLink(); updateStateConsoleLink();">
                             <option value="AL">Alabama</option>
                             <option value="CA">California</option>
                             <option value="CO">Colorado</option>
@@ -431,6 +431,7 @@
                 <a id="stateConsoleLink" href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
                 <a href="closing-email-reconstructor.html" class="closing-email-link" style="display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉️ Closing Notes</a>
                 <button type="button" onclick="generateFinalMessages()" class="messages-link" style="display:block; width:100%; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; border:none; cursor:pointer;">✅ Messages</button>
+                <a id="inboundMailLink" href="/inbound-mail.html" class="messages-link" style="display:block; width:100%; background:#181818; color:#9ad0ff; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉ Inbound Mail</a>
                 <a href="/admin.html" class="admin-panel-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
                 <a href="help.html" target="_blank" class="help-link" style="display:block; background:#181818; color:#aaa; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">❓ Help</a>
 
@@ -1961,6 +1962,13 @@ function distanceMatrixStatus(state) {
         // Keeps the "Watchdog" link pointed at whichever region is currently
         // selected, using the /watchdog/:state shortcut added to _redirects
         // 2026-08-12. Called on region change and once on page load.
+        function updateInboundMailLink() {
+            const sel = document.getElementById('stateSelector');
+            const link = document.getElementById('inboundMailLink');
+            if (!sel || !link) return;
+            const st = (sel.value || '').toUpperCase();
+            link.href = st ? ('/inbound-mail.html?state=' + encodeURIComponent(st)) : '/inbound-mail.html';
+        }
         function updateWatchdogLink() {
             const sel = document.getElementById('stateSelector');
             const link = document.getElementById('watchdogLink');
@@ -2055,7 +2063,7 @@ function distanceMatrixStatus(state) {
                         const existing = codesInput.value.trim();
                         codesInput.value = existing ? existing + '\n\n' + data.bodyText : data.bodyText;
                     }
-                    updateWatchdogLink();
+                    updateWatchdogLink(); updateInboundMailLink();
                     updateRestockLink();
                     updateStateConsoleLink();
                     setTimeout(() => processDispatch(), 300);
@@ -2314,7 +2322,7 @@ function distanceMatrixStatus(state) {
             // the 2026-09-16 comment above), rebuild the links that depend
             // on it -- previously these ran before this block and could go
             // stale for an entire page load.
-            updateWatchdogLink();
+            updateWatchdogLink(); updateInboundMailLink();
             updateRestockLink();
             updateStateConsoleLink();
 

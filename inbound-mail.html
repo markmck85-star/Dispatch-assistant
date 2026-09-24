@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inbound Mail — MCR Dispatch</title>
+<style>
+  :root {
+    --bg: #111218;
+    --panel: #1a1b24;
+    --panel2: #222333;
+    --border: #33344a;
+    --text: #e8e8ef;
+    --muted: #9aa0b5;
+    --accent: #7edb8e;
+    --trouble: #ef4444;
+    --restock: #3b82f6;
+    --maint: #f59e0b;
+    --other: #8b8b9a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 12px 14px 8px; border-bottom: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  header h1 { font-size: 1.15rem; margin: 0 8px 0 0; font-weight: 650; }
+  .back {
+    background: #6c757d; color: #fff; text-decoration: none; font-weight: 600;
+    padding: 8px 12px; border-radius: 8px; font-size: 14px;
+  }
+  .hint { color: var(--muted); font-size: 12px; width: 100%; }
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); align-items: center;
+  }
+  select, input[type="search"], button {
+    font-size: 15px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #555; background: #222; color: var(--text);
+  }
+  button { background: #2563eb; border-color: #2563eb; cursor: pointer; font-weight: 600; }
+  button.ghost { background: #2a2a3e; border-color: #444; }
+  .layout { display: flex; min-height: calc(100vh - 130px); }
+  .boxes {
+    width: 170px; flex-shrink: 0; border-right: 1px solid var(--border);
+    padding: 10px 8px; background: var(--panel);
+  }
+  .boxes button {
+    display: block; width: 100%; text-align: left; background: transparent;
+    border: none; color: var(--text); padding: 9px 10px; margin-bottom: 4px;
+    border-radius: 8px; font-weight: 600; font-size: 14px;
+  }
+  .boxes button.active { background: #2b3348; color: var(--accent); }
+  .list {
+    width: min(42vw, 420px); flex-shrink: 0; border-right: 1px solid var(--border);
+    overflow-y: auto; max-height: calc(100vh - 130px);
+  }
+  .row {
+    padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .row:hover { background: #1f2030; }
+  .row.active { background: #25263a; }
+  .row .subj { font-weight: 650; font-size: 14px; margin-bottom: 3px; }
+  .row .meta { color: var(--muted); font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill {
+    display: inline-block; font-size: 10px; letter-spacing: .03em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px; background: #333; color: #ddd;
+  }
+  .pill.trouble { background: #3a1515; color: #fca5a5; }
+  .pill.restock { background: #13233d; color: #93c5fd; }
+  .pill.maintenance { background: #3a2a10; color: #fcd34d; }
+  .pill.rma { background: #2a1a3a; color: #d8b4fe; }
+  .pill.other, .pill.notes { background: #2a2a2a; color: #bbb; }
+  .pill.failed { background: #4a1515; color: #fecaca; }
+  .read {
+    flex: 1; padding: 16px 18px; overflow-y: auto; max-height: calc(100vh - 130px);
+    white-space: pre-wrap; font-size: 14px; line-height: 1.45;
+  }
+  .read h2 { font-size: 1.05rem; margin: 0 0 6px; }
+  .read .who { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  #status { color: var(--muted); padding: 16px; }
+  @media (max-width: 800px) {
+    .layout { flex-direction: column; }
+    .boxes { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    .boxes button { width: auto; white-space: nowrap; margin-right: 4px; }
+    .list { width: 100%; max-height: 40vh; border-right: none; }
+    .read { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="/">← Dispatch</a>
+  <h1>Inbound Mail</h1>
+  <span class="hint">Read-only copy of what Mailgun stored. No send. Bodies are cleaned of quoted chains.</span>
+</header>
+<div class="toolbar">
+  <select id="stateSelect">
+    <option value="">All states</option>
+    <option value="CA">CA</option><option value="CO">CO</option>
+    <option value="FL">FL</option><option value="GA">GA</option>
+    <option value="ID">ID</option><option value="IL">IL</option>
+    <option value="IN">IN</option><option value="MI">MI</option>
+    <option value="MN">MN</option><option value="NC">NC</option>
+    <option value="NV">NV</option><option value="OH">OH</option>
+    <option value="OR">OR</option><option value="SC">SC</option>
+    <option value="WV">WV</option>
+  </select>
+  <select id="parseSelect">
+    <option value="">Any parse status</option>
+    <option value="parsed">Parsed</option>
+    <option value="failed">Failed</option>
+    <option value="pending">Pending</option>
+    <option value="ignored">Ignored</option>
+  </select>
+  <input type="search" id="q" placeholder="Search WO, site, subject…" style="flex:1;min-width:160px;">
+  <button id="go">Search</button>
+  <button class="ghost" id="refresh">Refresh</button>
+</div>
+<div class="layout">
+  <nav class="boxes" id="boxes">
+    <button data-box="all" class="active">All</button>
+    <button data-box="trouble">Trouble</button>
+    <button data-box="restock">Restock / lists</button>
+    <button data-box="maintenance">Maintenance</button>
+    <button data-box="rma">RMA / parts</button>
+    <button data-box="notes">Replies / notes</button>
+    <button data-box="other">Other / unknown</button>
+  </nav>
+  <div class="list" id="list"><div id="status">Loading…</div></div>
+  <div class="read" id="read">Select a message.</div>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  let mailbox = params.get('mailbox') || 'all';
+  let selectedId = params.get('id') || null;
+
+  const stateSelect = document.getElementById('stateSelect');
+  const parseSelect = document.getElementById('parseSelect');
+  const qInput = document.getElementById('q');
+  if (params.get('state')) stateSelect.value = params.get('state').toUpperCase();
+  if (params.get('query')) qInput.value = params.get('query');
+
+  document.querySelectorAll('#boxes button').forEach((btn) => {
+    if (btn.dataset.box === mailbox) btn.classList.add('active');
+    else btn.classList.remove('active');
+    btn.onclick = () => {
+      mailbox = btn.dataset.box;
+      document.querySelectorAll('#boxes button').forEach((b) => b.classList.toggle('active', b === btn));
+      loadList();
+    };
+  });
+
+  document.getElementById('go').onclick = loadList;
+  document.getElementById('refresh').onclick = loadList;
+  qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadList(); });
+  stateSelect.onchange = loadList;
+  parseSelect.onchange = loadList;
+
+  function fmtWhen(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  async function loadList() {
+    const list = document.getElementById('list');
+    list.innerHTML = '<div id="status">Loading…</div>';
+    const qs = new URLSearchParams();
+    qs.set('mailbox', mailbox);
+    qs.set('limit', '50');
+    if (stateSelect.value) qs.set('state', stateSelect.value);
+    if (parseSelect.value) qs.set('parseStatus', parseSelect.value);
+    if (qInput.value.trim()) qs.set('query', qInput.value.trim());
+    try {
+      const r = await fetch('/.netlify/functions/list-inbound-emails?' + qs.toString(), { cache: 'no-store' });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || 'load failed');
+      if (!data.emails.length) {
+        list.innerHTML = '<div id="status">No messages in this mailbox.</div>';
+        return;
+      }
+      list.innerHTML = data.emails.map((e) => `
+        <div class="row" data-id="${e.id}">
+          <div class="subj">${escapeHtml(e.subject || '(no subject)')}</div>
+          <div class="meta">
+            <span class="pill ${e.mailbox}">${e.mailbox}</span>
+            ${e.inferredState ? `<span class="pill">${e.inferredState}</span>` : ''}
+            ${e.parseStatus && e.parseStatus !== 'parsed' ? `<span class="pill failed">${e.parseStatus}</span>` : ''}
+            <span>${escapeHtml((e.sender || '').split('<')[0].trim())}</span>
+            <span>${fmtWhen(e.receivedAt)}</span>
+          </div>
+        </div>
+      `).join('');
+      list.querySelectorAll('.row').forEach((row) => {
+        row.onclick = () => openMail(row.dataset.id);
+      });
+      if (selectedId) openMail(selectedId);
+    } catch (err) {
+      list.innerHTML = '<div id="status">Could not load mail: ' + escapeHtml(err.message) + '</div>';
+    }
+  }
+
+  async function openMail(id) {
+    selectedId = id;
+    document.querySelectorAll('.row').forEach((r) => r.classList.toggle('active', r.dataset.id === id));
+    const pane = document.getElementById('read');
+    pane.textContent = 'Opening…';
+    try {
+      const r = await fetch('/.netlify/functions/get-source-email?id=' + encodeURIComponent(id), { cache: 'no-store' });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || 'open failed');
+      pane.innerHTML = `<h2>${escapeHtml(data.subject)}</h2>
+        <div class="who">${escapeHtml(data.sender || '')} · ${fmtWhen(data.receivedAt)}</div>
+        <div>${escapeHtml(data.bodyText || '(empty body)')}</div>`;
+    } catch (err) {
+      pane.textContent = 'Could not open message: ' + err.message;
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  loadList();
+</script>
+</body>
+</html>
