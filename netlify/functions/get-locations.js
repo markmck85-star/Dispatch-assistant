@@ -135,11 +135,22 @@ exports.handler = async (event) => {
       // same location object, without ever overwriting a live site_code entry.
       const siteIds = Object.keys(siteIdById);
       if (siteIds.length > 0) {
-        const { data: aliases, error: aliasErr } = await supabase
-          .from("site_aliases")
-          .select("site_id, alias")
-          .in("site_id", siteIds);
-        if (aliasErr) throw aliasErr;
+        // CA has 1000+ free-text name aliases. PostgREST caps one select at
+        // 1000 rows, which silently dropped later code tags (KS8). Pull only
+        // compact aliases (no spaces) and page in case a state still exceeds.
+        let aliases = [];
+        const pageSize = 1000;
+        for (let from = 0; ; from += pageSize) {
+          const q = await supabase
+            .from("site_aliases")
+            .select("site_id, alias")
+            .in("site_id", siteIds)
+            .not("alias", "ilike", "% %")
+            .range(from, from + pageSize - 1);
+          if (q.error) throw q.error;
+          aliases = aliases.concat(q.data || []);
+          if (!q.data || q.data.length < pageSize) break;
+        }
 
         for (const a of (aliases || [])) {
           const alias = (a.alias || "").trim().toUpperCase();
