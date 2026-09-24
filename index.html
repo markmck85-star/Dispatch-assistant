@@ -5619,9 +5619,32 @@ function distanceMatrixStatus(state) {
         // get-pending-promotions.js surfaces it here so the dispatcher can
         // confirm the swap (or dismiss it if it's a false match) instead of
         // the site sitting under its temp code forever.
+        // 2026-09-24: a successful Replace immediately called
+        // processDispatch(true), which re-fetched pending promotions and
+        // opened the same toast again. Combined with "if a modal is already
+        // open, skip this item and advance the queue", the second copy then
+        // tried to promote a site that was no longer a placeholder.
+        window._handledPromotionSiteIds = window._handledPromotionSiteIds || {};
+        window._promotionQueueLocked = window._promotionQueueLocked || false;
+
         function showPromotionPromptQueue(pending) {
             if (!pending || pending.length === 0) return;
-            const [first, ...rest] = pending;
+            const seen = {};
+            const filtered = pending.filter((item) => {
+                const id = item && item.siteId;
+                if (!id) return false;
+                if (window._handledPromotionSiteIds[id]) return false;
+                if (seen[id]) return false;
+                seen[id] = true;
+                return true;
+            });
+            if (!filtered.length) return;
+            if (document.getElementById('promotion-prompt') || window._promotionQueueLocked) {
+                // Modal already up -- do not skip-and-advance the new copy.
+                // The in-flight queue will finish on its own.
+                return;
+            }
+            const [first, ...rest] = filtered;
             showPromotionPrompt(first, () => {
                 if (rest.length > 0) setTimeout(() => showPromotionPromptQueue(rest), 300);
             });
@@ -5661,6 +5684,7 @@ function distanceMatrixStatus(state) {
                 .then(r => r.json())
                 .then(data => {
                     if (!data.ok) { status.textContent = 'Failed: ' + (data.error || 'unknown error'); return; }
+                    window._handledPromotionSiteIds[item.siteId] = true;
                     div.remove();
                     if (onComplete) onComplete();
                 })
@@ -5673,14 +5697,20 @@ function distanceMatrixStatus(state) {
                 var status = document.getElementById('pp-status');
                 if (!code) { status.textContent = 'Real site code is required.'; return; }
                 status.textContent = 'Promoting…';
+                window._promotionQueueLocked = true;
                 fetch('/.netlify/functions/promote-placeholder-site', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ siteId: item.siteId, action: 'confirm', newName: name })
+                    body: JSON.stringify({ siteId: item.siteId, action: 'confirm', newName: name, realCode: code })
                 })
                 .then(r => r.json())
                 .then(data => {
-                    if (!data.ok) { status.textContent = 'Failed: ' + (data.error || 'unknown error'); return; }
+                    if (!data.ok) {
+                        window._promotionQueueLocked = false;
+                        status.textContent = 'Failed: ' + (data.error || 'unknown error');
+                        return;
+                    }
+                    window._handledPromotionSiteIds[item.siteId] = true;
                     // The temp code no longer exists under that key once
                     // renamed server-side -- drop the stale entry and pull a
                     // fresh copy of every state's locations so the site
@@ -5689,10 +5719,16 @@ function distanceMatrixStatus(state) {
                     // uses), then reprocess so the board itself updates.
                     delete LOCATIONS[item.placeholderCode];
                     div.remove();
-                    loadRemoteLocations().then(() => processDispatch(true));
+                    // Refresh locations only. Do not processDispatch here --
+                    // that re-fetches pending promotions and reopens this toast.
+                    loadRemoteLocations().catch(() => {});
+                    window._promotionQueueLocked = false;
                     if (onComplete) onComplete();
                 })
-                .catch(e => { status.textContent = 'Network error: ' + e.message; });
+                .catch(e => {
+                    window._promotionQueueLocked = false;
+                    status.textContent = 'Network error: ' + e.message;
+                });
             };
         }
 
