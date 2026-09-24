@@ -75,7 +75,8 @@
   .pill.maintenance { background: #3a2a10; color: #fcd34d; }
   .pill.rma { background: #2a1a3a; color: #d8b4fe; }
   .pill.other, .pill.notes { background: #2a2a2a; color: #bbb; }
-  .pill.failed { background: #4a1515; color: #fecaca; }
+  .pill.review { background: #3a2a10; color: #fde68a; }
+  .pill.failed { background: #3a2a10; color: #fde68a; }
   .read {
     flex: 1; padding: 16px 18px; overflow-y: auto; max-height: calc(100vh - 130px);
     white-space: pre-wrap; font-size: 14px; line-height: 1.45;
@@ -129,7 +130,8 @@
     <button data-box="maintenance">Maintenance</button>
     <button data-box="rma">RMA / parts</button>
     <button data-box="notes">Replies / notes</button>
-    <button data-box="other">Other / unknown</button>
+    <button data-box="other">Catch-all</button>
+    <button data-box="review">Unparsed archive</button>
   </nav>
   <div class="list" id="list"><div id="status">Loading…</div></div>
   <div class="read" id="read">Select a message.</div>
@@ -190,7 +192,7 @@
           <div class="meta">
             <span class="pill ${e.mailbox}">${e.mailbox}</span>
             ${e.inferredState ? `<span class="pill">${e.inferredState}</span>` : ''}
-            ${e.parseStatus && e.parseStatus !== 'parsed' ? `<span class="pill failed">${e.parseStatus}</span>` : ''}
+            ${e.parseStatus === 'failed' ? `<span class="pill review">unparsed</span>` : (e.parseStatus && e.parseStatus !== 'parsed' ? `<span class="pill">${e.parseStatus}</span>` : '')}
             <span>${escapeHtml((e.sender || '').split('<')[0].trim())}</span>
             <span>${fmtWhen(e.receivedAt)}</span>
           </div>
