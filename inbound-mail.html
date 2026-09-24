@@ -363,33 +363,38 @@
 
   function stripPreamble(text) {
     const raw = String(text || '');
-    const hello = raw.search(/Hello,\s*here is today's dispatch list/i);
-    if (hello >= 0) return raw.slice(hello).trim();
+    const listHello = raw.search(/Hello,\s*here is today's dispatch list/i);
+    if (listHello >= 0) return raw.slice(listHello).trim();
 
     let t = raw.replace(/\u2014/g, '-');
+    t = t.replace(/CAUTION:[\s\S]*/gi, '');
+    t = t.replace(/This email originated from an External Source[\s\S]*/gi, '');
+    t = t.replace(/Please use proper judgment[\s\S]*/gi, '');
     t = t.replace(/\s*[-\u2014]{2,}\s*Original message\s*[-\u2014]*/gi, '\n---\n');
-    t = t.replace(/\s+(From:|Sent:|To:|Cc:|Subject:|Date:|CAUTION:)\s+/g, '\n$1 ');
+    t = t.replace(/\s+(From:|Sent:|To:|Cc:|Subject:|Date:)\s+/g, '\n$1 ');
 
-    const subjects = [...t.matchAll(/Subject:\s*.+/gi)];
-    if (subjects.length) {
-      for (let i = subjects.length - 1; i >= 0; i--) {
-        const after = t.slice(subjects[i].index + subjects[i][0].length).trim();
-        const bodyOnly = after
-          .replace(/^(From:|Sent:|To:|Cc:|Date:).+$/gim, '')
-          .replace(/\nCAUTION:[\s\S]*$/i, '')
-          .trim();
-        if (bodyOnly.length >= 12) {
-          t = after;
-          break;
-        }
-      }
-    }
+    const chunks = t.split(/\nSubject:\s*.+/i).map((p) => p
+      .replace(/^(From:|Sent:|To:|Cc:|Date:).+$/gim, '')
+      .replace(/^---+\s*$/gm, '')
+      .replace(/\n{2,}/g, '\n\n')
+      .trim()
+    ).filter((p) => p.length >= 8);
 
-    t = t.replace(/\nCAUTION:[\s\S]*$/i, '');
-    t = t.replace(/This email originated from an External Source[\s\S]*$/i, '');
-    t = t.replace(/Please use proper judgment[\s\S]*$/i, '');
-    t = t.replace(/\n{3,}/g, '\n\n').trim();
-    return t || raw.trim();
+    if (!chunks.length) return t.trim() || raw.trim();
+
+    const score = (s) => {
+      let n = s.length;
+      if (/cancel/i.test(s)) n += 400;
+      if (/\bhello\b/i.test(s)) n += 80;
+      if (/\bthank/i.test(s)) n += 40;
+      if (/work order number/i.test(s)) n += 120;
+      if (/please dispatch/i.test(s)) n += 80;
+      return n;
+    };
+    const ranked = chunks.slice().sort((a, b) => score(b) - score(a));
+    const best = ranked[0];
+    const thanks = chunks.find((c) => c !== best && /^thank/i.test(c) && c.length < 80);
+    return (thanks ? thanks + '\n\n' + best : best).trim();
   }
 
   function formatNatural(text) {
