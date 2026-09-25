@@ -928,10 +928,19 @@
       const geoData = await geoRes.json();
       if (!geoData.ok) throw new Error(geoData.error || 'Geocoding failed');
       geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
-      if (geoResult.geocoded === 0) {
-        qaSetStatus('⚠️ Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
-        return;
-      }
+      // 2026-09-25 FIX: used to bail out immediately here whenever nothing
+      // new needed geocoding. That's right for a genuine first click (no
+      // real address saved yet), but WRONG for a retry after the
+      // drive-time/site-to-site steps below failed on a prior attempt
+      // (e.g. a mistyped PIN) -- geocoding had already succeeded then, so
+      // a retry correctly finds nothing new to geocode, then used to quit
+      // right there instead of finishing the part that actually still
+      // needed to run. Confirmed live: Mark hit exactly this on a 4-site
+      // NV Quick Add after failing the PIN prompt once -- the retry just
+      // showed "nothing new to geocode" and never re-prompted for the PIN
+      // at all. Fixed by NOT bailing here -- only bailing below, once the
+      // cost check ALSO comes back empty, which is the only time there's
+      // genuinely nothing left to do.
     } catch (e) {
       qaSetStatus('❌ ' + e.message);
       return;
@@ -959,6 +968,18 @@
       }
     } catch (e) {
       qaSetStatus('❌ ' + e.message);
+      return;
+    }
+
+    // 2026-09-25: the real "genuinely nothing to do" check, moved here
+    // from right after geocoding -- only true when BOTH nothing new was
+    // geocoded AND the cost check found no missing pairs either. This is
+    // the actual first-click-by-mistake case the old check was meant to
+    // catch, without also catching a legitimate retry.
+    const driveEmpty = (driveEst.elementCount || 0) === 0;
+    const siteEmpty = !siteEst || (siteEst.missingPairCount || 0) === 0;
+    if (geoResult.geocoded === 0 && driveEmpty && siteEmpty) {
+      qaSetStatus('⚠️ Nothing new to geocode or price for ' + state + ' (' + geoResult.skipped + ' already had coordinates, matrix already covers everything). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
       return;
     }
 
