@@ -90,13 +90,16 @@ function quote(s) {
 }
 
 function parseFetchBatch(raw) {
-  // Split on * <uid> FETCH
+  // Bigfoot: "* <seq> FETCH (UID <uid> BODY[...] ...)"
+  // Sequence number is not the UID. Always read UID from the body.
   const parts = raw.split(/\r\n\* /);
   const out = [];
   for (const part of parts) {
-    const head = part.match(/^(\d+) FETCH/i);
-    if (!head) continue;
-    const uid = Number(head[1]);
+    if (!/FETCH/i.test(part)) continue;
+    const uidM = part.match(/\bUID\s+(\d+)/i);
+    const seqM = part.match(/^(\d+) FETCH/i);
+    const uid = uidM ? Number(uidM[1]) : (seqM ? Number(seqM[1]) : 0);
+    if (!uid) continue;
     const msgid = (part.match(/Message-ID:\s*<?([^>\r\n]+)>?/i) || [])[1] || "";
     const from = (part.match(/^From:\s*(.+)$/im) || [])[1] || "";
     const to = (part.match(/^To:\s*(.+)$/im) || [])[1] || "";
@@ -191,9 +194,16 @@ exports.handler = async (event) => {
       return json(200, { ok: true, found: 0, inserted: 0, skipped: 0, message: "No messages since " + since });
     }
 
+    const fetchItems = dryRun
+      ? "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])"
+      : "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] BODY.PEEK[TEXT])";
     const fetch = await session.cmd(
-      `UID FETCH ${batch[0]}:${batch[batch.length - 1]} (UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] BODY.PEEK[TEXT])`
+      `UID FETCH ${batch[0]}:${batch[batch.length - 1]} ${fetchItems}`
     );
+    if (!fetch.ok) {
+      session.socket.end();
+      return json(500, { error: "FETCH failed", detail: fetch.text, found: uids.length });
+    }
     session.socket.end();
 
     const msgs = parseFetchBatch(fetch.raw).filter((m) => batch.includes(m.uid));
