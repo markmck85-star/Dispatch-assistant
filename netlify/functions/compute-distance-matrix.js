@@ -72,9 +72,20 @@
  * matrix.js v4, now relevant here too since this function spans multiple
  * calls for the first time.
  *
+ * v6 (2026-09-25): added a lighter auth path for admin.html's Quick Add
+ * buttons only ({ quickAdd: true, dispatcherAuth: { username, pin } }
+ * instead of adminSecret) -- a dispatcher's own existing admin-role login
+ * verified against the `dispatchers` table (see distance-matrix-quickadd-
+ * auth.js), rather than the shared DISTANCE_MATRIX_ADMIN_PASSWORD. Only
+ * reachable for additive builds (quickAdd forces additive:true above,
+ * and quickAdd + force:true is rejected outright) -- structurally cannot
+ * authorize a full/forced rebuild. Own separate lockout counter so a
+ * fumbled PIN doesn't lock out the real admin-secret path.
+ *
  * POST /.netlify/functions/compute-distance-matrix
  * Body: { state: "GA", mode: "haversine"|"driving", additive?: true,
- *         offset?: 0, adminSecret?: "...", force?: true }
+ *         offset?: 0, adminSecret?: "...", force?: true,
+ *         quickAdd?: true, dispatcherAuth?: { username, pin } }
  * offset is only meaningful for mode:"driving" -- haversine always
  * completes in a single call regardless of what's passed.
  *
@@ -88,6 +99,7 @@
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
 const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require("./distance-matrix-usage.js");
+const { verifyQuickAddAdmin } = require("./distance-matrix-quickadd-auth.js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const DEST_BATCH = 10; // destinations per Distance Matrix API call
@@ -179,7 +191,15 @@ exports.handler = async (event) => {
     return json(400, { error: "Valid 2-letter state required" });
 
   const mode = payload.mode === "driving" ? "driving" : "haversine";
-  const additive = mode === "driving" && payload.additive === true;
+  // v6 (2026-09-25): quickAdd is a lighter auth path (see the password
+  // gate below and distance-matrix-quickadd-auth.js) for admin.html's
+  // Quick Add buttons only -- always additive, never combinable with a
+  // full/forced rebuild, regardless of what the request body claims.
+  const quickAdd = payload.quickAdd === true;
+  if (quickAdd && payload.force === true) {
+    return json(400, { error: "Quick Add cannot be combined with force -- resume any interrupted build normally instead." });
+  }
+  const additive = mode === "driving" && (quickAdd || payload.additive === true);
   const offset = Number.isInteger(payload.offset) ? payload.offset : 0;
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (mode === "driving" && !apiKey)
@@ -224,7 +244,42 @@ exports.handler = async (event) => {
   // Only re-checked on a genuine fresh start (offset 0); a resume call
   // still must present the password on every request, just skips the
   // lockout bookkeeping since it already passed once.
-  if (mode === "driving") {
+  if (mode === "driving" && quickAdd) {
+    // v6 (2026-09-25): Quick Add's own lighter gate -- a dispatcher's
+    // existing admin-role login (username+PIN, same as admin.html itself)
+    // instead of the shared DISTANCE_MATRIX_ADMIN_PASSWORD. Only reachable
+    // when additive is force-true above, so this can never authorize a
+    // full/non-additive rebuild. Checked on EVERY chunk (not just offset
+    // 0) since there's no server-side session -- cheap Supabase lookup,
+    // negligible cost next to the Google billing this gates. Own separate
+    // lockout counter so a dispatcher fumbling their PIN doesn't lock out
+    // Mark's/TJ's shared admin-secret path for real full rebuilds.
+    const qaAuthStore = getStore("dispatch");
+    const qaFailKey = "distance-matrix-quickadd-failed-attempts";
+    const QA_MAX_FAILED_ATTEMPTS = 5;
+    const QA_LOCKOUT_HOURS = 24;
+    const qaFailData = (await qaAuthStore.get(qaFailKey, { type: "json" })) || { count: 0, lockedUntil: null };
+    if (qaFailData.lockedUntil && Date.now() < new Date(qaFailData.lockedUntil).getTime()) {
+      const minsLeft = Math.ceil((new Date(qaFailData.lockedUntil).getTime() - Date.now()) / 60000);
+      return json(429, { error: `Too many incorrect Quick Add login attempts -- locked out for ${minsLeft} more minute(s).` });
+    }
+    const dispatcherAuth = payload.dispatcherAuth || {};
+    const supabaseAuth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const verified = await verifyQuickAddAdmin(supabaseAuth, dispatcherAuth.username, dispatcherAuth.pin);
+    if (!verified.ok) {
+      const newCount = (qaFailData.count || 0) + 1;
+      const update = { count: newCount, lockedUntil: null };
+      let msg = verified.reason;
+      if (newCount >= QA_MAX_FAILED_ATTEMPTS) {
+        update.lockedUntil = new Date(Date.now() + QA_LOCKOUT_HOURS * 3600 * 1000).toISOString();
+        update.count = 0;
+        msg += ` Too many failed attempts -- locked out for ${QA_LOCKOUT_HOURS} hours.`;
+      }
+      await qaAuthStore.setJSON(qaFailKey, update);
+      return json(401, { error: msg });
+    }
+    if (qaFailData.count) await qaAuthStore.setJSON(qaFailKey, { count: 0, lockedUntil: null });
+  } else if (mode === "driving") {
     const requiredSecret = process.env.DISTANCE_MATRIX_ADMIN_PASSWORD;
     if (!requiredSecret) {
       return json(500, { error: "DISTANCE_MATRIX_ADMIN_PASSWORD is not configured -- refusing to run a paid build until it is set." });
