@@ -16,6 +16,7 @@
   
 [functions."pull-mailbox"]
   timeout = 26
+  schedule = "*/2 * * * *"
 
 # 2026-09-08: disabled by Mark -- real-time SMS delivery may be starting to
 # work again after the Verizon block, and he doesn't want a batched morning
