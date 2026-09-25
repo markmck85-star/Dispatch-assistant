@@ -18,6 +18,10 @@
 
 const tls = require("tls");
 const { createClient } = require("@supabase/supabase-js");
+const { getStore, connectLambda } = require("@netlify/blobs");
+
+const CURSOR_KEY = "imap-backfill-cursor";
+const STOP_MS = 20000;
 
 function json(status, obj) {
   return { statusCode: status, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
@@ -166,10 +170,23 @@ exports.handler = async (event) => {
   let body = {};
   try { body = event.body ? JSON.parse(event.body) : {}; } catch { body = {}; }
   const qs = event.queryStringParameters || {};
-  const since = body.since || qs.since || "2026-03-01";
-  const limit = Math.min(60, Number(body.limit || qs.limit || 30));
-  const afterUid = Number(body.afterUid || qs.afterUid || 0);
+  try { connectLambda(event); } catch {}
+  const store = getStore("dispatch");
+  let saved = {};
+  try { saved = (await store.get(CURSOR_KEY, { type: "json" })) || {}; } catch { saved = {}; }
+
+  const since = body.since || qs.since || saved.since || "2026-07-01";
+  const limit = Math.min(40, Number(body.limit || qs.limit || 25));
   const dryRun = !!(body.dryRun || qs.dryRun);
+  const stop = !!(body.stop || qs.stop);
+  const loop = !dryRun && (body.loop === 0 || qs.loop === "0" ? false : true);
+  let afterUid = Number(body.afterUid || qs.afterUid || saved.afterUid || 0);
+
+  if (stop) {
+    saved.done = true;
+    await store.setJSON(CURSOR_KEY, saved);
+    return json(200, { ok: true, stopped: true, afterUid, since });
+  }
 
   let session;
   try {
@@ -189,28 +206,25 @@ exports.handler = async (event) => {
       .map(Number)
       .filter(Boolean);
 
-    const remaining = afterUid ? uids.filter((u) => u > afterUid) : uids;
-    const batch = remaining.slice(0, limit);
-    if (batch.length === 0) {
-      session.socket.end();
-      return json(200, { ok: true, found: uids.length, inserted: 0, skipped: 0, message: "No messages after uid " + afterUid });
-    }
-
     const fetchItems = dryRun
       ? "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])"
       : "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] BODY.PEEK[TEXT])";
-    const fetch = await session.cmd(
-      `UID FETCH ${batch[0]}:${batch[batch.length - 1]} ${fetchItems}`
-    );
-    if (!fetch.ok) {
-      session.socket.end();
-      return json(500, { error: "FETCH failed", detail: fetch.text, found: uids.length });
-    }
-    session.socket.end();
 
-    const msgs = parseFetchBatch(fetch.raw).filter((m) => batch.includes(m.uid));
+    const supabase = dryRun ? null : createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const started = Date.now();
+    let inserted = 0;
+    let skipped = 0;
+    let examined = 0;
+    let batches = 0;
+    const errors = [];
+    let lastUid = afterUid;
+    let remaining = afterUid ? uids.filter((u) => u > afterUid) : uids.slice();
 
     if (dryRun) {
+      const batch = remaining.slice(0, limit);
+      const fetch = await session.cmd(`UID FETCH ${batch[0]}:${batch[batch.length - 1]} ${fetchItems}`);
+      session.socket.end();
+      const msgs = parseFetchBatch(fetch.raw);
       return json(200, {
         ok: true,
         dryRun: true,
@@ -219,48 +233,63 @@ exports.handler = async (event) => {
       });
     }
 
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    let inserted = 0;
-    let skipped = 0;
-    const errors = [];
-
-    for (const m of msgs) {
-      const mid = m.messageId ? (m.messageId.startsWith("<") ? m.messageId : `<${m.messageId}>`) : `imap-uid-${m.uid}`;
-      const classified = classify(m.subject, m.text);
-      const received = m.date ? new Date(m.date) : new Date();
-      const row = {
-        mailbox: "imap-main",
-        sender: m.from || user,
-        subject: m.subject || "(no subject)",
-        body_text: m.text || "",
-        body_html: m.html,
-        received_at: isNaN(received.getTime()) ? new Date().toISOString() : received.toISOString(),
-        classified_as: classified,
-        parse_status: "pending",
-        mailgun_message_id: mid,
-        to_address: m.to || null,
-      };
-      const { error } = await supabase.from("inbound_emails").insert(row);
-      if (error) {
-        if (/duplicate|unique/i.test(error.message || "")) skipped += 1;
-        else errors.push({ uid: m.uid, error: error.message });
-      } else {
-        inserted += 1;
+    while (remaining.length && Date.now() - started < STOP_MS) {
+      const batch = remaining.slice(0, limit);
+      const fetch = await session.cmd(`UID FETCH ${batch[0]}:${batch[batch.length - 1]} ${fetchItems}`);
+      if (!fetch.ok) {
+        errors.push({ error: "FETCH failed", detail: fetch.text });
+        break;
       }
+      const msgs = parseFetchBatch(fetch.raw).filter((m) => batch.includes(m.uid));
+      examined += msgs.length;
+      batches += 1;
+      for (const m of msgs) {
+        const mid = m.messageId ? (m.messageId.startsWith("<") ? m.messageId : `<${m.messageId}>`) : `imap-uid-${m.uid}`;
+        const classified = classify(m.subject, m.text);
+        const received = m.date ? new Date(m.date) : new Date();
+        const row = {
+          mailbox: "imap-main",
+          sender: m.from || user,
+          subject: m.subject || "(no subject)",
+          body_text: m.text || "",
+          body_html: m.html,
+          received_at: isNaN(received.getTime()) ? new Date().toISOString() : received.toISOString(),
+          classified_as: classified,
+          parse_status: "pending",
+          mailgun_message_id: mid,
+          to_address: m.to || null,
+        };
+        const { error } = await supabase.from("inbound_emails").insert(row);
+        if (error) {
+          if (/duplicate|unique/i.test(error.message || "")) skipped += 1;
+          else errors.push({ uid: m.uid, error: error.message });
+        } else {
+          inserted += 1;
+        }
+      }
+      lastUid = batch[batch.length - 1];
+      remaining = remaining.filter((u) => u > lastUid);
+      if (!loop) break;
     }
+
+    session.socket.end();
+    const done = remaining.length === 0;
+    await store.setJSON(CURSOR_KEY, { since, afterUid: lastUid, done, updatedAt: new Date().toISOString() });
 
     return json(200, {
       ok: true,
       found: uids.length,
-      examined: msgs.length,
+      examined,
       inserted,
       skipped,
+      batches,
       errors: errors.slice(0, 8),
-      lastUid: batch[batch.length - 1],
-      remaining: Math.max(0, remaining.length - batch.length),
-      nextHint: remaining.length > limit
-        ? ("Call again with afterUid=" + batch[batch.length - 1] + "&since=" + since)
-        : "Done for this since window",
+      lastUid,
+      remaining: remaining.length,
+      done,
+      nextHint: done
+        ? "Backfill complete for this since window. Add ?stop=1 to freeze the scheduler."
+        : ("Call again with afterUid=" + lastUid + "&since=" + since + " (scheduler will also continue)"),
     });
   } catch (err) {
     try { if (session && session.socket) session.socket.end(); } catch {}
