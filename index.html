@@ -1405,6 +1405,36 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
  * Returns { distanceMi, durationMin, durationText, isReal } -- durationMin/
  * durationText are null when only straight-line distance is available.
  */
+        
+        function formatPrintTechDrive(techName) {
+            const items = (window.currentAssignments && window.currentAssignments[techName]) || [];
+            if (!items.length || typeof getCachedLegInfo !== 'function') return '';
+            let totalMi = 0, totalDur = 0, anyDur = false;
+            for (let i = 0; i < items.length; i++) {
+                const from = i === 0 ? null : items[i-1].code;
+                const leg = getCachedLegInfo(techName, from, items[i].code);
+                if (leg && leg.distanceMi != null) totalMi += leg.distanceMi;
+                if (leg && leg.durationMin != null) { totalDur += leg.durationMin; anyDur = true; }
+            }
+            const home = getCachedLegInfo(techName, null, items[items.length-1].code);
+            if (home && home.distanceMi != null) totalMi += home.distanceMi;
+            if (home && home.durationMin != null) { totalDur += home.durationMin; anyDur = true; }
+            const bits = [];
+            if (totalMi) bits.push((Math.round(totalMi * 10) / 10) + ' mi round trip');
+            if (anyDur) bits.push('~' + formatDriveTime(totalDur) + ' drive');
+            return bits.length ? ' · ' + bits.join(' · ') : '';
+        }
+
+        function formatDriveTime(mins) {
+            if (mins == null || isNaN(Number(mins))) return '';
+            const m = Math.round(Number(mins));
+            if (m < 60) return m + ' min';
+            const h = Math.floor(m / 60);
+            const r = m % 60;
+            if (r === 0) return h + ' hr';
+            return h + ' hr ' + r + ' min';
+        }
+
 function getCachedLegInfo(tech, fromCode, toCode) {
   if (fromCode === null) {
     const info = getTechDistance(tech, toCode, CURRENT_STATE);
@@ -1590,8 +1620,11 @@ function getTechDistance(techName, locCode, state) {
     const entry = _dmCache[key].matrix[techKey + "|" + locCode];
     if (entry) {
       let label;
-      if (entry.type === "driving" && entry.durationText) {
-        label = entry.distanceMi + " mi (" + entry.durationText + ")";
+      if (entry.type === "driving" && (entry.durationMin != null || entry.durationText)) {
+        const timeLabel = (typeof formatDriveTime === "function" && entry.durationMin != null)
+          ? formatDriveTime(entry.durationMin)
+          : entry.durationText;
+        label = entry.distanceMi + " mi (" + timeLabel + ")";
       } else {
         label = "~" + entry.distanceMi + " mi";
       }
@@ -4099,7 +4132,7 @@ function distanceMatrixStatus(state) {
                     ? ` <span style="color:#888;">(${includedCount} of ${items.length} stops, ${wantTomorrow ? 'tomorrow' : 'today'})</span>`
                     : '';
                 const routeSummary = includedCount
-                    ? `${Math.round(totalMi * 10) / 10} mi round trip${anyRealDuration ? ' · ~' + Math.round(totalDurMin) + ' min drive' : ''}` +
+                    ? `${Math.round(totalMi * 10) / 10} mi round trip${anyRealDuration ? ' · ~' + formatDriveTime(totalDurMin) + ' drive' : ''}` +
                       `${allLegsReal ? '' : ' <span title="Some legs are straight-line estimates -- real driving data not built for this state/pair yet" style="cursor:help;">(est.)</span>'}` +
                       scopeLabel
                     : '';
@@ -4143,7 +4176,7 @@ function distanceMatrixStatus(state) {
                     const leg = isFuturePushed ? null : getCachedLegInfo(tech, lastSameDayCode, item.code);
                     const legLabel = isFuturePushed
                         ? `📅 Not part of today's route${item.restockBy ? ' -- pushed to ' + item.restockBy : ''}`
-                        : `${Math.round(leg.distanceMi * 10) / 10} mi${leg.durationMin != null ? ' · ' + leg.durationMin + ' min' : ''}${leg.isReal ? '' : ' (est.)'}`;
+                        : `${Math.round(leg.distanceMi * 10) / 10} mi${leg.durationMin != null ? ' · ' + formatDriveTime(leg.durationMin) : ''}${leg.isReal ? '' : ' (est.)'}`;
                     // BUG FIX (2026-09-07): urgent alone used to mean the
                     // badge always said SAME DAY, even for a ticket already
                     // correctly pushed to a future day's board (a ticket
@@ -6165,7 +6198,7 @@ function distanceMatrixStatus(state) {
 
                 let block = `<div class="print-tech-section">
                     <div class="print-tech-header">${techName}</div>
-                    <div class="print-tech-sub">Total stops: ${stops.length}</div>`;
+                    <div class="print-tech-sub">Total stops: ${stops.length}${formatPrintTechDrive(techName)}</div>`;
 
                 function renderStop(stop, index) {
                     const code = stop.code || "";
@@ -7606,7 +7639,7 @@ ${content}</body></html>`;
                 route.pts.forEach((p, i) => {
                     const legLabel = p.leg && p.leg.distanceMi != null
                         ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
-                            + (p.leg.durationMin != null ? ' · ' + p.leg.durationMin + ' min' : '')
+                            + (p.leg.durationMin != null ? ' · ' + formatDriveTime(p.leg.durationMin) : '')
                             + (p.leg.isReal ? '' : ' (est.)')
                             + (i === 0 ? ' from home' : ' from prev. stop')
                         : '';
