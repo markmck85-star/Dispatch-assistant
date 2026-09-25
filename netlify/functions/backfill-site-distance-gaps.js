@@ -36,6 +36,27 @@
  * compute-site-distance-matrix.js alone and was hardened after a real
  * ~$122 overspend; a separate utility has no business touching it.
  *
+ * v2 (2026-09-25): FIXED a real bug found live by Mark -- the very first
+ * resume call after a fresh plan is created (offset:0 writes the plan,
+ * then the frontend's next call at offset:CHUNK_SIZE reads it back after
+ * only a fixed 1200ms delay) could hit a Netlify Blobs read-after-write
+ * propagation lag and see no plan at all, throwing "No gap-fill plan
+ * found" even though the plan (and the first chunk's real, billed
+ * results) were already safely written. Confirmed live on FL: the first
+ * 200 pairs landed correctly in site_site_distances, but the very next
+ * chunk's read of the plan came back empty. A bigger fixed delay isn't a
+ * real fix -- Blobs propagation time isn't constant, so any fixed number
+ * is just a guess that can still lose the race under the wrong
+ * conditions. Fixed instead by having the plan read retry with backoff
+ * (four attempts, 500ms/1000ms/1500ms/2000ms) before concluding no plan
+ * exists -- this only ever adds latency in the rare case where the first
+ * read genuinely lost the propagation race; a plan that's truly not
+ * there (offset:0 fresh start, or a genuinely bogus resume call) still
+ * resolves exactly as before, just up to ~5s slower to confirm. Nothing
+ * about the Supabase-write-per-chunk design changed -- that part was
+ * already correct and is exactly why the first chunk's data survived
+ * this bug intact.
+ *
  * POST /.netlify/functions/backfill-site-distance-gaps
  * Body: { state: "CA", offset: 0, adminSecret: "...", dryRun?, force? }
  *
@@ -49,6 +70,7 @@ const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const DEST_BATCH = 10;      // destinations per Google API call, matches the other two build functions
 const CHUNK_SIZE = 200;     // missing pairs processed per invocation -- comparable to what a single chunk of compute-site-distance-matrix.js already handles without hitting Netlify's execution limit
+const PLAN_READ_RETRY_DELAYS_MS = [500, 1000, 1500, 2000]; // v2 (2026-09-25): backoff for the Blobs read-after-write race, see header comment
 
 function json(statusCode, obj) {
   return { statusCode, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
@@ -56,6 +78,23 @@ function json(statusCode, obj) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// v2 (2026-09-25): reads the gap-fill plan with retry/backoff instead of
+// a single attempt. On a genuine resume call (offset > 0), a null result
+// on the first try is ambiguous -- it could mean "no build was ever
+// started" (a real error) or "the write from the previous chunk hasn't
+// propagated to this read yet" (a race, not an error). Retrying a few
+// times with increasing delay resolves that ambiguity safely: a real
+// plan that exists will show up within a couple seconds; a genuinely
+// missing plan still correctly reports missing, just slightly slower.
+async function readPlanWithRetry(store, planKey) {
+  let planRecord = await store.get(planKey, { type: "json" });
+  for (let i = 0; !planRecord && i < PLAN_READ_RETRY_DELAYS_MS.length; i++) {
+    await sleep(PLAN_READ_RETRY_DELAYS_MS[i]);
+    planRecord = await store.get(planKey, { type: "json" });
+  }
+  return planRecord;
 }
 
 // Builds the deterministic list of every missing (siteACode, siteBCode)
@@ -208,7 +247,8 @@ exports.handler = async (event) => {
 
   const store = getStore("dispatch");
   const planKey = "gap-fill-plan/" + state;
-  let planRecord = await store.get(planKey, { type: "json" });
+  // v2 (2026-09-25): retry-with-backoff read instead of a single attempt -- see header comment.
+  let planRecord = await readPlanWithRetry(store, planKey);
 
   // Orphaned-plan guard -- same shape as compute-site-distance-matrix.js's
   // own orphaned-build guard, so admin.html's existing resume-confirm flow
