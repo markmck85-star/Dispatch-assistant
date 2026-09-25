@@ -173,10 +173,10 @@
         .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
         /* Stop pins are divIcons rather than images, so each tech's route colour
            can be applied inline -- one shared shape instead of a PNG per colour. */
-        .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
         .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
-        .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
+        .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
         .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
         .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
 
@@ -7456,8 +7456,8 @@ ${content}</body></html>`;
                 L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], {
                     icon: L.divIcon({
                         className: '',
-                        html: '<div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:11px solid ' + color + ';transform:rotate(' + angle + 'deg);opacity:' + (opacity || 0.9) + ';"></div>',
-                        iconSize: [12, 12], iconAnchor: [6, 6]
+                        html: '<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:16px solid ' + color + ';transform:rotate(' + angle + 'deg);opacity:' + (opacity || 0.95) + ';filter:drop-shadow(0 0 1px #fff);"></div>',
+                        iconSize: [16, 16], iconAnchor: [8, 8]
                     }),
                     interactive: false
                 }).addTo(group);
@@ -7635,17 +7635,17 @@ ${content}</body></html>`;
                         if (donePath.length > 1) {
                             L.polyline(donePath, {
                                 color: route.color,
-                                weight: 3,
-                                opacity: 0.45,
-                                dashArray: '5,7'
+                                weight: 6,
+                                opacity: 0.8,
+                                dashArray: '10,8'
                             }).addTo(group);
-                            addMapRouteArrows(group, dottedSegs, route.color, 0.45);
+                            addMapRouteArrows(group, dottedSegs, route.color, 0.85);
                         }
                         const from = donePath[donePath.length - 1];
                         L.polyline([from, latlngs[0]], {
                             color: route.color,
-                            weight: 3.5,
-                            opacity: 0.85,
+                            weight: 6,
+                            opacity: 0.95,
                             dashArray: route.dashed ? '9,6' : null
                         }).addTo(group);
                         addMapRouteArrows(group, [[from, latlngs[0]]], route.color, 0.9);
@@ -7654,7 +7654,7 @@ ${content}</body></html>`;
                         icon: L.divIcon({
                             className: '',
                             html: '<div class="map-home-pin" style="background:' + route.color + ';">&#x1F3E0;</div>',
-                            iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                            iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -11]
                         }),
                         title: route.tech + ' — start'
                     }).bindPopup(
@@ -7667,8 +7667,8 @@ ${content}</body></html>`;
                 if (latlngs.length > 1) {
                     L.polyline(latlngs, {
                         color: route.color,
-                        weight: 3.5,
-                        opacity: 0.85,
+                        weight: 6,
+                        opacity: 0.95,
                         dashArray: route.dashed ? '9,6' : null
                     }).addTo(group);
                     const remainSegs = [];
@@ -7687,7 +7687,7 @@ ${content}</body></html>`;
                         icon: L.divIcon({
                             className: '',
                             html: '<div class="map-stop-pin" style="background:' + route.color + ';">' + (i + 1) + '</div>',
-                            iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -13]
+                            iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -13]
                         }),
                         title: 'Stop ' + (i + 1) + ' — ' + p.item.code + ' (' + route.tech + ')'
                     }).bindPopup(
@@ -7714,7 +7714,7 @@ ${content}</body></html>`;
                             icon: L.divIcon({
                                 className: '',
                                 html: '<div class="map-stop-pin map-stop-pin-done" style="background:' + route.color + ';">&#x2713;</div>',
-                                iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                                iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -11]
                             }),
                             title: 'Completed — ' + p.code + ' (' + route.tech + ')'
                         }).bindPopup(
@@ -7741,7 +7741,7 @@ ${content}</body></html>`;
                         icon: L.divIcon({
                             className: '',
                             html: '<div class="map-stop-pin map-stop-pin-future" style="background:' + route.color + ';">&#x1F4C5;</div>',
-                            iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -11]
+                            iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -11]
                         }),
                         title: 'Not today — ' + p.item.code + ' (' + route.tech + ')'
                     }).bindPopup(
