@@ -4,6 +4,7 @@
  * GET ?state=MI&testing=1
  */
 const { createClient } = require("@supabase/supabase-js");
+const XLSX = require("xlsx");
 
 function json(status, obj) {
   return { statusCode: status, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
@@ -63,6 +64,45 @@ exports.handler = async (event) => {
       callType: sr.callType || "",
       testing: isTesting(sr, t.site_text),
     });
+  }
+
+  if (qs.format === "xlsx") {
+    const sheetRows = rows.map((r) => ({
+      WO: r.wo,
+      "ITI ticket": r.ticketNumber,
+      Location: r.location,
+      Site: r.site,
+      Technician: r.technician,
+      "Call type": r.callType,
+      Testing: r.testing ? "Yes" : "",
+      Arrival: r.arrivalTime,
+      End: r.endTime,
+      "On site (min)": r.onsiteMin,
+      "Travel (min)": r.travelTime === "" ? "" : Number(r.travelTime) || r.travelTime,
+      Miles: r.mileage === "" ? "" : Number(r.mileage) || r.mileage,
+      Notes: r.notes,
+      Closed: r.closedAt ? String(r.closedAt).slice(0, 10) : "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(sheetRows.length ? sheetRows : [{ WO: "" }]);
+    ws["!cols"] = [
+      { wch: 12 }, { wch: 12 }, { wch: 28 }, { wch: 28 }, { wch: 18 },
+      { wch: 16 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 14 },
+      { wch: 13 }, { wch: 10 }, { wch: 60 }, { wch: 12 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Service responses");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const name = "Service_Responses_" + (state || "All") + "_" + stamp + ".xlsx";
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": "attachment; filename=\"" + name + "\"",
+      },
+      body: buf.toString("base64"),
+      isBase64Encoded: true,
+    };
   }
 
   return json(200, { ok: true, count: rows.length, rows });
