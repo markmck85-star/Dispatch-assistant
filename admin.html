@@ -879,7 +879,12 @@
     document.getElementById('dm-quickadd-status').textContent = msg;
   }
 
-  async function qaRunChunkedBuild(url, baseBody, adminSecret, label, offsetField) {
+  // 2026-09-25: authBody replaces the old bare adminSecret string -- an
+  // object spread straight into the request body, so it can carry either
+  // { adminSecret } (unused now for Quick Add, kept for any other caller)
+  // or { quickAdd: true, dispatcherAuth: { username, pin } } for the new
+  // lighter Quick Add auth path. See distance-matrix-quickadd-auth.js.
+  async function qaRunChunkedBuild(url, baseBody, authBody, label, offsetField) {
     let offset = 0, done = false, lastResult = null, resumedFromInterrupted = false;
     while (!done) {
       if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
@@ -887,7 +892,7 @@
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...baseBody, [offsetField]: offset, adminSecret }),
+        body: JSON.stringify({ ...baseBody, [offsetField]: offset, ...authBody }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -973,15 +978,27 @@
       qaSetStatus('Cancelled -- the new ' + noun + ' is geocoded and saved, just not priced into the matrix yet. Safe to run Quick Add again later.');
       return;
     }
-    const adminSecret = prompt('Distance Matrix admin password (needed for the drive-time step):') || '';
-    if (!adminSecret) { qaSetStatus('Cancelled -- no admin password entered. The new ' + noun + ' is geocoded and saved, just not priced into the matrix yet.'); return; }
+    // 2026-09-25: Quick Add now accepts the logged-in admin's own PIN
+    // instead of the separate, stronger DISTANCE_MATRIX_ADMIN_PASSWORD --
+    // this button only ever prices ONE new tech/location additively, a
+    // structurally small and bounded cost, so it's gated behind the same
+    // admin-role login already required just to see this tab, not the
+    // password reserved for full/non-additive rebuilds. See
+    // distance-matrix-quickadd-auth.js.
+    if (!currentUser || currentUser.role !== 'admin') {
+      qaSetStatus('❌ Admin login required for Quick Add.');
+      return;
+    }
+    const qaPin = prompt('Enter your admin PIN to confirm this Quick Add (' + currentUser.username + '):') || '';
+    if (!qaPin) { qaSetStatus('Cancelled -- no PIN entered. The new ' + noun + ' is geocoded and saved, just not priced into the matrix yet.'); return; }
+    const qaAuthBody = { quickAdd: true, dispatcherAuth: { username: currentUser.username, pin: qaPin } };
 
     try {
       qaSetStatus((kind === 'location' ? 'Step 1 of 2' : 'Adding') + ': drive-time for the new ' + noun + '…');
       const driveResult = await qaRunChunkedBuild(
         '/.netlify/functions/compute-distance-matrix',
         { state, mode: 'driving', additive: true },
-        adminSecret,
+        qaAuthBody,
         'Adding drive-time',
         'offset'
       );
@@ -992,7 +1009,7 @@
         siteResult = await qaRunChunkedBuild(
           '/.netlify/functions/backfill-site-distance-gaps',
           { state },
-          adminSecret,
+          qaAuthBody,
           'Adding site-to-site pairs',
           'offset'
         );
