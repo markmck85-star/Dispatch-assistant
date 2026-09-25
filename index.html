@@ -7606,7 +7606,13 @@ ${content}</body></html>`;
                 // line pointing at nothing.
                 if (route.home) {
                     if (latlngs.length) {
-                        L.polyline([[route.home.lat, route.home.lng], latlngs[0]], {
+                        const lastDone = route.completedPts && route.completedPts.length
+                            ? route.completedPts[route.completedPts.length - 1]
+                            : null;
+                        const from = lastDone
+                            ? [lastDone.lat, lastDone.lng]
+                            : [route.home.lat, route.home.lng];
+                        L.polyline([from, latlngs[0]], {
                             color: route.color,
                             weight: 3.5,
                             opacity: 0.85,
