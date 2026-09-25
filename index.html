@@ -797,11 +797,15 @@
 
         // --- FORM COUNT PARSER ---
                 function isLascomCarryoverNote(s) {
-            // Taylor's first block lists already-placed Lascom/CA restocks
-            // with "ON WED 9/23 LIST FOR 9/24 RESTOCK" in Consumables Needed
-            // and no Restock By column. That date is not a complete-by, and
-            // walking past it used to pick up the next state's date/counts.
-            return /LIST\s+FOR\s+\d{1,2}\/\d{1,2}[^\n]{0,40}RESTOCK|ON\s+(MON|TUE|WED|THU|FRI|SAT|SUN)[^\n]{0,40}LIST/i.test(String(s || ''));
+            // Only the leftover Lascom/CA stub: consumable cell is
+            // "ON WED 9/23 LIST FOR 9/24 RESTOCK" and there is no real
+            // Restock By (M/D/YYYY). Do not treat a later row as carryover
+            // just because a header or this stub sits nearby.
+            const text = String(s || '');
+            const stub = /ON\s+(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:DAY)?\s+\d{1,2}\/\d{1,2}\s+LIST\s+FOR\s+\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+RESTOCK/i.test(text)
+                || /LIST\s+FOR\s+\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+RESTOCK/i.test(text);
+            if (!stub) return false;
+            return !/\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(text);
         }
 
         function parseFormCounts(text) {
@@ -3058,7 +3062,7 @@ function distanceMatrixStatus(state) {
                     }
                     
                     if (siteCode) {
-                        const peek = allLines.slice(ni, Math.min(allLines.length, ni + 14)).join('\n');
+                        const peek = allLines.slice(ni, Math.min(allLines.length, ni + 8)).join('\n');
                         if (isLascomCarryoverNote(peek)) {
                             ni++;
                             while (ni < allLines.length && !STATE_TOKENS.has(allLines[ni]) && !/\b(?:[A-Z]{2}\d{3,5}|K[A-Z]\d{1,3}|K[A-Z]{2})\b/.test(allLines[ni])) ni++;
