@@ -90,6 +90,7 @@
         <div class="subtitle">Dispatch Tool – Manage Locations &amp; Technicians</div>
         <p style="margin:0 0 12px;">
           <a href="/inbound-mail.html" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;">✉ Inbound Mail</a>
+          <a href="/service-responses.html" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">⏱ Service responses</a>
         </p>
 
         <!-- State selector bar -->
@@ -879,12 +880,7 @@
     document.getElementById('dm-quickadd-status').textContent = msg;
   }
 
-  // 2026-09-25: authBody replaces the old bare adminSecret string -- an
-  // object spread straight into the request body, so it can carry either
-  // { adminSecret } (unused now for Quick Add, kept for any other caller)
-  // or { quickAdd: true, dispatcherAuth: { username, pin } } for the new
-  // lighter Quick Add auth path. See distance-matrix-quickadd-auth.js.
-  async function qaRunChunkedBuild(url, baseBody, authBody, label, offsetField) {
+  async function qaRunChunkedBuild(url, baseBody, adminSecret, label, offsetField) {
     let offset = 0, done = false, lastResult = null, resumedFromInterrupted = false;
     while (!done) {
       if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
@@ -892,7 +888,7 @@
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...baseBody, [offsetField]: offset, ...authBody }),
+        body: JSON.stringify({ ...baseBody, [offsetField]: offset, adminSecret }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -928,19 +924,10 @@
       const geoData = await geoRes.json();
       if (!geoData.ok) throw new Error(geoData.error || 'Geocoding failed');
       geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
-      // 2026-09-25 FIX: used to bail out immediately here whenever nothing
-      // new needed geocoding. That's right for a genuine first click (no
-      // real address saved yet), but WRONG for a retry after the
-      // drive-time/site-to-site steps below failed on a prior attempt
-      // (e.g. a mistyped PIN) -- geocoding had already succeeded then, so
-      // a retry correctly finds nothing new to geocode, then used to quit
-      // right there instead of finishing the part that actually still
-      // needed to run. Confirmed live: Mark hit exactly this on a 4-site
-      // NV Quick Add after failing the PIN prompt once -- the retry just
-      // showed "nothing new to geocode" and never re-prompted for the PIN
-      // at all. Fixed by NOT bailing here -- only bailing below, once the
-      // cost check ALSO comes back empty, which is the only time there's
-      // genuinely nothing left to do.
+      if (geoResult.geocoded === 0) {
+        qaSetStatus('⚠️ Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
+        return;
+      }
     } catch (e) {
       qaSetStatus('❌ ' + e.message);
       return;
@@ -971,18 +958,6 @@
       return;
     }
 
-    // 2026-09-25: the real "genuinely nothing to do" check, moved here
-    // from right after geocoding -- only true when BOTH nothing new was
-    // geocoded AND the cost check found no missing pairs either. This is
-    // the actual first-click-by-mistake case the old check was meant to
-    // catch, without also catching a legitimate retry.
-    const driveEmpty = (driveEst.elementCount || 0) === 0;
-    const siteEmpty = !siteEst || (siteEst.missingPairCount || 0) === 0;
-    if (geoResult.geocoded === 0 && driveEmpty && siteEmpty) {
-      qaSetStatus('⚠️ Nothing new to geocode or price for ' + state + ' (' + geoResult.skipped + ' already had coordinates, matrix already covers everything). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
-      return;
-    }
-
     const totalCost = (driveEst.estimatedCost || 0) + (siteEst ? (siteEst.estimatedCost || 0) : 0);
     const costLines = [
       'Drive-time: ' + driveEst.elementCount + ' element(s), $' + (driveEst.estimatedCost || 0).toFixed(2),
@@ -999,27 +974,15 @@
       qaSetStatus('Cancelled -- the new ' + noun + ' is geocoded and saved, just not priced into the matrix yet. Safe to run Quick Add again later.');
       return;
     }
-    // 2026-09-25: Quick Add now accepts the logged-in admin's own PIN
-    // instead of the separate, stronger DISTANCE_MATRIX_ADMIN_PASSWORD --
-    // this button only ever prices ONE new tech/location additively, a
-    // structurally small and bounded cost, so it's gated behind the same
-    // admin-role login already required just to see this tab, not the
-    // password reserved for full/non-additive rebuilds. See
-    // distance-matrix-quickadd-auth.js.
-    if (!currentUser || currentUser.role !== 'admin') {
-      qaSetStatus('❌ Admin login required for Quick Add.');
-      return;
-    }
-    const qaPin = prompt('Enter your admin PIN to confirm this Quick Add (' + currentUser.username + '):') || '';
-    if (!qaPin) { qaSetStatus('Cancelled -- no PIN entered. The new ' + noun + ' is geocoded and saved, just not priced into the matrix yet.'); return; }
-    const qaAuthBody = { quickAdd: true, dispatcherAuth: { username: currentUser.username, pin: qaPin } };
+    const adminSecret = prompt('Distance Matrix admin password (needed for the drive-time step):') || '';
+    if (!adminSecret) { qaSetStatus('Cancelled -- no admin password entered. The new ' + noun + ' is geocoded and saved, just not priced into the matrix yet.'); return; }
 
     try {
       qaSetStatus((kind === 'location' ? 'Step 1 of 2' : 'Adding') + ': drive-time for the new ' + noun + '…');
       const driveResult = await qaRunChunkedBuild(
         '/.netlify/functions/compute-distance-matrix',
         { state, mode: 'driving', additive: true },
-        qaAuthBody,
+        adminSecret,
         'Adding drive-time',
         'offset'
       );
@@ -1030,7 +993,7 @@
         siteResult = await qaRunChunkedBuild(
           '/.netlify/functions/backfill-site-distance-gaps',
           { state },
-          qaAuthBody,
+          adminSecret,
           'Adding site-to-site pairs',
           'offset'
         );

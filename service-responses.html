@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service responses — MCR Dispatch</title>
+<style>
+  :root {
+    --bg: #111218; --panel: #1a1b24; --border: #33344a;
+    --text: #e8e8ef; --muted: #9aa0b5; --accent: #7edb8e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  header {
+    padding: 12px 14px 8px; border-bottom: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  header h1 { font-size: 1.15rem; margin: 0 8px 0 0; font-weight: 650; }
+  .back {
+    background: #6c757d; color: #fff; text-decoration: none; font-weight: 600;
+    padding: 8px 12px; border-radius: 8px; font-size: 14px;
+  }
+  .hint { color: var(--muted); font-size: 12px; width: 100%; }
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); align-items: center;
+  }
+  select, input, button {
+    font-size: 15px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #555; background: #222; color: var(--text);
+  }
+  button { background: #2563eb; border-color: #2563eb; cursor: pointer; font-weight: 600; color: #fff; }
+  .wrap { overflow: auto; padding: 10px 14px 40px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--bg); }
+  tr:hover td { background: #1c1d2a; }
+  .muted { color: var(--muted); }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #2e3d2e; color: var(--accent); margin-left: 6px; }
+  .notes { max-width: 280px; color: #c8c8d4; }
+  .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="/">Dispatch</a>
+  <a class="back" href="/admin.html">Admin</a>
+  <h1>Service responses</h1>
+  <span class="count" id="count"></span>
+  <div class="hint">Times and miles from ITI close-outs. Default filter is Michigan testing stations — that is what TJ bills. CSV is for him to mark what actually goes on an invoice.</div>
+</header>
+<div class="toolbar">
+  <select id="state">
+    <option value="MI">Michigan</option>
+    <option value="OH">Ohio</option>
+    <option value="NV">Nevada</option>
+    <option value="CO">Colorado</option>
+    <option value="">All states</option>
+  </select>
+  <label class="muted"><input type="checkbox" id="testing" checked> Testing / K2D / examiner only</label>
+  <input id="q" type="search" placeholder="Search tech, site, WO, notes">
+  <button type="button" onclick="load()">Refresh</button>
+  <button type="button" onclick="downloadCsv()">Download CSV</button>
+</div>
+<div class="wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>WO</th><th>Location</th><th>Tech</th>
+        <th>Arrival</th><th>End</th><th>On site</th>
+        <th>Travel</th><th>Miles</th><th>Notes</th>
+      </tr>
+    </thead>
+    <tbody id="body"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+  </table>
+</div>
+<script>
+let ROWS = [];
+
+function fmtMin(m) {
+  if (m == null || m === "") return "";
+  const n = Number(m);
+  if (isNaN(n)) return String(m);
+  if (n < 60) return n + " min";
+  const h = Math.floor(n / 60), r = n % 60;
+  return r ? h + " hr " + r + " min" : h + " hr";
+}
+
+async function load() {
+  const state = document.getElementById("state").value;
+  const testing = document.getElementById("testing").checked ? "1" : "0";
+  const url = "/.netlify/functions/list-service-responses?state=" + encodeURIComponent(state) + "&testing=" + testing;
+  const res = await fetch(url, { cache: "no-store" });
+  const data = await res.json();
+  ROWS = data.rows || [];
+  render();
+}
+
+function filtered() {
+  const q = (document.getElementById("q").value || "").toLowerCase();
+  if (!q) return ROWS;
+  return ROWS.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+}
+
+function render() {
+  const rows = filtered();
+  document.getElementById("count").textContent = rows.length + " row" + (rows.length === 1 ? "" : "s");
+  const body = document.getElementById("body");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="9" class="muted">No matching service responses.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map((r) => `
+    <tr>
+      <td>${esc(r.wo)}${r.testing ? '<span class="tag">testing</span>' : ""}</td>
+      <td>${esc(r.location || r.site)}</td>
+      <td>${esc(r.technician)}</td>
+      <td>${esc(r.arrivalTime)}</td>
+      <td>${esc(r.endTime)}</td>
+      <td>${fmtMin(r.onsiteMin)}</td>
+      <td>${fmtMin(r.travelTime)}</td>
+      <td>${esc(r.mileage)}</td>
+      <td class="notes">${esc((r.notes || "").slice(0, 220))}</td>
+    </tr>`).join("");
+}
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function downloadCsv() {
+  const rows = filtered();
+  const cols = ["wo","location","technician","arrivalTime","endTime","onsiteMin","travelTime","mileage","callType","notes"];
+  const header = ["WO","Location","Tech","Arrival","End","On site min","Travel min","Miles","Call type","Notes"];
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    lines.push(cols.map((c) => csv(r[c])).join(","));
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "service-responses.csv";
+  a.click();
+}
+
+function csv(v) {
+  const s = String(v == null ? "" : v).replace(/"/g, '""');
+  return /[",\n]/.test(s) ? '"' + s + '"' : s;
+}
+
+document.getElementById("q").addEventListener("input", render);
+document.getElementById("state").addEventListener("change", load);
+document.getElementById("testing").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>
