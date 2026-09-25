@@ -16,6 +16,10 @@
   
 [functions."pull-mailbox"]
   timeout = 26
+  
+[functions."closings-sync"]
+  timeout = 26
+  schedule = "0 */2 * * *"
 
 
 # 2026-09-08: disabled by Mark -- real-time SMS delivery may be starting to
