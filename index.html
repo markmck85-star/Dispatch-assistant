@@ -7445,6 +7445,25 @@ ${content}</body></html>`;
          * pin numbers and the tech list all move together on a reassignment, so
          * a diff would touch nearly every layer anyway.
          */
+                function addMapRouteArrows(group, segments, color, opacity) {
+            (segments || []).forEach(function(seg) {
+                if (!seg || seg.length < 2) return;
+                var a = seg[0], b = seg[1];
+                if (!a || !b) return;
+                var dLat = b[0] - a[0], dLng = b[1] - a[1];
+                if (!dLat && !dLng) return;
+                var angle = Math.atan2(dLng, dLat) * 180 / Math.PI;
+                L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], {
+                    icon: L.divIcon({
+                        className: '',
+                        html: '<div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:11px solid ' + color + ';transform:rotate(' + angle + 'deg);opacity:' + (opacity || 0.9) + ';"></div>',
+                        iconSize: [12, 12], iconAnchor: [6, 6]
+                    }),
+                    interactive: false
+                }).addTo(group);
+            });
+        }
+
         function renderDispatchMap() {
             const panel = document.getElementById('dispatchMapPanel');
             if (!panel) return;
@@ -7606,18 +7625,30 @@ ${content}</body></html>`;
                 // line pointing at nothing.
                 if (route.home) {
                     if (latlngs.length) {
-                        const lastDone = route.completedPts && route.completedPts.length
-                            ? route.completedPts[route.completedPts.length - 1]
-                            : null;
-                        const from = lastDone
-                            ? [lastDone.lat, lastDone.lng]
-                            : [route.home.lat, route.home.lng];
+                        const donePath = [];
+                        donePath.push([route.home.lat, route.home.lng]);
+                        (route.completedPts || []).forEach(function(p) { donePath.push([p.lat, p.lng]); });
+                        const dottedSegs = [];
+                        for (var di = 0; di < donePath.length - 1; di++) {
+                            dottedSegs.push([donePath[di], donePath[di + 1]]);
+                        }
+                        if (donePath.length > 1) {
+                            L.polyline(donePath, {
+                                color: route.color,
+                                weight: 3,
+                                opacity: 0.45,
+                                dashArray: '5,7'
+                            }).addTo(group);
+                            addMapRouteArrows(group, dottedSegs, route.color, 0.45);
+                        }
+                        const from = donePath[donePath.length - 1];
                         L.polyline([from, latlngs[0]], {
                             color: route.color,
                             weight: 3.5,
                             opacity: 0.85,
                             dashArray: route.dashed ? '9,6' : null
                         }).addTo(group);
+                        addMapRouteArrows(group, [[from, latlngs[0]]], route.color, 0.9);
                     }
                     L.marker([route.home.lat, route.home.lng], {
                         icon: L.divIcon({
@@ -7640,6 +7671,9 @@ ${content}</body></html>`;
                         opacity: 0.85,
                         dashArray: route.dashed ? '9,6' : null
                     }).addTo(group);
+                    const remainSegs = [];
+                    for (var ri = 0; ri < latlngs.length - 1; ri++) remainSegs.push([latlngs[ri], latlngs[ri + 1]]);
+                    addMapRouteArrows(group, remainSegs, route.color, 0.9);
                 }
 
                 route.pts.forEach((p, i) => {
@@ -7647,7 +7681,7 @@ ${content}</body></html>`;
                         ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
                             + (p.leg.durationMin != null ? ' · ' + formatDriveTime(p.leg.durationMin) : '')
                             + (p.leg.isReal ? '' : ' (est.)')
-                            + (i === 0 ? ' from home' : ' from prev. stop')
+                            + (i === 0 ? ((route.completedPts && route.completedPts.length) ? ' from last completed' : ' from home') : ' from prev. stop')
                         : '';
                     L.marker([p.lat, p.lng], {
                         icon: L.divIcon({
