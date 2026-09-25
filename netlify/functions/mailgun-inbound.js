@@ -567,6 +567,15 @@ async function autoAddTicketToBoard({
         }
 }
 
+// v2 (2026-09-25): exported so link-ticket-to-site.js can call the exact
+// same logic when a previously-unmatched ticket gets resolved to a site
+// well after its own original ingestion -- see that file's own updated
+// header comment for why this was a real, confirmed gap (a ticket linked
+// to a brand-new site via the toast never got a board row at all, no
+// matter how many times the board was reprocessed, since this function
+// was previously only ever called from inside THIS file).
+module.exports.autoAddTicketToBoard = autoAddTicketToBoard;
+
 function calculateSlaDeadline(receivedAt, timezone, stateCode) {
   let remaining = 240; // 4 hours in minutes
   const tz = timezone || 'America/New_York';
