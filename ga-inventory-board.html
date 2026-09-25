@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GA SST Inventory — Monday Board</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #1c1916;
+      --muted: #6b6258;
+      --line: #e4dcd0;
+      --paper: #f6f1e8;
+      --card: #fffdf8;
+      --cy: #9b2c2c;
+      --py: #2f6b4f;
+      --warn: #b45309;
+      --bad: #9f1239;
+      --ok: #3f6b4a;
+      --late: #7c3aed;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      line-height: 1.45;
+    }
+    header {
+      padding: 28px 32px 20px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff 0%, var(--paper) 100%);
+    }
+    header .kicker {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    h1 { margin: 6px 0 8px; font-size: 28px; letter-spacing: -0.03em; }
+    .sub { color: var(--muted); max-width: 720px; }
+    .wrap { padding: 24px 32px 64px; display: grid; gap: 20px; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .stat b { display: block; font-size: 28px; letter-spacing: -0.04em; }
+    .stat span { color: var(--muted); font-size: 13px; }
+    .stat.miss b { color: var(--bad); }
+    .stat.ok b { color: var(--ok); }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 14px 18px;
+      font-size: 15px;
+      border-bottom: 1px solid var(--line);
+      background: #fbf8f2;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    .tag {
+      display: inline-block;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #eee7db;
+    }
+    .tag.in { background: #e4f0e6; color: var(--ok); }
+    .tag.out { background: #fde8ee; color: var(--bad); }
+    .tag.wait { background: #f5e8d0; color: var(--warn); }
+    .mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+    .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+    .note { padding: 14px 18px; color: var(--muted); font-size: 13px; }
+    .bucket { display: flex; justify-content: space-between; padding: 8px 18px; border-bottom: 1px solid var(--line); }
+    .keep { color: var(--py); }
+    .ship { color: var(--cy); }
+    .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .rule {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
+      background: var(--card);
+    }
+    .rule h3 { margin: 0 0 6px; font-size: 14px; }
+    .rule p { margin: 0; color: var(--muted); font-size: 13px; }
+    footer { padding: 0 32px 40px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 980px) {
+      .stats, .grid2, .rules { grid-template-columns: 1fr; }
+      .wrap, header, footer { padding-left: 16px; padding-right: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="kicker">Neumo / ITI · Warehouse 101 — GA SST · Lean v1</div>
+    <h1>Monday inventory board</h1>
+    <p class="sub">
+      Technicians send the frozen Neumo count sheet to the <strong>inventory mailbox</strong>.
+      The app is copied so TJ can see who is in before he forwards the set to Melinda.
+      Cutoff: Monday 9:00 a.m. Eastern. This board is Georgia-only.
+    </p>
+  </header>
+
+  <div class="wrap">
+    <section class="stats">
+      <div class="stat ok"><b>1</b><span>Received (week of Sep 21)</span></div>
+      <div class="stat miss"><b>—</b><span>Missing — add the GA roster to light this up</span></div>
+      <div class="stat"><b>9:00</b><span>Monday reminder if file not in</span></div>
+      <div class="stat"><b>Melinda</b><span>Batch forward after the set is complete</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Submissions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Tech</th>
+            <th>WHSE</th>
+            <th>Inv date</th>
+            <th>Mailbox</th>
+            <th>Status</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Mark McKelvey</td>
+            <td class="mono">101 - GA SST</td>
+            <td class="mono">2026-09-21</td>
+            <td>File parsed</td>
+            <td><span class="tag in">Received</span></td>
+            <td>CY forms 20 / par 30 · ribbon 14 / par 24</td>
+          </tr>
+          <tr>
+            <td colspan="6" class="note">
+              Roster is not in this prototype. When techs are listed, missing rows appear here as
+              <span class="tag out">Missing</span> after Friday and flip to
+              <span class="tag wait">Reminded</span> at 9:00 Monday.
+              TJ does not need to hunt the inbox to know who is holding the Melinda batch.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid2">
+      <div class="panel">
+        <h2>McKelvey — consumables that actually run out</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Neumo code</th>
+              <th>Item</th>
+              <th>Par</th>
+              <th>Count</th>
+              <th>Order</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="mono">010101030</td>
+              <td>Current-year forms · red 4×8.5 · 800/roll · 2027</td>
+              <td>30</td>
+              <td>20</td>
+              <td>10</td>
+            </tr>
+            <tr>
+              <td class="mono">10101026</td>
+              <td>Previous-year forms · green 4×8.5 · 800/roll · 2026</td>
+              <td>3</td>
+              <td>4</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="mono">10300072</td>
+              <td>Ribbon IMAK 110mm × 360 · 24/box</td>
+              <td>24</td>
+              <td>14</td>
+              <td>10</td>
+            </tr>
+            <tr>
+              <td class="mono">10901041</td>
+              <td>Journal paper coated · 4/box</td>
+              <td>16</td>
+              <td>21</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="mono">40200058</td>
+              <td>Magstripe cleaning cards</td>
+              <td>25</td>
+              <td>19</td>
+              <td>6</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note">
+          Days-of-supply stays off until closed-ticket restocks are joined per tech.
+          No company-wide “two boxes / six rolls” tripwire. Box = 3 rolls when we convert later.
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Partials — month-end / DCO rules</h2>
+        <div class="bucket"><span>608–800</span><span class="keep">Keep</span></div>
+        <div class="bucket"><span>408–600</span><span class="keep">Keep</span></div>
+        <div class="bucket"><span>208–400 · code 10101055</span><span class="keep">Keep · 33</span></div>
+        <div class="bucket"><span>208–400 · code 10101030</span><span class="keep">Keep · 5</span></div>
+        <div class="bucket"><span>128–200</span><span class="ship">Returnable · 10</span></div>
+        <div class="bucket"><span>0–120</span><span class="ship">Returnable · 44</span></div>
+        <div class="note">
+          Neumo takes partials at <strong>200 sheets or below</strong> only.
+          Larger leftover previous-year rolls stay on the van to burn at sites
+          whose dispatch PY count is 200 or under — even when restock was not requested.
+        </div>
+      </div>
+    </section>
+
+    <section class="rules">
+      <div class="rule">
+        <h3>Mailbox path</h3>
+        <p>Tech → inventory@ mailbox → app copy. TJ keeps mailbox access and forwards the complete set to Melinda at Neumo. Do not also auto-forward every message to his main inbox.</p>
+      </div>
+      <div class="rule">
+        <h3>Monday 9:00 reminder</h3>
+        <p>One text to anyone with no parseable file. Still missing stays on this board so TJ is not counting names by hand before the Neumo batch.</p>
+      </div>
+      <div class="rule">
+        <h3>Georgia form vintage</h3>
+        <p>Current year = next-year dated stock (red 2027 now). Previous year = this registration year’s stock (green 2026). Birthday renewals. Other states stay off this page.</p>
+      </div>
+      <div class="rule">
+        <h3>Intentionally not in v1</h3>
+        <p>Per-tech velocity flags, auto call-tags, in-app counting, NC / FL profiles, spare-kit tracking. Those wait until submissions are reliable.</p>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    Built as a lean Georgia slice from the Mark McKelvey Neumo sheet dated 2026-09-21.
+    Product codes are Neumo’s; this board does not rename them.
+  </footer>
+</body>
+</html>
