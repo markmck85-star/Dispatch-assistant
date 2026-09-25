@@ -43,8 +43,12 @@ function fmtDistance(mi) {
 
 function fmtDuration(min) {
   if (min == null) return null;
-  const rounded = Math.round(min);
-  return rounded + ' min' + (rounded === 1 ? '' : 's');
+  const rounded = Math.round(Number(min));
+  if (rounded < 60) return rounded + ' min';
+  const h = Math.floor(rounded / 60);
+  const r = rounded % 60;
+  if (r === 0) return h + ' hr';
+  return h + ' hr ' + r + ' min';
 }
 
 const MODE_PRIORITY = { driving: 0, 'haversine-fallback': 1, haversine: 2 };
