@@ -64,6 +64,7 @@
   <input id="q" type="search" placeholder="Search tech, site, WO, notes">
   <button type="button" onclick="load()">Refresh</button>
   <button type="button" onclick="downloadCsv()">Download CSV</button>
+  <button type="button" onclick="downloadXlsx()">Download Excel</button>
 </div>
 <div class="wrap">
   <table>
@@ -150,6 +151,13 @@ function downloadCsv() {
 function csv(v) {
   const s = String(v == null ? "" : v).replace(/"/g, '""');
   return /[",\n]/.test(s) ? '"' + s + '"' : s;
+}
+
+function downloadXlsx() {
+  const state = document.getElementById("state").value;
+  const testing = document.getElementById("testing").checked ? "1" : "0";
+  const url = "/.netlify/functions/list-service-responses?state=" + encodeURIComponent(state) + "&testing=" + testing + "&format=xlsx";
+  window.location.href = url;
 }
 
 document.getElementById("q").addEventListener("input", render);
