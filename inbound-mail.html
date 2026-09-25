@@ -326,8 +326,10 @@
       const code = match[0];
       if (seen[code]) continue;
       const win = body.slice(match.index + code.length, match.index + code.length + 300);
+      if (/LIST\s+FOR\s+\d{1,2}\/\d{1,2}[^\n]{0,40}RESTOCK|ON\s+(MON|TUE|WED|THU|FRI|SAT|SUN)[^\n]{0,40}LIST/i.test(win)) continue;
       const dateMatch = win.match(dateRe);
       if (!dateMatch) continue;
+      if (dateMatch[1] && dateMatch[1].split('/')[2] && dateMatch[1].split('/')[2].length !== 4) continue;
       const nums = [...win.replace(dateRe, '').matchAll(/(?<![\/.\d])(-?\d{1,4})(?![\/.\d])/g)]
         .map((x) => parseInt(x[1], 10))
         .filter((n) => n <= 9999 && n >= -99 && n !== 0);
