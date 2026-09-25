@@ -30,6 +30,12 @@ function unfoldBody(s) {
     .trim();
 }
 
+function firstNumber(s) {
+  if (s == null || s === "") return null;
+  const m = String(s).replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  return m ? m[0] : String(s).split(" PCI")[0].trim();
+}
+
 function field(text, label) {
   const re = new RegExp(label + "\\s*:\\s*(.*?)(?=\\s+(?:Service Call Date|Technician|Component|Location|Contact|Ticket Number|Issue|Call Type|Status|Resolution and Notes|Arrival Time|End Time|Travel Time|Mileage|PCI Requirements)\\s*:|$)", "i");
   const m = text.match(re);
@@ -48,8 +54,8 @@ function parseResponse(subject, body) {
     notes: field(text, "Resolution and Notes"),
     arrivalTime: field(text, "Arrival Time"),
     endTime: field(text, "End Time"),
-    travelTime: field(text, "Travel Time"),
-    mileage: field(text, "Mileage"),
+    travelTime: firstNumber(field(text, "Travel Time")),
+    mileage: firstNumber(field(text, "Mileage")),
     callType: field(text, "Call Type"),
     issue: field(text, "Issue"),
   };
@@ -147,10 +153,11 @@ exports.handler = async (event) => {
       }
     }
 
-    if (!match && parsed.location) {
+    const looksLikeSalesforceWo = /^00\d{6,}$/.test(String(parsed.ticketNumber || "").replace(/\s/g,""));
+    if (!match && parsed.location && !looksLikeSalesforceWo) {
       const scored = (openTickets || [])
         .map((t) => ({ t, score: locationScore(parsed.location, t.site_text) }))
-        .filter((x) => x.score >= 0.6)
+        .filter((x) => x.score >= 0.85)
         .sort((a, b) => b.score - a.score);
       if (scored.length === 1 || (scored.length > 1 && scored[0].score >= 0.85 && scored[0].score - scored[1].score >= 0.2)) {
         match = scored[0].t;
