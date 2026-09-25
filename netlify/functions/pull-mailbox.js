@@ -168,6 +168,7 @@ exports.handler = async (event) => {
   const qs = event.queryStringParameters || {};
   const since = body.since || qs.since || "2026-03-01";
   const limit = Math.min(60, Number(body.limit || qs.limit || 30));
+  const afterUid = Number(body.afterUid || qs.afterUid || 0);
   const dryRun = !!(body.dryRun || qs.dryRun);
 
   let session;
@@ -188,10 +189,11 @@ exports.handler = async (event) => {
       .map(Number)
       .filter(Boolean);
 
-    const batch = uids.slice(0, limit);
+    const remaining = afterUid ? uids.filter((u) => u > afterUid) : uids;
+    const batch = remaining.slice(0, limit);
     if (batch.length === 0) {
       session.socket.end();
-      return json(200, { ok: true, found: 0, inserted: 0, skipped: 0, message: "No messages since " + since });
+      return json(200, { ok: true, found: uids.length, inserted: 0, skipped: 0, message: "No messages after uid " + afterUid });
     }
 
     const fetchItems = dryRun
@@ -254,7 +256,11 @@ exports.handler = async (event) => {
       inserted,
       skipped,
       errors: errors.slice(0, 8),
-      nextHint: uids.length > limit ? "Call again with a later since= date or raise limit in chunks" : "Done for this since window",
+      lastUid: batch[batch.length - 1],
+      remaining: Math.max(0, remaining.length - batch.length),
+      nextHint: remaining.length > limit
+        ? ("Call again with afterUid=" + batch[batch.length - 1] + "&since=" + since)
+        : "Done for this since window",
     });
   } catch (err) {
     try { if (session && session.socket) session.socket.end(); } catch {}
