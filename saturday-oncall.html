@@ -181,6 +181,20 @@
   </div>
 </div>
 
+<!-- Push-to-date modal -- for the holiday-weekend case where Monday isn't
+     a work day either; →Mon covers the common case, this covers the rest -->
+<div class="modal-overlay" id="dateModal">
+  <div class="modal">
+    <h2>Push to Date</h2>
+    <label for="dateModalInput">New date</label>
+    <input type="date" id="dateModalInput" style="width:100%;background:#181818;border:1px solid #444;border-radius:6px;padding:8px;color:#fff;font-size:14px;">
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="dateModalCancel">Cancel</button>
+      <button class="btn btn-blue" id="dateModalConfirm">Push</button>
+    </div>
+  </div>
+</div>
+
 <!-- Message compose modal -- assigning/unassigning/pushing now happen
      inline on each stop card, matching the main dispatch board; this modal
      is purely for the optional text to the technician. -->
@@ -885,7 +899,9 @@ function renderStopCard(t) {
       <span class="show-all-link" data-idx="${t._idx}">Show all techs</span>
     </div>
     <div class="row2">
+      <button class="sc-btn" style="background:#2a6496;" data-idx="${t._idx}" data-action="route">🗺️ Route</button>
       <button class="sc-btn sc-mon" data-idx="${t._idx}" data-action="mon">📅 →Mon</button>
+      <button class="sc-btn" style="background:#5a4a1e;" data-idx="${t._idx}" data-action="pickdate">🗓️ Date…</button>
       <button class="sc-btn sc-done" data-idx="${t._idx}" data-action="done">✓ Done</button>
       <button class="sc-btn sc-cancel" data-idx="${t._idx}" data-action="cancel">✗ Cancel</button>
       <button class="sc-btn sc-msg" data-idx="${t._idx}" data-action="msg">💬 Message</button>
@@ -968,7 +984,21 @@ async function handleStopAction(t, action) {
     openMessageModal(t, defaultTech);
     return;
   }
-  if (!techName) return; // Mon/Done/Cancel need an existing assignment
+  if (!techName) return; // Route/Mon/Date/Done/Cancel need an existing assignment
+
+  if (action === 'route') {
+    // Same link-building as index.html's Route button -- a plain Google
+    // Maps directions URL, so live traffic/closures come from Maps itself
+    // rather than anything this page tries to model.
+    const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.name === techName);
+    const start = (tech && tech.homeAddress) || '';
+    const dest = (t._loc && t._loc.address) || '';
+    if (!dest) { alert('No address on file for this site.'); return; }
+    window.open(`https://www.google.com/maps/dir/${encodeURIComponent(start)}/${encodeURIComponent(dest)}`, '_blank');
+    return;
+  }
+
+  if (action === 'pickdate') { openDatePickerFor(t, techName); return; }
 
   if (action === 'cancel' && !confirm(`Cancel the assignment for ${t._loc.name}? This removes it from today's board -- use this only if Neumo itself canceled the ticket.`)) return;
 
@@ -996,6 +1026,45 @@ async function handleStopAction(t, action) {
     alert('Action failed: ' + e.message);
   }
 }
+
+// Arbitrary-date push -- same remove-then-recreate pattern as →Mon, just
+// with a chosen date instead of the fixed following-Monday one. Covers
+// Mark's holiday-weekend case (Monday itself isn't a work day either).
+let _datePickerTicket = null;
+let _datePickerTechName = null;
+
+function openDatePickerFor(t, techName) {
+  _datePickerTicket = t;
+  _datePickerTechName = techName;
+  const input = document.getElementById('dateModalInput');
+  input.min = TARGET_DAY;
+  input.value = followingMonday(TARGET_DAY);
+  document.getElementById('dateModal').classList.add('active');
+}
+
+document.getElementById('dateModalCancel').onclick = () => document.getElementById('dateModal').classList.remove('active');
+document.getElementById('dateModalConfirm').onclick = async () => {
+  const t = _datePickerTicket;
+  const techName = _datePickerTechName;
+  const targetIso = document.getElementById('dateModalInput').value;
+  if (!targetIso) { alert('Pick a date first.'); return; }
+  try {
+    await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
+    });
+    await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dispatchDate: targetIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
+    });
+    await loadAssignments();
+    renderTicketList();
+    document.getElementById('dateModal').classList.remove('active');
+    alert(`Pushed to ${targetIso} for ${techName}.`);
+  } catch (e) {
+    alert('Could not push to that date: ' + e.message);
+  }
+};
 
 async function showSiteHistory(code) {
   const body = document.getElementById('siteHistoryBody');
