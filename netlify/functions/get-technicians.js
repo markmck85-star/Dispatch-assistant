@@ -10,6 +10,13 @@
  * need any changes: an object keyed by tech slug, each value shaped like
  * { name, state, phone, email, homeAddress, smsAddress, active, lat, lng,
  *   geoFormatted, geoAt }.
+ *
+ * v3 (2026-09-26): added `id` (technicians.id, the real uuid) to each
+ * record. Every write endpoint that takes a technician_id -- save-on-call.js
+ * included -- needs the actual FK value, not the slug; the Saturday
+ * on-call page's tech-override save was broken without this, since slug
+ * was the only identifier available client-side. Purely additive --
+ * nothing existing reads or breaks on the new field.
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
@@ -61,7 +68,7 @@ exports.handler = async (event) => {
       // real NC/SC home_state.
       const { data: techs, error: techErr } = await supabase
         .from("technicians")
-        .select("slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, title, is_contractor, lat, lng, geocoded_at")
+        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, title, is_contractor, lat, lng, geocoded_at")
         .or(`home_state.eq.${state},additional_states.cs.{${state}}`);
 
       if (techErr) throw techErr;
@@ -83,6 +90,7 @@ exports.handler = async (event) => {
       for (const t of (techs || [])) {
         if (t.name === 'Unassigned (New Site)') continue;
         result[t.slug] = {
+          id: t.id,
           name: t.name,
           state: t.home_state,
           additionalStates: Array.isArray(t.additional_states) ? t.additional_states : [],
