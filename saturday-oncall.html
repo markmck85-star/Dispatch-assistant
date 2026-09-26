@@ -309,7 +309,7 @@ async function loadAssignments() {
     (data.assignments || []).forEach(a => {
       if (!covered.has(a.state)) return; // this page only shows Saturday-coverage states
       const key = (a.ticket && a.ticket.woNumber) || a.siteCode;
-      if (key) assignmentsByKey[key] = { techName: a.techName, status: a.status };
+      if (key) assignmentsByKey[key] = { techName: a.techName, status: a.status, receivedAt: a.receivedAt || null };
     });
   } catch (e) { /* leave assignmentsByKey empty -- ticket list just shows nothing assigned */ }
 }
@@ -569,7 +569,7 @@ function renderTicketList() {
     const key = ticketKey(t, loc ? loc.code : null);
     const assignment = key ? assignmentsByKey[key] : null;
     const assignedLabel = assignment
-      ? `<div class="meta" style="color:#5bd9c0;">Assigned to ${escapeHtml(assignment.techName)}${assignment.status === 'notified' ? ' — notified' : ''}</div>`
+      ? `<div class="meta" style="color:#5bd9c0;">Assigned to ${escapeHtml(assignment.techName)}${assignment.status === 'notified' ? ' — notified' : ''}${assignment.receivedAt ? ` · ✓ Received ${new Date(assignment.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}</div>`
       : '';
     // Same fix as index.html: a second, distinct ticket at a site with an
     // already-planned entry gets appended as a note on the FIRST ticket's
@@ -785,8 +785,30 @@ document.getElementById('messageModalSend').onclick = async () => {
   const techs = TECHS_BY_STATE[t.state] || {};
   const slug = document.getElementById('msgTechSelect').value;
   const tech = techs[slug];
-  const txt = document.getElementById('msgText').value;
+  let txt = document.getElementById('msgText').value;
   if (!tech) return;
+
+  // Attach a one-tap "confirm you got this" link when the ticket is
+  // formally assigned (a receipt only makes sense against a real
+  // assignment row). Best-effort -- an unmatched site or a failed token
+  // call just means the text goes out without the link, not a blocked send.
+  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  if (loc) {
+    try {
+      const tokRes = await fetch('/.netlify/functions/generate-receipt-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: loc.code }),
+      });
+      const tokData = await tokRes.json();
+      if (tokData.ok && tokData.token) {
+        const confirmUrl = `${location.origin}/.netlify/functions/confirm-receipt?token=${tokData.token}`;
+        txt += `\n\nTap when you've got this: ${confirmUrl}`;
+        document.getElementById('msgText').value = txt;
+      }
+    } catch (e) { /* non-fatal -- send without the link */ }
+  }
+
   try {
     const r = await fetch('/.netlify/functions/send-sms', {
       method: 'POST',
