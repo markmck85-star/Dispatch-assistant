@@ -76,6 +76,14 @@
         <label for="loginPin">PIN</label>
         <input type="password" id="loginPin" placeholder="PIN" inputmode="numeric" maxlength="10" autocomplete="current-password">
         <button class="big-btn" onclick="doLogin()">Log In</button>
+        <button type="button" class="big-btn" onclick="toggleChangePinForm()" style="background:#6c757d;margin-top:8px;">Change my PIN</button>
+        <div id="changePinBox" style="display:none;margin-top:12px;text-align:left;">
+            <label for="changePinCurrent">Current PIN</label>
+            <input type="password" id="changePinCurrent" placeholder="Current PIN" inputmode="numeric" maxlength="8">
+            <label for="changePinNew">New PIN (4–8 digits)</label>
+            <input type="password" id="changePinNew" placeholder="New PIN" inputmode="numeric" maxlength="8">
+            <button type="button" class="big-btn save-btn" onclick="changeOwnPinFromLogin()">Save new PIN</button>
+        </div>
         <div class="login-error" id="loginError"></div>
     </div>
 
@@ -1470,6 +1478,51 @@
         }
 
         // --- LOGIN ---
+        function toggleChangePinForm() {
+            var box = document.getElementById('changePinBox');
+            box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function changeOwnPinFromLogin() {
+            var username = document.getElementById('loginUser').value.trim();
+            var currentPin = document.getElementById('changePinCurrent').value.trim();
+            var newPin = document.getElementById('changePinNew').value.trim();
+            var errEl = document.getElementById('loginError');
+            errEl.style.display = 'none';
+            if (!username || !currentPin || !newPin) {
+                errEl.textContent = 'Enter username, current PIN, and new PIN.';
+                errEl.style.display = 'block';
+                return;
+            }
+            try {
+                var res = await fetch('/.netlify/functions/manage-dispatchers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminUsername: username, adminPin: currentPin, action: 'change-own-pin', pin: newPin })
+                });
+                var data = await res.json();
+                if (!res.ok || !data.ok) {
+                    errEl.textContent = data.error || 'Could not change PIN';
+                    errEl.style.display = 'block';
+                    return;
+                }
+                sessionStorage.setItem('dispatchAdminPin', newPin);
+                document.getElementById('loginPin').value = newPin;
+                document.getElementById('changePinBox').style.display = 'none';
+                showToast('PIN updated. Log in with the new PIN.', 'success');
+            } catch (e) {
+                errEl.textContent = 'Connection error. Try again.';
+                errEl.style.display = 'block';
+            }
+        }
+
+        function togglePinReveal(id) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            var hidden = el.textContent === '••••';
+            el.textContent = hidden ? (el.getAttribute('data-pin') || '') : '••••';
+        }
+
         async function doLogin() {
             var username = document.getElementById('loginUser').value.trim();
             var pin = document.getElementById('loginPin').value.trim();
@@ -1646,9 +1699,12 @@
                     var badge = u.active === false ? '<span style="color:#dc3545;">inactive</span>' : '<span style="color:#28a745;">active</span>';
                     var states = (u.states && u.states.length) ? u.states.join(', ') : '—';
                     var toggleLabel = u.active === false ? 'Reactivate' : 'Deactivate';
+                    var pinId = 'pin-'+u.id;
                     return '<div class="card">'
                         + '<div class="card-title">'+u.username+' <span style="font-weight:400;color:#666;font-size:13px;">('+u.role+')</span></div>'
                         + '<div class="card-detail">'+badge+' · territories: '+states+'</div>'
+                        + '<div class="card-detail">PIN: <span id="'+pinId+'" data-pin="'+(u.pin||'')+'">••••</span> '
+                        + '<button type="button" class="edit-btn" style="padding:2px 8px;" onclick="togglePinReveal(\''+pinId+'\')">Show</button></div>'
                         + '<div class="card-actions">'
                         + '<button class="edit-btn" onclick="editManagedUser(\''+u.id+'\')">Edit</button>'
                         + '<button class="edit-btn" onclick="resetManagedPin(\''+u.id+'\',\''+u.username+'\')">Change PIN</button>'
