@@ -8,9 +8,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-text-size-adjust:100%; }
-  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f5f5f5; padding:15px; line-height:1.5; font-size:16px; }
-  .container { max-width:1000px; margin:0 auto; }
-  @media (min-width:1100px) { .container { max-width:1200px; } body { padding:20px 28px 40px; } }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f5f5f5; padding:8px; line-height:1.5; font-size:16px; }
+  .container { max-width:none; width:100%; margin:0 auto; }
+  @media (min-width:700px) { body { padding:12px 16px 24px; } }
+  @media (min-width:1100px) { body { padding:16px 20px 32px; } }
 
   .back-link { display:inline-block; color:#007bff; text-decoration:none; font-size:14px; font-weight:600; margin-bottom:10px; }
   .console { background:#181818; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.15); padding:16px; color:#ddd; }
@@ -31,7 +32,10 @@
   .state-chip { background:#2a2a2a; color:#ccc; border:1px solid #444; border-radius:14px; padding:5px 12px; font-size:12.5px; cursor:pointer; }
   .state-chip.active { background:#007bff; color:#fff; border-color:#007bff; }
 
-  #satMap { height:340px; border-radius:8px; margin-bottom:16px; background:#111; }
+  #satMap { height:42vh; min-height:260px; max-height:560px; border-radius:8px; margin-bottom:16px; background:#111; }
+  .demo-banner { display:none; background:#3a2a00; border:1px solid #f0a500; border-radius:8px; padding:10px 12px; margin-bottom:14px; color:#ffe1a8; font-size:13.5px; }
+  .demo-banner a { color:#fff; }
+  .suggest { font-size:12px; color:#9ad7c8; margin-top:6px; }
   #satMapPanel.map-fullscreen { position:fixed; top:0; left:0; right:0; bottom:0; z-index:10000; margin:0; border-radius:0; padding:10px; background:#181818; display:flex; flex-direction:column; }
   #satMapPanel.map-fullscreen #satMapBody { flex:1; display:flex; flex-direction:column; min-height:0; }
   #satMapPanel.map-fullscreen #satMap { flex:1; height:auto; margin-bottom:0; }
@@ -80,6 +84,12 @@
   .modal select, .modal textarea { width:100%; background:#181818; border:1px solid #444; border-radius:6px; padding:8px; color:#fff; font-size:14px; }
   .modal textarea { min-height:140px; resize:vertical; }
   .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; position:sticky; bottom:-18px; background:#222; padding:10px 0 4px; margin-bottom:-4px; }
+
+  .sat-toast { position:fixed; left:12px; right:12px; bottom:12px; z-index:2000; background:#2a2208; border:1px solid #f0a500; border-radius:10px; padding:12px 14px; color:#ffe9b8; box-shadow:0 8px 24px rgba(0,0,0,0.4); display:none; max-width:560px; margin:0 auto; }
+  .sat-toast.active { display:block; }
+  .sat-toast strong { color:#f0a500; }
+  .sat-toast p { font-size:13.5px; margin:6px 0 10px; line-height:1.45; }
+  .sat-toast .toast-actions { display:flex; gap:8px; flex-wrap:wrap; }
 </style>
 </head>
 <body>
@@ -88,6 +98,10 @@
   <div class="console">
     <h1>&#128222; Saturday On-Call</h1>
     <div class="subtitle" id="dateLabel">&nbsp;</div>
+    <div class="demo-banner" id="previewBanner">
+      DEMO MODE — sample tickets only. Assign, Change, alerts, and Send do not write to the database.
+      <a href="/saturday-oncall">Exit demo</a>
+    </div>
 
     <div class="banner">
       <div class="who" id="dispatcherWho">Loading on-call dispatcher&hellip;</div>
@@ -119,6 +133,15 @@
 
 <!-- Dispatcher override / alerts confirmation modal (shared: both flows
      need "who is on call today, pick someone else if wrong") -->
+<div class="sat-toast" id="carrierToast" role="status">
+  <strong>Can't send text alerts yet</strong>
+  <p id="carrierToastBody">This dispatcher does not have a phone number and carrier on file. Enter them here — they are saved to the employee profile, no trip to the Admin Panel required.</p>
+  <div class="toast-actions">
+    <button class="btn btn-orange" id="carrierToastAdd">Enter phone &amp; carrier</button>
+    <button class="btn btn-grey" id="carrierToastDismiss">Not now</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="dispatcherModal">
   <div class="modal">
     <h2 id="dispatcherModalTitle">On-Call Dispatcher</h2>
@@ -229,6 +252,13 @@ let satMap = null;
 let mapMarkers = [];
 let satMapBounds = null;
 let pendingMessageTicket = null;
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+
+function previewGuard(actionLabel) {
+  if (!PREVIEW) return false;
+  alert('DEMO MODE: ' + actionLabel + ' is not written to the database.');
+  return true;
+}
 
 // Sites that are closed on Saturdays -- a ticket here is unlikely to need
 // a same-day dispatch (no one's onsite, so nothing to fix in person), but
@@ -456,41 +486,54 @@ async function getSortedOnCallCandidates(state, siteCode) {
   });
 }
 
-// For any ticket that doesn't yet have an assignment row at all (never
-// touched, not explicitly pushed/unassigned -- that's a real 'removed'
-// status, left alone here), auto-create one against the closest on-call
-// tech, same idea as tickets already arriving pre-assigned on the main
-// board -- just against the actual Saturday on-call roster instead of the
-// site's stored (and possibly not-on-call-today) primary/fallback tech.
-// assignedBy: 'manual' -- see the note above render: an 'auto'-tagged
-// assignment can get silently re-derived back to the site's stored
-// default the next time the main board reprocesses this date, which would
-// undo the whole point of this. Tagging it 'manual' protects it exactly
-// the way an actual dispatcher click would.
-async function autoAssignDefaults() {
-  let anyChanged = false;
-  for (const s of SAT_STATES) {
-    for (const t of (ticketsByState[s.code] || [])) {
-      const loc = resolveSiteLoc({ ...t, state: s.code });
-      if (!loc) continue; // unmatched -- can't assign, handled separately
-      const key = ticketKey(t, loc.code);
-      if (assignmentsByKey[key]) continue; // already has SOME row (including 'removed') -- leave it
-      const sorted = await getSortedOnCallCandidates(s.code, loc.code);
-      if (!sorted.length) continue; // no on-call tech to default to
-      try {
-        await fetch('/.netlify/functions/save-assignment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dispatchDate: TARGET_DAY, siteCode: loc.code, techName: sorted[0].name,
-            status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
-          }),
-        });
-        anyChanged = true;
-      } catch (e) { /* leave unassigned -- dispatcher can assign manually */ }
-    }
+// Closest on-call house is only a *suggestion* until a dispatcher clicks
+// Assign. Page load must not write planned rows.
+async function saveAssignmentRow(payload) {
+  if (previewGuard('Save assignment')) return { ok: false, preview: true };
+  const res = await fetch('/.netlify/functions/save-assignment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+function applyPreviewFixtures() {
+  if (!SAT_STATES.length) {
+    SAT_STATES = [
+      { code: 'GA', name: 'Georgia', timezone: 'America/New_York' },
+      { code: 'IN', name: 'Indiana', timezone: 'America/Indiana/Indianapolis' },
+      { code: 'MI', name: 'Michigan', timezone: 'America/Detroit' },
+      { code: 'NV', name: 'Nevada', timezone: 'America/Los_Angeles' },
+    ];
   }
-  if (anyChanged) await loadAssignments();
+  const sla = new Date();
+  sla.setHours(17, 0, 0, 0);
+  const slaIso = sla.toISOString();
+  const sample = [
+    { state: 'MI', siteText: 'Grand Rapids - Plainfield', address: '3472 Plainfield', siteCode: 'MIPREV1', woNumber: 'MI4412', issueCategory: 'Kiosk Down', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
+    { state: 'MI', siteText: 'Lansing - S Cedar', address: '123 S Cedar', siteCode: 'MIPREV2', woNumber: 'MI4418', issueCategory: 'Printer Jam / Out of Service', computedSlaDeadline: slaIso, needsReview: true, receivedAt: slaIso },
+    { state: 'GA', siteText: 'Atlanta - Peachtree', address: '100 Peachtree', siteCode: 'GAPREV1', woNumber: 'GA2201', issueCategory: 'Card Reader Failure', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
+    { state: 'IN', siteText: 'Indianapolis - Keystone', address: '200 Keystone', siteCode: 'INPREV1', woNumber: 'IN1188', issueCategory: 'Network Offline', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
+    { state: 'NV', siteText: 'NV - Test Kiosk', address: '', siteCode: null, woNumber: 'NV0099', issueCategory: 'Kiosk Down', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
+  ];
+  sample.forEach(t => {
+    ticketsByState[t.state] = ticketsByState[t.state] || [];
+    ticketsByState[t.state].push(t);
+  });
+  const locDefaults = {
+    MIPREV1: { code: 'MIPREV1', name: 'Grand Rapids - Plainfield', lat: 43.01, lng: -85.66, address: '3472 Plainfield' },
+    MIPREV2: { code: 'MIPREV2', name: 'Lansing - S Cedar', lat: 42.70, lng: -84.55, address: '123 S Cedar' },
+    GAPREV1: { code: 'GAPREV1', name: 'Atlanta - Peachtree', lat: 33.78, lng: -84.38, address: '100 Peachtree' },
+    INPREV1: { code: 'INPREV1', name: 'Indianapolis - Keystone', lat: 39.91, lng: -86.10, address: '200 Keystone' },
+  };
+  Object.entries(locDefaults).forEach(([code, loc]) => {
+    const st = code.slice(0, 2);
+    LOCATIONS_BY_STATE[st] = LOCATIONS_BY_STATE[st] || {};
+    LOCATIONS_BY_STATE[st][code] = loc;
+  });
+  assignmentsByKey['IN1188'] = { techName: (onCallByState.IN && onCallByState.IN[0] && onCallByState.IN[0].technician) || 'Aaron Schrop', status: 'planned' };
+  assignmentsByKey['MI4418'] = { techName: (onCallByState.MI && onCallByState.MI[0] && onCallByState.MI[0].technician) || 'Terril King', status: 'planned' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -530,6 +573,7 @@ document.getElementById('dispatcherModalConfirm').onclick = async () => {
   const mode = document.getElementById('dispatcherModal').dataset.mode;
   const dispatcherId = document.getElementById('dispatcherSelect').value;
   const changed = !currentDispatcher || currentDispatcher.dispatcherId !== dispatcherId;
+  if (previewGuard(mode === 'alerts' ? 'Enable text alerts' : 'Change dispatcher')) return;
 
   if (changed) {
     try {
@@ -562,9 +606,9 @@ async function enableTextAlerts() {
   if (!dispatcher) { alert('Could not find that dispatcher.'); return; }
 
   if (!dispatcher.smsAddress) {
-    const smsAddress = await promptForCarrier(dispatcher);
-    if (!smsAddress) return; // cancelled
-    dispatcher.smsAddress = smsAddress; // update the in-memory copy so the rest of this call sees it
+    const smsAddress = await showMissingCarrierToast(dispatcher);
+    if (!smsAddress) return;
+    dispatcher.smsAddress = smsAddress;
   }
 
   // Group today's covered states by timezone so each group gets its own
@@ -616,10 +660,36 @@ async function enableTextAlerts() {
 // file, saves it to their profile via save-dispatcher-contact.js (so it's
 // there for every future Saturday too, not just this one), and resolves
 // with the new address -- or null if the dispatcher cancels.
+function showMissingCarrierToast(dispatcher) {
+  return new Promise((resolve) => {
+    const toast = document.getElementById('carrierToast');
+    const body = document.getElementById('carrierToastBody');
+    const who = dispatcher.username || 'This dispatcher';
+    body.textContent = `${who} does not have a phone number and carrier on file. Enter them here and they will be saved to the employee profile so Saturday alerts (and later messaging) can reach them.`;
+    toast.classList.add('active');
+
+    const addBtn = document.getElementById('carrierToastAdd');
+    const dismissBtn = document.getElementById('carrierToastDismiss');
+
+    function cleanup() {
+      toast.classList.remove('active');
+      addBtn.onclick = null;
+      dismissBtn.onclick = null;
+    }
+
+    dismissBtn.onclick = () => { cleanup(); resolve(null); };
+    addBtn.onclick = async () => {
+      cleanup();
+      const smsAddress = await promptForCarrier(dispatcher);
+      resolve(smsAddress || null);
+    };
+  });
+}
+
 function promptForCarrier(dispatcher) {
   return new Promise((resolve) => {
     document.getElementById('carrierModalBody').textContent =
-      `${dispatcher.username} doesn't have a phone number on file yet. Add one so they can receive text alerts, now and every Saturday going forward.`;
+      `${dispatcher.username} doesn't have a phone number on file yet. Saving it here writes it to their employee profile — you do not need to open the Admin Panel.`;
     document.getElementById('carrierPhoneInput').value = '';
     document.getElementById('carrierSelect').value = '@vtext.com';
     document.getElementById('carrierModal').classList.add('active');
@@ -718,6 +788,13 @@ function renderMap() {
       if (loc && loc.lat != null && loc.lng != null) {
         const closed = closedSaturdayFlag(ticket.address);
         const color = closed ? '#f0a500' : '#e57373';
+        const slaPop = ticket.computedSlaDeadline
+          ? `<br>SLA: ${escapeHtml(new Date(ticket.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}`
+          : '';
+        const reviewPop = ticket.needsReview ? '<br><b>⚠ REVIEW</b>' : '';
+        const key = ticketKey(ticket, loc.code);
+        const asg = key && assignmentsByKey[key] && assignmentsByKey[key].status !== 'removed' ? assignmentsByKey[key] : null;
+        const whoPop = asg ? `<br>Assigned: ${escapeHtml(asg.techName)}` : '';
         const m = L.marker([loc.lat, loc.lng], {
           icon: L.divIcon({
             className: '',
@@ -725,7 +802,7 @@ function renderMap() {
             iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -13],
           }),
           title: loc.name,
-        }).bindPopup(`<b>${escapeHtml(loc.name)}</b><br>${escapeHtml(ticket.issueCategory || 'Trouble ticket')}${closed ? '<br><i>Closed on Saturdays</i>' : ''}`)
+        }).bindPopup(`<b>${escapeHtml(loc.name)}</b><br>${escapeHtml(ticket.issueCategory || 'Trouble ticket')}${slaPop}${reviewPop}${closed ? '<br><i>Closed on Saturdays</i>' : ''}${whoPop}`)
           .addTo(satMap);
         mapMarkers.push(m);
         bounds.push([loc.lat, loc.lng]);
@@ -830,7 +907,12 @@ function renderTicketList() {
   }
   rows.sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt));
 
-  if (!rows.length) { el.innerHTML = '<div class="empty">No open trouble tickets right now.</div>'; return; }
+  if (!rows.length) {
+    el.innerHTML = PREVIEW
+      ? '<div class="empty">No sample tickets loaded.</div>'
+      : '<div class="empty">No open trouble tickets right now.<br><a href="?preview=1" style="color:#7ec8e3;">Open demo mode to see sample placards</a></div>';
+    return;
+  }
 
   // Group by (state, assignedTech) -- unmatched/unassigned tickets (no
   // site match, or no on-call tech to default to) get their own bucket
@@ -893,12 +975,14 @@ function renderStopCard(t) {
     ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
     ${reviewBadge}
     ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
+    ${!a && loc ? '<div class="suggest">Suggested tech is the closest on-call house — nothing is saved until you Assign.</div>' : ''}
     ${canManage ? `
     <div class="row1">
       <select class="reassign-select" data-idx="${t._idx}"><option>Loading…</option></select>
       <span class="show-all-link" data-idx="${t._idx}">Show all techs</span>
     </div>
     <div class="row2">
+      ${a ? '' : `<button class="sc-btn" style="background:#0a6e5c;" data-idx="${t._idx}" data-action="assign">Assign suggested</button>`}
       <button class="sc-btn" style="background:#2a6496;" data-idx="${t._idx}" data-action="route">🗺️ Route</button>
       <button class="sc-btn sc-mon" data-idx="${t._idx}" data-action="mon">📅 →Mon</button>
       <button class="sc-btn" style="background:#5a4a1e;" data-idx="${t._idx}" data-action="pickdate">🗓️ Date…</button>
@@ -955,19 +1039,16 @@ function populateReassignSelect(sel, t, techList, isFullList) {
 async function handleReassign(t, techId) {
   const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.id === techId);
   if (!tech) return;
+  if (previewGuard('Reassign')) return;
   try {
-    const res = await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName: tech.name,
-        status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
-      }),
+    const data = await saveAssignmentRow({
+      dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName: tech.name,
+      status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
     });
-    const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Reassign failed');
     await loadAssignments();
     renderTicketList();
+    renderMap();
   } catch (e) {
     alert('Could not reassign: ' + e.message);
   }
@@ -975,6 +1056,26 @@ async function handleReassign(t, techId) {
 
 async function handleStopAction(t, action) {
   const techName = t._assignment ? t._assignment.techName : null;
+  if (action === 'assign') {
+    if (!t._loc) return;
+    const sorted = await getSortedOnCallCandidates(t.state, t._loc.code);
+    const pick = sorted[0];
+    if (!pick) { alert('No on-call technician to assign.'); return; }
+    if (previewGuard('Assign suggested')) return;
+    try {
+      const data = await saveAssignmentRow({
+        dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName: pick.name,
+        status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
+      });
+      if (!data.ok) throw new Error(data.error || 'Assign failed');
+      await loadAssignments();
+      renderTicketList();
+      renderMap();
+    } catch (e) {
+      alert('Could not assign: ' + e.message);
+    }
+    return;
+  }
   if (action === 'msg') {
     let defaultTech = techName;
     if (!defaultTech) {
@@ -1001,27 +1102,20 @@ async function handleStopAction(t, action) {
   if (action === 'pickdate') { openDatePickerFor(t, techName); return; }
 
   if (action === 'cancel' && !confirm(`Cancel the assignment for ${t._loc.name}? This removes it from today's board -- use this only if Neumo itself canceled the ticket.`)) return;
+  if (previewGuard(action === 'mon' ? 'Push to Monday' : action)) return;
 
   try {
     if (action === 'mon') {
       const mondayIso = followingMonday(TARGET_DAY);
       if (!confirm(`Push ${t._loc.name} to Monday (${mondayIso})?`)) return;
-      await fetch('/.netlify/functions/save-assignment', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
-      });
-      await fetch('/.netlify/functions/save-assignment', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dispatchDate: mondayIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
-      });
+      await saveAssignmentRow({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
+      await saveAssignmentRow({ dispatchDate: mondayIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
     } else if (action === 'done' || action === 'cancel') {
-      await fetch('/.netlify/functions/save-assignment', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: action === 'done' ? 'completed' : 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
-      });
+      await saveAssignmentRow({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: action === 'done' ? 'completed' : 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
     }
     await loadAssignments();
     renderTicketList();
+    renderMap();
   } catch (e) {
     alert('Action failed: ' + e.message);
   }
@@ -1046,17 +1140,18 @@ document.getElementById('dateModalCancel').onclick = () => document.getElementBy
 document.getElementById('dateModalConfirm').onclick = async () => {
   const t = _datePickerTicket;
   const techName = _datePickerTechName;
-  const targetIso = document.getElementById('dateModalInput').value;
+  let targetIso = document.getElementById('dateModalInput').value;
   if (!targetIso) { alert('Pick a date first.'); return; }
+  const picked = new Date(targetIso + 'T12:00:00');
+  if (picked.getDay() === 0) {
+    picked.setDate(picked.getDate() + 1);
+    targetIso = isoDate(picked);
+    alert('There is never Sunday coverage. Using Monday (' + targetIso + ') instead.');
+  }
+  if (previewGuard('Push to ' + targetIso)) return;
   try {
-    await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
-    });
-    await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dispatchDate: targetIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
-    });
+    await saveAssignmentRow({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
+    await saveAssignmentRow({ dispatchDate: targetIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
     await loadAssignments();
     renderTicketList();
     document.getElementById('dateModal').classList.remove('active');
@@ -1143,6 +1238,7 @@ document.getElementById('techModalConfirm').onclick = async () => {
   const slug = document.getElementById('techSelect').value;
   const tech = (TECHS_BY_STATE[state] || {})[slug];
   if (!tech) return;
+  if (previewGuard('Change on-call technician')) return;
   try {
     await fetch('/.netlify/functions/save-on-call', {
       method: 'POST',
@@ -1197,6 +1293,7 @@ document.getElementById('messageModalSend').onclick = async () => {
   const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.name === pendingMessageTechName);
   let txt = document.getElementById('msgText').value;
   if (!tech) { alert('Could not find that technician.'); return; }
+  if (previewGuard('Send message')) return;
 
   // Attach a one-tap "confirm you got this" link when the ticket is
   // formally assigned (a receipt only makes sense against a real
@@ -1266,7 +1363,11 @@ function escapeHtml(s) {
   await loadSaturdayStates();
   renderStateChips();
   await Promise.all([loadDispatchers(), loadDispatcherOnCall(), loadOnCallTechs(), loadTickets(), loadLocationsAndTechs(), loadAssignments()]);
-  await autoAssignDefaults();
+  if (PREVIEW) {
+    document.getElementById('previewBanner').style.display = 'block';
+    applyPreviewFixtures();
+    renderStateChips();
+  }
 
   renderDispatcherBanner();
   renderMap();

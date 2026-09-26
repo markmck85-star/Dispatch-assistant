@@ -113,6 +113,34 @@
             <button id="tabUnmatchedsites" onclick="switchTab('unmatchedsites')">🔍 Unmatched Sites</button>
             <button id="tabRestockschedule" onclick="switchTab('restockschedule')">🔄 Restock Schedule</button>
             <button id="tabMileagecheck" onclick="switchTab('mileagecheck')">🚗 Mileage Check</button>
+            <button id="tabUsers" onclick="switchTab('users')" style="display:none;">👤 Users</button>
+        </div>
+
+        <!-- USERS TAB (admin role only) -->
+        <div id="sectionUsers" class="section">
+            <div class="form-section">
+                <h2 id="userFormTitle">Add Login</h2>
+                <p style="font-size:13px;color:#555;margin-bottom:10px;">Creates a dispatcher login (username + PIN) used on this Admin Panel and the main board. Admin role can manage users and the Distance Matrix. Deactivate instead of deleting when someone leaves so history stays intact.</p>
+                <input type="hidden" id="userEditId" value="">
+                <label for="userUsername">Username</label>
+                <input type="text" id="userUsername" placeholder="e.g. justin" autocapitalize="none" autocomplete="off">
+                <label for="userPin">PIN <span style="color:#888;font-weight:400;font-size:12px;">(4–8 digits; leave blank when editing to keep the current PIN)</span></label>
+                <input type="password" id="userPin" placeholder="PIN" inputmode="numeric" maxlength="8" autocomplete="new-password">
+                <label for="userRole">Role</label>
+                <select id="userRole">
+                    <option value="dispatcher">Dispatcher</option>
+                    <option value="admin">Admin</option>
+                </select>
+                <label>Territories</label>
+                <div id="userStatesBox" style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:12px;"></div>
+                <button class="big-btn save-btn" onclick="saveManagedUser()">Save Login</button>
+                <button class="big-btn" onclick="clearUserForm()" style="background:#6c757d;margin-top:5px;">Clear Form</button>
+            </div>
+            <div class="list-header">
+                <h2>Logins</h2>
+                <span class="count-badge" id="userCount">0</span>
+            </div>
+            <div id="userList"></div>
         </div>
 
         <!-- LOCATIONS TAB -->
@@ -1468,6 +1496,7 @@
                 }
                 currentUser = data;
                 sessionStorage.setItem('dispatchUser', JSON.stringify(data));
+                sessionStorage.setItem('dispatchAdminPin', pin);
                 showAdminPanel();
             } catch (e) {
                 errEl.textContent = 'Connection error. Try again.';
@@ -1498,6 +1527,13 @@
             if (dmTabBtn) {
                 dmTabBtn.style.display = (currentUser.role === 'admin') ? '' : 'none';
                 if (currentUser.role !== 'admin' && dmTabBtn.className === 'active') {
+                    switchTab('locations');
+                }
+            }
+            var usersTabBtn = document.getElementById('tabUsers');
+            if (usersTabBtn) {
+                usersTabBtn.style.display = (currentUser.role === 'admin') ? '' : 'none';
+                if (currentUser.role !== 'admin' && usersTabBtn.className === 'active') {
                     switchTab('locations');
                 }
             }
@@ -1558,12 +1594,140 @@
         })();
 
         // --- TAB SWITCHING ---
+        var ALL_LOGIN_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
+
+        function adminCreds() {
+            return { adminUsername: currentUser && currentUser.username, adminPin: sessionStorage.getItem('dispatchAdminPin') || '' };
+        }
+
+        async function manageUsers(payload) {
+            var body = Object.assign(adminCreds(), payload);
+            var res = await fetch('/.netlify/functions/manage-dispatchers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            var data = await res.json();
+            if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Request failed');
+            return data;
+        }
+
+        function renderUserStateChecks(selected) {
+            var box = document.getElementById('userStatesBox');
+            var picked = selected || [];
+            box.innerHTML = ALL_LOGIN_STATES.map(function(st) {
+                var on = picked.indexOf(st) >= 0 ? ' checked' : '';
+                return '<label style="font-weight:400;display:flex;align-items:center;gap:4px;margin:0;"><input type="checkbox" class="user-state-cb" value="'+st+'"'+on+'> '+st+'</label>';
+            }).join('');
+        }
+
+        function selectedUserStates() {
+            return Array.prototype.slice.call(document.querySelectorAll('.user-state-cb:checked')).map(function(el){ return el.value; });
+        }
+
+        function clearUserForm() {
+            document.getElementById('userEditId').value = '';
+            document.getElementById('userUsername').value = '';
+            document.getElementById('userUsername').disabled = false;
+            document.getElementById('userPin').value = '';
+            document.getElementById('userRole').value = 'dispatcher';
+            document.getElementById('userFormTitle').textContent = 'Add Login';
+            renderUserStateChecks([]);
+        }
+
+        async function loadManagedUsers() {
+            if (!currentUser || currentUser.role !== 'admin') return;
+            try {
+                var data = await manageUsers({ action: 'list' });
+                var list = document.getElementById('userList');
+                var users = data.users || [];
+                document.getElementById('userCount').textContent = users.length;
+                list.innerHTML = users.map(function(u) {
+                    var badge = u.active === false ? '<span style="color:#dc3545;">inactive</span>' : '<span style="color:#28a745;">active</span>';
+                    var states = (u.states && u.states.length) ? u.states.join(', ') : '—';
+                    var toggleLabel = u.active === false ? 'Reactivate' : 'Deactivate';
+                    return '<div class="card">'
+                        + '<div class="card-title">'+u.username+' <span style="font-weight:400;color:#666;font-size:13px;">('+u.role+')</span></div>'
+                        + '<div class="card-detail">'+badge+' · territories: '+states+'</div>'
+                        + '<div class="card-actions">'
+                        + '<button class="edit-btn" onclick="editManagedUser(\''+u.id+'\')">Edit</button>'
+                        + '<button class="edit-btn" onclick="resetManagedPin(\''+u.id+'\',\''+u.username+'\')">Change PIN</button>'
+                        + '<button class="del-btn" onclick="toggleManagedUser(\''+u.id+'\','+(u.active===false)+')">'+toggleLabel+'</button>'
+                        + '</div></div>';
+                }).join('') || '<div class="card-detail">No logins found.</div>';
+                window._managedUsers = users;
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        function editManagedUser(id) {
+            var users = window._managedUsers || [];
+            var u = users.filter(function(x){ return x.id === id; })[0];
+            if (!u) return;
+            document.getElementById('userEditId').value = u.id;
+            document.getElementById('userUsername').value = u.username;
+            document.getElementById('userUsername').disabled = true;
+            document.getElementById('userPin').value = '';
+            document.getElementById('userRole').value = u.role || 'dispatcher';
+            document.getElementById('userFormTitle').textContent = 'Edit ' + u.username;
+            renderUserStateChecks(u.states || []);
+            window.scrollTo(0, 0);
+        }
+
+        async function saveManagedUser() {
+            var id = document.getElementById('userEditId').value;
+            var username = document.getElementById('userUsername').value.trim().toLowerCase();
+            var pin = document.getElementById('userPin').value.trim();
+            var role = document.getElementById('userRole').value;
+            var states = selectedUserStates();
+            try {
+                if (id) {
+                    var payload = { action: 'update', id: id, role: role, states: states };
+                    if (pin) payload.pin = pin;
+                    await manageUsers(payload);
+                    showToast('Login updated', 'success');
+                } else {
+                    if (!pin) { showToast('New logins need a PIN', 'error'); return; }
+                    await manageUsers({ action: 'create', username: username, pin: pin, role: role, states: states });
+                    showToast('Login created', 'success');
+                }
+                clearUserForm();
+                loadManagedUsers();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function resetManagedPin(id, username) {
+            var pin = prompt('New 4–8 digit PIN for ' + username + ':');
+            if (pin == null) return;
+            try {
+                await manageUsers({ action: 'set-pin', id: id, pin: pin.trim() });
+                showToast('PIN updated for ' + username, 'success');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function toggleManagedUser(id, currentlyInactive) {
+            var next = !!currentlyInactive;
+            if (!next && !confirm('Deactivate this login? They will not be able to sign in. You can reactivate later.')) return;
+            try {
+                await manageUsers({ action: 'set-active', id: id, active: next });
+                showToast(next ? 'Login reactivated' : 'Login deactivated', 'success');
+                loadManagedUsers();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
         function switchTab(tab) {
-            if (tab === 'distancematrix' && (!currentUser || currentUser.role !== 'admin')) {
-                showToast('Distance Matrix is restricted to admin users.', 'error');
+            if ((tab === 'distancematrix' || tab === 'users') && (!currentUser || currentUser.role !== 'admin')) {
+                showToast('That tab is restricted to admin users.', 'error');
                 tab = 'locations';
             }
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule', 'mileagecheck'];
+            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -1574,6 +1738,7 @@
             if (tab === 'repeatissues') loadRepeatIssues();
             if (tab === 'unmatchedsites') loadUnmatchedSites();
             if (tab === 'restockschedule') loadRestockSchedule();
+            if (tab === 'users') { renderUserStateChecks([]); loadManagedUsers(); }
         }
 
         // --- RESTOCK SCHEDULE ---
