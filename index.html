@@ -5267,20 +5267,28 @@ function distanceMatrixStatus(state) {
             const loc = LOCATIONS[item.code];
             if (!loc || loc.contractorOverride) return;
             const currentPrimary = loc.primaryTech || loc.defaultTech || 'unassigned';
-            showReassignPrompt(item.code, loc.name || item.code, currentPrimary, newTech, loc);
+            // Moving off the named primary → offer to replace primary.
+            // Moving off a cover tech (primary is out) → offer fallback so
+            // Omari stays primary and Randy becomes who covers next time.
+            showReassignPrompt(item.code, loc.name || item.code, currentPrimary, newTech, loc, oldTech);
         }
 
-        function showReassignPrompt(code, locName, fromTech, toTech, loc) {
+        function showReassignPrompt(code, locName, fromTech, toTech, loc, fromAssignedTech) {
             // Remove any existing prompt
             var existing = document.getElementById('reassign-prompt');
             if (existing) existing.remove();
 
             var state = code.substring(0, 2);
+            var saveAsFallback = !!(fromAssignedTech && fromTech && fromAssignedTech !== fromTech);
+            var roleLabel = saveAsFallback ? 'fallback' : 'primary';
+            var currentNote = saveAsFallback
+                ? 'Primary stays <strong>' + fromTech + '</strong>. Stop was on ' + fromAssignedTech + '.'
+                : 'Currently: ' + fromTech;
             var div = document.createElement('div');
             div.id = 'reassign-prompt';
             div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #ffa500;border-radius:8px;padding:14px 18px;z-index:9999;max-width:90vw;box-shadow:0 4px 20px rgba(0,0,0,0.5);font-size:14px;color:#f0f0f0;';
             div.innerHTML = '<div style="margin-bottom:10px;"><strong>' + code + '</strong> — ' + locName + '</div>' +
-                '<div style="margin-bottom:12px;color:#ccc;">Save <strong>' + toTech + '</strong> as permanent primary?<br><small style="color:#999;">Currently: ' + fromTech + '</small></div>' +
+                '<div style="margin-bottom:12px;color:#ccc;">Save <strong>' + toTech + '</strong> as permanent ' + roleLabel + '?<br><small style="color:#999;">' + currentNote + '</small></div>' +
                 '<div style="display:flex;gap:10px;">' +
                 '<button id="rp-yes" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Yes, save it</button>' +
                 '<button id="rp-no" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">No</button>' +
@@ -5290,25 +5298,35 @@ function distanceMatrixStatus(state) {
             document.getElementById('rp-no').onclick = function() { div.remove(); };
             document.getElementById('rp-yes').onclick = function() {
                 div.remove();
+                var payload = {
+                    code: code,
+                    state: state,
+                    name: loc.name || '',
+                    address: loc.address || '',
+                    contractorOverride: false,
+                    contractorName: loc.contractorName || ''
+                };
+                if (saveAsFallback) {
+                    payload.primaryTech = loc.primaryTech || loc.defaultTech || fromTech;
+                    payload.fallbackTech = toTech;
+                } else {
+                    payload.primaryTech = toTech;
+                    payload.fallbackTech = loc.fallbackTech || '';
+                }
                 fetch('/.netlify/functions/save-location', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        code: code,
-                        state: state,
-                        name: loc.name || '',
-                        address: loc.address || '',
-                        primaryTech: toTech,
-                        fallbackTech: loc.fallbackTech || '',
-                        contractorOverride: false,
-                        contractorName: loc.contractorName || ''
-                    })
+                    body: JSON.stringify(payload)
                 })
                 .then(r => r.json())
                 .then(data => {
                     if (data.ok) {
-                        loc.primaryTech = toTech;
-                        loc.defaultTech = toTech;
+                        if (saveAsFallback) {
+                            loc.fallbackTech = toTech;
+                        } else {
+                            loc.primaryTech = toTech;
+                            loc.defaultTech = toTech;
+                        }
                     }
                 })
                 .catch(() => {});
