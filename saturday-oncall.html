@@ -1026,9 +1026,15 @@ async function wireStopCardEvents() {
     link.onclick = () => {
       const t = rows[Number(link.dataset.idx)];
       const sel = document.querySelector(`select.reassign-select[data-idx="${link.dataset.idx}"]`);
-      const allTechs = Object.values(TECHS_BY_STATE[t.state] || {}).filter(x => x.active !== false);
+      const allTechs = Object.values(TECHS_BY_STATE[t.state] || {})
+        .filter(x => x.active !== false)
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
       populateReassignSelect(sel, t, allTechs, true);
       link.style.display = 'none';
+      sel.focus();
+      try {
+        if (typeof sel.showPicker === 'function') sel.showPicker();
+      } catch (e) { /* some browsers only allow this from a direct gesture */ }
     };
   });
 
