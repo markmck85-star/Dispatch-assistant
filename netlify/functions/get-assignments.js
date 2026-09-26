@@ -6,8 +6,14 @@
  * date, joined to site_code and technician name so the frontend doesn't
  * need to do its own id lookups.
  *
+ * v2 (2026-09-26): added receivedAt -- the timestamp a technician tapped
+ * their "confirm receipt" link (see confirm-receipt.js), built for the
+ * Saturday on-call page so a dispatcher can see a ticket was actually
+ * acknowledged even when the tech never replies to the text itself.
+ * Purely additive, null on every assignment made before this existed.
+ *
  * GET /.netlify/functions/get-assignments?dispatchDate=YYYY-MM-DD
- * -> { assignments: [ { siteCode, techName, status, assignedBy, sequenceOrder, locked,
+ * -> { assignments: [ { siteCode, techName, status, assignedBy, sequenceOrder, locked, receivedAt,
  *                        ticket: { woNumber, ticketKind, issueCategory, issueDetail,
  *                                  slaEndsAt, earliestStartAt, computedSlaDeadline } | null } ] }
  */
@@ -45,7 +51,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("assignments")
-      .select("status, assigned_by, sequence_order, locked, restock_form_counts, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review)")
+      .select("status, assigned_by, sequence_order, locked, restock_form_counts, received_at, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review)")
       .eq("dispatch_date", dispatchDate);
 
     if (error) return json(500, { error: "Query failed: " + error.message });
@@ -108,6 +114,11 @@ exports.handler = async (event) => {
           assignedBy: row.assigned_by,
           sequenceOrder: row.sequence_order,
           locked: row.locked,
+          // 2026-09-26: when a technician tapped their receipt-confirmation
+          // link (confirm-receipt.js) -- null until they do. Lets the
+          // Saturday on-call page show a real "confirmed" signal instead
+          // of relying on the tech replying to the text itself.
+          receivedAt: row.received_at || null,
           // 2026-09-17: restock form counts (LF/RF/Journal/consumables/etc),
           // persisted by save-assignment.js when a stop is first saved from
           // a fresh dispatch-list paste. Null for assignments saved before
