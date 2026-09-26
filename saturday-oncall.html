@@ -745,7 +745,18 @@ document.getElementById('messageModalSend').onclick = async () => {
       body: JSON.stringify({
         to: tech.smsAddress || null,
         email: tech.email || null,
-        body: `MCR Dispatch: urgent ticket for ${t.state}. Details sent to your email.`,
+        body: (() => {
+          const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+          const site = loc ? `${loc.code} - ${loc.name}` : (t.siteText || 'See email');
+          const issue = t.issueCategory || t.issueDetail || 'See email for details';
+          let sms = `🚨 WO: ${t.woNumber || 'See email'}\nSite: ${site}`;
+          if (issue && issue !== 'See email for details') sms += `\nIssue: ${issue}`;
+          if (t.computedSlaDeadline) {
+            const slaStr = new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+            sms += `\nSLA ends: ${slaStr}`;
+          }
+          return sms;
+        })(),
         htmlBody: `<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">${escapeHtml(txt)}</pre>`,
         subject: `MCR Dispatch — Saturday urgent (${t.state})`,
       }),
@@ -770,7 +781,7 @@ function escapeHtml(s) {
 (async function init() {
   TARGET_DAY = targetSaturday();
   document.getElementById('dateLabel').textContent =
-    `For Saturday, ${new Date(TARGET_DAY + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    `For ${new Date(TARGET_DAY + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
 
   await loadSaturdayStates();
   renderStateChips();
