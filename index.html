@@ -819,7 +819,8 @@
 
             let match;
             while ((match = codeRe.exec(text)) !== null) {
-                const code = (typeof canonicalSiteCode === 'function') ? canonicalSiteCode(match[1]) : match[1];
+                const rawCode = match[0];
+                const code = (typeof canonicalSiteCode === 'function') ? canonicalSiteCode(rawCode) : rawCode;
                 const start = match.index + match[0].length;
                 // Grab window of text after the site code — enough to cover all fields
                 // BH locations have more columns so need a larger window
@@ -898,6 +899,12 @@
                     };
                 }
             }
+            // CA Loomis tags (KB5) must also be readable as the real CA####
+            // site code the board and messages use.
+            Object.keys(counts).forEach(function(k) {
+                const can = (typeof canonicalSiteCode === 'function') ? canonicalSiteCode(k) : k;
+                if (can && can !== k && !counts[can]) counts[can] = counts[k];
+            });
             return counts;
         }
 
@@ -3105,7 +3112,11 @@ function distanceMatrixStatus(state) {
                     } else { ni++; }
                 }
             }
-            const skippedCarry = [...new Set(window._skippedCarryover || [])];
+            const skippedCarry = [...new Set(window._skippedCarryover || [])].filter(function(code) {
+                const up = String(code || '').toUpperCase();
+                if (CURRENT_STATE === 'CA') return /^CA\d/.test(up) || /^K[A-Z0-9]+$/.test(up);
+                return up.indexOf(CURRENT_STATE) === 0;
+            });
             if (skippedCarry.length) {
                 showToast('Skipped leftover list note (no Restock By): ' + skippedCarry.join(', ') + '. Check that prior dispatch list for what they actually need.', 7000);
             }
