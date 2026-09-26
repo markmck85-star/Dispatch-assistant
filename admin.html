@@ -2295,6 +2295,8 @@
             if (!code) { showToast('Site code is required.', 'error'); return; }
 
             var isEdit = document.getElementById('locCode').disabled;
+            var prevLoc = locationsData[code] || {};
+            var prevAddress = String(prevLoc.address || '').trim();
             var payload = {
                 code: code,
                 state: currentState,
@@ -2346,7 +2348,8 @@
                 // (geocode + linear-cost drive-time/site-to-site for just
                 // this one site), and someone editing from this tab has no
                 // reason to already know the Distance Matrix tab exists.
-                if (payload.address) {
+                var addressChanged = !isEdit || (payload.address && payload.address !== prevAddress);
+                if (payload.address && addressChanged) {
                     showActionToast(
                         (isEdit ? 'Add this location\'s new address' : 'Add ' + code) + ' to the ' + currentState + ' distance matrix?',
                         'Add to matrix',
@@ -2559,7 +2562,9 @@
                 // currentState (the tab they happened to be viewing) --
                 // those can differ, e.g. adding a tech while on a
                 // neighboring state's tab.
-                if (payload.homeAddress) {
+                var prevHome = String(existingTech.homeAddress || '').trim();
+                var homeChanged = !isEdit || (payload.homeAddress && payload.homeAddress !== prevHome);
+                if (payload.homeAddress && homeChanged) {
                     showActionToast(
                         (isEdit ? 'Add this technician\'s new address' : 'Add ' + name) + ' to the ' + homeState + ' distance matrix?',
                         'Add to matrix',
