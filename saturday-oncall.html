@@ -972,8 +972,10 @@ function renderStopCard(t) {
     ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
     : '';
   const a = t._assignment;
-  const receivedStr = a && a.receivedAt ? ` · ✓ Received ${new Date(a.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : '';
-  const notifiedStr = a && a.status === 'notified' ? ' — notified' : '';
+  const receivedStr = a && a.receivedAt
+    ? ` <span class="closed-badge" style="background:#1a3d2a;color:#8fd4a8;border:1px solid #2e6b48;">✓ Received ${new Date(a.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>`
+    : '';
+  const notifiedStr = (!a || a.receivedAt) ? '' : (a.status === 'notified' ? ' — notified' : '');
   const reviewBadge = t.needsReview
     ? `<span onclick="showSiteHistory('${loc ? loc.code : ''}')" style="cursor:pointer;display:inline-block;background:#c98a1e;color:#1a1a1a;font-weight:700;font-size:11px;border-radius:4px;padding:2px 6px;margin-top:5px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
     : '';
@@ -1318,6 +1320,7 @@ document.getElementById('messageModalSend').onclick = async () => {
   // assignment row). Best-effort -- an unmatched site or a failed token
   // call just means the text goes out without the link, not a blocked send.
   const loc = t._loc || resolveSiteLoc(t);
+  let confirmUrl = '';
   if (loc && !PREVIEW) {
     try {
       const tokRes = await fetch('/.netlify/functions/generate-receipt-token', {
@@ -1327,8 +1330,8 @@ document.getElementById('messageModalSend').onclick = async () => {
       });
       const tokData = await tokRes.json();
       if (tokData.ok && tokData.token) {
-        const confirmUrl = `${location.origin}/.netlify/functions/confirm-receipt?token=${tokData.token}`;
-        txt += `\n\nTap when you've got this: ${confirmUrl}`;
+        confirmUrl = `${location.origin}/.netlify/functions/confirm-receipt?token=${tokData.token}`;
+        txt += `\n\nTap to confirm you got this: ${confirmUrl}`;
         document.getElementById('msgText').value = txt;
       }
     } catch (e) { /* non-fatal -- send without the link */ }
@@ -1342,22 +1345,42 @@ document.getElementById('messageModalSend').onclick = async () => {
         to: tech.smsAddress || null,
         email: tech.email || null,
         body: (() => {
-          const site = loc ? `${loc.code} - ${loc.name}` : (t.siteCode ? `${t.siteCode} - ${t.siteName || ''}` : (t.siteText || 'See email'));
-          const issue = t.issueCategory || t.issueDetail || 'See email for details';
-          let sms = `🚨 WO: ${t.woNumber || 'See email'}\nSite: ${site}`;
-          if (issue && issue !== 'See email for details') sms += `\nIssue: ${issue}`;
-          if (t.computedSlaDeadline) {
-            const slaStr = new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-            sms += `\nSLA ends: ${slaStr}`;
-          }
+          const site = loc ? (loc.name || loc.code) : (t.siteText || 'a site');
+          const wo = t.woNumber ? ` WO ${t.woNumber}` : '';
+          let sms = `MCR Saturday on-call:${wo} at ${site}. Details sent to your email.`;
+          if (confirmUrl) sms += ` Tap to confirm: ${confirmUrl}`;
           return sms;
         })(),
-        htmlBody: `<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">${escapeHtml(txt)}</pre>`,
-        subject: `MCR Dispatch — Saturday urgent (${t.state})`,
+        htmlBody: (() => {
+          const site = loc ? `${loc.code ? loc.code + ' — ' : ''}${loc.name}` : (t.siteText || 'Unknown site');
+          const addr = (loc && loc.address) || t.address || '';
+          const issue = t.issueCategory || t.issueDetail || 'Trouble ticket';
+          const detail = t.issueDetail && t.issueDetail !== t.issueCategory ? t.issueDetail : '';
+          const sla = t.computedSlaDeadline
+            ? new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+            : '';
+          const closed = closedSaturdayFlag(t.address || (loc && loc.address));
+          let email = `Saturday on-call dispatch — ${t.state}\n\n`;
+          email += txt + '\n\n';
+          email += '────────\n';
+          email += `Work order: ${t.woNumber || 'n/a'}\n`;
+          email += `Site: ${site}\n`;
+          if (addr) email += `Address: ${addr}\n`;
+          email += `Issue: ${issue}\n`;
+          if (detail) email += `Detail: ${detail}\n`;
+          if (sla) email += `SLA deadline: ${sla}\n`;
+          if (closed) email += `Note: This site is flagged closed on Saturdays. Confirm it is a real call before rolling.\n`;
+          if (currentDispatcher && currentDispatcher.dispatcher) email += `On-call dispatcher: ${currentDispatcher.dispatcher}\n`;
+          return `<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">${escapeHtml(email)}</pre>`;
+        })(),
+        subject: `MCR Dispatch — Saturday urgent (${t.state}${t.woNumber ? ' WO ' + t.woNumber : ''})`,
       }),
     });
     const d = await r.json();
-    if (d.ok) { alert(`Sent to ${tech.name}!`); document.getElementById('messageModal').classList.remove('active'); }
+    if (d.ok) {
+      alert(`Sent to ${tech.name}!${tech.email ? '\n📧 Full details emailed' : ''}${tech.smsAddress ? '\n📱 SMS ping sent' : ''}`);
+      document.getElementById('messageModal').classList.remove('active');
+    }
     else alert('Send failed: ' + (d.error || 'unknown error'));
   } catch (e) {
     alert('Send failed: ' + e.message);
@@ -1391,6 +1414,17 @@ function escapeHtml(s) {
   renderMap();
   renderTicketList();
   renderTechPanels();
+
+  // Refresh assignments so a tech tapping "confirm receipt" shows up
+  // on the board without a manual reload.
+  setInterval(async () => {
+    const before = JSON.stringify(assignmentsByKey);
+    await loadAssignments();
+    if (JSON.stringify(assignmentsByKey) !== before) {
+      renderTicketList();
+      renderMap();
+    }
+  }, 20000);
 })();
 </script>
 </body>
