@@ -136,13 +136,17 @@
   </div>
 </div>
 
-<!-- Dispatch-a-ticket message modal -->
+<!-- Dispatch-a-ticket modal: assign is the real action (writes to the same
+     assignments table the main dispatch board uses), texting is optional
+     alongside it since a dispatcher might just call instead -->
 <div class="modal-overlay" id="messageModal">
   <div class="modal">
-    <h2>Send to Technician</h2>
+    <h2>Assign Technician</h2>
+    <div id="assignUnmatchedNote" style="display:none;font-size:12.5px;color:#f0a500;margin-bottom:8px;">This ticket's site isn't matched to a real location yet, so it can't be formally assigned -- resolve the site first (via the unmatched-sites toast on the main dispatch page). You can still message a tech below.</div>
     <label for="msgTechSelect">Technician</label>
     <select id="msgTechSelect"></select>
-    <label for="msgText">Message</label>
+    <button class="btn btn-green" id="assignBtn" style="width:100%;margin-top:10px;">✅ Assign</button>
+    <label for="msgText">Message (optional)</label>
     <textarea id="msgText"></textarea>
     <div class="modal-actions">
       <button class="btn btn-grey" id="messageModalCancel">Cancel</button>
@@ -164,6 +168,7 @@ let onCallByState = {};         // { GA: [{state,day,technician,homeState}], ...
 let ticketsByState = {};        // { GA: [entries...], ... } (trouble-only)
 let LOCATIONS_BY_STATE = {};    // { GA: {code: {...}}, ... }
 let TECHS_BY_STATE = {};        // { GA: {slug: {...}}, ... }
+let assignmentsByKey = {};      // { <woNumber or siteCode>: {techName, status} }
 let activeStateFilter = null;   // null = overview, else a state code
 let satMap = null;
 let mapMarkers = [];
@@ -273,6 +278,28 @@ async function loadLocationsAndTechs() {
       TECHS_BY_STATE[s.code] = {};
     }
   }));
+}
+
+// A ticket and its assignment row are matched the same way the main
+// dispatch board's own ticket-linked stops are: by WO number when the
+// ticket has one (every trouble ticket does), falling back to site code
+// for the rare ticket with none.
+function ticketKey(t, siteCode) {
+  return t.woNumber || siteCode || null;
+}
+
+async function loadAssignments() {
+  assignmentsByKey = {};
+  try {
+    const res = await fetch(`/.netlify/functions/get-assignments?dispatchDate=${TARGET_DAY}`);
+    const data = await res.json();
+    const covered = new Set(SAT_STATES.map(s => s.code));
+    (data.assignments || []).forEach(a => {
+      if (!covered.has(a.state)) return; // this page only shows Saturday-coverage states
+      const key = (a.ticket && a.ticket.woNumber) || a.siteCode;
+      if (key) assignmentsByKey[key] = { techName: a.techName, status: a.status };
+    });
+  } catch (e) { /* leave assignmentsByKey empty -- ticket list just shows nothing assigned */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -527,15 +554,21 @@ function renderTicketList() {
     const slaLabel = t.computedSlaDeadline
       ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
       : '';
+    const key = ticketKey(t, loc ? loc.code : null);
+    const assignment = key ? assignmentsByKey[key] : null;
+    const assignedLabel = assignment
+      ? `<div class="meta" style="color:#5bd9c0;">Assigned to ${escapeHtml(assignment.techName)}${assignment.status === 'notified' ? ' — notified' : ''}</div>`
+      : '';
     return `<div class="ticket-card" data-idx="${i}">
       <div class="top">
         <div>
           <span class="site" data-code="${loc ? loc.code : ''}">[${t.state}] ${escapeHtml(siteLabel)}</span>
           <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}</div>
           ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
+          ${assignedLabel}
           ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
         </div>
-        <button class="dispatch-btn" data-idx="${i}">Dispatch</button>
+        <button class="dispatch-btn" data-idx="${i}">${assignment ? 'Reassign' : 'Dispatch'}</button>
       </div>
     </div>`;
   }).join('');
@@ -622,14 +655,26 @@ function openMessageModal(ticket) {
   pendingMessageTicket = ticket;
   const techs = TECHS_BY_STATE[ticket.state] || {};
   const entries = onCallByState[ticket.state] || [];
+  const loc = (LOCATIONS_BY_STATE[ticket.state] || {})[(ticket.siteText || '').split(/[\s-]/)[0]];
   const sel = document.getElementById('msgTechSelect');
   sel.innerHTML = Object.entries(techs)
     .filter(([, t]) => t.active !== false)
     .map(([slug, t]) => `<option value="${slug}">${escapeHtml(t.name)}</option>`).join('');
-  if (entries[0] && entries[0].technician) {
+  const key = ticketKey(ticket, loc ? loc.code : null);
+  const existing = key ? assignmentsByKey[key] : null;
+  if (existing) {
+    const slug = existing.techName.toLowerCase().replace(/\s+/g, '-');
+    if (techs[slug]) sel.value = slug;
+  } else if (entries[0] && entries[0].technician) {
     const slug = entries[0].technician.toLowerCase().replace(/\s+/g, '-');
     if (techs[slug]) sel.value = slug;
   }
+
+  const unmatched = !loc;
+  document.getElementById('assignUnmatchedNote').style.display = unmatched ? 'block' : 'none';
+  document.getElementById('assignBtn').disabled = unmatched;
+  document.getElementById('assignBtn').style.opacity = unmatched ? '0.5' : '1';
+
   buildMessageText();
   sel.onchange = buildMessageText;
   document.getElementById('messageModal').classList.add('active');
@@ -651,6 +696,36 @@ function buildMessageText() {
   msg += `\nPlease acknowledge receipt.`;
   document.getElementById('msgText').value = msg;
 }
+
+document.getElementById('assignBtn').onclick = async () => {
+  const t = pendingMessageTicket;
+  const techs = TECHS_BY_STATE[t.state] || {};
+  const slug = document.getElementById('msgTechSelect').value;
+  const tech = techs[slug];
+  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  if (!tech || !loc) return; // button is disabled in this case, but guard anyway
+  try {
+    const res = await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dispatchDate: TARGET_DAY,
+        siteCode: loc.code,
+        techName: tech.name,
+        status: 'notified',
+        assignedBy: 'manual',
+        ticketWoNumber: t.woNumber || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Assign failed');
+    await loadAssignments();
+    renderTicketList();
+    alert(`Assigned to ${tech.name}. This shows up on the main dispatch board too.`);
+  } catch (e) {
+    alert('Could not assign: ' + e.message);
+  }
+};
 
 document.getElementById('messageModalCancel').onclick = () => document.getElementById('messageModal').classList.remove('active');
 document.getElementById('messageModalCopy').onclick = () => {
@@ -699,7 +774,7 @@ function escapeHtml(s) {
 
   await loadSaturdayStates();
   renderStateChips();
-  await Promise.all([loadDispatchers(), loadDispatcherOnCall(), loadOnCallTechs(), loadTickets(), loadLocationsAndTechs()]);
+  await Promise.all([loadDispatchers(), loadDispatcherOnCall(), loadOnCallTechs(), loadTickets(), loadLocationsAndTechs(), loadAssignments()]);
 
   renderDispatcherBanner();
   renderMap();
