@@ -826,7 +826,11 @@
                 const windowSize = isBigHoku(code) ? 500 : 300;
                 const window = text.slice(start, start + windowSize);
 
-                if (isLascomCarryoverNote(window)) continue;
+                if (isLascomCarryoverNote(window)) {
+                    window._skippedCarryover = window._skippedCarryover || [];
+                    window._skippedCarryover.push(code);
+                    continue;
+                }
 
                 // Extract date
                 const dateMatch = window.match(dateRe);
@@ -3036,6 +3040,7 @@ function distanceMatrixStatus(state) {
             await loadDistanceMatrix(CURRENT_STATE);
 
             // Parse form counts and ticket metadata (includes automatic SLA from Earliest Start Permitted)
+            window._skippedCarryover = [];
             window.parsedFormCounts = parseFormCounts(codesInput.value);
 
             // Line-by-line parser for newline-per-field format (Taylor's dispatch format for all states)
@@ -3064,6 +3069,8 @@ function distanceMatrixStatus(state) {
                     if (siteCode) {
                         const peek = allLines.slice(ni, Math.min(allLines.length, ni + 8)).join('\n');
                         if (isLascomCarryoverNote(peek)) {
+                            window._skippedCarryover = window._skippedCarryover || [];
+                            window._skippedCarryover.push(siteCode);
                             ni++;
                             while (ni < allLines.length && !STATE_TOKENS.has(allLines[ni]) && !/\b(?:[A-Z]{2}\d{3,5}|K[A-Z]\d{1,3}|K[A-Z]{2})\b/.test(allLines[ni])) ni++;
                             continue;
@@ -3097,6 +3104,10 @@ function distanceMatrixStatus(state) {
                         ni = nj;
                     } else { ni++; }
                 }
+            }
+            const skippedCarry = [...new Set(window._skippedCarryover || [])];
+            if (skippedCarry.length) {
+                showToast('Skipped leftover list note (no Restock By): ' + skippedCarry.join(', ') + '. Check that prior dispatch list for what they actually need.', 7000);
             }
             window.ticketMeta = parseTicketMetadata(codesInput.value);
             // Switch availability board to dispatch date context
