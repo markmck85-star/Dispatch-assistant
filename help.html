@@ -80,7 +80,7 @@
 <body>
 <header>
   <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.86 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>v9.87 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
@@ -121,12 +121,23 @@
       <tr><td>Undo something I just did</td><td><strong>↩ Undo</strong> in the Session Actions list at the bottom -- only works until you refresh the page. See <a href="#session-actions">Session Actions</a>.</td></tr>
       <tr><td>Add/edit a location or technician</td><td><strong>Admin Panel</strong> → Locations or Technicians tab. See <a href="#admin">Admin Panel</a>.</td></tr>
       <tr><td>Add a single new tech/location to the distance matrix</td><td>Just save them with a real address -- a prompt offers to add them right there, or use <strong>➕ Quick Add</strong> on the Distance Matrix tab any time after. See <a href="#admin">Admin Panel</a>.</td></tr>
+      <tr><td>Work Saturday on-call tickets</td><td>Open <strong>📞 Saturday On-Call</strong> from the board. Assign only after you choose a tech. See <a href="#saturday">Saturday On-Call</a>.</td></tr>
+      <tr><td>Add a dispatcher login or change a PIN</td><td><strong>Admin Panel</strong> → Users (admin role), or check <strong>This employee is also a dispatcher</strong> on the Technicians tab. See <a href="#admin">Admin Panel</a>.</td></tr>
     </table>
   </section>
 
   <!-- WHAT'S NEW -->
   <section id="whats-new">
     <h2>🆕 What's New</h2>
+
+    <h3>Board login and home state</h3>
+    <p>Opening the dispatch board now asks for the same username and PIN as Admin. The region list is limited to that person's territories (admins see every state). The board opens on the last state they used, or their first territory if they have no last-used state. <strong>Switch user</strong> is at the top for a shared tablet. The splash stays up until the board has actually loaded, so the empty map/cards should not flash on a fresh start.</p>
+
+    <h3>Saturday On-Call page</h3>
+    <p>A dedicated Saturday console (<code>/saturday-oncall</code>, also linked from the board) shows only trouble tickets due that Saturday across coverage states. Closest on-call house is a <em>suggestion</em> until you tap Assign. Reassign defaults to that day's on-call list; <strong>Show all techs</strong> is the escape hatch. Message sends a short SMS ("details in email") plus a full email. After a real assignment, the text includes a tap-to-confirm link; when the tech taps it the card shows <strong>✓ Received</strong> and today's on-call dispatcher gets a ping. There is no Sunday coverage -- the date picker skips Sunday. Add <code>?preview=1</code> for demo tickets; demo texts are stamped <strong>TEST — DO NOT DISPATCH</strong> and do not write assignments.</p>
+
+    <h3>User management in Admin</h3>
+    <p>Admins get a <strong>Users</strong> tab to add logins, change PINs, edit territories/role, and deactivate people who leave. Show unmasks a PIN when someone calls. Anyone can use <strong>Change my PIN</strong> on the Admin login screen if they still know the old one. On the Technicians tab, <strong>This employee is also a dispatcher</strong> creates the login and links it to that employee profile so Saturday alerts use the same phone/carrier.</p>
 
     <h3>Quick Add for the Distance Matrix</h3>
     <p>Saving a new technician or location (or editing one's address) on the Admin Panel now offers to add it to that state's distance matrix right then -- a small popup with an <strong>Add to matrix</strong> button, no need to know the Distance Matrix tab exists. It shows the real price before anything runs (typically a dollar or less for one tech or one site, since it only prices that one new item against everything already built), asks for the admin password, then handles geocoding, drive-time, and -- for a new location -- site-to-site distances automatically. The same guided flow is also available any time from the Distance Matrix tab itself under <strong>➕ Quick Add</strong>, without needing to have just saved something. See <a href="#admin">Admin Panel</a> for the full rundown, including how this differs from the state-wide build tools.</p>
@@ -183,7 +194,9 @@
   </section>
   <section id="login">
     <h2>Logging In</h2>
-    <p>Navigate to <strong>mcrdispatch.net</strong> and tap <strong>Admin Panel</strong> at the bottom of the screen. Enter your username and PIN as provided to you directly -- credentials are not published here, since this page itself isn't login-protected.</p>
+    <p>The dispatch board itself now requires a username and PIN (same credentials as Admin). After sign-in, the board opens on your home state. The session lasts for that browser tab; use <strong>Switch user</strong> when handing off a shared tablet.</p>
+    <p>Admin Panel uses the same login. Forgot PIN: an admin can Show or Change PIN on the Users tab. If you remember the current PIN, <strong>Change my PIN</strong> on the Admin login screen is enough -- no email reset.</p>
+    <p>Credentials are not published on this page.</p>
   </section>
 
   <!-- DAILY DISPATCH -->
@@ -350,13 +363,26 @@ Please acknowledge receipt.</div>
   <!-- SATURDAY -->
   <section id="saturday">
     <h2>Saturday On-Call</h2>
-    <p>On Saturdays the availability board automatically marks everyone <strong>Not on call</strong> except the two scheduled on-call techs. Dispatch assignments only go to on-call techs.</p>
+    <p>On Saturdays the main board still auto-marks everyone <strong>Not on call</strong> except the scheduled on-call techs. Day-to-day Saturday work now lives on <strong>📞 Saturday On-Call</strong> (<code>saturday-oncall.html</code>).</p>
+    <h3>What the Saturday page shows</h3>
+    <ul>
+      <li>Trouble tickets due that Saturday for coverage states (GA, IN, MI, NV, …). Restock lists stay off this page.</li>
+      <li>Map pins for on-call houses and tickets, with SLA and a review badge when a site may already have a ticket today.</li>
+      <li>Who is the on-call <em>dispatcher</em> for that calendar Saturday -- Change if you are covering for someone else before enabling text alerts.</li>
+    </ul>
+    <h3>Assigning</h3>
+    <p>Closest on-call house is only a suggestion. Nothing is written until you tap <strong>Assign suggested</strong> or pick someone in the dropdown. The dropdown is that state's Saturday on-call list (usually one or two people). <strong>Show all techs</strong> is for the occasional cover-from-next-door case. Primary/secondary from the weekday board is not used here, because those people are often the same ones already on call.</p>
+    <h3>Messaging</h3>
+    <p>💬 Message sends a short SMS telling the tech the details are in email, plus a full email (WO, site, address, issue, SLA, closed-Saturday warning). After the stop is actually assigned, the SMS also includes a tap-to-confirm link. Tapping it stamps the assignment received, shows <strong>✓ Received</strong> on the card (refreshes about every 20 seconds), and texts today's on-call dispatcher. Tapping twice does not ping again.</p>
+    <h3>Demo mode</h3>
+    <p>Add <code>?preview=1</code> to see sample placards without writing to the database. Demo SMS/email are labeled <strong>TEST — DO NOT DISPATCH</strong>. Confirm-receipt links are not created in demo, so testers cannot accidentally ping the live Saturday dispatcher.</p>
+    <h3>Georgia weekday rotation (still used by the main board)</h3>
     <table>
       <tr><th>Saturdays</th><th>On-Call Techs</th><th>Comp Day</th></tr>
       <tr><td>Odd (05/09, 05/23…)</td><td>Randy Thomas + Sean Reich</td><td>Monday before</td></tr>
       <tr><td>Even (05/16, 05/30…)</td><td>Omari Williams + Robert Medley</td><td>Thu before (Robert M.) / Mon before (Omari)</td></tr>
     </table>
-    <div class="note"><strong>Note:</strong> Keontae Johnson covers Savannah only and is not in the on-call rotation. He does not take a comp day.</div>
+    <div class="note"><strong>Note:</strong> Keontae Johnson covers Savannah only and is not in that GA rotation. Other states keep their own Saturday on-call rows in Admin. There is never Sunday coverage.</div>
   </section>
 
   <!-- ADMIN -->
@@ -374,7 +400,15 @@ Please acknowledge receipt.</div>
     <ul>
       <li>Add, edit, or remove technicians for any state. Changes take effect immediately.</li>
       <li>Set each tech's carrier and SMS address here to enable the direct-Send feature on dispatch cards.</li>
+      <li>Check <strong>This employee is also a dispatcher</strong> to create a board/Saturday login linked to that employee (phone/carrier already on the profile is reused).</li>
       <li>Saving a new technician, or editing their home address, prompts to add them to their home state's distance matrix right there -- see <strong>Quick Add</strong> below.</li>
+    </ul>
+    <h3>Users Tab (admin role only)</h3>
+    <ul>
+      <li>Add a login (username, 4–8 digit PIN, dispatcher vs admin, territories).</li>
+      <li>Edit role and territories, Change PIN, or Show the current PIN when someone calls having forgotten it.</li>
+      <li>Deactivate instead of delete when someone leaves -- they cannot sign in; history stays. You cannot deactivate or demote your own admin login.</li>
+      <li>The Saturday dispatcher dropdown is this same list (active dispatcher and admin logins; the generic shared <code>admin</code> account is hidden).</li>
     </ul>
     <h3>Backup Tab</h3>
     <ul>
@@ -436,6 +470,7 @@ Please acknowledge receipt.</div>
           <li>Direct email + SMS send to technicians</li>
           <li>Print dispatch summary</li>
           <li>Board auto-rebuilds from saved state on page load/refresh</li>
+          <li>Per-person login; board opens on that dispatcher's home state</li>
         </ul>
       </div>
       <div class="feature-card">
@@ -462,6 +497,8 @@ Please acknowledge receipt.</div>
           <li>Closed-ticket sync (manual or automatic)</li>
           <li>Repeat-issue and unmatched-site detection tools</li>
           <li>Backup and restore per state</li>
+          <li>Users tab -- add/deactivate logins, reset PINs, set territories</li>
+          <li>Mark a technician as a dispatcher from the employee form</li>
         </ul>
       </div>
       <div class="feature-card">
@@ -481,6 +518,16 @@ Please acknowledge receipt.</div>
           <li>Map View for any saved date</li>
           <li>Recent tickets + restock status</li>
           <li>On-demand closed-ticket sync</li>
+        </ul>
+      </div>
+      <div class="feature-card">
+        <h4>📞 Saturday On-Call</h4>
+        <ul>
+          <li>Dedicated Saturday console for trouble tickets only</li>
+          <li>Closest on-call house is a suggestion until Assign</li>
+          <li>Show all techs escape hatch</li>
+          <li>SMS ping + full email; tap-to-confirm receipt</li>
+          <li>Demo mode (<code>?preview=1</code>) with TEST labels</li>
         </ul>
       </div>
       <div class="feature-card">
@@ -511,7 +558,6 @@ Please acknowledge receipt.</div>
     </ul>
     <h3>Longer Term</h3>
     <ul>
-      <li>Per-dispatcher logins with individually configurable state coverage.</li>
       <li>Full site-to-site and tech-to-site distance matrix coverage for the remaining smaller states.</li>
       <li>Bundled/opportunistic restock suggestions when a tech is already near a site approaching its threshold.</li>
     </ul>
