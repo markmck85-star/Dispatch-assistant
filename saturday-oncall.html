@@ -32,6 +32,15 @@
   .state-chip.active { background:#007bff; color:#fff; border-color:#007bff; }
 
   #satMap { height:340px; border-radius:8px; margin-bottom:16px; background:#111; }
+  #satMapPanel.map-fullscreen { position:fixed; top:0; left:0; right:0; bottom:0; z-index:10000; margin:0; border-radius:0; padding:10px; background:#181818; display:flex; flex-direction:column; }
+  #satMapPanel.map-fullscreen #satMapBody { flex:1; display:flex; flex-direction:column; min-height:0; }
+  #satMapPanel.map-fullscreen #satMap { flex:1; height:auto; margin-bottom:0; }
+  .map-panel-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  #satMapFullscreenBtn, #satMapFullscreenCloseBtn { padding:4px 10px; background:#2a2a3e; color:#ccc; border:1px solid #555; border-radius:6px; font-size:12px; cursor:pointer; }
+  #satMapFullscreenBtn:hover, #satMapFullscreenCloseBtn:hover { background:#33334a; }
+  #satMapFullscreenCloseBtn { display:none; }
+  #satMapPanel.map-fullscreen #satMapFullscreenCloseBtn { display:inline-block; }
+  #satMapPanel.map-fullscreen #satMapFullscreenBtn { display:none; }
   .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 
@@ -76,7 +85,16 @@
     </div>
 
     <div class="state-chips" id="stateChips"></div>
-    <div id="satMap"></div>
+    <div id="satMapPanel">
+      <div class="map-panel-head">
+        <button type="button" id="satMapFullscreenBtn" onclick="toggleSatMapFullscreen()"
+          title="Expand the map to fill the screen -- better for pinch-zoom and reading pins on mobile">⛶ Expand</button>
+        <button type="button" id="satMapFullscreenCloseBtn" onclick="toggleSatMapFullscreen()">✕ Close</button>
+      </div>
+      <div id="satMapBody">
+        <div id="satMap"></div>
+      </div>
+    </div>
 
     <div class="section-title">Trouble Tickets</div>
     <div id="ticketList"><div class="empty">Loading&hellip;</div></div>
@@ -190,6 +208,7 @@ let assignmentsByKey = {};      // { <woNumber or siteCode>: {techName, status} 
 let activeStateFilter = null;   // null = overview, else a state code
 let satMap = null;
 let mapMarkers = [];
+let satMapBounds = null;
 let pendingMessageTicket = null;
 
 // Sites that are closed on Saturdays -- a ticket here is unlikely to need
@@ -570,8 +589,85 @@ function renderMap() {
     });
   }
 
-  if (bounds.length) satMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+  if (bounds.length) {
+    satMapBounds = L.latLngBounds(bounds);
+    satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
+  }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Map fullscreen toggle -- same pattern as state.html's "⛶ Expand" (better
+// for pinch-zoom/reading pins on mobile than the embedded 340px map).
+// ═══════════════════════════════════════════════════════════════════════
+let _satMapFullscreenPrevViewport = null;
+let _satMapFullscreenHistoryPushed = false;
+
+function toggleSatMapFullscreen() {
+  const panel = document.getElementById('satMapPanel');
+  if (!panel) return;
+  if (!panel.classList.contains('map-fullscreen')) {
+    _openSatMapFullscreen();
+  } else if (_satMapFullscreenHistoryPushed) {
+    history.back(); // triggers popstate -> _closeSatMapFullscreen()
+  } else {
+    _closeSatMapFullscreen();
+  }
+}
+
+function _openSatMapFullscreen() {
+  const panel = document.getElementById('satMapPanel');
+  panel.classList.add('map-fullscreen');
+  try {
+    history.pushState({ mcrSatMapFullscreen: true }, '', location.href);
+    _satMapFullscreenHistoryPushed = true;
+  } catch (err) {
+    _satMapFullscreenHistoryPushed = false; // Close button/Escape still works
+  }
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  if (viewportMeta) {
+    _satMapFullscreenPrevViewport = viewportMeta.getAttribute('content');
+    viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+  }
+  document.addEventListener('keydown', _satMapFullscreenEscHandler);
+  _fitSatMapAfterResize();
+}
+
+function _closeSatMapFullscreen() {
+  const panel = document.getElementById('satMapPanel');
+  if (!panel) return;
+  panel.classList.remove('map-fullscreen');
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  if (viewportMeta && _satMapFullscreenPrevViewport) {
+    viewportMeta.setAttribute('content', _satMapFullscreenPrevViewport);
+  }
+  document.removeEventListener('keydown', _satMapFullscreenEscHandler);
+  _satMapFullscreenHistoryPushed = false;
+  _fitSatMapAfterResize();
+}
+
+function _fitSatMapAfterResize() {
+  requestAnimationFrame(() => {
+    if (satMap) {
+      satMap.invalidateSize();
+      if (satMapBounds && satMapBounds.isValid()) {
+        satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
+      }
+    }
+  });
+}
+
+function _satMapFullscreenEscHandler(e) {
+  if (e.key === 'Escape') toggleSatMapFullscreen();
+}
+
+// Physical/gesture back button while the map is fullscreen: the pushState
+// above means this fires INSTEAD OF leaving the page.
+window.addEventListener('popstate', function () {
+  const panel = document.getElementById('satMapPanel');
+  if (panel && panel.classList.contains('map-fullscreen')) {
+    _closeSatMapFullscreen();
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // Ticket list
