@@ -51,13 +51,26 @@
   .ticket-card .meta { font-size:12px; color:#aaa; margin-top:3px; }
   .ticket-card .sla { font-size:12px; color:#e57373; margin-top:3px; }
   .closed-badge { display:inline-block; background:#7a5200; color:#ffe1a8; font-size:11px; font-weight:700; border-radius:4px; padding:2px 6px; margin-top:5px; }
-  .dispatch-btn { background:#007bff; color:#fff; border:none; border-radius:5px; padding:6px 10px; font-size:12px; cursor:pointer; white-space:nowrap; }
   .empty { color:#777; font-size:13.5px; padding:14px 0; text-align:center; }
 
   .tech-panel { background:#1a1a1a; border:1px solid #333; border-radius:8px; padding:10px 12px; margin-bottom:10px; }
   .tech-panel .state-hdr { font-weight:700; color:#7ec8e3; font-size:13px; margin-bottom:6px; }
   .tech-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13.5px; }
   .tech-row select { background:#222; color:#fff; border:1px solid #444; border-radius:5px; padding:4px 6px; font-size:12.5px; }
+
+  .placard { background:#181818; border-radius:8px; margin-bottom:14px; overflow:hidden; border-left:4px solid #007bff; }
+  .placard-head { padding:8px 12px; background:#1f1f1f; font-weight:700; font-size:14px; color:#eee; }
+  .placard-head .count { color:#888; font-weight:400; font-size:12.5px; }
+  .stop-card { padding:10px 12px; border-top:1px solid #2a2a2a; }
+  .stop-card .site { font-weight:700; font-size:14px; cursor:pointer; text-decoration:underline; text-decoration-style:dotted; color:#eee; }
+  .stop-card .meta { font-size:12px; color:#aaa; margin-top:3px; }
+  .stop-card .sla { font-size:12px; color:#e57373; margin-top:3px; }
+  .stop-card .row1 { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .stop-card select.reassign-select { background:#222; color:#fff; border:1px solid #444; border-radius:5px; padding:5px 6px; font-size:12.5px; flex:1; min-width:120px; }
+  .stop-card .show-all-link { font-size:11px; color:#7ec8e3; cursor:pointer; text-decoration:underline; white-space:nowrap; }
+  .stop-card .row2 { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .sc-btn { border:none; border-radius:5px; padding:6px 10px; font-size:12px; cursor:pointer; color:#fff; white-space:nowrap; }
+  .sc-mon { background:#6c5300; } .sc-done { background:#1a6b1a; } .sc-cancel { background:#6b1a1a; } .sc-msg { background:#007bff; }
 
   .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; justify-content:center; align-items:center; }
   .modal-overlay.active { display:flex; }
@@ -168,21 +181,13 @@
   </div>
 </div>
 
-<!-- Dispatch-a-ticket modal: assign is the real action (writes to the same
-     assignments table the main dispatch board uses), texting is optional
-     alongside it since a dispatcher might just call instead -->
+<!-- Message compose modal -- assigning/unassigning/pushing now happen
+     inline on each stop card, matching the main dispatch board; this modal
+     is purely for the optional text to the technician. -->
 <div class="modal-overlay" id="messageModal">
   <div class="modal">
-    <h2>Assign Technician</h2>
-    <div id="assignUnmatchedNote" style="display:none;font-size:12.5px;color:#f0a500;margin-bottom:8px;">This ticket's site isn't matched to a real location yet, so it can't be formally assigned -- resolve the site first (via the unmatched-sites toast on the main dispatch page). You can still message a tech below.</div>
-    <label for="msgTechSelect">Technician</label>
-    <select id="msgTechSelect"></select>
-    <div style="display:flex;gap:8px;margin-top:10px;">
-      <button class="btn btn-green" id="assignBtn" style="flex:2;">✅ Assign</button>
-      <button class="btn btn-grey" id="unassignBtn" style="flex:1;">Unassign</button>
-    </div>
-    <button class="btn btn-orange" id="pushMondayBtn" style="width:100%;margin-top:8px;">📅 Push to Monday</button>
-    <label for="msgText">Message (optional)</label>
+    <h2 id="messageModalTitle">Message Technician</h2>
+    <label for="msgText">Message</label>
     <textarea id="msgText"></textarea>
     <div class="modal-actions">
       <button class="btn btn-grey" id="messageModalCancel">Cancel</button>
@@ -391,6 +396,87 @@ async function loadAssignments() {
       if (key) assignmentsByKey[key] = { techName: a.techName, status: a.status, receivedAt: a.receivedAt || null };
     });
   } catch (e) { /* leave assignmentsByKey empty -- ticket list just shows nothing assigned */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Distance-based closest-tech default -- a site's stored primary/fallback
+// tech (what the main board falls back to normally) isn't necessarily on
+// call on a given Saturday, so this looks up drive time from the ACTUAL
+// on-call candidates instead. Cached per site code since several tickets
+// can share a site, and re-rendering shouldn't re-fetch every time.
+// ═══════════════════════════════════════════════════════════════════════
+let distanceCacheBySite = {};
+
+async function getSortedOnCallCandidates(state, siteCode) {
+  const oncall = onCallByState[state] || [];
+  const techs = TECHS_BY_STATE[state] || {};
+  // Dedup by slug (an on-call list can repeat the same tech across a
+  // date range query, though since/until here is a single day).
+  const candidates = [];
+  const seen = new Set();
+  for (const entry of oncall) {
+    if (!entry.technician) continue;
+    const slug = entry.technician.toLowerCase().replace(/\s+/g, '-');
+    if (seen.has(slug) || !techs[slug]) continue;
+    seen.add(slug);
+    candidates.push(techs[slug]);
+  }
+  if (!siteCode || candidates.length < 2) return candidates; // nothing to sort
+
+  const cacheKey = siteCode;
+  if (!distanceCacheBySite[cacheKey]) {
+    try {
+      const ids = candidates.map(t => t.id).join(',');
+      const res = await fetch(`/.netlify/functions/get-tech-site-distances?siteCode=${siteCode}&technicianIds=${ids}`);
+      const data = await res.json();
+      distanceCacheBySite[cacheKey] = data.distances || {};
+    } catch (e) {
+      distanceCacheBySite[cacheKey] = {};
+    }
+  }
+  const distances = distanceCacheBySite[cacheKey];
+  return [...candidates].sort((a, b) => {
+    const da = distances[a.id] ? distances[a.id].durationMin : Infinity;
+    const db = distances[b.id] ? distances[b.id].durationMin : Infinity;
+    return da - db;
+  });
+}
+
+// For any ticket that doesn't yet have an assignment row at all (never
+// touched, not explicitly pushed/unassigned -- that's a real 'removed'
+// status, left alone here), auto-create one against the closest on-call
+// tech, same idea as tickets already arriving pre-assigned on the main
+// board -- just against the actual Saturday on-call roster instead of the
+// site's stored (and possibly not-on-call-today) primary/fallback tech.
+// assignedBy: 'manual' -- see the note above render: an 'auto'-tagged
+// assignment can get silently re-derived back to the site's stored
+// default the next time the main board reprocesses this date, which would
+// undo the whole point of this. Tagging it 'manual' protects it exactly
+// the way an actual dispatcher click would.
+async function autoAssignDefaults() {
+  let anyChanged = false;
+  for (const s of SAT_STATES) {
+    for (const t of (ticketsByState[s.code] || [])) {
+      const loc = resolveSiteLoc({ ...t, state: s.code });
+      if (!loc) continue; // unmatched -- can't assign, handled separately
+      const key = ticketKey(t, loc.code);
+      if (assignmentsByKey[key]) continue; // already has SOME row (including 'removed') -- leave it
+      const sorted = await getSortedOnCallCandidates(s.code, loc.code);
+      if (!sorted.length) continue; // no on-call tech to default to
+      try {
+        await fetch('/.netlify/functions/save-assignment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dispatchDate: TARGET_DAY, siteCode: loc.code, techName: sorted[0].name,
+            status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
+          }),
+        });
+        anyChanged = true;
+      } catch (e) { /* leave unassigned -- dispatcher can assign manually */ }
+    }
+  }
+  if (anyChanged) await loadAssignments();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -714,7 +800,12 @@ window.addEventListener('popstate', function () {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// Ticket list
+// Ticket list -- grouped into per-technician placards, same visual/
+// interaction pattern as the main dispatch board's stop cards (Reassign
+// dropdown, →Mon, Done, Cancel), so there's nothing new to learn. Only a
+// tech who actually has an assigned call gets a placard at all -- Saturday
+// volume is sparse enough that an empty "Randy Thomas (0)" card every week
+// would just be noise.
 // ═══════════════════════════════════════════════════════════════════════
 function renderTicketList() {
   const el = document.getElementById('ticketList');
@@ -727,52 +818,183 @@ function renderTicketList() {
 
   if (!rows.length) { el.innerHTML = '<div class="empty">No open trouble tickets right now.</div>'; return; }
 
-  el.innerHTML = rows.map((t, i) => {
-    const closed = closedSaturdayFlag(t.address);
+  // Group by (state, assignedTech) -- unmatched/unassigned tickets (no
+  // site match, or no on-call tech to default to) get their own bucket
+  // since there's no assignment row possible for them yet.
+  const groups = {}; // key: "STATE::Tech Name" -> rows[]
+  const unassignedRows = [];
+  rows.forEach((t, i) => {
     const loc = resolveSiteLoc(t);
-    const siteLabel = loc ? loc.name : (t.siteName || t.siteText || 'Unmatched site');
-    const slaLabel = t.computedSlaDeadline
-      ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
-      : '';
     const key = ticketKey(t, loc ? loc.code : null);
-    const rawAssignment = key ? assignmentsByKey[key] : null;
-    const assignment = rawAssignment && rawAssignment.status !== 'removed' ? rawAssignment : null;
-    const assignedLabel = assignment
-      ? `<div class="meta" style="color:#5bd9c0;">Assigned to ${escapeHtml(assignment.techName)}${assignment.status === 'notified' ? ' — notified' : ''}${assignment.receivedAt ? ` · ✓ Received ${new Date(assignment.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}</div>`
-      : (rawAssignment && rawAssignment.status === 'removed'
-          ? `<div class="meta" style="color:#f0a500;">Pushed to Monday / unassigned</div>`
-          : '');
-    // Same fix as index.html: a second, distinct ticket at a site with an
-    // already-planned entry gets appended as a note on the FIRST ticket's
-    // description (not shown here) and flags needs_review -- surfaced as a
-    // clickable badge straight to site history, where that appended note
-    // actually shows up (folded into the visit's remediation detail).
-    const reviewBadge = t.needsReview
-      ? `<span onclick="showSiteHistory('${loc ? loc.code : ''}')" style="cursor:pointer;display:inline-block;background:#c98a1e;color:#1a1a1a;font-weight:700;font-size:11px;border-radius:4px;padding:2px 6px;margin-top:5px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
-      : '';
-    return `<div class="ticket-card" data-idx="${i}">
-      <div class="top">
-        <div>
-          <span class="site" data-code="${loc ? loc.code : ''}">[${t.state}] ${escapeHtml(siteLabel)}</span>
-          <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}</div>
-          ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
-          ${assignedLabel}
-          ${reviewBadge}
-          ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
-        </div>
-        <button class="dispatch-btn" data-idx="${i}">${assignment ? 'Reassign' : 'Dispatch'}</button>
-      </div>
-    </div>`;
-  }).join('');
+    const raw = key ? assignmentsByKey[key] : null;
+    const live = raw && raw.status !== 'removed' ? raw : null;
+    t._idx = i;
+    t._loc = loc;
+    t._assignment = live;
+    if (live) {
+      const gk = `${t.state}::${live.techName}`;
+      (groups[gk] = groups[gk] || []).push(t);
+    } else {
+      unassignedRows.push(t);
+    }
+  });
 
   window._satTicketRows = rows;
 
-  el.querySelectorAll('.site[data-code]').forEach(span => {
+  let html = '';
+  for (const [gk, groupRows] of Object.entries(groups)) {
+    const [state, techName] = gk.split('::');
+    html += `<div class="placard"><div class="placard-head">${escapeHtml(techName)} <span class="count">(${groupRows.length}) — ${state}</span></div>`;
+    html += groupRows.map(t => renderStopCard(t)).join('');
+    html += `</div>`;
+  }
+  if (unassignedRows.length) {
+    html += `<div class="placard" style="border-left-color:#888;"><div class="placard-head">Unassigned / unmatched <span class="count">(${unassignedRows.length})</span></div>`;
+    html += unassignedRows.map(t => renderStopCard(t)).join('');
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+
+  wireStopCardEvents();
+}
+
+function renderStopCard(t) {
+  const closed = closedSaturdayFlag(t.address);
+  const loc = t._loc;
+  const siteLabel = loc ? loc.name : (t.siteName || t.siteText || 'Unmatched site');
+  const slaLabel = t.computedSlaDeadline
+    ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+    : '';
+  const a = t._assignment;
+  const receivedStr = a && a.receivedAt ? ` · ✓ Received ${new Date(a.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : '';
+  const notifiedStr = a && a.status === 'notified' ? ' — notified' : '';
+  const reviewBadge = t.needsReview
+    ? `<span onclick="showSiteHistory('${loc ? loc.code : ''}')" style="cursor:pointer;display:inline-block;background:#c98a1e;color:#1a1a1a;font-weight:700;font-size:11px;border-radius:4px;padding:2px 6px;margin-top:5px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
+    : '';
+  const canManage = !!loc; // Reassign/Mon/Done/Cancel all need a real assignment, which needs a real site match
+
+  return `<div class="stop-card" data-idx="${t._idx}">
+    <span class="site" data-code="${loc ? loc.code : ''}">[${t.state}] ${escapeHtml(siteLabel)}</span>
+    <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}${notifiedStr}${receivedStr}</div>
+    ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
+    ${reviewBadge}
+    ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
+    ${canManage ? `
+    <div class="row1">
+      <select class="reassign-select" data-idx="${t._idx}"><option>Loading…</option></select>
+      <span class="show-all-link" data-idx="${t._idx}">Show all techs</span>
+    </div>
+    <div class="row2">
+      <button class="sc-btn sc-mon" data-idx="${t._idx}" data-action="mon">📅 →Mon</button>
+      <button class="sc-btn sc-done" data-idx="${t._idx}" data-action="done">✓ Done</button>
+      <button class="sc-btn sc-cancel" data-idx="${t._idx}" data-action="cancel">✗ Cancel</button>
+      <button class="sc-btn sc-msg" data-idx="${t._idx}" data-action="msg">💬 Message</button>
+    </div>` : `
+    <div class="row1" style="color:#888;font-size:12px;">Site not matched to a real location -- resolve via the unmatched-sites toast on the main dispatch page before this can be assigned.</div>
+    <div class="row2"><button class="sc-btn sc-msg" data-idx="${t._idx}" data-action="msg">💬 Message on-call tech</button></div>`}
+  </div>`;
+}
+
+async function wireStopCardEvents() {
+  const rows = window._satTicketRows;
+
+  document.querySelectorAll('.stop-card .site[data-code]').forEach(span => {
     span.onclick = () => { if (span.dataset.code) showSiteHistory(span.dataset.code); };
   });
-  el.querySelectorAll('.dispatch-btn').forEach(btn => {
-    btn.onclick = () => openMessageModal(rows[Number(btn.dataset.idx)]);
+
+  // Populate each Reassign dropdown, sorted closest-on-call-first.
+  for (const sel of document.querySelectorAll('select.reassign-select')) {
+    const t = rows[Number(sel.dataset.idx)];
+    const sorted = await getSortedOnCallCandidates(t.state, t._loc.code);
+    populateReassignSelect(sel, t, sorted, false);
+    sel.onchange = () => handleReassign(t, sel.value);
+  }
+
+  document.querySelectorAll('.show-all-link').forEach(link => {
+    link.onclick = () => {
+      const t = rows[Number(link.dataset.idx)];
+      const sel = document.querySelector(`select.reassign-select[data-idx="${link.dataset.idx}"]`);
+      const allTechs = Object.values(TECHS_BY_STATE[t.state] || {}).filter(x => x.active !== false);
+      populateReassignSelect(sel, t, allTechs, true);
+      link.style.display = 'none';
+    };
   });
+
+  document.querySelectorAll('.sc-btn').forEach(btn => {
+    btn.onclick = () => {
+      const t = rows[Number(btn.dataset.idx)];
+      handleStopAction(t, btn.dataset.action);
+    };
+  });
+}
+
+function populateReassignSelect(sel, t, techList, isFullList) {
+  sel.innerHTML = techList.map(x => `<option value="${x.id}">${escapeHtml(x.name)}${isFullList ? '' : ''}</option>`).join('')
+    || '<option value="">No technicians found</option>';
+  const currentName = t._assignment ? t._assignment.techName : (techList[0] && techList[0].name);
+  const match = techList.find(x => x.name === currentName);
+  if (match) sel.value = match.id;
+}
+
+async function handleReassign(t, techId) {
+  const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.id === techId);
+  if (!tech) return;
+  try {
+    const res = await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName: tech.name,
+        status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Reassign failed');
+    await loadAssignments();
+    renderTicketList();
+  } catch (e) {
+    alert('Could not reassign: ' + e.message);
+  }
+}
+
+async function handleStopAction(t, action) {
+  const techName = t._assignment ? t._assignment.techName : null;
+  if (action === 'msg') {
+    let defaultTech = techName;
+    if (!defaultTech) {
+      const oncall = onCallByState[t.state] || [];
+      defaultTech = (oncall[0] && oncall[0].technician) || ((Object.values(TECHS_BY_STATE[t.state] || {})[0] || {}).name) || null;
+    }
+    openMessageModal(t, defaultTech);
+    return;
+  }
+  if (!techName) return; // Mon/Done/Cancel need an existing assignment
+
+  if (action === 'cancel' && !confirm(`Cancel the assignment for ${t._loc.name}? This removes it from today's board -- use this only if Neumo itself canceled the ticket.`)) return;
+
+  try {
+    if (action === 'mon') {
+      const mondayIso = followingMonday(TARGET_DAY);
+      if (!confirm(`Push ${t._loc.name} to Monday (${mondayIso})?`)) return;
+      await fetch('/.netlify/functions/save-assignment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
+      });
+      await fetch('/.netlify/functions/save-assignment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatchDate: mondayIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
+      });
+    } else if (action === 'done' || action === 'cancel') {
+      await fetch('/.netlify/functions/save-assignment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: action === 'done' ? 'completed' : 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined }),
+      });
+    }
+    await loadAssignments();
+    renderTicketList();
+  } catch (e) {
+    alert('Action failed: ' + e.message);
+  }
 }
 
 async function showSiteHistory(code) {
@@ -868,49 +1090,25 @@ document.getElementById('techModalConfirm').onclick = async () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
-// Dispatch-a-ticket message modal -- single-urgent-ticket format, same
-// wording index.html's generateFinalMessages() uses for one urgent stop.
+// Message compose modal -- assign/unassign/push-to-Monday are now inline
+// stop-card actions (see handleStopAction above); this is purely the
+// optional text to whichever tech the card is currently assigned to (or,
+// for an unmatched ticket, whichever tech was picked).
 // ═══════════════════════════════════════════════════════════════════════
-function openMessageModal(ticket) {
+let pendingMessageTechName = null;
+
+function openMessageModal(ticket, techName) {
   pendingMessageTicket = ticket;
-  const techs = TECHS_BY_STATE[ticket.state] || {};
-  const entries = onCallByState[ticket.state] || [];
-  const loc = resolveSiteLoc(ticket);
-  const sel = document.getElementById('msgTechSelect');
-  sel.innerHTML = Object.entries(techs)
-    .filter(([, t]) => t.active !== false)
-    .map(([slug, t]) => `<option value="${slug}">${escapeHtml(t.name)}</option>`).join('');
-  const key = ticketKey(ticket, loc ? loc.code : null);
-  const existing = key ? assignmentsByKey[key] : null;
-  if (existing) {
-    const slug = existing.techName.toLowerCase().replace(/\s+/g, '-');
-    if (techs[slug]) sel.value = slug;
-  } else if (entries[0] && entries[0].technician) {
-    const slug = entries[0].technician.toLowerCase().replace(/\s+/g, '-');
-    if (techs[slug]) sel.value = slug;
-  }
-
-  const unmatched = !loc;
-  document.getElementById('assignUnmatchedNote').style.display = unmatched ? 'block' : 'none';
-  document.getElementById('assignBtn').disabled = unmatched;
-  document.getElementById('assignBtn').style.opacity = unmatched ? '0.5' : '1';
-  document.getElementById('unassignBtn').disabled = unmatched;
-  document.getElementById('unassignBtn').style.opacity = unmatched ? '0.5' : '1';
-  document.getElementById('pushMondayBtn').disabled = unmatched;
-  document.getElementById('pushMondayBtn').style.opacity = unmatched ? '0.5' : '1';
-
+  pendingMessageTechName = techName;
+  document.getElementById('messageModalTitle').textContent = techName ? `Message ${techName}` : 'Message Technician';
   buildMessageText();
-  sel.onchange = buildMessageText;
   document.getElementById('messageModal').classList.add('active');
 }
 
 function buildMessageText() {
   const t = pendingMessageTicket;
-  const techs = TECHS_BY_STATE[t.state] || {};
-  const slug = document.getElementById('msgTechSelect').value;
-  const tech = techs[slug];
-  const firstName = tech ? tech.name.split(' ')[0] : 'there';
-  const loc = resolveSiteLoc(t);
+  const firstName = pendingMessageTechName ? pendingMessageTechName.split(' ')[0] : 'there';
+  const loc = t._loc || resolveSiteLoc(t);
   const siteName = loc ? loc.name : (t.siteName || t.siteText || 'the site');
   const closed = closedSaturdayFlag(t.address);
 
@@ -921,133 +1119,21 @@ function buildMessageText() {
   document.getElementById('msgText').value = msg;
 }
 
-document.getElementById('assignBtn').onclick = async () => {
-  const t = pendingMessageTicket;
-  const techs = TECHS_BY_STATE[t.state] || {};
-  const slug = document.getElementById('msgTechSelect').value;
-  const tech = techs[slug];
-  const loc = resolveSiteLoc(t);
-  if (!tech || !loc) return; // button is disabled in this case, but guard anyway
-  try {
-    const res = await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dispatchDate: TARGET_DAY,
-        siteCode: loc.code,
-        techName: tech.name,
-        status: 'planned',
-        assignedBy: 'manual',
-        ticketWoNumber: t.woNumber || undefined,
-      }),
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Assign failed');
-    await loadAssignments();
-    renderTicketList();
-    alert(`Assigned to ${tech.name}. This shows up on the main dispatch board too.`);
-  } catch (e) {
-    alert('Could not assign: ' + e.message);
-  }
-};
-
-document.getElementById('unassignBtn').onclick = async () => {
-  const t = pendingMessageTicket;
-  const loc = resolveSiteLoc(t);
-  if (!loc) return;
-  const key = ticketKey(t, loc.code);
-  const existing = key ? assignmentsByKey[key] : null;
-  const techForCall = (existing && existing.techName) || (TECHS_BY_STATE[t.state] || {})[document.getElementById('msgTechSelect').value]?.name;
-  if (!techForCall) { alert('Nothing to unassign.'); return; }
-  try {
-    const res = await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dispatchDate: TARGET_DAY,
-        siteCode: loc.code,
-        techName: techForCall,
-        status: 'removed',
-        assignedBy: 'manual',
-        ticketWoNumber: t.woNumber || undefined,
-      }),
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Unassign failed');
-    await loadAssignments();
-    renderTicketList();
-    document.getElementById('messageModal').classList.remove('active');
-  } catch (e) {
-    alert('Could not unassign: ' + e.message);
-  }
-};
-
-document.getElementById('pushMondayBtn').onclick = async () => {
-  const t = pendingMessageTicket;
-  const loc = resolveSiteLoc(t);
-  if (!loc) return;
-  const techs = TECHS_BY_STATE[t.state] || {};
-  const slug = document.getElementById('msgTechSelect').value;
-  const tech = techs[slug];
-  const key = ticketKey(t, loc.code);
-  const existing = key ? assignmentsByKey[key] : null;
-  const techForToday = (existing && existing.techName) || (tech && tech.name);
-  const mondayIso = followingMonday(TARGET_DAY);
-  if (!techForToday) { alert('Pick a technician first.'); return; }
-  if (!confirm(`Push ${loc.name} to Monday (${mondayIso})? This clears today's assignment and creates a new one for Monday.`)) return;
-  try {
-    // Clear today's row, then create Monday's -- same two-step pattern
-    // index.html's pushToTomorrow() uses (separate rows, not a moved date,
-    // so today's history isn't lost).
-    const removeRes = await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dispatchDate: TARGET_DAY, siteCode: loc.code, techName: techForToday,
-        status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
-      }),
-    });
-    const removeData = await removeRes.json();
-    if (!removeData.ok) throw new Error(removeData.error || 'Could not clear today\'s assignment');
-
-    const mondayTech = (tech && tech.name) || techForToday;
-    const addRes = await fetch('/.netlify/functions/save-assignment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dispatchDate: mondayIso, siteCode: loc.code, techName: mondayTech,
-        status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
-      }),
-    });
-    const addData = await addRes.json();
-    if (!addData.ok) throw new Error(addData.error || 'Could not create Monday\'s assignment');
-
-    await loadAssignments();
-    renderTicketList();
-    document.getElementById('messageModal').classList.remove('active');
-    alert(`Pushed to Monday (${mondayIso}) for ${mondayTech}.`);
-  } catch (e) {
-    alert('Could not push to Monday: ' + e.message);
-  }
-};
-
 document.getElementById('messageModalCancel').onclick = () => document.getElementById('messageModal').classList.remove('active');
 document.getElementById('messageModalCopy').onclick = () => {
   navigator.clipboard.writeText(document.getElementById('msgText').value).then(() => alert('Copied!')).catch(() => alert('Copy failed'));
 };
 document.getElementById('messageModalSend').onclick = async () => {
   const t = pendingMessageTicket;
-  const techs = TECHS_BY_STATE[t.state] || {};
-  const slug = document.getElementById('msgTechSelect').value;
-  const tech = techs[slug];
+  const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.name === pendingMessageTechName);
   let txt = document.getElementById('msgText').value;
-  if (!tech) return;
+  if (!tech) { alert('Could not find that technician.'); return; }
 
   // Attach a one-tap "confirm you got this" link when the ticket is
   // formally assigned (a receipt only makes sense against a real
   // assignment row). Best-effort -- an unmatched site or a failed token
   // call just means the text goes out without the link, not a blocked send.
-  const loc = resolveSiteLoc(t);
+  const loc = t._loc || resolveSiteLoc(t);
   if (loc) {
     try {
       const tokRes = await fetch('/.netlify/functions/generate-receipt-token', {
@@ -1072,7 +1158,6 @@ document.getElementById('messageModalSend').onclick = async () => {
         to: tech.smsAddress || null,
         email: tech.email || null,
         body: (() => {
-          const loc = resolveSiteLoc(t);
           const site = loc ? `${loc.code} - ${loc.name}` : (t.siteCode ? `${t.siteCode} - ${t.siteName || ''}` : (t.siteText || 'See email'));
           const issue = t.issueCategory || t.issueDetail || 'See email for details';
           let sms = `🚨 WO: ${t.woNumber || 'See email'}\nSite: ${site}`;
@@ -1112,6 +1197,7 @@ function escapeHtml(s) {
   await loadSaturdayStates();
   renderStateChips();
   await Promise.all([loadDispatchers(), loadDispatcherOnCall(), loadOnCallTechs(), loadTickets(), loadLocationsAndTechs(), loadAssignments()]);
+  await autoAssignDefaults();
 
   renderDispatcherBanner();
   renderMap();
