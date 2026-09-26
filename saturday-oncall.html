@@ -315,6 +315,16 @@ function isDueTodayOrEarlier(t) {
   return deadlineDate.getTime() <= endOfTargetDay.getTime();
 }
 
+// Testing Station tickets are internal DMV test-PC hardware/install work,
+// not a customer-facing kiosk being down -- they don't need a Saturday
+// dispatcher regardless of date, overdue or not. Excluded outright rather
+// than folded into the date filter above, so a genuinely overdue KIOSK
+// trouble ticket still correctly shows. Revisit if Testing Station work
+// ever actually gets Saturday-dispatched.
+function isTestingStation(t) {
+  return (t.issueCategory || '').trim().toLowerCase() === 'testing station';
+}
+
 async function loadTickets() {
   ticketsByState = {};
   await Promise.all(SAT_STATES.map(async (s) => {
@@ -323,6 +333,7 @@ async function loadTickets() {
       const data = await res.json();
       ticketsByState[s.code] = (data.entries || [])
         .filter(t => t.ticketKind === 'trouble')
+        .filter(t => !isTestingStation(t))
         .filter(isDueTodayOrEarlier);
     } catch (e) { ticketsByState[s.code] = []; }
   }));
@@ -350,6 +361,22 @@ async function loadLocationsAndTechs() {
 // for the rare ticket with none.
 function ticketKey(t, siteCode) {
   return t.woNumber || siteCode || null;
+}
+
+// Resolves a ticket's actual location record. Prefers t.siteCode (the real
+// matched site from get-watchdog-log.js's sites() join) -- t.siteText is
+// the ticket's own raw/stored text and does NOT reliably start with the
+// real site code (only true when Neumo's raw text happened to embed it;
+// a ticket matched via WO number, PC name, or a site_aliases entry has no
+// such guarantee). Confirmed live via two MI tickets (MIT038, MI1018)
+// whose raw text was just "MI - <name>" with no code at all despite being
+// genuinely matched. The old guess-from-siteText is kept as a last-resort
+// fallback only, for the rare case siteCode itself is missing.
+function resolveSiteLoc(t) {
+  const locs = LOCATIONS_BY_STATE[t.state] || {};
+  if (t.siteCode && locs[t.siteCode]) return locs[t.siteCode];
+  const guess = (t.siteText || '').split(/[\s-]/)[0];
+  return locs[guess] || null;
 }
 
 async function loadAssignments() {
@@ -587,8 +614,7 @@ function renderMap() {
 
     const locs = LOCATIONS_BY_STATE[code] || {};
     (ticketsByState[code] || []).forEach(ticket => {
-      const siteCode = (ticket.siteText || '').split(/[\s-]/)[0];
-      const loc = locs[siteCode];
+      const loc = resolveSiteLoc(ticket);
       if (loc && loc.lat != null && loc.lng != null) {
         const closed = closedSaturdayFlag(ticket.address);
         const color = closed ? '#f0a500' : '#e57373';
@@ -703,8 +729,8 @@ function renderTicketList() {
 
   el.innerHTML = rows.map((t, i) => {
     const closed = closedSaturdayFlag(t.address);
-    const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
-    const siteLabel = loc ? loc.name : (t.siteText || 'Unmatched site');
+    const loc = resolveSiteLoc(t);
+    const siteLabel = loc ? loc.name : (t.siteName || t.siteText || 'Unmatched site');
     const slaLabel = t.computedSlaDeadline
       ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
       : '';
@@ -849,7 +875,7 @@ function openMessageModal(ticket) {
   pendingMessageTicket = ticket;
   const techs = TECHS_BY_STATE[ticket.state] || {};
   const entries = onCallByState[ticket.state] || [];
-  const loc = (LOCATIONS_BY_STATE[ticket.state] || {})[(ticket.siteText || '').split(/[\s-]/)[0]];
+  const loc = resolveSiteLoc(ticket);
   const sel = document.getElementById('msgTechSelect');
   sel.innerHTML = Object.entries(techs)
     .filter(([, t]) => t.active !== false)
@@ -884,8 +910,8 @@ function buildMessageText() {
   const slug = document.getElementById('msgTechSelect').value;
   const tech = techs[slug];
   const firstName = tech ? tech.name.split(' ')[0] : 'there';
-  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
-  const siteName = loc ? loc.name : (t.siteText || 'the site');
+  const loc = resolveSiteLoc(t);
+  const siteName = loc ? loc.name : (t.siteName || t.siteText || 'the site');
   const closed = closedSaturdayFlag(t.address);
 
   let msg = `⚡ URGENT - Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
@@ -900,7 +926,7 @@ document.getElementById('assignBtn').onclick = async () => {
   const techs = TECHS_BY_STATE[t.state] || {};
   const slug = document.getElementById('msgTechSelect').value;
   const tech = techs[slug];
-  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  const loc = resolveSiteLoc(t);
   if (!tech || !loc) return; // button is disabled in this case, but guard anyway
   try {
     const res = await fetch('/.netlify/functions/save-assignment', {
@@ -927,7 +953,7 @@ document.getElementById('assignBtn').onclick = async () => {
 
 document.getElementById('unassignBtn').onclick = async () => {
   const t = pendingMessageTicket;
-  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  const loc = resolveSiteLoc(t);
   if (!loc) return;
   const key = ticketKey(t, loc.code);
   const existing = key ? assignmentsByKey[key] : null;
@@ -958,7 +984,7 @@ document.getElementById('unassignBtn').onclick = async () => {
 
 document.getElementById('pushMondayBtn').onclick = async () => {
   const t = pendingMessageTicket;
-  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  const loc = resolveSiteLoc(t);
   if (!loc) return;
   const techs = TECHS_BY_STATE[t.state] || {};
   const slug = document.getElementById('msgTechSelect').value;
@@ -1021,7 +1047,7 @@ document.getElementById('messageModalSend').onclick = async () => {
   // formally assigned (a receipt only makes sense against a real
   // assignment row). Best-effort -- an unmatched site or a failed token
   // call just means the text goes out without the link, not a blocked send.
-  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  const loc = resolveSiteLoc(t);
   if (loc) {
     try {
       const tokRes = await fetch('/.netlify/functions/generate-receipt-token', {
@@ -1046,8 +1072,8 @@ document.getElementById('messageModalSend').onclick = async () => {
         to: tech.smsAddress || null,
         email: tech.email || null,
         body: (() => {
-          const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
-          const site = loc ? `${loc.code} - ${loc.name}` : (t.siteText || 'See email');
+          const loc = resolveSiteLoc(t);
+          const site = loc ? `${loc.code} - ${loc.name}` : (t.siteCode ? `${t.siteCode} - ${t.siteName || ''}` : (t.siteText || 'See email'));
           const issue = t.issueCategory || t.issueDetail || 'See email for details';
           let sms = `🚨 WO: ${t.woNumber || 'See email'}\nSite: ${site}`;
           if (issue && issue !== 'See email for details') sms += `\nIssue: ${issue}`;
