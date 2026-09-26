@@ -514,6 +514,7 @@ function applyPreviewFixtures() {
     { state: 'MI', siteText: 'Grand Rapids - Plainfield', address: '3472 Plainfield', siteCode: 'MIPREV1', woNumber: 'MI4412', issueCategory: 'Kiosk Down', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
     { state: 'MI', siteText: 'Lansing - S Cedar', address: '123 S Cedar', siteCode: 'MIPREV2', woNumber: 'MI4418', issueCategory: 'Printer Jam / Out of Service', computedSlaDeadline: slaIso, needsReview: true, receivedAt: slaIso },
     { state: 'GA', siteText: 'Atlanta - Peachtree', address: '100 Peachtree', siteCode: 'GAPREV1', woNumber: 'GA2201', issueCategory: 'Card Reader Failure', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
+    { state: 'GA', siteText: 'Gainesville - Spout Springs Kroger', address: 'Spout Springs Rd', siteCode: 'GAPREV2', woNumber: 'GA2208', issueCategory: 'Kiosk Down', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
     { state: 'IN', siteText: 'Indianapolis - Keystone', address: '200 Keystone', siteCode: 'INPREV1', woNumber: 'IN1188', issueCategory: 'Network Offline', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
     { state: 'NV', siteText: 'NV - Test Kiosk', address: '', siteCode: null, woNumber: 'NV0099', issueCategory: 'Kiosk Down', computedSlaDeadline: slaIso, needsReview: false, receivedAt: slaIso },
   ];
@@ -525,6 +526,7 @@ function applyPreviewFixtures() {
     MIPREV1: { code: 'MIPREV1', name: 'Grand Rapids - Plainfield', lat: 43.01, lng: -85.66, address: '3472 Plainfield' },
     MIPREV2: { code: 'MIPREV2', name: 'Lansing - S Cedar', lat: 42.70, lng: -84.55, address: '123 S Cedar' },
     GAPREV1: { code: 'GAPREV1', name: 'Atlanta - Peachtree', lat: 33.78, lng: -84.38, address: '100 Peachtree' },
+    GAPREV2: { code: 'GAPREV2', name: 'Gainesville - Spout Springs Kroger', lat: 34.28, lng: -83.87, address: 'Spout Springs Rd' },
     INPREV1: { code: 'INPREV1', name: 'Indianapolis - Keystone', lat: 39.91, lng: -86.10, address: '200 Keystone' },
   };
   Object.entries(locDefaults).forEach(([code, loc]) => {
@@ -534,6 +536,27 @@ function applyPreviewFixtures() {
   });
   assignmentsByKey['IN1188'] = { techName: (onCallByState.IN && onCallByState.IN[0] && onCallByState.IN[0].technician) || 'Aaron Schrop', status: 'planned' };
   assignmentsByKey['MI4418'] = { techName: (onCallByState.MI && onCallByState.MI[0] && onCallByState.MI[0].technician) || 'Terril King', status: 'planned' };
+
+  const gaTechs = Object.values(TECHS_BY_STATE.GA || {});
+  function gaName(part) {
+    const hit = gaTechs.find(t => (t.name || '').toLowerCase().includes(part));
+    return hit ? hit.name : null;
+  }
+  const gina = gaName('gina');
+  const mark = gaName('mark') || gaName('mck');
+  const gaFallback = (onCallByState.GA && onCallByState.GA[0] && onCallByState.GA[0].technician)
+    || (gaTechs[0] && gaTechs[0].name)
+    || 'Gina';
+  if (gina || mark) {
+    onCallByState.GA = onCallByState.GA || [];
+    [gina, mark].filter(Boolean).forEach(name => {
+      if (!onCallByState.GA.some(r => r.technician === name)) {
+        onCallByState.GA.push({ state: 'GA', day: TARGET_DAY, technician: name, homeState: 'GA' });
+      }
+    });
+  }
+  assignmentsByKey['GA2201'] = { techName: gina || gaFallback, status: 'planned' };
+  assignmentsByKey['GA2208'] = { techName: mark || gina || gaFallback, status: 'planned' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1293,14 +1316,15 @@ document.getElementById('messageModalSend').onclick = async () => {
   const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.name === pendingMessageTechName);
   let txt = document.getElementById('msgText').value;
   if (!tech) { alert('Could not find that technician.'); return; }
-  if (previewGuard('Send message')) return;
+  // Demo mode still allows a real SMS so you can text yourself or Gina.
+  // Assignment / alert writes stay blocked.
 
   // Attach a one-tap "confirm you got this" link when the ticket is
   // formally assigned (a receipt only makes sense against a real
   // assignment row). Best-effort -- an unmatched site or a failed token
   // call just means the text goes out without the link, not a blocked send.
   const loc = t._loc || resolveSiteLoc(t);
-  if (loc) {
+  if (loc && !PREVIEW) {
     try {
       const tokRes = await fetch('/.netlify/functions/generate-receipt-token', {
         method: 'POST',
