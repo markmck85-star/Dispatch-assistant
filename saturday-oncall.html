@@ -429,6 +429,7 @@ function resolveSiteLoc(t) {
 }
 
 async function loadAssignments() {
+  const previewKeep = PREVIEW ? { ...previewAssignments } : {};
   assignmentsByKey = {};
   try {
     const res = await fetch(`/.netlify/functions/get-assignments?dispatchDate=${TARGET_DAY}`);
@@ -440,6 +441,10 @@ async function loadAssignments() {
       if (key) assignmentsByKey[key] = { techName: a.techName, status: a.status, receivedAt: a.receivedAt || null };
     });
   } catch (e) { /* leave assignmentsByKey empty -- ticket list just shows nothing assigned */ }
+  if (PREVIEW) {
+    Object.assign(assignmentsByKey, previewKeep);
+    previewAssignments = previewKeep;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -450,6 +455,7 @@ async function loadAssignments() {
 // can share a site, and re-rendering shouldn't re-fetch every time.
 // ═══════════════════════════════════════════════════════════════════════
 let distanceCacheBySite = {};
+let previewAssignments = {}; // demo-only picks; survive the receipt poll
 
 async function getSortedOnCallCandidates(state, siteCode) {
   const oncall = onCallByState[state] || [];
@@ -543,6 +549,11 @@ function applyPreviewFixtures() {
   if (gaOnCall[0]) {
     assignmentsByKey['GA2201'] = { techName: gaOnCall[0], status: 'planned' };
     assignmentsByKey['GA2208'] = { techName: gaOnCall[1] || gaOnCall[0], status: 'planned' };
+  }
+  if (PREVIEW) {
+    ['IN1188', 'MI4418', 'GA2201', 'GA2208'].forEach(k => {
+      if (assignmentsByKey[k]) previewAssignments[k] = assignmentsByKey[k];
+    });
   }
 }
 
@@ -1046,20 +1057,41 @@ async function wireStopCardEvents() {
   });
 }
 
+function techSelectValue(tech) {
+  return tech.id || (tech.name || '').toLowerCase().replace(/\s+/g, '-');
+}
+
+function findTechBySelectValue(state, value) {
+  const list = Object.values(TECHS_BY_STATE[state] || {});
+  return list.find(x => String(x.id) === String(value))
+    || list.find(x => techSelectValue(x) === String(value))
+    || list.find(x => x.name === value)
+    || null;
+}
+
 function populateReassignSelect(sel, t, techList, isFullList) {
-  sel.innerHTML = techList.map(x => `<option value="${x.id}">${escapeHtml(x.name)}${isFullList ? '' : ''}</option>`).join('')
+  sel.innerHTML = techList.map(x => `<option value="${escapeHtml(techSelectValue(x))}">${escapeHtml(x.name)}</option>`).join('')
     || '<option value="">No technicians found</option>';
   const currentName = t._assignment ? t._assignment.techName : (techList[0] && techList[0].name);
   const match = techList.find(x => x.name === currentName);
-  if (match) sel.value = match.id;
+  if (match) sel.value = techSelectValue(match);
+  sel.dataset.full = isFullList ? '1' : '';
 }
 
 async function handleReassign(t, techId) {
-  const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.id === techId);
+  const tech = findTechBySelectValue(t.state, techId);
   if (!tech) return;
   if (PREVIEW) {
-    if (t.woNumber) assignmentsByKey[t.woNumber] = { techName: tech.name, status: 'planned' };
-    t._assignment = assignmentsByKey[t.woNumber];
+    const row = { techName: tech.name, status: 'planned' };
+    if (t.woNumber) {
+      assignmentsByKey[t.woNumber] = row;
+      previewAssignments[t.woNumber] = row;
+    }
+    if (t._loc && t._loc.code) {
+      assignmentsByKey[t._loc.code] = row;
+      previewAssignments[t._loc.code] = row;
+    }
+    t._assignment = row;
     renderTicketList();
     renderMap();
     return;
@@ -1431,14 +1463,16 @@ function escapeHtml(s) {
 
   // Refresh assignments so a tech tapping "confirm receipt" shows up
   // on the board without a manual reload.
-  setInterval(async () => {
-    const before = JSON.stringify(assignmentsByKey);
-    await loadAssignments();
-    if (JSON.stringify(assignmentsByKey) !== before) {
-      renderTicketList();
-      renderMap();
-    }
-  }, 20000);
+  if (!PREVIEW) {
+    setInterval(async () => {
+      const before = JSON.stringify(assignmentsByKey);
+      await loadAssignments();
+      if (JSON.stringify(assignmentsByKey) !== before) {
+        renderTicketList();
+        renderMap();
+      }
+    }, 20000);
+  }
 })();
 </script>
 </body>
