@@ -1296,7 +1296,10 @@ function buildMessageText() {
   const siteName = loc ? loc.name : (t.siteName || t.siteText || 'the site');
   const closed = closedSaturdayFlag(t.address);
 
-  let msg = `⚡ URGENT - Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
+  let msg = PREVIEW
+    ? `TEST MESSAGE — DO NOT DISPATCH. This is a demo from the Saturday on-call page. There is no real ticket.\n\n`
+    : '';
+  msg += `⚡ URGENT - Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
   msg += `1. ${t.woNumber ? 'WO ' + t.woNumber + ' – ' : ''}${t.issueCategory || t.issueDetail || 'Trouble ticket'}\n`;
   if (closed) msg += `\n⚠️ This site is closed on Saturdays -- verify before dispatching, may just be a remote-monitoring false alarm.\n`;
   msg += `\nPlease acknowledge receipt.`;
@@ -1347,7 +1350,9 @@ document.getElementById('messageModalSend').onclick = async () => {
         body: (() => {
           const site = loc ? (loc.name || loc.code) : (t.siteText || 'a site');
           const wo = t.woNumber ? ` WO ${t.woNumber}` : '';
-          let sms = `MCR Saturday on-call:${wo} at ${site}. Details sent to your email.`;
+          let sms = PREVIEW
+            ? `TEST — DO NOT DISPATCH. Demo only. MCR Saturday on-call:${wo} at ${site}. Details in email.`
+            : `MCR Saturday on-call:${wo} at ${site}. Details sent to your email.`;
           if (confirmUrl) sms += ` Tap to confirm: ${confirmUrl}`;
           return sms;
         })(),
@@ -1360,7 +1365,10 @@ document.getElementById('messageModalSend').onclick = async () => {
             ? new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
             : '';
           const closed = closedSaturdayFlag(t.address || (loc && loc.address));
-          let email = `Saturday on-call dispatch — ${t.state}\n\n`;
+          let email = PREVIEW
+            ? '*** TEST MESSAGE — DO NOT DISPATCH ***\nThis was sent from Saturday on-call DEMO MODE. There is no real work order. Do not roll.\n\n'
+            : '';
+          email += `Saturday on-call dispatch — ${t.state}\n\n`;
           email += txt + '\n\n';
           email += '────────\n';
           email += `Work order: ${t.woNumber || 'n/a'}\n`;
@@ -1373,7 +1381,7 @@ document.getElementById('messageModalSend').onclick = async () => {
           if (currentDispatcher && currentDispatcher.dispatcher) email += `On-call dispatcher: ${currentDispatcher.dispatcher}\n`;
           return `<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">${escapeHtml(email)}</pre>`;
         })(),
-        subject: `MCR Dispatch — Saturday urgent (${t.state}${t.woNumber ? ' WO ' + t.woNumber : ''})`,
+        subject: `${PREVIEW ? 'TEST — DO NOT DISPATCH — ' : ''}MCR Dispatch — Saturday urgent (${t.state}${t.woNumber ? ' WO ' + t.woNumber : ''})`,
       }),
     });
     const d = await r.json();
