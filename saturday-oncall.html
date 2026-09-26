@@ -155,6 +155,19 @@
   </div>
 </div>
 
+<!-- Full technician list — used by Show all techs so Android does not
+     swallow the first native <select> tap. -->
+<div class="modal-overlay" id="techPickModal">
+  <div class="modal">
+    <h2>Assign technician</h2>
+    <div style="font-size:13.5px;color:#bbb;margin-bottom:10px;" id="techPickBody">Tap a name. This replaces the on-call-only dropdown.</div>
+    <div id="techPickList" style="display:flex;flex-direction:column;gap:6px;max-height:55vh;overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="techPickCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Tech override modal -->
 <div class="modal-overlay" id="techModal">
   <div class="modal">
@@ -1030,23 +1043,16 @@ async function wireStopCardEvents() {
     const t = rows[Number(sel.dataset.idx)];
     const sorted = await getSortedOnCallCandidates(t.state, t._loc.code);
     populateReassignSelect(sel, t, sorted, false);
-    sel.onchange = () => handleReassign(t, sel.value);
+    sel.onchange = () => {
+      const current = t._assignment && t._assignment.techName;
+      const picked = findTechBySelectValue(t.state, sel.value);
+      if (picked && current && picked.name === current) return;
+      handleReassign(t, sel.value);
+    };
   }
 
   document.querySelectorAll('.show-all-link').forEach(link => {
-    link.onclick = () => {
-      const t = rows[Number(link.dataset.idx)];
-      const sel = document.querySelector(`select.reassign-select[data-idx="${link.dataset.idx}"]`);
-      const allTechs = Object.values(TECHS_BY_STATE[t.state] || {})
-        .filter(x => x.active !== false)
-        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-      populateReassignSelect(sel, t, allTechs, true);
-      link.style.display = 'none';
-      sel.focus();
-      try {
-        if (typeof sel.showPicker === 'function') sel.showPicker();
-      } catch (e) { /* some browsers only allow this from a direct gesture */ }
-    };
+    link.onclick = () => openTechPickModal(rows[Number(link.dataset.idx)]);
   });
 
   document.querySelectorAll('.sc-btn').forEach(btn => {
@@ -1077,6 +1083,28 @@ function populateReassignSelect(sel, t, techList, isFullList) {
   if (match) sel.value = techSelectValue(match);
   sel.dataset.full = isFullList ? '1' : '';
 }
+
+function openTechPickModal(t) {
+  const list = document.getElementById('techPickList');
+  const allTechs = Object.values(TECHS_BY_STATE[t.state] || {})
+    .filter(x => x.active !== false)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const current = t._assignment && t._assignment.techName;
+  document.getElementById('techPickBody').textContent =
+    current ? `Currently ${current}. Tap another name to assign.` : 'Tap a name to assign.';
+  list.innerHTML = allTechs.map(tech => {
+    const on = tech.name === current;
+    return `<button type="button" class="btn ${on ? 'btn-blue' : 'btn-grey'}" data-tech="${escapeHtml(techSelectValue(tech))}" style="width:100%;text-align:left;">${on ? '✓ ' : ''}${escapeHtml(tech.name)}</button>`;
+  }).join('') || '<div class="empty">No technicians on file for this state.</div>';
+  list.querySelectorAll('button[data-tech]').forEach(btn => {
+    btn.onclick = () => {
+      document.getElementById('techPickModal').classList.remove('active');
+      handleReassign(t, btn.dataset.tech);
+    };
+  });
+  document.getElementById('techPickModal').classList.add('active');
+}
+document.getElementById('techPickCancel').onclick = () => document.getElementById('techPickModal').classList.remove('active');
 
 async function handleReassign(t, techId) {
   const tech = findTechBySelectValue(t.state, techId);
