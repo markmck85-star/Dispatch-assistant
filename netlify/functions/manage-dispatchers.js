@@ -1,15 +1,12 @@
 // manage-dispatchers.js
 //
-// Admin-only user management for dispatcher logins (the same rows
-// login.js authenticates against). Add, deactivate, change PIN/role/
-// territories without a code deploy.
+// User management for dispatcher logins (the same rows login.js uses).
+// Every request includes username + current PIN.
 //
-// Every request must include the acting admin's username + PIN.
-// Dispatcher-role logins get 403.
+// Dispatcher role: change-own-pin only.
+// Admin role: list / create / update / set-pin / set-active.
 //
 // POST { adminUsername, adminPin, action, ... }
-//   action: 'list' | 'create' | 'update' | 'set-pin' | 'set-active'
-// -> { ok: true, users } or { ok: true, user }
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -29,13 +26,14 @@ function publicUser(row) {
     active: row.active !== false,
     technicianId: row.technician_id || null,
     phone: row.phone || '',
+    pin: row.pin || '',
   };
 }
 
-async function requireAdmin(sb, username, pin) {
+async function requireLogin(sb, username, pin) {
   const u = String(username || '').trim().toLowerCase();
   const p = String(pin || '').trim();
-  if (!u || !p) return { error: 'Admin username and PIN are required', status: 401 };
+  if (!u || !p) return { error: 'Username and PIN are required', status: 401 };
   const { data, error } = await sb
     .from('dispatchers')
     .select('id, username, role, active')
@@ -44,9 +42,8 @@ async function requireAdmin(sb, username, pin) {
     .eq('active', true)
     .maybeSingle();
   if (error) return { error: error.message, status: 500 };
-  if (!data) return { error: 'Invalid admin credentials', status: 401 };
-  if (data.role !== 'admin') return { error: 'User management is restricted to admin accounts', status: 403 };
-  return { admin: data };
+  if (!data) return { error: 'Invalid username or PIN', status: 401 };
+  return { user: data };
 }
 
 exports.handler = async (event) => {
@@ -60,16 +57,32 @@ exports.handler = async (event) => {
   catch { return json(400, { ok: false, error: 'Invalid JSON body' }); }
 
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const gate = await requireAdmin(sb, body.adminUsername, body.adminPin);
+  const gate = await requireLogin(sb, body.adminUsername, body.adminPin);
   if (gate.error) return json(gate.status, { ok: false, error: gate.error });
 
   const action = body.action || 'list';
+  const isAdmin = gate.user.role === 'admin';
 
   try {
+    if (action === 'change-own-pin') {
+      const newPin = String(body.pin || body.newPin || '').trim();
+      if (!/^\d{4,8}$/.test(newPin)) return json(400, { ok: false, error: 'New PIN must be 4–8 digits' });
+      const { data, error } = await sb
+        .from('dispatchers')
+        .update({ pin: newPin })
+        .eq('id', gate.user.id)
+        .select('id, username, role, states, active, technician_id, phone, pin')
+        .single();
+      if (error) throw error;
+      return json(200, { ok: true, user: publicUser(data) });
+    }
+
+    if (!isAdmin) return json(403, { ok: false, error: 'User management is restricted to admin accounts' });
+
     if (action === 'list') {
       const { data, error } = await sb
         .from('dispatchers')
-        .select('id, username, role, states, active, technician_id, phone')
+        .select('id, username, role, states, active, technician_id, phone, pin')
         .order('username', { ascending: true });
       if (error) throw error;
       return json(200, { ok: true, users: (data || []).map(publicUser) });
@@ -99,7 +112,7 @@ exports.handler = async (event) => {
           active: true,
           technician_id: body.technicianId || null,
         })
-        .select('id, username, role, states, active, technician_id, phone')
+        .select('id, username, role, states, active, technician_id, phone, pin')
         .single();
       if (error) throw error;
       return json(200, { ok: true, user: publicUser(data) });
@@ -125,14 +138,14 @@ exports.handler = async (event) => {
       }
       if (action === 'set-active' || typeof body.active === 'boolean') {
         const nextActive = body.active !== false;
-        if (!nextActive && target.role === 'admin' && target.id === gate.admin.id) {
+        if (!nextActive && target.role === 'admin' && target.id === gate.user.id) {
           return json(400, { ok: false, error: 'You cannot deactivate your own admin login' });
         }
         patch.active = nextActive;
       }
       if (action === 'update') {
         if (body.role && ROLES.has(body.role)) {
-          if (body.role !== 'admin' && target.role === 'admin' && target.id === gate.admin.id) {
+          if (body.role !== 'admin' && target.role === 'admin' && target.id === gate.user.id) {
             return json(400, { ok: false, error: 'You cannot remove admin from your own login' });
           }
           patch.role = body.role;
@@ -149,7 +162,7 @@ exports.handler = async (event) => {
         .from('dispatchers')
         .update(patch)
         .eq('id', id)
-        .select('id, username, role, states, active, technician_id, phone')
+        .select('id, username, role, states, active, technician_id, phone, pin')
         .single();
       if (error) throw error;
       return json(200, { ok: true, user: publicUser(data) });
