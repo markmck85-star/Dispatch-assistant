@@ -113,6 +113,29 @@
   </div>
 </div>
 
+<!-- Carrier capture -- shown only if the selected dispatcher has no
+     sms_address on file yet, so alerts can still be enabled without a
+     trip to the dispatchers table -->
+<div class="modal-overlay" id="carrierModal">
+  <div class="modal">
+    <h2>Add Phone Number</h2>
+    <div style="font-size:13.5px;color:#bbb;" id="carrierModalBody"></div>
+    <label for="carrierPhoneInput">Phone Number</label>
+    <input type="text" id="carrierPhoneInput" placeholder="5551234567" style="width:100%;background:#181818;border:1px solid #444;border-radius:6px;padding:8px;color:#fff;font-size:14px;">
+    <label for="carrierSelect">Carrier</label>
+    <select id="carrierSelect">
+      <option value="@vtext.com">Verizon</option>
+      <option value="@tmomail.net">T-Mobile</option>
+      <option value="@txt.att.net">AT&amp;T</option>
+      <option value="@messaging.sprintpcs.com">Sprint</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="carrierModalCancel">Cancel</button>
+      <button class="btn btn-blue" id="carrierModalSave">Save &amp; Continue</button>
+    </div>
+  </div>
+</div>
+
 <!-- Dispatch-a-ticket message modal -->
 <div class="modal-overlay" id="messageModal">
   <div class="modal">
@@ -317,10 +340,13 @@ document.getElementById('alertsBtn').onclick = () => openDispatcherModal('alerts
 
 async function enableTextAlerts() {
   if (!currentDispatcher) { alert('Set an on-call dispatcher first.'); return; }
-  const dispatcher = DISPATCHERS.find(d => d.id === currentDispatcher.dispatcherId);
-  if (!dispatcher || !dispatcher.smsAddress) {
-    alert(`${currentDispatcher.dispatcher} has no SMS address on file yet -- add one in the dispatchers table before alerts can be enabled.`);
-    return;
+  let dispatcher = DISPATCHERS.find(d => d.id === currentDispatcher.dispatcherId);
+  if (!dispatcher) { alert('Could not find that dispatcher.'); return; }
+
+  if (!dispatcher.smsAddress) {
+    const smsAddress = await promptForCarrier(dispatcher);
+    if (!smsAddress) return; // cancelled
+    dispatcher.smsAddress = smsAddress; // update the in-memory copy so the rest of this call sees it
   }
 
   // Group today's covered states by timezone so each group gets its own
@@ -366,6 +392,50 @@ async function enableTextAlerts() {
   } catch (e) {
     alert('Could not enable alerts: ' + e.message);
   }
+}
+
+// Shows the carrier-capture modal for a dispatcher with no sms_address on
+// file, saves it to their profile via save-dispatcher-contact.js (so it's
+// there for every future Saturday too, not just this one), and resolves
+// with the new address -- or null if the dispatcher cancels.
+function promptForCarrier(dispatcher) {
+  return new Promise((resolve) => {
+    document.getElementById('carrierModalBody').textContent =
+      `${dispatcher.username} doesn't have a phone number on file yet. Add one so they can receive text alerts, now and every Saturday going forward.`;
+    document.getElementById('carrierPhoneInput').value = '';
+    document.getElementById('carrierSelect').value = '@vtext.com';
+    document.getElementById('carrierModal').classList.add('active');
+
+    const cancelBtn = document.getElementById('carrierModalCancel');
+    const saveBtn = document.getElementById('carrierModalSave');
+
+    function cleanup() {
+      cancelBtn.onclick = null;
+      saveBtn.onclick = null;
+      document.getElementById('carrierModal').classList.remove('active');
+    }
+
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    saveBtn.onclick = async () => {
+      const phone = document.getElementById('carrierPhoneInput').value.trim();
+      const carrier = document.getElementById('carrierSelect').value;
+      const digits = phone.replace(/\D/g, '');
+      if (digits.length !== 10) { alert('Enter a 10-digit phone number.'); return; }
+      try {
+        const res = await fetch('/.netlify/functions/save-dispatcher-contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dispatcher_id: dispatcher.id, phone: digits, carrier }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Save failed');
+        cleanup();
+        resolve(data.smsAddress);
+      } catch (e) {
+        alert('Could not save phone number: ' + e.message);
+      }
+    };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -530,16 +600,10 @@ document.getElementById('techModalConfirm').onclick = async () => {
   const tech = (TECHS_BY_STATE[state] || {})[slug];
   if (!tech) return;
   try {
-    // NOTE: get-technicians.js returns records keyed by slug, without the
-    // underlying technicians.id -- save-on-call.js's technician_id column
-    // is a real FK, so this needs the actual id, not the slug. Flagging
-    // rather than guessing: either add `id` to get-technicians.js's
-    // returned fields, or resolve slug -> id via a small lookup here
-    // before this call will work end to end.
     await fetch('/.netlify/functions/save-on-call', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, day: TARGET_DAY, technician_id: tech.id || slug }),
+      body: JSON.stringify({ state, day: TARGET_DAY, technician_id: tech.id }),
     });
     await loadOnCallTechs();
     renderTechPanels();
