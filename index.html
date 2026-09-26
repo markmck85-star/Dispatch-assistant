@@ -4270,6 +4270,27 @@ function distanceMatrixStatus(state) {
                     const supabaseOnlyBadge = item.fromSupabaseOnly
                         ? `<span style="background:#2a4a6b;color:#9ecbf5;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="Loaded from a previously-processed dispatch -- restock counts not shown here. Paste the original dispatch list to see them.">☁ from saved dispatch</span>`
                         : '';
+                    // 2026-09-26 fix: this badge used to live ONLY inside
+                    // lineItemsStr below, gated on ticketLineItems.length > 0
+                    // -- so it correctly never showed for the OTHER thing
+                    // that sets needs_review: a second, distinct ticket
+                    // arriving at a site with an already-planned board entry
+                    // (mailgun-inbound.js appends that as a note on the
+                    // EXISTING ticket's description, not as a line item, and
+                    // flags needs_review -- see the 2026-09-02 comment
+                    // there). That path has zero line items, so the badge's
+                    // old condition never fired and the flag was invisible
+                    // anywhere on the board -- confirmed live via Piedmont
+                    // Publix (GA1121). Now renders independently of line
+                    // items, and is clickable straight to site history
+                    // (on-demand, not a permanent banner -- state.html's own
+                    // 2026-09-13 note explains why an undismissable version
+                    // of this was pulled from there) since that's where the
+                    // appended note text (folded into remediation_detail)
+                    // actually surfaces.
+                    const needsReviewBadge = item.ticketNeedsReview
+                        ? `<span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;background:#c98a1e;color:#1a1a1a;font-weight:bold;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
+                        : '';
                     const restockByStr = item.restockBy ? `<span style="font-size:11px;color:#888;margin-left:6px;">by ${item.restockBy}</span>` : '';
                     const ticketInfoStr = item.fromTicket
                         ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : ''}</div>`
@@ -4282,9 +4303,7 @@ function distanceMatrixStatus(state) {
                     // since not every addition is service-affecting -- the
                     // dispatcher decides, the app just surfaces it.
                     const lineItemsStr = (item.ticketLineItems && item.ticketLineItems.length)
-                        ? `<div style="font-size:12px;color:#c98a1e;margin-top:2px;">` + (item.ticketNeedsReview
-                            ? `<span style="background:#c98a1e;color:#1a1a1a;font-weight:bold;padding:1px 5px;border-radius:3px;margin-right:4px;">⚠ NEEDS REVIEW</span>`
-                            : '') + item.ticketLineItems.map(li => {
+                        ? `<div style="font-size:12px;color:#c98a1e;margin-top:2px;">` + item.ticketLineItems.map(li => {
                             const label = li.issueCategory || (li.text ? li.text.slice(0, 50) + (li.text.length > 50 ? '…' : '') : 'see email');
                             return `📝 <button onclick="viewSourceEmail('${li.inboundEmailId}')" style="background:none;border:none;padding:0;color:#c98a1e;text-decoration:underline;cursor:pointer;font-size:inherit;">Line item added – ${label}</button>`;
                         }).join('<br>') + `</div>`
@@ -4304,7 +4323,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div>
-                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${restockByStr}</div>
+                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${needsReviewBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">${isFuturePushed ? legLabel : '📏 ' + legLabel + (index === 0 ? ' from home' : ' from prev. stop')}</div>
                                     ${ticketInfoStr}

@@ -571,6 +571,14 @@ function renderTicketList() {
     const assignedLabel = assignment
       ? `<div class="meta" style="color:#5bd9c0;">Assigned to ${escapeHtml(assignment.techName)}${assignment.status === 'notified' ? ' — notified' : ''}</div>`
       : '';
+    // Same fix as index.html: a second, distinct ticket at a site with an
+    // already-planned entry gets appended as a note on the FIRST ticket's
+    // description (not shown here) and flags needs_review -- surfaced as a
+    // clickable badge straight to site history, where that appended note
+    // actually shows up (folded into the visit's remediation detail).
+    const reviewBadge = t.needsReview
+      ? `<span onclick="showSiteHistory('${loc ? loc.code : ''}')" style="cursor:pointer;display:inline-block;background:#c98a1e;color:#1a1a1a;font-weight:700;font-size:11px;border-radius:4px;padding:2px 6px;margin-top:5px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
+      : '';
     return `<div class="ticket-card" data-idx="${i}">
       <div class="top">
         <div>
@@ -578,6 +586,7 @@ function renderTicketList() {
           <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}</div>
           ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
           ${assignedLabel}
+          ${reviewBadge}
           ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
         </div>
         <button class="dispatch-btn" data-idx="${i}">${assignment ? 'Reassign' : 'Dispatch'}</button>
