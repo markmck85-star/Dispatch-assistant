@@ -537,26 +537,13 @@ function applyPreviewFixtures() {
   assignmentsByKey['IN1188'] = { techName: (onCallByState.IN && onCallByState.IN[0] && onCallByState.IN[0].technician) || 'Aaron Schrop', status: 'planned' };
   assignmentsByKey['MI4418'] = { techName: (onCallByState.MI && onCallByState.MI[0] && onCallByState.MI[0].technician) || 'Terril King', status: 'planned' };
 
-  const gaTechs = Object.values(TECHS_BY_STATE.GA || {});
-  function gaName(part) {
-    const hit = gaTechs.find(t => (t.name || '').toLowerCase().includes(part));
-    return hit ? hit.name : null;
+  // GA demo tickets follow the live rule: only Saturday on-call names are
+  // the default. Gina/Mark stay available under Show all techs.
+  const gaOnCall = (onCallByState.GA || []).map(r => r.technician).filter(Boolean);
+  if (gaOnCall[0]) {
+    assignmentsByKey['GA2201'] = { techName: gaOnCall[0], status: 'planned' };
+    assignmentsByKey['GA2208'] = { techName: gaOnCall[1] || gaOnCall[0], status: 'planned' };
   }
-  const gina = gaName('gina');
-  const mark = gaName('mark') || gaName('mck');
-  const gaFallback = (onCallByState.GA && onCallByState.GA[0] && onCallByState.GA[0].technician)
-    || (gaTechs[0] && gaTechs[0].name)
-    || 'Gina';
-  if (gina || mark) {
-    onCallByState.GA = onCallByState.GA || [];
-    [gina, mark].filter(Boolean).forEach(name => {
-      if (!onCallByState.GA.some(r => r.technician === name)) {
-        onCallByState.GA.push({ state: 'GA', day: TARGET_DAY, technician: name, homeState: 'GA' });
-      }
-    });
-  }
-  assignmentsByKey['GA2201'] = { techName: gina || gaFallback, status: 'planned' };
-  assignmentsByKey['GA2208'] = { techName: mark || gina || gaFallback, status: 'planned' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1062,6 +1049,13 @@ function populateReassignSelect(sel, t, techList, isFullList) {
 async function handleReassign(t, techId) {
   const tech = Object.values(TECHS_BY_STATE[t.state] || {}).find(x => x.id === techId);
   if (!tech) return;
+  if (PREVIEW) {
+    if (t.woNumber) assignmentsByKey[t.woNumber] = { techName: tech.name, status: 'planned' };
+    t._assignment = assignmentsByKey[t.woNumber];
+    renderTicketList();
+    renderMap();
+    return;
+  }
   if (previewGuard('Reassign')) return;
   try {
     const data = await saveAssignmentRow({
