@@ -33,10 +33,20 @@
  * business-day logic needed -- flat calendar days, same cutoff in every
  * state, per Mark's call.
  *
+ * v4 (2026-09-26): added siteCode/siteName, joined from the ticket's own
+ * site_id when matched. Found via the Saturday on-call page showing "MI -
+ * Wyoming SOS" instead of the real site name for two properly-matched
+ * tickets (MIT038, MI1018) -- site_text is the ticket's own raw/stored
+ * text and does NOT reliably start with the real site code (only true for
+ * tickets whose raw Neumo text happened to embed it; a ticket matched via
+ * WO number, PC name, or a site_aliases entry has no such guarantee).
+ * Every consumer of this endpoint that needs the actual matched site
+ * should use siteCode now instead of re-deriving one from site_text.
+ *
  * GET /.netlify/functions/get-watchdog-log?state=CO
- * -> { entries: [ { ticketId, woNumber, siteText, ticketKind, matched,
- *                    issueCategory, issueDetail, description, address,
- *                    dueAt, slaEndsAt, receivedAt } ] }
+ * -> { entries: [ { ticketId, woNumber, siteText, siteCode, siteName,
+ *                    ticketKind, matched, issueCategory, issueDetail,
+ *                    description, address, dueAt, slaEndsAt, receivedAt } ] }
  */
 const { createClient } = require("@supabase/supabase-js");
 const { computeSlaDeadline } = require("./slaCalculator.js");
@@ -85,9 +95,13 @@ exports.handler = async (event) => {
     // it), so without this branch those tickets -- exactly the ones with
     // possible SLA impact that prompted this page -- would never appear
     // here no matter what SMS notification hours are configured.
+    //
+    // sites(site_code, name): the real matched site, when there is one --
+    // see the v4 header note for why site_text alone isn't a safe way to
+    // derive this.
     const { data, error } = await supabase
       .from("tickets")
-      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, earliest_start_at, received_at, status, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at")
+      .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, earliest_start_at, received_at, status, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at, sites(site_code, name)")
       .or("ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true")
       .eq("status", "open")
       .order("received_at", { ascending: false });
@@ -154,6 +168,11 @@ exports.handler = async (event) => {
           ticketId: t.id,
           woNumber: t.wo_number,
           siteText: t.site_text,
+          // v4: the real matched site, if any -- null for a genuinely
+          // unmatched ticket, which is a real and different case from a
+          // matched ticket whose raw text just didn't embed the code.
+          siteCode: t.sites ? t.sites.site_code : null,
+          siteName: t.sites ? t.sites.name : null,
           ticketKind: t.ticket_kind,
           needsReview: !!t.needs_review,
           matched: !!t.site_id,
