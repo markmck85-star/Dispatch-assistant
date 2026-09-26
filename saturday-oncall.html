@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<title>Saturday On-Call – MCR Dispatch</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-text-size-adjust:100%; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f5f5f5; padding:15px; line-height:1.5; font-size:16px; }
+  .container { max-width:1000px; margin:0 auto; }
+  @media (min-width:1100px) { .container { max-width:1200px; } body { padding:20px 28px 40px; } }
+
+  .back-link { display:inline-block; color:#007bff; text-decoration:none; font-size:14px; font-weight:600; margin-bottom:10px; }
+  .console { background:#181818; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.15); padding:16px; color:#ddd; }
+  .console h1 { color:#f0a500; font-size:21px; margin-bottom:2px; }
+  .console .subtitle { color:#888; font-size:12px; margin-bottom:14px; }
+
+  .banner { background:#0a2e2a; border:1px solid #14a085; border-radius:8px; padding:12px 14px; margin-bottom:16px; display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; }
+  .banner .who { font-size:14.5px; }
+  .banner .who b { color:#5bd9c0; }
+  .banner .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .btn { border:none; border-radius:6px; padding:8px 12px; font-size:13px; font-weight:600; cursor:pointer; color:#fff; }
+  .btn-blue { background:#007bff; } .btn-blue:hover { background:#0056b3; }
+  .btn-green { background:#0a6e5c; } .btn-green:hover { background:#0d8a72; }
+  .btn-grey { background:#444; color:#ccc; } .btn-grey:hover { background:#555; }
+  .btn-orange { background:#f0a500; color:#1a1400; }
+
+  .state-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+  .state-chip { background:#2a2a2a; color:#ccc; border:1px solid #444; border-radius:14px; padding:5px 12px; font-size:12.5px; cursor:pointer; }
+  .state-chip.active { background:#007bff; color:#fff; border-color:#007bff; }
+
+  #satMap { height:340px; border-radius:8px; margin-bottom:16px; background:#111; }
+
+  .section-title { font-size:14.5px; font-weight:700; color:#f0a500; margin:18px 0 8px; }
+  .ticket-card { background:#1e1e1e; border:1px solid #333; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .ticket-card .top { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .ticket-card .site { font-weight:700; font-size:14px; cursor:pointer; text-decoration:underline; text-decoration-style:dotted; }
+  .ticket-card .meta { font-size:12px; color:#aaa; margin-top:3px; }
+  .ticket-card .sla { font-size:12px; color:#e57373; margin-top:3px; }
+  .closed-badge { display:inline-block; background:#7a5200; color:#ffe1a8; font-size:11px; font-weight:700; border-radius:4px; padding:2px 6px; margin-top:5px; }
+  .dispatch-btn { background:#007bff; color:#fff; border:none; border-radius:5px; padding:6px 10px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .empty { color:#777; font-size:13.5px; padding:14px 0; text-align:center; }
+
+  .tech-panel { background:#1a1a1a; border:1px solid #333; border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+  .tech-panel .state-hdr { font-weight:700; color:#7ec8e3; font-size:13px; margin-bottom:6px; }
+  .tech-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13.5px; }
+  .tech-row select { background:#222; color:#fff; border:1px solid #444; border-radius:5px; padding:4px 6px; font-size:12.5px; }
+
+  .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; justify-content:center; align-items:center; }
+  .modal-overlay.active { display:flex; }
+  .modal { background:#222; border:1px solid #444; border-radius:10px; padding:18px; width:90%; max-width:440px; color:#ddd; max-height:85vh; overflow-y:auto; }
+  .modal h2 { font-size:17px; color:#f0a500; margin-bottom:12px; }
+  .modal label { display:block; font-size:12px; color:#aaa; margin:10px 0 4px; }
+  .modal select, .modal textarea { width:100%; background:#181818; border:1px solid #444; border-radius:6px; padding:8px; color:#fff; font-size:14px; }
+  .modal textarea { min-height:140px; resize:vertical; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="index.html" class="back-link">&larr; Back to Dispatch</a>
+  <div class="console">
+    <h1>&#128222; Saturday On-Call</h1>
+    <div class="subtitle" id="dateLabel">&nbsp;</div>
+
+    <div class="banner">
+      <div class="who" id="dispatcherWho">Loading on-call dispatcher&hellip;</div>
+      <div class="actions">
+        <button class="btn btn-grey" id="changeDispatcherBtn">Change</button>
+        <button class="btn btn-green" id="alertsBtn">&#128276; Enable Text Alerts</button>
+      </div>
+    </div>
+
+    <div class="state-chips" id="stateChips"></div>
+    <div id="satMap"></div>
+
+    <div class="section-title">Trouble Tickets</div>
+    <div id="ticketList"><div class="empty">Loading&hellip;</div></div>
+
+    <div class="section-title">On-Call Technicians</div>
+    <div id="techPanels"><div class="empty">Loading&hellip;</div></div>
+  </div>
+</div>
+
+<!-- Dispatcher override / alerts confirmation modal (shared: both flows
+     need "who is on call today, pick someone else if wrong") -->
+<div class="modal-overlay" id="dispatcherModal">
+  <div class="modal">
+    <h2 id="dispatcherModalTitle">On-Call Dispatcher</h2>
+    <div id="dispatcherModalBody" style="font-size:13.5px;color:#bbb;"></div>
+    <label for="dispatcherSelect">Dispatcher</label>
+    <select id="dispatcherSelect"></select>
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="dispatcherModalCancel">Cancel</button>
+      <button class="btn btn-blue" id="dispatcherModalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tech override modal -->
+<div class="modal-overlay" id="techModal">
+  <div class="modal">
+    <h2>Change On-Call Technician</h2>
+    <div id="techModalBody" style="font-size:13.5px;color:#bbb;"></div>
+    <label for="techSelect">Technician</label>
+    <select id="techSelect"></select>
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="techModalCancel">Cancel</button>
+      <button class="btn btn-blue" id="techModalConfirm">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dispatch-a-ticket message modal -->
+<div class="modal-overlay" id="messageModal">
+  <div class="modal">
+    <h2>Send to Technician</h2>
+    <label for="msgTechSelect">Technician</label>
+    <select id="msgTechSelect"></select>
+    <label for="msgText">Message</label>
+    <textarea id="msgText"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="messageModalCancel">Cancel</button>
+      <button class="btn btn-green" id="messageModalCopy">&#128203; Copy</button>
+      <button class="btn btn-blue" id="messageModalSend">&#128228; Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// State / data caches
+// ═══════════════════════════════════════════════════════════════════════
+let SAT_STATES = [];            // [{code,name,timezone}]
+let DISPATCHERS = [];           // [{id,username,phone,smsAddress}]
+let TARGET_DAY = null;          // ISO date of the Saturday this page is for
+let currentDispatcher = null;   // {dispatcherId, dispatcher} | null
+let onCallByState = {};         // { GA: [{state,day,technician,homeState}], ... }
+let ticketsByState = {};        // { GA: [entries...], ... } (trouble-only)
+let LOCATIONS_BY_STATE = {};    // { GA: {code: {...}}, ... }
+let TECHS_BY_STATE = {};        // { GA: {slug: {...}}, ... }
+let activeStateFilter = null;   // null = overview, else a state code
+let satMap = null;
+let mapMarkers = [];
+let pendingMessageTicket = null;
+
+// Sites that are closed on Saturdays -- a ticket here is unlikely to need
+// a same-day dispatch (no one's onsite, so nothing to fix in person), but
+// remote-monitoring can still generate a false "down" ticket. Flagged
+// inline rather than hidden, per Mark's call. Loose address-substring
+// match since these tickets don't always resolve to a real site_code.
+// TODO: move this list into a real table once there's a second state's
+// worth of these to maintain -- for now MI is the only one supplied.
+const CLOSED_SATURDAY_SITES = [
+  { name: 'Adrian - S Winter St', match: '1114 S Winter St' },
+  { name: 'Bay City - N Euclid', match: '1007 N Euclid' },
+  { name: 'Davison - N Main St', match: '300 N Main' },
+  { name: 'Dearborn - Schafer Rd', match: '5094 Schaefer' },
+  { name: 'Detroit - Mack Ave', match: '14634 Mack' },
+  { name: 'Grand Haven - Robbins Rd', match: '1110 Robbins' },
+  { name: 'Grand Rapids - Plainfield', match: '3472 Plainfield' },
+  { name: 'Hazel Park - Dequindre', match: '20809 Dequindre' },
+  { name: 'Hudsonville - Cherry Ave', match: '5211 Cherry' },
+  { name: 'Midland - Saginaw Rd', match: '1832 N Saginaw' },
+  { name: 'Niles - E Main St', match: '110 E Main' },
+  { name: 'Saginaw - Bay Rd', match: '4404 Bay Road' },
+  { name: 'Sparta - State St', match: '534 S State' },
+  { name: 'Temperance - Lewis Ave', match: '7200 Lewis' },
+  { name: 'Trenton - Van Horn', match: '3040 Van Horn' },
+  { name: 'Grand Rapids - 28th St', match: '3601 28th St' },
+  { name: 'St Johns - S US-27', match: '1041 S US-27' },
+  { name: 'Wyoming - Rodgers Plaza', match: '1056 Rodgers Plaza' },
+  { name: 'Detroit - W Grand Blvd', match: '3046 W Grand' },
+  { name: 'Port Huron - Krafft Rd', match: '2887 Krafft' },
+  { name: 'Detroit - Livernois Ave', match: '17500 Livernois' },
+];
+
+function isoDate(d) { return d.toISOString().slice(0, 10); }
+
+function targetSaturday() {
+  const d = new Date();
+  const offset = (6 - d.getDay() + 7) % 7; // 0 if today is Saturday
+  d.setDate(d.getDate() + offset);
+  return isoDate(d);
+}
+
+function closedSaturdayFlag(address) {
+  if (!address) return null;
+  const a = address.toLowerCase();
+  const hit = CLOSED_SATURDAY_SITES.find(s => a.includes(s.match.toLowerCase()));
+  return hit || null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Loaders
+// ═══════════════════════════════════════════════════════════════════════
+async function loadSaturdayStates() {
+  const res = await fetch('/.netlify/functions/get-saturday-states');
+  const data = await res.json();
+  SAT_STATES = data.states || [];
+}
+
+async function loadDispatchers() {
+  const res = await fetch('/.netlify/functions/get-dispatchers');
+  const data = await res.json();
+  DISPATCHERS = data.dispatchers || [];
+}
+
+async function loadDispatcherOnCall() {
+  const res = await fetch(`/.netlify/functions/get-dispatcher-on-call?since=${TARGET_DAY}&until=${TARGET_DAY}`);
+  const data = await res.json();
+  currentDispatcher = (data.entries || [])[0] || null;
+}
+
+async function loadOnCallTechs() {
+  onCallByState = {};
+  await Promise.all(SAT_STATES.map(async (s) => {
+    try {
+      const res = await fetch(`/.netlify/functions/get-on-call?state=${s.code}&since=${TARGET_DAY}&until=${TARGET_DAY}`);
+      const data = await res.json();
+      onCallByState[s.code] = data.entries || [];
+    } catch (e) { onCallByState[s.code] = []; }
+  }));
+}
+
+async function loadTickets() {
+  ticketsByState = {};
+  await Promise.all(SAT_STATES.map(async (s) => {
+    try {
+      const res = await fetch(`/.netlify/functions/get-watchdog-log?state=${s.code}`);
+      const data = await res.json();
+      ticketsByState[s.code] = (data.entries || []).filter(t => t.ticketKind === 'trouble');
+    } catch (e) { ticketsByState[s.code] = []; }
+  }));
+}
+
+async function loadLocationsAndTechs() {
+  await Promise.all(SAT_STATES.map(async (s) => {
+    try {
+      const [locRes, techRes] = await Promise.all([
+        fetch(`/.netlify/functions/get-locations?state=${s.code}`),
+        fetch(`/.netlify/functions/get-technicians?state=${s.code}`),
+      ]);
+      LOCATIONS_BY_STATE[s.code] = await locRes.json();
+      TECHS_BY_STATE[s.code] = await techRes.json();
+    } catch (e) {
+      LOCATIONS_BY_STATE[s.code] = {};
+      TECHS_BY_STATE[s.code] = {};
+    }
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dispatcher banner + override/confirm modal (shared by the Change button
+// and the alerts toggle -- one source of truth for "who's on today")
+// ═══════════════════════════════════════════════════════════════════════
+function renderDispatcherBanner() {
+  const el = document.getElementById('dispatcherWho');
+  if (currentDispatcher) {
+    el.innerHTML = `On-call dispatcher today: <b>${escapeHtml(currentDispatcher.dispatcher)}</b>`;
+  } else {
+    el.innerHTML = `<b style="color:#f0a500;">No dispatcher set for today</b> — pick one below`;
+  }
+}
+
+function openDispatcherModal(mode) {
+  // mode: 'change' (just correct who's on) or 'alerts' (about to enable
+  // texts for whoever ends up selected here)
+  const sel = document.getElementById('dispatcherSelect');
+  sel.innerHTML = DISPATCHERS.map(d => `<option value="${d.id}">${escapeHtml(d.username)}</option>`).join('');
+  if (currentDispatcher) sel.value = currentDispatcher.dispatcherId;
+
+  document.getElementById('dispatcherModalTitle').textContent =
+    mode === 'alerts' ? 'Confirm On-Call Dispatcher' : 'Change On-Call Dispatcher';
+  document.getElementById('dispatcherModalBody').textContent =
+    mode === 'alerts'
+      ? `Text alerts will go to whoever is selected here. If the dispatcher shown isn't you (e.g. you're covering for someone), pick the right person before continuing.`
+      : `This only changes today's (${TARGET_DAY}) assignment -- next Saturday reverts automatically.`;
+  document.getElementById('dispatcherModal').dataset.mode = mode;
+  document.getElementById('dispatcherModal').classList.add('active');
+}
+
+document.getElementById('changeDispatcherBtn').onclick = () => openDispatcherModal('change');
+document.getElementById('dispatcherModalCancel').onclick = () => document.getElementById('dispatcherModal').classList.remove('active');
+
+document.getElementById('dispatcherModalConfirm').onclick = async () => {
+  const mode = document.getElementById('dispatcherModal').dataset.mode;
+  const dispatcherId = document.getElementById('dispatcherSelect').value;
+  const changed = !currentDispatcher || currentDispatcher.dispatcherId !== dispatcherId;
+
+  if (changed) {
+    try {
+      await fetch('/.netlify/functions/save-dispatcher-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day: TARGET_DAY, dispatcher_id: dispatcherId }),
+      });
+      await loadDispatcherOnCall();
+      renderDispatcherBanner();
+    } catch (e) {
+      alert('Could not save dispatcher: ' + e.message);
+      return;
+    }
+  }
+
+  document.getElementById('dispatcherModal').classList.remove('active');
+  if (mode === 'alerts') await enableTextAlerts();
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// Text alerts toggle -- one notification-recipient row per timezone group
+// among today's covered states, each capped at 5pm in its own zone.
+// ═══════════════════════════════════════════════════════════════════════
+document.getElementById('alertsBtn').onclick = () => openDispatcherModal('alerts');
+
+async function enableTextAlerts() {
+  if (!currentDispatcher) { alert('Set an on-call dispatcher first.'); return; }
+  const dispatcher = DISPATCHERS.find(d => d.id === currentDispatcher.dispatcherId);
+  if (!dispatcher || !dispatcher.smsAddress) {
+    alert(`${currentDispatcher.dispatcher} has no SMS address on file yet -- add one in the dispatchers table before alerts can be enabled.`);
+    return;
+  }
+
+  // Group today's covered states by timezone so each group gets its own
+  // 5pm-local cutoff (states.timezone is the live source, not a hardcoded
+  // Eastern/Pacific split).
+  const byTz = {};
+  for (const s of SAT_STATES) {
+    const tz = s.timezone || 'America/New_York';
+    (byTz[tz] = byTz[tz] || []).push(s.code);
+  }
+
+  try {
+    const res = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS', { cache: 'no-store' });
+    const data = await res.json();
+    const s = data.settings || {};
+    let recipients = (s.settings && s.settings.recipients) || s.recipients || [];
+
+    // Drop any prior Saturday-on-call rows for THIS day before adding
+    // fresh ones -- avoids piling up duplicates if the toggle is used
+    // more than once, or a different dispatcher is picked after the fact.
+    recipients = recipients.filter(r => !(r.source === 'saturday-oncall' && r.day === TARGET_DAY));
+
+    for (const [tz, states] of Object.entries(byTz)) {
+      recipients.push({
+        name: `On-Call Dispatcher (${TARGET_DAY}, ${tz.split('/')[1] || tz})`,
+        address: dispatcher.smsAddress,
+        enabled: true,
+        states,
+        timezone: tz,
+        hoursStart: '08:00',
+        hoursEnd: '17:00',
+        source: 'saturday-oncall',
+        day: TARGET_DAY,
+      });
+    }
+
+    await fetch('/.netlify/functions/save-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: 'NOTIFICATIONS', settings: { recipients } }),
+    });
+    alert(`Text alerts enabled for ${currentDispatcher.dispatcher} through 5pm (local) in each covered state's time zone.`);
+  } catch (e) {
+    alert('Could not enable alerts: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// State chips + map
+// ═══════════════════════════════════════════════════════════════════════
+function renderStateChips() {
+  const el = document.getElementById('stateChips');
+  const chips = [`<span class="state-chip ${activeStateFilter === null ? 'active' : ''}" data-state="">Overview</span>`]
+    .concat(SAT_STATES.map(s => `<span class="state-chip ${activeStateFilter === s.code ? 'active' : ''}" data-state="${s.code}">${s.code}</span>`));
+  el.innerHTML = chips.join('');
+  el.querySelectorAll('.state-chip').forEach(chip => {
+    chip.onclick = () => {
+      activeStateFilter = chip.dataset.state || null;
+      renderStateChips();
+      renderMap();
+      renderTicketList();
+      renderTechPanels();
+    };
+  });
+}
+
+function ensureMap() {
+  if (satMap) return;
+  satMap = L.map('satMap', { scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(satMap);
+  satMap.setView([37, -90], 4);
+}
+
+function renderMap() {
+  ensureMap();
+  mapMarkers.forEach(m => satMap.removeLayer(m));
+  mapMarkers = [];
+  const bounds = [];
+
+  const states = activeStateFilter ? [activeStateFilter] : SAT_STATES.map(s => s.code);
+
+  for (const code of states) {
+    const techs = TECHS_BY_STATE[code] || {};
+    const oncall = onCallByState[code] || [];
+    oncall.forEach(entry => {
+      const slug = entry.technician ? entry.technician.toLowerCase().replace(/\s+/g, '-') : null;
+      const t = slug && techs[slug];
+      if (t && t.lat != null && t.lng != null) {
+        const m = L.marker([t.lat, t.lng], { title: t.name })
+          .bindPopup(`<b>${escapeHtml(t.name)}</b><br>On-call — ${code}`)
+          .addTo(satMap);
+        mapMarkers.push(m);
+        bounds.push([t.lat, t.lng]);
+      }
+    });
+
+    const locs = LOCATIONS_BY_STATE[code] || {};
+    (ticketsByState[code] || []).forEach(ticket => {
+      const siteCode = (ticket.siteText || '').split(/[\s-]/)[0];
+      const loc = locs[siteCode];
+      if (loc && loc.lat != null && loc.lng != null) {
+        const closed = closedSaturdayFlag(ticket.address);
+        const m = L.circleMarker([loc.lat, loc.lng], {
+          radius: 8, color: closed ? '#f0a500' : '#e57373', fillOpacity: 0.85,
+        }).bindPopup(`<b>${escapeHtml(loc.name)}</b><br>${escapeHtml(ticket.issueCategory || 'Trouble ticket')}${closed ? '<br><i>Closed on Saturdays</i>' : ''}`)
+          .addTo(satMap);
+        mapMarkers.push(m);
+        bounds.push([loc.lat, loc.lng]);
+      }
+    });
+  }
+
+  if (bounds.length) satMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Ticket list
+// ═══════════════════════════════════════════════════════════════════════
+function renderTicketList() {
+  const el = document.getElementById('ticketList');
+  const states = activeStateFilter ? [activeStateFilter] : SAT_STATES.map(s => s.code);
+  const rows = [];
+  for (const code of states) {
+    (ticketsByState[code] || []).forEach(t => rows.push({ ...t, state: code }));
+  }
+  rows.sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt));
+
+  if (!rows.length) { el.innerHTML = '<div class="empty">No open trouble tickets right now.</div>'; return; }
+
+  el.innerHTML = rows.map((t, i) => {
+    const closed = closedSaturdayFlag(t.address);
+    const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+    const siteLabel = loc ? loc.name : (t.siteText || 'Unmatched site');
+    const slaLabel = t.computedSlaDeadline
+      ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+      : '';
+    return `<div class="ticket-card" data-idx="${i}">
+      <div class="top">
+        <div>
+          <span class="site" data-code="${loc ? loc.code : ''}">[${t.state}] ${escapeHtml(siteLabel)}</span>
+          <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}</div>
+          ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
+          ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
+        </div>
+        <button class="dispatch-btn" data-idx="${i}">Dispatch</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  window._satTicketRows = rows;
+
+  el.querySelectorAll('.site[data-code]').forEach(span => {
+    span.onclick = () => { if (span.dataset.code) showSiteHistory(span.dataset.code); };
+  });
+  el.querySelectorAll('.dispatch-btn').forEach(btn => {
+    btn.onclick = () => openMessageModal(rows[Number(btn.dataset.idx)]);
+  });
+}
+
+async function showSiteHistory(code) {
+  // Same endpoint index.html's location click-through uses -- opens in a
+  // new tab for now rather than duplicating that page's whole overlay
+  // markup here.
+  window.open(`location-lookup.html?code=${encodeURIComponent(code)}`, '_blank');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tech panels + override
+// ═══════════════════════════════════════════════════════════════════════
+function renderTechPanels() {
+  const el = document.getElementById('techPanels');
+  const states = activeStateFilter ? [activeStateFilter] : SAT_STATES.map(s => s.code);
+  el.innerHTML = states.map(code => {
+    const entries = onCallByState[code] || [];
+    const rows = entries.length
+      ? entries.map(e => `<div class="tech-row"><span>${escapeHtml(e.technician || 'Unassigned')}</span>
+          <button class="btn btn-grey" style="padding:4px 8px;font-size:12px;" data-state="${code}" data-tech="${escapeHtml(e.technician || '')}">Change</button></div>`).join('')
+      : `<div class="tech-row"><span style="color:#888;">No on-call tech set</span>
+          <button class="btn btn-grey" style="padding:4px 8px;font-size:12px;" data-state="${code}" data-tech="">Set</button></div>`;
+    return `<div class="tech-panel"><div class="state-hdr">${code}</div>${rows}</div>`;
+  }).join('');
+
+  el.querySelectorAll('button[data-state]').forEach(btn => {
+    btn.onclick = () => openTechModal(btn.dataset.state, btn.dataset.tech);
+  });
+}
+
+function openTechModal(state, currentTechName) {
+  const techs = TECHS_BY_STATE[state] || {};
+  const sel = document.getElementById('techSelect');
+  sel.innerHTML = Object.entries(techs)
+    .filter(([, t]) => t.active !== false)
+    .map(([slug, t]) => `<option value="${slug}">${escapeHtml(t.name)}</option>`).join('');
+  if (currentTechName) {
+    const slug = currentTechName.toLowerCase().replace(/\s+/g, '-');
+    if (techs[slug]) sel.value = slug;
+  }
+  document.getElementById('techModalBody').textContent = `Only today's (${TARGET_DAY}) assignment for ${state} changes -- next Saturday reverts automatically.`;
+  document.getElementById('techModal').dataset.state = state;
+  document.getElementById('techModal').classList.add('active');
+}
+
+document.getElementById('techModalCancel').onclick = () => document.getElementById('techModal').classList.remove('active');
+document.getElementById('techModalConfirm').onclick = async () => {
+  const state = document.getElementById('techModal').dataset.state;
+  const slug = document.getElementById('techSelect').value;
+  const tech = (TECHS_BY_STATE[state] || {})[slug];
+  if (!tech) return;
+  try {
+    // NOTE: get-technicians.js returns records keyed by slug, without the
+    // underlying technicians.id -- save-on-call.js's technician_id column
+    // is a real FK, so this needs the actual id, not the slug. Flagging
+    // rather than guessing: either add `id` to get-technicians.js's
+    // returned fields, or resolve slug -> id via a small lookup here
+    // before this call will work end to end.
+    await fetch('/.netlify/functions/save-on-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, day: TARGET_DAY, technician_id: tech.id || slug }),
+    });
+    await loadOnCallTechs();
+    renderTechPanels();
+    renderMap();
+  } catch (e) {
+    alert('Could not save: ' + e.message);
+  }
+  document.getElementById('techModal').classList.remove('active');
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dispatch-a-ticket message modal -- single-urgent-ticket format, same
+// wording index.html's generateFinalMessages() uses for one urgent stop.
+// ═══════════════════════════════════════════════════════════════════════
+function openMessageModal(ticket) {
+  pendingMessageTicket = ticket;
+  const techs = TECHS_BY_STATE[ticket.state] || {};
+  const entries = onCallByState[ticket.state] || [];
+  const sel = document.getElementById('msgTechSelect');
+  sel.innerHTML = Object.entries(techs)
+    .filter(([, t]) => t.active !== false)
+    .map(([slug, t]) => `<option value="${slug}">${escapeHtml(t.name)}</option>`).join('');
+  if (entries[0] && entries[0].technician) {
+    const slug = entries[0].technician.toLowerCase().replace(/\s+/g, '-');
+    if (techs[slug]) sel.value = slug;
+  }
+  buildMessageText();
+  sel.onchange = buildMessageText;
+  document.getElementById('messageModal').classList.add('active');
+}
+
+function buildMessageText() {
+  const t = pendingMessageTicket;
+  const techs = TECHS_BY_STATE[t.state] || {};
+  const slug = document.getElementById('msgTechSelect').value;
+  const tech = techs[slug];
+  const firstName = tech ? tech.name.split(' ')[0] : 'there';
+  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  const siteName = loc ? loc.name : (t.siteText || 'the site');
+  const closed = closedSaturdayFlag(t.address);
+
+  let msg = `⚡ URGENT - Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
+  msg += `1. ${t.woNumber ? 'WO ' + t.woNumber + ' – ' : ''}${t.issueCategory || t.issueDetail || 'Trouble ticket'}\n`;
+  if (closed) msg += `\n⚠️ This site is closed on Saturdays -- verify before dispatching, may just be a remote-monitoring false alarm.\n`;
+  msg += `\nPlease acknowledge receipt.`;
+  document.getElementById('msgText').value = msg;
+}
+
+document.getElementById('messageModalCancel').onclick = () => document.getElementById('messageModal').classList.remove('active');
+document.getElementById('messageModalCopy').onclick = () => {
+  navigator.clipboard.writeText(document.getElementById('msgText').value).then(() => alert('Copied!')).catch(() => alert('Copy failed'));
+};
+document.getElementById('messageModalSend').onclick = async () => {
+  const t = pendingMessageTicket;
+  const techs = TECHS_BY_STATE[t.state] || {};
+  const slug = document.getElementById('msgTechSelect').value;
+  const tech = techs[slug];
+  const txt = document.getElementById('msgText').value;
+  if (!tech) return;
+  try {
+    const r = await fetch('/.netlify/functions/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: tech.smsAddress || null,
+        email: tech.email || null,
+        body: `MCR Dispatch: urgent ticket for ${t.state}. Details sent to your email.`,
+        htmlBody: `<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">${escapeHtml(txt)}</pre>`,
+        subject: `MCR Dispatch — Saturday urgent (${t.state})`,
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) { alert(`Sent to ${tech.name}!`); document.getElementById('messageModal').classList.remove('active'); }
+    else alert('Send failed: ' + (d.error || 'unknown error'));
+  } catch (e) {
+    alert('Send failed: ' + e.message);
+  }
+};
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s ?? '');
+  return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════
+(async function init() {
+  TARGET_DAY = targetSaturday();
+  document.getElementById('dateLabel').textContent =
+    `For Saturday, ${new Date(TARGET_DAY + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`;
+
+  await loadSaturdayStates();
+  renderStateChips();
+  await Promise.all([loadDispatchers(), loadDispatcherOnCall(), loadOnCallTechs(), loadTickets(), loadLocationsAndTechs()]);
+
+  renderDispatcherBanner();
+  renderMap();
+  renderTicketList();
+  renderTechPanels();
+})();
+</script>
+</body>
+</html>
