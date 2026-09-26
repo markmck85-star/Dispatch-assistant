@@ -302,6 +302,35 @@
             object-fit: contain;
             display: block;
         }
+
+        #boardLoginOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            background: rgba(0,0,0,0.72);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        #boardLoginOverlay.active { display: flex; }
+        #boardLoginBox {
+            width: 100%;
+            max-width: 360px;
+            background: #1a1a1a;
+            color: #eee;
+            border-radius: 12px;
+            padding: 22px 20px;
+            border: 1px solid #444;
+        }
+        #boardLoginBox h2 { margin: 0 0 6px; font-size: 20px; color: #fff; }
+        #boardLoginBox p { margin: 0 0 14px; font-size: 13px; color: #aaa; }
+        #boardLoginBox label { display: block; font-size: 13px; margin: 8px 0 4px; }
+        #boardLoginBox input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #555; background: #111; color: #fff; font-size: 16px; }
+        #boardLoginBox button { width: 100%; margin-top: 12px; padding: 12px; border: none; border-radius: 8px; background: #0a6e5c; color: #fff; font-weight: 700; font-size: 16px; }
+        #boardLoginError { color: #ff8a80; font-size: 13px; min-height: 18px; margin-top: 8px; }
+        #boardUserChip { font-size: 13px; color: #888; margin: 4px 0 8px; }
+        #boardUserChip button { margin-left: 8px; background: transparent; border: none; color: #dc3545; text-decoration: underline; cursor: pointer; font-size: 13px; }
     </style>
 </head>
 <body>
@@ -326,8 +355,22 @@
         }
     </script>
 
+    <div id="boardLoginOverlay">
+        <div id="boardLoginBox">
+            <h2>Sign in</h2>
+            <p>Same username and PIN as the Admin Panel. The board will open on your home state.</p>
+            <label for="boardLoginUser">Username</label>
+            <input id="boardLoginUser" type="text" autocomplete="username" autocapitalize="none">
+            <label for="boardLoginPin">PIN</label>
+            <input id="boardLoginPin" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password">
+            <button type="button" onclick="submitBoardLogin()">Sign in</button>
+            <div id="boardLoginError"></div>
+        </div>
+    </div>
+
     <div class="container">
-        <h1>MCR Dispatch Hub v9.86</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-164</div>
+        <h1>MCR Dispatch Hub v9.87</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-165</div>
+        <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
             <span id="bootStatusText">Starting…</span>
@@ -2080,8 +2123,122 @@ function distanceMatrixStatus(state) {
             }
         }
 
+        const BOARD_STATE_MAP = { NC: 'GA', SC: 'GA' };
+        const BOARD_ALL_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','NV','OH','OR','WV'];
+        window.CURRENT_USER = null;
+
+        function boardStateFor(code) {
+            const raw = String(code || '').toUpperCase();
+            const mapped = BOARD_STATE_MAP[raw] || raw;
+            return BOARD_ALL_STATES.indexOf(mapped) >= 0 ? mapped : null;
+        }
+
+        function loadSavedBoardUser() {
+            try {
+                const raw = sessionStorage.getItem('dispatchUser');
+                if (!raw) return null;
+                const user = JSON.parse(raw);
+                if (user && user.username) return user;
+            } catch (e) {}
+            return null;
+        }
+
+        function applyDispatcherSession(user) {
+            window.CURRENT_USER = user;
+            const chip = document.getElementById('boardUserChip');
+            if (chip) {
+                chip.innerHTML = 'Signed in as <strong>' + user.username + '</strong> (' + (user.role || 'dispatcher') + ')'
+                    + ' <button type="button" onclick="switchBoardUser()">Switch user</button>';
+            }
+            const sel = document.getElementById('stateSelector');
+            if (!sel) return;
+            const allowed = (user.role === 'admin')
+                ? BOARD_ALL_STATES.slice()
+                : (user.states || []).map(boardStateFor).filter(Boolean)
+                    .filter(function(v, i, a) { return a.indexOf(v) === i; });
+            if (!allowed.length) allowed.push('GA');
+            const current = sel.value;
+            sel.innerHTML = '';
+            const labels = {
+                AL:'Alabama', CA:'California', CO:'Colorado', FL:'Florida',
+                GA:'Georgia / NC / SC', ID:'Idaho', IL:'Illinois', IN:'Indiana',
+                MI:'Michigan', MN:'Minnesota', NV:'Nevada', OH:'Ohio',
+                OR:'Oregon', WV:'West Virginia'
+            };
+            allowed.forEach(function(st) {
+                const opt = document.createElement('option');
+                opt.value = st;
+                opt.textContent = labels[st] || st;
+                sel.appendChild(opt);
+            });
+            const preferred = boardStateFor(localStorage.getItem('dispatchReturnState'))
+                || boardStateFor(localStorage.getItem('lastSelectedState'))
+                || boardStateFor((user.states || [])[0])
+                || allowed[0];
+            sel.value = allowed.indexOf(preferred) >= 0 ? preferred : allowed[0];
+            if (sel.value !== current) { /* dropdown rewritten */ }
+        }
+
+        function switchBoardUser() {
+            sessionStorage.removeItem('dispatchUser');
+            sessionStorage.removeItem('dispatchAdminPin');
+            window.location.reload();
+        }
+
+        function ensureBoardLogin() {
+            const existing = loadSavedBoardUser();
+            if (existing) {
+                applyDispatcherSession(existing);
+                return Promise.resolve(existing);
+            }
+            return new Promise(function(resolve) {
+                const overlay = document.getElementById('boardLoginOverlay');
+                overlay.classList.add('active');
+                setBootStatus('Waiting for sign-in…');
+                window.__resolveBoardLogin = resolve;
+                const pin = document.getElementById('boardLoginPin');
+                const user = document.getElementById('boardLoginUser');
+                if (pin && !pin._bound) {
+                    pin._bound = true;
+                    pin.addEventListener('keydown', function(e) { if (e.key === 'Enter') submitBoardLogin(); });
+                    user.addEventListener('keydown', function(e) { if (e.key === 'Enter') pin.focus(); });
+                }
+            });
+        }
+
+        async function submitBoardLogin() {
+            const username = document.getElementById('boardLoginUser').value.trim();
+            const pin = document.getElementById('boardLoginPin').value.trim();
+            const err = document.getElementById('boardLoginError');
+            err.textContent = '';
+            if (!username || !pin) {
+                err.textContent = 'Enter username and PIN.';
+                return;
+            }
+            try {
+                const res = await fetch('/.netlify/functions/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username, pin: pin })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    err.textContent = data.error || 'Login failed';
+                    return;
+                }
+                sessionStorage.setItem('dispatchUser', JSON.stringify(data));
+                sessionStorage.setItem('dispatchAdminPin', pin);
+                applyDispatcherSession(data);
+                document.getElementById('boardLoginOverlay').classList.remove('active');
+                if (window.__resolveBoardLogin) window.__resolveBoardLogin(data);
+            } catch (e) {
+                err.textContent = 'Connection error. Try again.';
+            }
+        }
+
         window.onload = async function() {
             setBootStatus('Starting…');
+            await ensureBoardLogin();
             restoreJournalThreshold();
             restoreHeavyDayTrigger();
             restoreControlsState();
