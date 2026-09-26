@@ -132,8 +132,11 @@
                 <input type="hidden" id="userEditId" value="">
                 <label for="userUsername">Username</label>
                 <input type="text" id="userUsername" placeholder="e.g. justin" autocapitalize="none" autocomplete="off">
-                <label for="userPin">PIN <span style="color:#888;font-weight:400;font-size:12px;">(4–8 digits; leave blank when editing to keep the current PIN)</span></label>
-                <input type="password" id="userPin" placeholder="PIN" inputmode="numeric" maxlength="8" autocomplete="new-password">
+                <label for="userPin">PIN <span style="color:#888;font-weight:400;font-size:12px;">(4–8 digits)</span></label>
+                <div style="position:relative;margin-bottom:10px;">
+                    <input type="password" id="userPin" placeholder="PIN" inputmode="numeric" maxlength="8" autocomplete="new-password" style="margin-bottom:0;padding-right:52px;">
+                    <button type="button" id="userPinToggle" onclick="toggleUserPinField()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:#e9ecef;border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;">Show</button>
+                </div>
                 <label for="userRole">Role</label>
                 <select id="userRole">
                     <option value="dispatcher">Dispatcher</option>
@@ -231,6 +234,21 @@
                 <div class="checkbox-row">
                     <input type="checkbox" id="techActive" checked>
                     <label for="techActive" style="margin:0;font-weight:400;">Active</label>
+                </div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="techIsDispatcher" onchange="document.getElementById('techDispatcherFields').style.display=this.checked?'block':'none'">
+                    <label for="techIsDispatcher" style="margin:0;font-weight:400;">This employee is also a dispatcher <span style="color:#888;font-size:12px;">(creates a login for the board and Saturday on-call list)</span></label>
+                </div>
+                <div id="techDispatcherFields" style="display:none;background:#fff;border:1px solid #dde;border-radius:8px;padding:12px;margin-bottom:12px;">
+                    <label for="techDispatcherUsername">Dispatcher username</label>
+                    <input type="text" id="techDispatcherUsername" placeholder="e.g. mark" autocapitalize="none" autocomplete="off">
+                    <label for="techDispatcherPin">PIN (4–8 digits)</label>
+                    <input type="password" id="techDispatcherPin" placeholder="PIN" inputmode="numeric" maxlength="8" autocomplete="new-password">
+                    <label for="techDispatcherRole">Login role</label>
+                    <select id="techDispatcherRole">
+                        <option value="dispatcher">Dispatcher</option>
+                        <option value="admin">Admin</option>
+                    </select>
                 </div>
                 <button class="big-btn save-btn" onclick="saveTechnician()">Save Technician</button>
                 <button id="techClearBtn" class="big-btn" onclick="clearTechForm()" style="background:#6c757d;margin-top:5px;">Clear Form</button>
@@ -1516,6 +1534,14 @@
             }
         }
 
+        function toggleUserPinField() {
+            var input = document.getElementById('userPin');
+            var btn = document.getElementById('userPinToggle');
+            var show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            btn.textContent = show ? 'Hide' : 'Show';
+        }
+
         function togglePinReveal(id) {
             var el = document.getElementById(id);
             if (!el) return;
@@ -1683,6 +1709,8 @@
             document.getElementById('userUsername').value = '';
             document.getElementById('userUsername').disabled = false;
             document.getElementById('userPin').value = '';
+            document.getElementById('userPin').type = 'password';
+            document.getElementById('userPinToggle').textContent = 'Show';
             document.getElementById('userRole').value = 'dispatcher';
             document.getElementById('userFormTitle').textContent = 'Add Login';
             renderUserStateChecks([]);
@@ -1724,7 +1752,9 @@
             document.getElementById('userEditId').value = u.id;
             document.getElementById('userUsername').value = u.username;
             document.getElementById('userUsername').disabled = true;
-            document.getElementById('userPin').value = '';
+            document.getElementById('userPin').value = u.pin || '';
+            document.getElementById('userPin').type = 'password';
+            document.getElementById('userPinToggle').textContent = 'Show';
             document.getElementById('userRole').value = u.role || 'dispatcher';
             document.getElementById('userFormTitle').textContent = 'Edit ' + u.username;
             renderUserStateChecks(u.states || []);
@@ -2432,6 +2462,14 @@
             document.getElementById('techAdditionalStates').value = '';
             document.getElementById('techActive').checked = true;
             document.getElementById('techFormTitle').textContent = 'Add Technician';
+            var dispCb = document.getElementById('techIsDispatcher');
+            if (dispCb) {
+                dispCb.checked = false;
+                document.getElementById('techDispatcherFields').style.display = 'none';
+                document.getElementById('techDispatcherUsername').value = '';
+                document.getElementById('techDispatcherPin').value = '';
+                document.getElementById('techDispatcherRole').value = 'dispatcher';
+            }
             document.getElementById('techClearBtn').textContent = 'Clear Form';
         }
 
@@ -2493,6 +2531,28 @@
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
                 showToast(isEdit ? 'Technician updated' : 'Technician added', 'success');
+
+                if (document.getElementById('techIsDispatcher').checked && currentUser && currentUser.role === 'admin') {
+                    var dUser = document.getElementById('techDispatcherUsername').value.trim().toLowerCase();
+                    var dPin = document.getElementById('techDispatcherPin').value.trim();
+                    if (!dUser || !dPin) {
+                        showToast('Technician saved, but dispatcher login needs a username and PIN.', 'error');
+                    } else {
+                        try {
+                            await manageUsers({
+                                action: 'from-technician',
+                                technicianSlug: slug,
+                                username: dUser,
+                                pin: dPin,
+                                role: document.getElementById('techDispatcherRole').value,
+                                states: [homeState].concat(additionalStates)
+                            });
+                            showToast('Dispatcher login saved for ' + dUser, 'success');
+                        } catch (de) {
+                            showToast('Technician saved; dispatcher login failed: ' + de.message, 'error');
+                        }
+                    }
+                }
 
                 // 2026-09-24: same Quick Add offer as saveLocation above.
                 // Uses homeState (the tech's actual state), not
