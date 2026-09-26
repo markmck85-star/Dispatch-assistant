@@ -299,13 +299,31 @@ async function loadOnCallTechs() {
   }));
 }
 
+// A ticket belongs on today's Saturday list only if its own deadline is
+// today or already past -- something legitimately due Wednesday (seen live
+// on MI "Testing Station" tickets, which don't run on the normal 4-hour
+// kiosk-down SLA) doesn't need a Saturday dispatcher's attention yet, even
+// though it's still open. Falls back through whichever deadline field the
+// ticket actually has; a ticket with none of them is kept rather than
+// silently hidden, since that's a data gap, not a "not due yet" case.
+function isDueTodayOrEarlier(t) {
+  const deadline = t.computedSlaDeadline || t.earliestStartAt || t.slaEndsAt || t.dueAt;
+  if (!deadline) return true;
+  const deadlineDate = new Date(deadline);
+  if (isNaN(deadlineDate.getTime())) return true;
+  const endOfTargetDay = new Date(TARGET_DAY + 'T23:59:59');
+  return deadlineDate.getTime() <= endOfTargetDay.getTime();
+}
+
 async function loadTickets() {
   ticketsByState = {};
   await Promise.all(SAT_STATES.map(async (s) => {
     try {
       const res = await fetch(`/.netlify/functions/get-watchdog-log?state=${s.code}`);
       const data = await res.json();
-      ticketsByState[s.code] = (data.entries || []).filter(t => t.ticketKind === 'trouble');
+      ticketsByState[s.code] = (data.entries || [])
+        .filter(t => t.ticketKind === 'trouble')
+        .filter(isDueTodayOrEarlier);
     } catch (e) { ticketsByState[s.code] = []; }
   }));
 }
