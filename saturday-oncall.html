@@ -157,7 +157,11 @@
     <div id="assignUnmatchedNote" style="display:none;font-size:12.5px;color:#f0a500;margin-bottom:8px;">This ticket's site isn't matched to a real location yet, so it can't be formally assigned -- resolve the site first (via the unmatched-sites toast on the main dispatch page). You can still message a tech below.</div>
     <label for="msgTechSelect">Technician</label>
     <select id="msgTechSelect"></select>
-    <button class="btn btn-green" id="assignBtn" style="width:100%;margin-top:10px;">✅ Assign</button>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn btn-green" id="assignBtn" style="flex:2;">✅ Assign</button>
+      <button class="btn btn-grey" id="unassignBtn" style="flex:1;">Unassign</button>
+    </div>
+    <button class="btn btn-orange" id="pushMondayBtn" style="width:100%;margin-top:8px;">📅 Push to Monday</button>
     <label for="msgText">Message (optional)</label>
     <textarea id="msgText"></textarea>
     <div class="modal-actions">
@@ -223,6 +227,15 @@ function targetSaturday() {
   const d = new Date();
   const offset = (6 - d.getDay() + 7) % 7; // 0 if today is Saturday
   d.setDate(d.getDate() + offset);
+  return isoDate(d);
+}
+
+// Monday following a given Saturday -- matches the main dispatch board's
+// own push-to-Monday behavior (a late Saturday call is never re-dispatched
+// Sunday, always the next business day).
+function followingMonday(saturdayIso) {
+  const d = new Date(saturdayIso + 'T12:00:00');
+  d.setDate(d.getDate() + 2);
   return isoDate(d);
 }
 
@@ -567,10 +580,13 @@ function renderTicketList() {
       ? `SLA: ${new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
       : '';
     const key = ticketKey(t, loc ? loc.code : null);
-    const assignment = key ? assignmentsByKey[key] : null;
+    const rawAssignment = key ? assignmentsByKey[key] : null;
+    const assignment = rawAssignment && rawAssignment.status !== 'removed' ? rawAssignment : null;
     const assignedLabel = assignment
       ? `<div class="meta" style="color:#5bd9c0;">Assigned to ${escapeHtml(assignment.techName)}${assignment.status === 'notified' ? ' — notified' : ''}${assignment.receivedAt ? ` · ✓ Received ${new Date(assignment.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}</div>`
-      : '';
+      : (rawAssignment && rawAssignment.status === 'removed'
+          ? `<div class="meta" style="color:#f0a500;">Pushed to Monday / unassigned</div>`
+          : '');
     // Same fix as index.html: a second, distinct ticket at a site with an
     // already-planned entry gets appended as a note on the FIRST ticket's
     // description (not shown here) and flags needs_review -- surfaced as a
@@ -723,6 +739,10 @@ function openMessageModal(ticket) {
   document.getElementById('assignUnmatchedNote').style.display = unmatched ? 'block' : 'none';
   document.getElementById('assignBtn').disabled = unmatched;
   document.getElementById('assignBtn').style.opacity = unmatched ? '0.5' : '1';
+  document.getElementById('unassignBtn').disabled = unmatched;
+  document.getElementById('unassignBtn').style.opacity = unmatched ? '0.5' : '1';
+  document.getElementById('pushMondayBtn').disabled = unmatched;
+  document.getElementById('pushMondayBtn').style.opacity = unmatched ? '0.5' : '1';
 
   buildMessageText();
   sel.onchange = buildMessageText;
@@ -773,6 +793,86 @@ document.getElementById('assignBtn').onclick = async () => {
     alert(`Assigned to ${tech.name}. This shows up on the main dispatch board too.`);
   } catch (e) {
     alert('Could not assign: ' + e.message);
+  }
+};
+
+document.getElementById('unassignBtn').onclick = async () => {
+  const t = pendingMessageTicket;
+  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  if (!loc) return;
+  const key = ticketKey(t, loc.code);
+  const existing = key ? assignmentsByKey[key] : null;
+  const techForCall = (existing && existing.techName) || (TECHS_BY_STATE[t.state] || {})[document.getElementById('msgTechSelect').value]?.name;
+  if (!techForCall) { alert('Nothing to unassign.'); return; }
+  try {
+    const res = await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dispatchDate: TARGET_DAY,
+        siteCode: loc.code,
+        techName: techForCall,
+        status: 'removed',
+        assignedBy: 'manual',
+        ticketWoNumber: t.woNumber || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Unassign failed');
+    await loadAssignments();
+    renderTicketList();
+    document.getElementById('messageModal').classList.remove('active');
+  } catch (e) {
+    alert('Could not unassign: ' + e.message);
+  }
+};
+
+document.getElementById('pushMondayBtn').onclick = async () => {
+  const t = pendingMessageTicket;
+  const loc = (LOCATIONS_BY_STATE[t.state] || {})[(t.siteText || '').split(/[\s-]/)[0]];
+  if (!loc) return;
+  const techs = TECHS_BY_STATE[t.state] || {};
+  const slug = document.getElementById('msgTechSelect').value;
+  const tech = techs[slug];
+  const key = ticketKey(t, loc.code);
+  const existing = key ? assignmentsByKey[key] : null;
+  const techForToday = (existing && existing.techName) || (tech && tech.name);
+  const mondayIso = followingMonday(TARGET_DAY);
+  if (!techForToday) { alert('Pick a technician first.'); return; }
+  if (!confirm(`Push ${loc.name} to Monday (${mondayIso})? This clears today's assignment and creates a new one for Monday.`)) return;
+  try {
+    // Clear today's row, then create Monday's -- same two-step pattern
+    // index.html's pushToTomorrow() uses (separate rows, not a moved date,
+    // so today's history isn't lost).
+    const removeRes = await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dispatchDate: TARGET_DAY, siteCode: loc.code, techName: techForToday,
+        status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
+      }),
+    });
+    const removeData = await removeRes.json();
+    if (!removeData.ok) throw new Error(removeData.error || 'Could not clear today\'s assignment');
+
+    const mondayTech = (tech && tech.name) || techForToday;
+    const addRes = await fetch('/.netlify/functions/save-assignment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dispatchDate: mondayIso, siteCode: loc.code, techName: mondayTech,
+        status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined,
+      }),
+    });
+    const addData = await addRes.json();
+    if (!addData.ok) throw new Error(addData.error || 'Could not create Monday\'s assignment');
+
+    await loadAssignments();
+    renderTicketList();
+    document.getElementById('messageModal').classList.remove('active');
+    alert(`Pushed to Monday (${mondayIso}) for ${mondayTech}.`);
+  } catch (e) {
+    alert('Could not push to Monday: ' + e.message);
   }
 };
 
