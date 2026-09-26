@@ -113,6 +113,18 @@
   </div>
 </div>
 
+<!-- Site visit history overlay -- same data/endpoint as index.html's
+     clickable-location-history feature -->
+<div class="modal-overlay" id="siteHistoryModal">
+  <div class="modal" style="max-width:520px;">
+    <h2 id="siteHistoryTitle">Visit History</h2>
+    <div id="siteHistoryBody" style="font-size:13px;color:#ddd;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-grey" id="siteHistoryClose">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Carrier capture -- shown only if the selected dispatcher has no
      sms_address on file yet, so alerts can still be enabled without a
      trip to the dispatchers table -->
@@ -584,11 +596,39 @@ function renderTicketList() {
 }
 
 async function showSiteHistory(code) {
-  // Same endpoint index.html's location click-through uses -- opens in a
-  // new tab for now rather than duplicating that page's whole overlay
-  // markup here.
-  window.open(`location-lookup.html?code=${encodeURIComponent(code)}`, '_blank');
+  const body = document.getElementById('siteHistoryBody');
+  document.getElementById('siteHistoryTitle').textContent = 'Visit History — ' + code;
+  body.innerHTML = 'Loading…';
+  document.getElementById('siteHistoryModal').classList.add('active');
+  try {
+    const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(code));
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    document.getElementById('siteHistoryTitle').textContent = `Visit History — ${data.site.name} (${data.site.code})`;
+    if (!data.visits.length) {
+      body.innerHTML = '<em style="color:#888;">No visit history found for this site yet.</em>';
+      return;
+    }
+    body.innerHTML = data.visits.map(v => {
+      const when = v.started_at
+        ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : 'Unknown date';
+      const tech = v.tech_name_raw || 'Unknown tech';
+      const label = v.remediation || (v.is_restock ? 'Restock' : 'Service');
+      const detail = v.remediation_detail || v.closing_note || '';
+      const wo = v.wo_number ? `WO ${escapeHtml(String(v.wo_number))}` : '';
+      const dur = v.duration_min != null ? ` · ${v.duration_min} min` : '';
+      return `<div style="border-bottom:1px solid #333;padding:8px 0;">
+        <div style="font-weight:700;color:#f0f0f0;">${escapeHtml(when)} — <span style="color:${v.is_restock ? '#7bc796' : '#e08a8a'};">${escapeHtml(label)}</span>${dur}</div>
+        <div style="color:#bbb;">${escapeHtml(tech)}${detail ? ' — ' + escapeHtml(detail) : ''}</div>
+        ${wo ? `<div style="color:#888;font-size:11.5px;">${wo}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    body.innerHTML = `<span style="color:#e57373;">Error loading history: ${escapeHtml(err.message)}</span>`;
+  }
 }
+document.getElementById('siteHistoryClose').onclick = () => document.getElementById('siteHistoryModal').classList.remove('active');
 
 // ═══════════════════════════════════════════════════════════════════════
 // Tech panels + override
@@ -712,7 +752,7 @@ document.getElementById('assignBtn').onclick = async () => {
         dispatchDate: TARGET_DAY,
         siteCode: loc.code,
         techName: tech.name,
-        status: 'notified',
+        status: 'planned',
         assignedBy: 'manual',
         ticketWoNumber: t.woNumber || undefined,
       }),
