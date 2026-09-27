@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.13</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.14</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -464,7 +464,11 @@ function downloadBlob(blob, name) {
 function exportExcel() {
   if (!ctx) return;
   const start = document.getElementById('periodStart').value || '';
-  const base = 'Mileage-' + (ctx.technician.name || 'tech').replace(/\s+/g, '_') + '-' + start;
+  const end = document.getElementById('periodEnd').value || '';
+  const endParts = (end || start).split('-');
+  const fileEnd = endParts.length === 3 ? (Number(endParts[1]) + '_' + Number(endParts[2]) + '_' + endParts[0]) : (end || start);
+  const lastName = (ctx.technician.name || 'tech').trim().split(/\s+/).slice(-1)[0];
+  const base = lastName + '_Mileage_' + fileEnd;
   if (!window.XLSX) {
     document.getElementById('status').textContent = 'Excel library did not load — try Print / PDF.';
     return;
@@ -491,6 +495,10 @@ function exportExcel() {
   put(1, 0, '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)', { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
   put(3, 0, 'NAME:', { font: fontB, border: false });
   put(3, 1, ctx.technician.name, { font: fontB, border: false });
+  put(3, 3, 'PERIOD BEGINNING:', { font: fontB, border: false });
+  put(3, 4, start, { font: fontB, border: false });
+  put(4, 3, 'PERIOD ENDING:', { font: fontB, border: false });
+  put(4, 4, end, { font: fontB, border: false });
   const headers = ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.'];
   headers.forEach((h, i) => put(5, i, h, { font: fontB, fill: headerFill, alignment: { horizontal: 'center', vertical: 'center' } }));
   const byDay = {};
