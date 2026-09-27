@@ -69,9 +69,14 @@ const TOKEN_ALIASES = {
   // unambiguous enough in this context (a site-name word list, not free
   // prose) that this carries negligible risk of misreading something else.
   n: 'north', s: 'south', e: 'east', w: 'west',
+  ks: 'soopers', sooper: 'soopers',
+  mv: 'vehicle',
 };
 function tokenize(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => TOKEN_ALIASES[t] || t);
+  return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).flatMap((t) => {
+    if (t === 'ks') return ['king', 'soopers'];
+    return [TOKEN_ALIASES[t] || t];
+  });
 }
 
 const MIN_RATIO = 0.4;
@@ -147,6 +152,18 @@ function isHomeLabel(rawLabel, homeAddress) {
 function isErrandLabel(rawLabel) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
+}
+
+function isCityOnlyLabel(rawLabel) {
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
+  if (!label || label.length < 3) return false;
+  if (isErrandLabel(label)) return false;
+  const tokens = tokenize(label);
+  if (!tokens.length || tokens.length > 3) return false;
+  const storeWords = new Set(['kroger', 'soopers', 'king', 'safeway', 'meijer', 'walmart', 'target', 'publix', 'albertsons', 'vehicle', 'office', 'warehouse']);
+  if (tokens.some((t) => storeWords.has(t))) return false;
+  if (/\d{3,}/.test(label)) return false;
+  return true;
 }
 
 /**
@@ -314,12 +331,27 @@ function parseMileageWorkbookBuffer(buffer) {
  * full result for the caller to log/display.
  */
 async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPeriodEnd, source, sourceEmailId, sourceFilename }) {
-  const { data: techRow, error: techErr } = await supabase
+  const rawName = String(technicianNameRaw || '').trim();
+  let techRow = null;
+  const { data: exactTech, error: techErr } = await supabase
     .from('technicians')
     .select('id, name, home_state, additional_states, home_address, lat, lng')
-    .ilike('name', String(technicianNameRaw || '').trim())
+    .ilike('name', rawName)
     .maybeSingle();
   if (techErr) throw new Error('Technician lookup failed: ' + techErr.message);
+  techRow = exactTech;
+  if (!techRow && rawName) {
+    const { data: allTechs } = await supabase
+      .from('technicians')
+      .select('id, name, home_state, additional_states, home_address, lat, lng');
+    const tokens = rawName.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+    const last = tokens[tokens.length - 1];
+    const hits = (allTechs || []).filter((t) => {
+      const n = String(t.name || '').toLowerCase();
+      return last && n.includes(last) && tokens.filter((tok) => n.includes(tok)).length >= Math.min(2, tokens.length);
+    });
+    if (hits.length === 1) techRow = hits[0];
+  }
 
   const states = techRow ? [techRow.home_state, ...(techRow.additional_states || [])].filter(Boolean) : [];
   let candidateSites = [];
@@ -422,6 +454,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // called here anymore -- see the precedence rationale below.
   function resolveHomeOrAlias(rawLabel) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
+    if (isCityOnlyLabel(rawLabel)) return { type: 'home' };
     if (isErrandLabel(rawLabel)) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
     const cleaned = normalizePlaceLabel(rawLabel).toLowerCase();
     const aliasHit = aliasMap[cleaned] || aliasMap[String(rawLabel || '').trim().toLowerCase()];
