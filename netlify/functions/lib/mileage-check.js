@@ -928,9 +928,14 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
   }
 
-  const needsReview = flaggedLegs.length > 0 || aliasConflicts.length > 0
-    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow
-    || daySummaries.some((d) => d.flagged) || (historyComparison && historyComparison.flagged);
+  const needsReview = !!(
+    flaggedLegs.length > 0
+    || aliasConflicts.length > 0
+    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3)
+    || !techRow
+    || (Array.isArray(daySummaries) && daySummaries.some((d) => d.flagged))
+    || (historyComparison && historyComparison.flagged)
+  );
 
   const row = {
     technician_id: techRow ? techRow.id : null,
