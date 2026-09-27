@@ -3038,6 +3038,11 @@ function distanceMatrixStatus(state) {
             // Clear any pending fallback assignment dialogs from previous state
             const existingDialog = document.getElementById('fallback-assign-prompt');
             if (existingDialog) existingDialog.remove();
+            const aiDiff = document.getElementById('aiCommandDiff');
+            if (aiDiff) aiDiff.innerHTML = '';
+            const aiInput = document.getElementById('aiCommandInput');
+            if (aiInput) aiInput.value = '';
+            window._aiRebalanceTotalSavedMi = 0;
             // Clear fallback flags on current assignments
             Object.values(window.currentAssignments || {}).forEach(items => {
                 (items || []).forEach(item => { item.needsFallbackAssignment = false; });

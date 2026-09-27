@@ -170,7 +170,7 @@
     <div id="stateMapPanel">
       <div class="map-panel-head">
         <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
-        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; updateDispatchBackLinks(); renderStateMap(document.getElementById('stateSel').value, this.value);"
+        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; updateDispatchBackLinks(); (function(){ var d=document.getElementById('stateAiCommandDiff'); if(d) d.innerHTML=''; window._stateAiRebalanceTotalSavedMi=0; })(); renderStateMap(document.getElementById('stateSel').value, this.value);"
           style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
         <button type="button" id="stateMapToggleBtn" onclick="toggleStateMap()"
           aria-expanded="true" aria-controls="stateMapBody">Hide Map</button>
