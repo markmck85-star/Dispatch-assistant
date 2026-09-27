@@ -6344,7 +6344,7 @@ function distanceMatrixStatus(state) {
                         });
                         const td = await tr.json();
                         if (td && td.ok && td.token) {
-                            ackUrl = (location.origin || 'https://mcrdispatch.net') + '/.netlify/functions/confirm-receipt?token=' + td.token;
+                            ackUrl = (location.origin || 'https://mcrdispatch.net') + '/ack?t=' + td.token;
                         }
                     } catch (e) {}
                 }
