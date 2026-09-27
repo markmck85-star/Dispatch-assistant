@@ -26,6 +26,10 @@
   .dow { display:block; font-size:22px; font-weight:700; color:#fff; line-height:1.25; margin:2px 0 8px; }
   .dayhead { font-size:22px; font-weight:700; color:#fff; display:block; margin-bottom:6px; }
   input[type="date"] { font-size:18px; }
+  .stop-row { display:flex; gap:8px; align-items:flex-end; }
+  .stop-row .grow { flex:1; min-width:0; }
+  .stop-row .odo { width:108px; flex-shrink:0; text-align:right; }
+  .stop-row input { width:100%; box-sizing:border-box; }
 </style>
 </head>
 <body>
@@ -56,16 +60,30 @@
     <label>Date
       <input type="date" id="legDate" style="width:100%;box-sizing:border-box;" onchange="updateDow()">
     </label>
-    <label>From</label>
-    <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <div class="stop-row">
+      <div class="grow">
+        <label>From</label>
+        <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off">
+      </div>
+      <div class="odo">
+        <label>Odo</label>
+        <input type="number" id="odoStart" inputmode="numeric">
+      </div>
+    </div>
     <div id="fromSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="fromPicked"></div>
-    <label>Odometer at From <input type="number" id="odoStart" inputmode="numeric" style="width:100%;box-sizing:border-box;"></label>
-    <label>To</label>
-    <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <div class="stop-row">
+      <div class="grow">
+        <label>To</label>
+        <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off">
+      </div>
+      <div class="odo">
+        <label>Odo</label>
+        <input type="number" id="odoEnd" inputmode="numeric">
+      </div>
+    </div>
     <div id="toSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="toPicked"></div>
-    <label>Odometer at To <input type="number" id="odoEnd" inputmode="numeric" style="width:100%;box-sizing:border-box;"></label>
     <div class="row" style="margin-top:10px;">
       <button type="button" onclick="addLeg()">Add leg</button>
       <button type="button" class="secondary" onclick="endDay()">End day at home</button>
@@ -316,9 +334,9 @@ function renderLegs() {
       const flag = l.flag === 'negative' ? '<div class="flag neg">Odometer went down — check the reading.</div>' :
         (l.flag === 'over' ? '<div class="flag">About ' + l.expected_mi + ' mi on the matrix; you entered ' + l.miles + '.</div>' : '');
       html += '<div style="padding:8px 0;border-bottom:1px solid #333;">' +
-        '<div>' + (l.from_print || l.from_picker) + ' <span class="muted">odo ' + (l.odo_start || '?') + '</span></div>' +
-        '<div>' + (l.to_print || l.to_picker) + ' <span class="muted">odo ' + (l.odo_end || '?') + '</span>' +
-        ' · <strong>' + (l.miles == null ? '?' : l.miles) + ' mi</strong>' +
+        '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + '</div></div>' +
+        '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong></div></div>' +
+        '<div class="day-total">' + (l.miles == null ? '?' : l.miles) + ' mi' +
         ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">x</button></div>' +
         flag + '</div>';
     });
