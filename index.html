@@ -4457,11 +4457,11 @@ function distanceMatrixStatus(state) {
                     // appended note text (folded into remediation_detail)
                     // actually surfaces.
                     const needsReviewBadge = item.ticketNeedsReview
-                        ? `<span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;background:#c98a1e;color:#1a1a1a;font-weight:bold;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
+                        ? `<span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;background:#c98a1e;color:#1a1a1a;font-weight:bold;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="Another ticket for this site today — tap to open history with the other WO">⚠ Another ticket today — tap for WO / notes</span>`
                         : '';
                     const restockByStr = item.restockBy ? `<span style="font-size:11px;color:#888;margin-left:6px;">by ${item.restockBy}</span>` : '';
-                    const ticketInfoStr = item.fromTicket
-                        ? `<div style="font-size:12px;color:#c0392b;margin-top:2px;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? ` <strong>Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : ''}</div>`
+                    const ticketInfoStr = (item.fromTicket || item.ticketWo || item.ticketSlaEnd || item.ticketNeedsReview)
+                        ? `<div style="font-size:12px;color:#c0392b;margin-top:4px;line-height:1.35;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? `<br><strong style="font-size:13px;">SLA / Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : (item.ticketNeedsReview ? '<br><strong>SLA on the other ticket — tap the amber badge</strong>' : '')}</div>`
                         : '';
                     // 2026-09-08: same line-item badge added to the state
                     // console -- brought here too so the actual working
@@ -4512,7 +4512,7 @@ function distanceMatrixStatus(state) {
                                         <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'completed')" style="font-size:10px;padding:2px 6px;background:#1a6b1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Done</button>
                                         <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'canceled')" style="font-size:10px;padding:2px 6px;background:#6b1a1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✗ Cancel</button>
                                     </div>
-                                    ${(item.fromTicket || item.urgent) ? `<button class="control-btn" onclick="notifyStop('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#1d4e89;color:#fff;border:none;border-radius:3px;cursor:pointer;">📱 Text this stop</button>` : ''}
+                                    ${(item.fromTicket && item.urgent) ? `<button class="control-btn" onclick="notifyStop('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#1d4e89;color:#fff;border:none;border-radius:3px;cursor:pointer;">📱 Text this stop</button>` : ''}
                                 </div>
                              </div>`;
                 });
@@ -4990,7 +4990,17 @@ function distanceMatrixStatus(state) {
                 if (!res.ok) return {};
                 const data = await res.json();
                 const byCode = {};
-                (data.assignments || []).forEach(a => { byCode[a.siteCode] = a; });
+                const rank = (x) => {
+                    if (!x) return -1;
+                    if (x.status === 'planned' && x.ticket) return 3;
+                    if (x.status === 'planned') return 2;
+                    if (x.ticket && x.status !== 'completed' && x.status !== 'removed') return 1;
+                    return 0;
+                };
+                (data.assignments || []).forEach(a => {
+                    const prev = byCode[a.siteCode];
+                    if (!prev || rank(a) >= rank(prev)) byCode[a.siteCode] = a;
+                });
                 return byCode;
             } catch (err) {
                 console.error('[get-assignments] fetch failed (non-fatal, falling back to auto-assign):', err.message);
