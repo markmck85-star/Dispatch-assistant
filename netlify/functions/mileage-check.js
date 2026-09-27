@@ -122,12 +122,26 @@ function normalizePlaceLabel(rawLabel) {
   return s;
 }
 
+function homeCityFromAddress(homeAddress) {
+  if (!homeAddress) return '';
+  const parts = String(homeAddress).split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const city = parts[parts.length - 2].replace(/\s+\d{5}(-\d{4})?$/, '').trim();
+    if (city && !/^[A-Z]{2}$/i.test(city)) return city.toLowerCase();
+  }
+  return '';
+}
+
 function isHomeLabel(rawLabel, homeAddress) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label) return false;
-  if (label === 'home' || label === 'office' || label === 'shop') return true;
-  if (!homeAddress || label.length < 4) return false;
-  return homeAddress.toLowerCase().includes(label);
+  if (label === 'home' || label === 'house' || label === 'my house' || label === 'office' || label === 'shop') return true;
+  if (!homeAddress) return false;
+  const addr = homeAddress.toLowerCase();
+  if (label.length >= 4 && addr.includes(label)) return true;
+  const city = homeCityFromAddress(homeAddress);
+  if (city && (label === city || label === city.replace(/\s+/g, ''))) return true;
+  return false;
 }
 
 function isErrandLabel(rawLabel) {
@@ -490,20 +504,65 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
 
     for (const date of datesNeedingLookup) {
-      // This date's real stop sequence, as WRITTEN in the log (every
-      // leg's destination, home excluded) -- independent of whether each
-      // one already resolved in pass 1.
       const dayLegs = legs.filter((l) => l.date === date);
-      const stops = dayLegs.map((l) => l.toRaw).filter((label) => !(techRow && isHomeLabel(label, techRow.home_address)));
-      const visits = visitsByDate[date] || [];
-      if (stops.length === 0 || stops.length !== visits.length) continue; // count mismatch -- skip this date entirely
+      const stops = dayLegs.map((l) => l.toRaw).filter((label) =>
+        !(techRow && isHomeLabel(label, techRow.home_address)) && !isErrandLabel(label)
+      );
+      const visitSites = (visitsByDate[date] || []).map((v) => v.sites).filter(Boolean);
+      if (!stops.length || !visitSites.length) continue;
 
-      stops.forEach((label, i) => {
-        if (!unresolvedLabelsByDate[date].has(label)) return; // already resolved in pass 1 -- don't touch
-        const site = visits[i].sites;
+      const knownByLabel = {};
+      for (const r of resolved) {
+        if (r.leg.date !== date) continue;
+        for (const [raw, place] of [[r.leg.fromRaw, r.fromPlace], [r.leg.toRaw, r.toPlace]]) {
+          if (place && place.type === 'site' && place.site) {
+            knownByLabel[normalizePlaceLabel(raw).toLowerCase()] = place.site;
+          }
+        }
+      }
+      // One or two fuzzy hits are enough to pin the day's closed-ticket
+      // list. Do not require every name to match.
+      for (const label of stops) {
+        const key = normalizePlaceLabel(label).toLowerCase();
+        if (knownByLabel[key]) continue;
+        const site = matchSiteByName(normalizePlaceLabel(label), candidateSites);
+        if (site) knownByLabel[key] = site;
+      }
+
+      const proposed = {}; // label -> site
+      if (stops.length === visitSites.length) {
+        stops.forEach((label, i) => { proposed[label] = visitSites[i]; });
+      } else {
+        // Anchor on the one or two labels we already know, then walk the
+        // closed-ticket order from there. Count mismatch used to skip the
+        // whole day; one locked stop is enough to place its neighbors.
+        const anchors = [];
+        stops.forEach((label, si) => {
+          const known = knownByLabel[normalizePlaceLabel(label).toLowerCase()];
+          if (!known) return;
+          const vi = visitSites.findIndex((s) => s.id === known.id);
+          if (vi >= 0) anchors.push({ si, vi });
+        });
+        if (!anchors.length) continue;
+        stops.forEach((label, si) => {
+          const votes = {};
+          for (const a of anchors) {
+            const vi = a.vi + (si - a.si);
+            if (vi < 0 || vi >= visitSites.length) continue;
+            const id = visitSites[vi].id;
+            votes[id] = (votes[id] || 0) + 1;
+          }
+          const ids = Object.keys(votes);
+          if (ids.length !== 1) return;
+          proposed[label] = visitSites.find((s) => s.id === ids[0]);
+        });
+      }
+
+      Object.entries(proposed).forEach(([label, site]) => {
         if (!site) return;
+        if (!unresolvedLabelsByDate[date] || !unresolvedLabelsByDate[date].has(label)) return;
         const key = `${date}|${label}`;
-        if (labelToResolvedSite[key]) return; // already resolved this label for this date
+        if (labelToResolvedSite[key]) return;
         labelToResolvedSite[key] = site;
         resolvedViaClosedTickets.push({ date, rawLabel: label, resolvedSiteCode: site.site_code, resolvedSiteName: site.name });
       });
@@ -667,6 +726,6 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
 }
 
 module.exports = {
-  tokenize, matchSiteByName, isHomeLabel, isErrandLabel, normalizePlaceLabel, haversineMiles,
+  tokenize, matchSiteByName, isHomeLabel, isErrandLabel, normalizePlaceLabel, homeCityFromAddress, haversineMiles,
   extractMileageLegs, parseMileageWorkbookBuffer, evaluateMileageReport,
 };
