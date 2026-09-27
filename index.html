@@ -8434,13 +8434,13 @@ ${content}</body></html>`;
                 + (r.daysSince != null ? ' · ' + Math.round(r.daysSince) + 'd ago' : '')
                 + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>';
         }
-        function restockPinColor(code) {
+        function restockPinStyle(code) {
             const r = (window._restockScheduleByCode || {})[code];
-            if (!r) return '#5a6a7a';
-            if (r.status === 'overdue') return '#c0392b';
-            if (r.status === 'soon') return '#d4a017';
-            if (r.status === 'ok') return '#3d7a4a';
-            return '#5a6a7a';
+            const st = r && r.status;
+            if (st === 'overdue') return { color: '#c0392b', size: 22 };
+            if (st === 'soon') return { color: '#d4a017', size: 18 };
+            if (st === 'ok') return { color: '#3d7a4a', size: 12 };
+            return { color: '#5a6a7a', size: 12 };
         }
         function toggleMapShowAllSites(checked) {
             window._dispatchMapShowAllSites = !!checked;
@@ -8470,11 +8470,13 @@ ${content}</body></html>`;
                 if (onBoard.has(code)) return;
                 const name = loc.name || code;
                 if (/unassigned|placeholder|tmp[-_]?site/i.test(name + ' ' + code)) return;
+                const ps = restockPinStyle(code);
+                const ps = restockPinStyle(code);
                 L.marker([Number(loc.lat), Number(loc.lng)], {
                     icon: L.divIcon({
                         className: '',
-                        html: '<div class="map-site-pin" style="background:' + restockPinColor(code) + ';"></div>',
-                        iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -10]
+                        html: '<div class="map-site-pin" style="width:' + ps.size + 'px;height:' + ps.size + 'px;background:' + ps.color + ';"></div>',
+                        iconSize: [ps.size, ps.size], iconAnchor: [ps.size/2, ps.size/2], popupAnchor: [0, -ps.size/2]
                     }),
                     title: code + ' — ' + name,
                     zIndexOffset: -200

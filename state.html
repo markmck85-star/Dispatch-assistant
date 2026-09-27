@@ -1403,7 +1403,7 @@ function plotStateAllSites(map, LOCATIONS, routes) {
       '<div class="map-pop-code">' + escapeHtml(code) + '</div>'
       + '<div>' + escapeHtml(name) + '</div>'
       + (loc.address ? '<div style="color:#666;">' + escapeHtml(loc.address) + '</div>' : '')
-      + '<div style="color:#888;font-size:11px;margin-top:4px;">Not on this date\'s board</div>'
+      + '<div style="color:#888;font-size:11px;margin-top:4px;">Not on this date\'s board</div>' + formatRestockPopup(code)
       + formatRestockPopup(code)
     ).addTo(group);
     n++;
