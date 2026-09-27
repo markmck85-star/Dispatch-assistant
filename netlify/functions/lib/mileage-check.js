@@ -69,9 +69,14 @@ const TOKEN_ALIASES = {
   // unambiguous enough in this context (a site-name word list, not free
   // prose) that this carries negligible risk of misreading something else.
   n: 'north', s: 'south', e: 'east', w: 'west',
+  ks: 'soopers', sooper: 'soopers',
+  mv: 'vehicle',
 };
 function tokenize(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => TOKEN_ALIASES[t] || t);
+  return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).flatMap((t) => {
+    if (t === 'ks') return ['king', 'soopers'];
+    return [TOKEN_ALIASES[t] || t];
+  });
 }
 
 const MIN_RATIO = 0.4;
@@ -115,15 +120,50 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
 
 /** True if rawLabel plausibly refers to the technician's own home base. */
 function normalizePlaceLabel(rawLabel) {
-  return String(rawLabel || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+  let s = String(rawLabel || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+  s = s.replace(/^sa\s*\d{4,6}\s+/i, '');
+  s = s.replace(/\bsa\d{4,6}\b/ig, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+function homeCityFromAddress(homeAddress) {
+  if (!homeAddress) return '';
+  const parts = String(homeAddress).split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const city = parts[parts.length - 2].replace(/\s+\d{5}(-\d{4})?$/, '').trim();
+    if (city && !/^[A-Z]{2}$/i.test(city)) return city.toLowerCase();
+  }
+  return '';
 }
 
 function isHomeLabel(rawLabel, homeAddress) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label) return false;
-  if (label === 'home' || label === 'office' || label === 'shop') return true;
-  if (!homeAddress || label.length < 4) return false;
-  return homeAddress.toLowerCase().includes(label);
+  if (label === 'home' || label === 'house' || label === 'my house' || label === 'office' || label === 'shop') return true;
+  if (!homeAddress) return false;
+  const addr = homeAddress.toLowerCase();
+  if (label.length >= 4 && addr.includes(label)) return true;
+  const city = homeCityFromAddress(homeAddress);
+  if (city && (label === city || label === city.replace(/\s+/g, ''))) return true;
+  return false;
+}
+
+function isErrandLabel(rawLabel) {
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
+  return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
+}
+
+function isCityOnlyLabel(rawLabel) {
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
+  if (!label || label.length < 3) return false;
+  if (isErrandLabel(label)) return false;
+  const tokens = tokenize(label);
+  if (!tokens.length || tokens.length > 3) return false;
+  const storeWords = new Set(['kroger', 'soopers', 'king', 'safeway', 'meijer', 'walmart', 'target', 'publix', 'albertsons', 'vehicle', 'office', 'warehouse']);
+  if (tokens.some((t) => storeWords.has(t))) return false;
+  if (/\d{3,}/.test(label)) return false;
+  return true;
 }
 
 /**
@@ -291,12 +331,27 @@ function parseMileageWorkbookBuffer(buffer) {
  * full result for the caller to log/display.
  */
 async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPeriodEnd, source, sourceEmailId, sourceFilename }) {
-  const { data: techRow, error: techErr } = await supabase
+  const rawName = String(technicianNameRaw || '').trim();
+  let techRow = null;
+  const { data: exactTech, error: techErr } = await supabase
     .from('technicians')
     .select('id, name, home_state, additional_states, home_address, lat, lng')
-    .ilike('name', String(technicianNameRaw || '').trim())
+    .ilike('name', rawName)
     .maybeSingle();
   if (techErr) throw new Error('Technician lookup failed: ' + techErr.message);
+  techRow = exactTech;
+  if (!techRow && rawName) {
+    const { data: allTechs } = await supabase
+      .from('technicians')
+      .select('id, name, home_state, additional_states, home_address, lat, lng');
+    const tokens = rawName.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+    const last = tokens[tokens.length - 1];
+    const hits = (allTechs || []).filter((t) => {
+      const n = String(t.name || '').toLowerCase();
+      return last && n.includes(last) && tokens.filter((tok) => n.includes(tok)).length >= Math.min(2, tokens.length);
+    });
+    if (hits.length === 1) techRow = hits[0];
+  }
 
   const states = techRow ? [techRow.home_state, ...(techRow.additional_states || [])].filter(Boolean) : [];
   let candidateSites = [];
@@ -399,7 +454,10 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // called here anymore -- see the precedence rationale below.
   function resolveHomeOrAlias(rawLabel) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
-    const aliasHit = aliasMap[normalizePlaceLabel(rawLabel).toLowerCase()];
+    if (isCityOnlyLabel(rawLabel)) return { type: 'home' };
+    if (isErrandLabel(rawLabel)) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
+    const cleaned = normalizePlaceLabel(rawLabel).toLowerCase();
+    const aliasHit = aliasMap[cleaned] || aliasMap[String(rawLabel || '').trim().toLowerCase()];
     return aliasHit ? { type: 'site', site: aliasHit } : null;
   }
 
@@ -479,20 +537,65 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
 
     for (const date of datesNeedingLookup) {
-      // This date's real stop sequence, as WRITTEN in the log (every
-      // leg's destination, home excluded) -- independent of whether each
-      // one already resolved in pass 1.
       const dayLegs = legs.filter((l) => l.date === date);
-      const stops = dayLegs.map((l) => l.toRaw).filter((label) => !(techRow && isHomeLabel(label, techRow.home_address)));
-      const visits = visitsByDate[date] || [];
-      if (stops.length === 0 || stops.length !== visits.length) continue; // count mismatch -- skip this date entirely
+      const stops = dayLegs.map((l) => l.toRaw).filter((label) =>
+        !(techRow && isHomeLabel(label, techRow.home_address)) && !isErrandLabel(label)
+      );
+      const visitSites = (visitsByDate[date] || []).map((v) => v.sites).filter(Boolean);
+      if (!stops.length || !visitSites.length) continue;
 
-      stops.forEach((label, i) => {
-        if (!unresolvedLabelsByDate[date].has(label)) return; // already resolved in pass 1 -- don't touch
-        const site = visits[i].sites;
+      const knownByLabel = {};
+      for (const r of resolved) {
+        if (r.leg.date !== date) continue;
+        for (const [raw, place] of [[r.leg.fromRaw, r.fromPlace], [r.leg.toRaw, r.toPlace]]) {
+          if (place && place.type === 'site' && place.site) {
+            knownByLabel[normalizePlaceLabel(raw).toLowerCase()] = place.site;
+          }
+        }
+      }
+      // One or two fuzzy hits are enough to pin the day's closed-ticket
+      // list. Do not require every name to match.
+      for (const label of stops) {
+        const key = normalizePlaceLabel(label).toLowerCase();
+        if (knownByLabel[key]) continue;
+        const site = matchSiteByName(normalizePlaceLabel(label), candidateSites);
+        if (site) knownByLabel[key] = site;
+      }
+
+      const proposed = {}; // label -> site
+      if (stops.length === visitSites.length) {
+        stops.forEach((label, i) => { proposed[label] = visitSites[i]; });
+      } else {
+        // Anchor on the one or two labels we already know, then walk the
+        // closed-ticket order from there. Count mismatch used to skip the
+        // whole day; one locked stop is enough to place its neighbors.
+        const anchors = [];
+        stops.forEach((label, si) => {
+          const known = knownByLabel[normalizePlaceLabel(label).toLowerCase()];
+          if (!known) return;
+          const vi = visitSites.findIndex((s) => s.id === known.id);
+          if (vi >= 0) anchors.push({ si, vi });
+        });
+        if (!anchors.length) continue;
+        stops.forEach((label, si) => {
+          const votes = {};
+          for (const a of anchors) {
+            const vi = a.vi + (si - a.si);
+            if (vi < 0 || vi >= visitSites.length) continue;
+            const id = visitSites[vi].id;
+            votes[id] = (votes[id] || 0) + 1;
+          }
+          const ids = Object.keys(votes);
+          if (ids.length !== 1) return;
+          proposed[label] = visitSites.find((s) => s.id === ids[0]);
+        });
+      }
+
+      Object.entries(proposed).forEach(([label, site]) => {
         if (!site) return;
+        if (!unresolvedLabelsByDate[date] || !unresolvedLabelsByDate[date].has(label)) return;
         const key = `${date}|${label}`;
-        if (labelToResolvedSite[key]) return; // already resolved this label for this date
+        if (labelToResolvedSite[key]) return;
         labelToResolvedSite[key] = site;
         resolvedViaClosedTickets.push({ date, rawLabel: label, resolvedSiteCode: site.site_code, resolvedSiteName: site.name });
       });
@@ -515,12 +618,42 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // ── for whatever neither the alias table nor position could reach ────
   for (const r of resolved) {
     if (!r.fromPlace) {
-      const site = matchSiteByName(r.leg.fromRaw, candidateSites);
+      const site = matchSiteByName(normalizePlaceLabel(r.leg.fromRaw), candidateSites);
       if (site) r.fromPlace = { type: 'site', site };
     }
     if (!r.toPlace) {
-      const site = matchSiteByName(r.leg.toRaw, candidateSites);
+      const site = matchSiteByName(normalizePlaceLabel(r.leg.toRaw), candidateSites);
       if (site) r.toPlace = { type: 'site', site };
+    }
+  }
+
+  // ── Pass 4: neighbor + claimed miles (Mark's idea) ─────────────────
+  // If one end of a leg is known and the other is not, keep only sites
+  // whose drive (or haversine) is within the same loose ratio band as
+  // flagging. One survivor → lock it. Two or more → leave unmatched.
+  function milesFromKnown(knownPlace, site) {
+    return expectedMilesFor(knownPlace, { type: 'site', site });
+  }
+  function candidatesForClaimed(knownPlace, claimed) {
+    if (!knownPlace || knownPlace.type === 'errand' || !(claimed > 0)) return [];
+    const hits = [];
+    for (const site of candidateSites) {
+      if (knownPlace.type === 'site' && knownPlace.site.id === site.id) continue;
+      const exp = milesFromKnown(knownPlace, site);
+      if (!exp || exp.miles < 0.5) continue;
+      const ratio = claimed / exp.miles;
+      if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push(site);
+    }
+    return hits;
+  }
+  for (const r of resolved) {
+    if (!r.fromPlace && r.toPlace && r.toPlace.type !== 'errand') {
+      const hits = candidatesForClaimed(r.toPlace, r.leg.claimedMiles);
+      if (hits.length === 1) r.fromPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+    }
+    if (!r.toPlace && r.fromPlace && r.fromPlace.type !== 'errand') {
+      const hits = candidatesForClaimed(r.fromPlace, r.leg.claimedMiles);
+      if (hits.length === 1) r.toPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
     }
   }
 
@@ -554,6 +687,16 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
 
   for (const { leg, fromPlace, toPlace } of resolved) {
     totalClaimed += leg.claimedMiles;
+    if ((fromPlace && fromPlace.type === 'errand') || (toPlace && toPlace.type === 'errand')) {
+      unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'errand_stop' });
+      continue;
+    }
+    const fromClean = normalizePlaceLabel(leg.fromRaw).toLowerCase();
+    const toClean = normalizePlaceLabel(leg.toRaw).toLowerCase();
+    if (fromClean && fromClean === toClean && !(fromPlace.type === 'home' && toPlace.type === 'home')) {
+      unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'same_label_both_ends' });
+      continue;
+    }
     if (!fromPlace || !toPlace) {
       unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'site_not_matched' });
       continue;
@@ -616,6 +759,6 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
 }
 
 module.exports = {
-  tokenize, matchSiteByName, isHomeLabel, haversineMiles,
+  tokenize, matchSiteByName, isHomeLabel, isErrandLabel, normalizePlaceLabel, homeCityFromAddress, haversineMiles,
   extractMileageLegs, parseMileageWorkbookBuffer, evaluateMileageReport,
 };
