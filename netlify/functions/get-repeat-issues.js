@@ -47,7 +47,7 @@ exports.handler = async (event) => {
 
   const { data: tickets, error } = await supabase
     .from('tickets')
-    .select('site_id, issue_category, issue_detail, description, received_at, wo_number')
+    .select('id, site_id, issue_category, issue_detail, description, received_at, wo_number, inbound_email_id')
     .eq('ticket_kind', 'trouble')
     .not('issue_category', 'is', null)
     .not('site_id', 'is', null)
@@ -72,11 +72,48 @@ exports.handler = async (event) => {
       };
     }
     groups[key].tickets.push({
+      id: t.id || null,
       wo_number: t.wo_number || null,
       received_at: t.received_at || null,
       issue_detail: t.issue_detail || null,
       description: t.description || null,
+      inbound_email_id: t.inbound_email_id || null,
+      appointment_number: null,
+      closing_note: null,
+      tech_name_raw: null,
     });
+  }
+
+  // Attach SA numbers + closing notes from site_visits (same source as
+  // the dispatch-console visit history overlay). Match by ticket_id first,
+  // then fall back to site_id + WO so older imports still line up.
+  const flagged = Object.values(groups).filter(g => g.tickets.length >= minCount);
+  const siteIds = [...new Set(flagged.map(g => g.site_id))];
+  const visitByTicketId = {};
+  const visitBySiteWo = {};
+  if (siteIds.length) {
+    const { data: visits, error: visitErr } = await supabase
+      .from('site_visits')
+      .select('ticket_id, site_id, wo_number, appointment_number, closing_note, tech_name_raw, started_at')
+      .in('site_id', siteIds)
+      .gte('started_at', sinceDate);
+    if (!visitErr && visits) {
+      for (const v of visits) {
+        if (v.ticket_id) visitByTicketId[v.ticket_id] = v;
+        if (v.site_id && v.wo_number) visitBySiteWo[v.site_id + '|' + v.wo_number] = v;
+      }
+    }
+  }
+  for (const g of flagged) {
+    for (const t of g.tickets) {
+      const v = (t.id && visitByTicketId[t.id]) ||
+        (t.wo_number && visitBySiteWo[g.site_id + '|' + t.wo_number]) ||
+        null;
+      if (!v) continue;
+      t.appointment_number = v.appointment_number || null;
+      t.closing_note = v.closing_note || null;
+      t.tech_name_raw = v.tech_name_raw || null;
+    }
   }
 
   const results = Object.values(groups)
