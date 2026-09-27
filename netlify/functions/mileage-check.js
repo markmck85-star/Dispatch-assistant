@@ -58,7 +58,18 @@
  *   error, and kept separate so it's never miscounted as "flagged."
  */
 
-const TOKEN_ALIASES = { co: 'county', cnty: 'county', ave: 'avenue', blvd: 'boulevard', dr: 'drive', rd: 'road', st: 'street', mt: 'mount', hwy: 'highway', pkwy: 'parkway' };
+const TOKEN_ALIASES = {
+  co: 'county', cnty: 'county', ave: 'avenue', blvd: 'boulevard', dr: 'drive', rd: 'road',
+  st: 'street', mt: 'mount', hwy: 'highway', pkwy: 'parkway',
+  // 2026-09-20: directional abbreviations ("N. Decatur", "S Cobb" -- both
+  // real site names already in this database) previously tokenized to a
+  // bare "n"/"s", which almost never overlaps the spelled-out
+  // "north"/"south" a technician actually writes -- silently weakening a
+  // real match's score for no good reason. Single-letter tokens are
+  // unambiguous enough in this context (a site-name word list, not free
+  // prose) that this carries negligible risk of misreading something else.
+  n: 'north', s: 'south', e: 'east', w: 'west',
+};
 function tokenize(s) {
   return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => TOKEN_ALIASES[t] || t);
 }
@@ -66,6 +77,31 @@ function tokenize(s) {
 const MIN_RATIO = 0.4;
 const MAX_RATIO = 2.5;
 const SITE_MATCH_THRESHOLD = 0.65;
+
+// 2026-09-20: found via a real false positive on Mark's own timesheet --
+// "Lawrenceville Suwanee Kroger" (a real place, not yet in `sites` at
+// all) scored 0.667 against "Gwinnett County Kroger - Lawrenceville
+// Lilburn" (a DIFFERENT, unrelated Kroger) purely because "Lawrenceville"
+// and "Kroger" overlapped, even though "Suwanee" and "Lilburn" -- the
+// actual distinguishing place names -- share nothing. Generic chain/
+// site-type words like "Kroger" or "County" appear in dozens of this
+// state's site names and should never be able to carry a match on their
+// own; they're down-weighted here (not removed outright, since a real
+// match like "State Bridge Kroger" vs "Fulton County Kroger State
+// Bridge" should still get a little credit from the shared "Kroger") so
+// a match has to be driven by the genuinely distinctive place-name words.
+// Scoped to this function only -- other site-matching code elsewhere in
+// this app (Salesforce/BlueFolder imports) has its own independent copy
+// of this scoring and isn't touched by this fix.
+const GENERIC_TERM_WEIGHT = 0.15;
+const GENERIC_TERMS = new Set([
+  'kroger', 'publix', 'walmart', 'target', 'county', 'cnty', 'co',
+  'tag', 'office', 'dmv', 'mv', 'department', 'motor', 'vehicle',
+  'tax', 'collector', 'market', 'marketplace', 'store',
+]);
+function weightedTokenSum(tokens) {
+  return tokens.reduce((sum, t) => sum + (GENERIC_TERMS.has(t) ? GENERIC_TERM_WEIGHT : 1), 0);
+}
 
 function haversineMiles(lat1, lng1, lat2, lng2) {
   if ([lat1, lng1, lat2, lng2].some((v) => v == null || isNaN(v))) return null;
@@ -78,26 +114,83 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
 }
 
 /** True if rawLabel plausibly refers to the technician's own home base. */
+function normalizePlaceLabel(rawLabel) {
+  let s = String(rawLabel || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+  s = s.replace(/^sa\s*\d{4,6}\s+/i, '');
+  s = s.replace(/\bsa\d{4,6}\b/ig, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
 function isHomeLabel(rawLabel, homeAddress) {
-  const label = (rawLabel || '').trim().toLowerCase();
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label) return false;
   if (label === 'home' || label === 'office' || label === 'shop') return true;
   if (!homeAddress || label.length < 4) return false;
   return homeAddress.toLowerCase().includes(label);
 }
 
-/** Best site match for a raw place name, scoped to the given candidate sites. */
+function isErrandLabel(rawLabel) {
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
+  return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
+}
+
+/**
+ * Best site match for a raw place name, scoped to the given candidate
+ * sites. Each site may carry a `.aliases` array (other colloquial names
+ * already taught to the system, e.g. via a previous positional
+ * resolution or a manually-added one) -- scored the same way as the
+ * site's own `.name`, taking the BEST result across name + every alias.
+ *
+ * 2026-09-20: added per Mark's real example -- a site's real `name` field
+ * is often generic or even actively misleading (a site's naming
+ * convention frequently follows the STREET it's on rather than the city/
+ * county it's actually in -- "Covington Highway Kroger" is really in
+ * Lithonia, not Covington), so a technician's own wording can fuzzy-match
+ * an ALIAS much better than it ever could the bare site name. Previously
+ * aliases only fed the exact-match fast path in evaluateMileageReport;
+ * a near-variant of a known alias (a typo, a different word order,
+ * dropped punctuation) fell all the way through to matching against just
+ * the site's own name, which is exactly the gap that let "Lawrenceville
+ * Suwanee Kroger" -- close to an existing alias, not identical to it --
+ * go unmatched even with a relevant alias already on file.
+ */
 function matchSiteByName(rawName, candidateSites) {
   const targetTokens = tokenize(rawName);
   if (!targetTokens.length) return null;
+  const targetWeight = weightedTokenSum(targetTokens);
   let best = null, bestScore = 0;
   for (const site of candidateSites) {
-    const siteTokens = tokenize(site.name);
-    const setA = new Set(targetTokens), setB = new Set(siteTokens);
-    const intersection = [...setA].filter((t) => setB.has(t)).length;
-    const smaller = Math.min(setA.size, setB.size);
-    const score = smaller > 0 ? intersection / smaller : 0;
-    if (score > bestScore) { bestScore = score; best = site; }
+    const namesToTry = [site.name, ...(site.aliases || [])];
+    for (const candidateName of namesToTry) {
+      const siteTokens = tokenize(candidateName);
+      const setA = new Set(targetTokens), setB = new Set(siteTokens);
+      const intersectionTokens = [...setA].filter((t) => setB.has(t));
+      const intersectionWeight = weightedTokenSum(intersectionTokens);
+      const siteWeight = weightedTokenSum(siteTokens);
+      const smallerWeight = Math.min(targetWeight, siteWeight);
+      const overlapScore = smallerWeight > 0 ? intersectionWeight / smallerWeight : 0;
+      // 2026-09-20: found via a second real false positive on the SAME
+      // technician's file -- a short, generic alias ("Lawrenceville
+      // Kroger", for a DIFFERENT, real site) that happens to be a pure
+      // SUBSET of a longer target's tokens ("Lawrenceville Suwanee
+      // Kroger") scores a perfect 1.0 on the overlap-coefficient above,
+      // regardless of how much of the target it actually explains --
+      // dividing by the SMALLER side means any short candidate fully
+      // contained in a longer name auto-wins, even missing the one word
+      // ("Suwanee") that actually distinguishes the real place. Also
+      // requiring targetCoverage (how much of what the TECHNICIAN typed
+      // this candidate accounts for) to clear the same bar closes this
+      // without reopening the original generic-word bug: a genuine short
+      // colloquial name (target IS the short side) still scores 1.0/1.0
+      // coverage against a longer official name, since coverage is
+      // computed against whichever side is actually the technician's own
+      // wording -- this only bites when the CANDIDATE is short relative
+      // to a longer, more specific target.
+      const targetCoverage = targetWeight > 0 ? intersectionWeight / targetWeight : 0;
+      const score = Math.min(overlapScore, targetCoverage);
+      if (score > bestScore) { bestScore = score; best = site; }
+    }
   }
   return best && bestScore >= SITE_MATCH_THRESHOLD ? best : null;
 }
@@ -133,26 +226,51 @@ function extractMileageLegs(grid) {
     }
   }
 
-  const legs = [];
-  let currentDate = null;
+  // Two passes, not one: the template shows a day's weekday abbreviation
+  // ("Mon") on that day's FIRST leg row, but the real Date value doesn't
+  // appear until the SECOND leg row of that same day -- confirmed against
+  // the real file (row 16: "Mon"/Johns Creek->Steve Reynolds, no date;
+  // row 17: the actual 2026-08-31, on the very next leg). A single
+  // top-to-bottom pass that just tracks "the last Date object seen"
+  // mis-dates every day's first leg (the home -> first-stop commute) to
+  // the PREVIOUS day, silently, since it still had the prior block's date
+  // carried over when that first row was processed. Splitting into
+  // day-blocks first (new block starts at any weekday-abbreviation row),
+  // then resolving each block's real date from whichever row in that same
+  // block actually carries it, fixes this for every block uniformly.
+  const WEEKDAYS = new Set(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+  const blocks = [];
+  let current = null;
   for (const row of grid) {
-    const a = row[0], b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
+    const a = row[0];
+    const aStr = typeof a === 'string' ? a.trim().toLowerCase() : null;
+    if (aStr && WEEKDAYS.has(aStr)) {
+      current = { date: null, rows: [] };
+      blocks.push(current);
+    }
+    if (!current) continue; // rows before the first weekday marker (title/NAME rows) -- not part of any day
+    current.rows.push(row);
+    if (a instanceof Date && !isNaN(a) && !current.date) current.date = a;
+  }
 
-    if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break; // grand-total row -- end of real data
-
-    if (a instanceof Date && !isNaN(a)) currentDate = a;
-
-    const fromRaw = typeof b === 'string' ? b.trim() : '';
-    const toRaw = typeof d === 'string' ? d.trim() : '';
-    if (fromRaw && toRaw && typeof f === 'number') {
-      legs.push({
-        date: currentDate ? currentDate.toISOString().slice(0, 10) : null,
-        fromRaw,
-        toRaw,
-        odometerStart: typeof c === 'number' ? c : null,
-        odometerEnd: typeof e === 'number' ? e : null,
-        claimedMiles: f,
-      });
+  const legs = [];
+  outer:
+  for (const block of blocks) {
+    if (!block.date) continue; // no date ever appeared in this block (shouldn't normally happen, but skip rather than guess)
+    const dateStr = block.date.toISOString().slice(0, 10);
+    for (const row of block.rows) {
+      const b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
+      if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break outer; // grand-total row -- end of real data
+      const fromRaw = typeof b === 'string' ? b.trim() : '';
+      const toRaw = typeof d === 'string' ? d.trim() : '';
+      if (fromRaw && toRaw && typeof f === 'number') {
+        legs.push({
+          date: dateStr, fromRaw, toRaw,
+          odometerStart: typeof c === 'number' ? c : null,
+          odometerEnd: typeof e === 'number' ? e : null,
+          claimedMiles: f,
+        });
+      }
     }
   }
   return { technicianNameRaw, legs };
@@ -193,9 +311,40 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   let candidateSites = [];
   if (states.length) {
     const { data: siteRows, error: siteErr } = await supabase
-      .from('sites').select('id, name, lat, lng').in('state', states);
+      .from('sites').select('id, name, site_code, lat, lng').in('state', states);
     if (siteErr) throw new Error('Site lookup failed: ' + siteErr.message);
     candidateSites = siteRows || [];
+  }
+
+  // 2026-09-20: colloquial-name fast path. Every technician tends to
+  // write a site's name their own way ("Steve Reynolds Kroger" vs the
+  // real site name "Gwinnett County Kroger Steve Reynolds") -- token
+  // matching handles a lot of that, but not every variant, and definitely
+  // not a genuine misspelling. Checking site_aliases FIRST (exact,
+  // case-insensitive) catches anything already taught to the system,
+  // including aliases THIS function itself writes below once resolved
+  // via the closed-ticket report -- so a name that had to be resolved the
+  // hard way once is recognized instantly on every later timesheet.
+  //
+  // Also attaches each site's aliases as `.aliases` so matchSiteByName's
+  // fuzzy scoring can try them too, not just the exact-match path above --
+  // a site's real `name` is often generic or even misleading (naming
+  // frequently follows the street it's on, not the city/county it's
+  // actually in -- "Covington Highway Kroger" is really in Lithonia), so
+  // a near-variant of a known alias can score far better against that
+  // alias than against the bare site name alone.
+  let aliasMap = {}; // lowercased alias -> site row
+  if (candidateSites.length) {
+    const { data: aliasRows } = await supabase
+      .from('site_aliases').select('alias, site_id').in('site_id', candidateSites.map((s) => s.id));
+    const siteById = Object.fromEntries(candidateSites.map((s) => [s.id, s]));
+    for (const s of candidateSites) s.aliases = [];
+    for (const a of aliasRows || []) {
+      if (siteById[a.site_id]) {
+        aliasMap[a.alias.toLowerCase()] = siteById[a.site_id];
+        siteById[a.site_id].aliases.push(a.alias);
+      }
+    }
   }
 
   // Pre-fetch this technician's whole tech_site_distances set, and
@@ -205,33 +354,64 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   const MODE_PRIORITY = { driving: 0, 'haversine-fallback': 1, haversine: 2 };
   const pickBest = (rows) => rows.slice().sort((a, b) => (MODE_PRIORITY[a.mode] ?? 9) - (MODE_PRIORITY[b.mode] ?? 9))[0];
 
+  // supabase-js / PostgREST default max-rows is 1000. GA alone has ~6k
+  // driving site-site pairs (table-wide ~19k). A single unpaged select
+  // silently truncated, so most real driving rows never made it into
+  // siteSiteDist and Mileage Check fell through to haversine-fallback
+  // even after a successful matrix build. Page until a short batch.
+  async function fetchAllRows(buildQuery) {
+    const pageSize = 1000;
+    const all = [];
+    for (let from = 0; from < 200000; from += pageSize) {
+      const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < pageSize) break;
+    }
+    return all;
+  }
+
   let techSiteDist = {};
   let siteSiteDist = {};
   if (techRow) {
-    const { data: t2s } = await supabase
-      .from('tech_site_distances').select('site_id, mode, distance_mi').eq('technician_id', techRow.id);
+    const t2s = await fetchAllRows(() =>
+      supabase.from('tech_site_distances').select('site_id, mode, distance_mi').eq('technician_id', techRow.id)
+    );
     const bySite = {};
-    for (const row of t2s || []) (bySite[row.site_id] = bySite[row.site_id] || []).push(row);
+    for (const row of t2s) (bySite[row.site_id] = bySite[row.site_id] || []).push(row);
     for (const [siteId, rows] of Object.entries(bySite)) techSiteDist[siteId] = pickBest(rows).distance_mi;
   }
   if (candidateSites.length) {
     const siteIds = candidateSites.map((s) => s.id);
-    const { data: s2s } = await supabase
-      .from('site_site_distances').select('site_a, site_b, mode, distance_mi')
-      .or(`site_a.in.(${siteIds.join(',')}),site_b.in.(${siteIds.join(',')})`);
+    // Two paged .in() queries instead of one giant .or(site_a.in, site_b.in)
+    // so we stay under PostgREST URL limits once a state has 100+ sites.
+    const [s2sA, s2sB] = await Promise.all([
+      fetchAllRows(() =>
+        supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi').in('site_a', siteIds)
+      ),
+      fetchAllRows(() =>
+        supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi').in('site_b', siteIds)
+      ),
+    ]);
     const byPair = {};
-    for (const row of s2s || []) {
+    for (const row of [...s2sA, ...s2sB]) {
       const k = [row.site_a, row.site_b].sort().join('|');
       (byPair[k] = byPair[k] || []).push(row);
     }
     for (const [k, rows] of Object.entries(byPair)) siteSiteDist[k] = pickBest(rows).distance_mi;
   }
-  const siteById = Object.fromEntries(candidateSites.map((s) => [s.id, s]));
 
-  function resolvePlace(rawLabel) {
+  // 2026-09-21: split out of the old combined resolvePlace -- home/alias
+  // checks are unambiguous and free (no DB round trip), so they still run
+  // first. Fuzzy name-matching (matchSiteByName) is deliberately NOT
+  // called here anymore -- see the precedence rationale below.
+  function resolveHomeOrAlias(rawLabel) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
-    const site = matchSiteByName(rawLabel, candidateSites);
-    return site ? { type: 'site', site } : null;
+    if (isErrandLabel(rawLabel)) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
+    const cleaned = normalizePlaceLabel(rawLabel).toLowerCase();
+    const aliasHit = aliasMap[cleaned] || aliasMap[String(rawLabel || '').trim().toLowerCase()];
+    return aliasHit ? { type: 'site', site: aliasHit } : null;
   }
 
   function expectedMilesFor(fromPlace, toPlace) {
@@ -254,16 +434,177 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     return null;
   }
 
+  // ── Pass 1: home + exact alias only (unambiguous, no guessing) ─────────
+  const resolved = legs.map((leg) => ({
+    leg,
+    fromPlace: resolveHomeOrAlias(leg.fromRaw),
+    toPlace: resolveHomeOrAlias(leg.toRaw),
+  }));
+
+  // ── Pass 2: position against the closed-ticket report, BEFORE fuzzy
+  // ── name-matching is even attempted ─────────────────────────────────
+  // 2026-09-21 reordering, per Mark: with many technicians each writing
+  // stop names their own way, a naming-based matcher has no real ceiling
+  // on how many variations/misspellings it needs to keep learning --
+  // every fix so far has been reactive, one technician's timesheet at a
+  // time. Position doesn't have that problem: a technician's mileage log
+  // for a day is a sequence of real stops, and the closed-ticket report
+  // (site_visits) is an INDEPENDENT record of the same day's real
+  // visits, in the same real order -- it doesn't care what words anyone
+  // used. So position is tried FIRST now, ahead of fuzzy matching, since
+  // it's grounded in verified data rather than a probabilistic guess;
+  // fuzzy matching is demoted to the last resort, for whatever position
+  // genuinely can't reach.
+  //
+  // The one thing position can't do is replace fuzzy matching entirely:
+  // it only works when a day's stop COUNT matches its visit COUNT
+  // exactly. A mismatched count (an OTC/testing-station stop that never
+  // reaches this report, a sync lag, an errand mixed in) means SOMETHING
+  // isn't accounted for, and guessing which stop is the odd one out would
+  // risk silently mis-mapping everything after it -- so a mismatched day
+  // is skipped for position entirely and falls through to fuzzy matching
+  // for every leg on it instead, same as before this reordering.
+  const unresolvedLabelsByDate = {};
+  for (const r of resolved) {
+    if (!r.fromPlace) (unresolvedLabelsByDate[r.leg.date] = unresolvedLabelsByDate[r.leg.date] || new Set()).add(r.leg.fromRaw);
+    if (!r.toPlace) (unresolvedLabelsByDate[r.leg.date] = unresolvedLabelsByDate[r.leg.date] || new Set()).add(r.leg.toRaw);
+  }
+  const datesNeedingLookup = Object.keys(unresolvedLabelsByDate).filter(Boolean).sort();
+
+  const labelToResolvedSite = {}; // `${date}|${rawLabel}` -> site row
+  const resolvedViaClosedTickets = [];
+  if (techRow && datesNeedingLookup.length) {
+    const { data: visitRows, error: visitErr } = await supabase
+      .from('site_visits')
+      .select('site_id, started_at, sites(id, name, site_code, lat, lng)')
+      .eq('technician_id', techRow.id)
+      .gte('started_at', datesNeedingLookup[0] + 'T00:00:00Z')
+      .lte('started_at', datesNeedingLookup[datesNeedingLookup.length - 1] + 'T23:59:59Z')
+      .order('started_at', { ascending: true });
+    if (visitErr) console.error('[mileage-check] site_visits lookup failed (non-fatal, falls through to fuzzy matching):', visitErr.message);
+
+    const visitsByDate = {};
+    for (const v of visitRows || []) {
+      const d = String(v.started_at).slice(0, 10);
+      (visitsByDate[d] = visitsByDate[d] || []).push(v);
+    }
+
+    for (const date of datesNeedingLookup) {
+      // This date's real stop sequence, as WRITTEN in the log (every
+      // leg's destination, home excluded) -- independent of whether each
+      // one already resolved in pass 1.
+      const dayLegs = legs.filter((l) => l.date === date);
+      const stops = dayLegs.map((l) => l.toRaw).filter((label) => !(techRow && isHomeLabel(label, techRow.home_address)));
+      const visits = visitsByDate[date] || [];
+      if (stops.length === 0 || stops.length !== visits.length) continue; // count mismatch -- skip this date entirely
+
+      stops.forEach((label, i) => {
+        if (!unresolvedLabelsByDate[date].has(label)) return; // already resolved in pass 1 -- don't touch
+        const site = visits[i].sites;
+        if (!site) return;
+        const key = `${date}|${label}`;
+        if (labelToResolvedSite[key]) return; // already resolved this label for this date
+        labelToResolvedSite[key] = site;
+        resolvedViaClosedTickets.push({ date, rawLabel: label, resolvedSiteCode: site.site_code, resolvedSiteName: site.name });
+      });
+    }
+
+    // Apply resolutions back onto pass-1 results.
+    for (const r of resolved) {
+      if (!r.fromPlace) {
+        const site = labelToResolvedSite[`${r.leg.date}|${r.leg.fromRaw}`];
+        if (site) r.fromPlace = { type: 'site', site };
+      }
+      if (!r.toPlace) {
+        const site = labelToResolvedSite[`${r.leg.date}|${r.leg.toRaw}`];
+        if (site) r.toPlace = { type: 'site', site };
+      }
+    }
+  }
+
+  // ── Pass 3: fuzzy name-matching, now genuinely the last resort -- only
+  // ── for whatever neither the alias table nor position could reach ────
+  for (const r of resolved) {
+    if (!r.fromPlace) {
+      const site = matchSiteByName(normalizePlaceLabel(r.leg.fromRaw), candidateSites);
+      if (site) r.fromPlace = { type: 'site', site };
+    }
+    if (!r.toPlace) {
+      const site = matchSiteByName(normalizePlaceLabel(r.leg.toRaw), candidateSites);
+      if (site) r.toPlace = { type: 'site', site };
+    }
+  }
+
+  // ── Pass 4: neighbor + claimed miles (Mark's idea) ─────────────────
+  // If one end of a leg is known and the other is not, keep only sites
+  // whose drive (or haversine) is within the same loose ratio band as
+  // flagging. One survivor → lock it. Two or more → leave unmatched.
+  function milesFromKnown(knownPlace, site) {
+    return expectedMilesFor(knownPlace, { type: 'site', site });
+  }
+  function candidatesForClaimed(knownPlace, claimed) {
+    if (!knownPlace || knownPlace.type === 'errand' || !(claimed > 0)) return [];
+    const hits = [];
+    for (const site of candidateSites) {
+      if (knownPlace.type === 'site' && knownPlace.site.id === site.id) continue;
+      const exp = milesFromKnown(knownPlace, site);
+      if (!exp || exp.miles < 0.5) continue;
+      const ratio = claimed / exp.miles;
+      if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push(site);
+    }
+    return hits;
+  }
+  for (const r of resolved) {
+    if (!r.fromPlace && r.toPlace && r.toPlace.type !== 'errand') {
+      const hits = candidatesForClaimed(r.toPlace, r.leg.claimedMiles);
+      if (hits.length === 1) r.fromPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+    }
+    if (!r.toPlace && r.fromPlace && r.fromPlace.type !== 'errand') {
+      const hits = candidatesForClaimed(r.fromPlace, r.leg.claimedMiles);
+      if (hits.length === 1) r.toPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+    }
+  }
+
+  // Teach these back to site_aliases so the NEXT timesheet recognizes the
+  // name instantly via the fast path above, instead of needing the
+  // closed-ticket report every time. Never overwrites an existing alias
+  // that already points somewhere else -- that's a real conflict worth a
+  // human look, not something to silently resolve either direction.
+  const aliasConflicts = [];
+  for (const [key, site] of Object.entries(labelToResolvedSite)) {
+    const rawLabel = key.slice(key.indexOf('|') + 1);
+    if (aliasMap[rawLabel.toLowerCase()]) continue; // already known (shouldn't normally happen given the check above, but safe)
+    const { data: existing } = await supabase
+      .from('site_aliases').select('site_id').eq('alias', rawLabel).maybeSingle();
+    if (existing) {
+      if (existing.site_id !== site.id) aliasConflicts.push({ rawLabel, existingSiteId: existing.site_id, resolvedSiteCode: site.site_code });
+      continue;
+    }
+    const { error: aliasInsertErr } = await supabase
+      .from('site_aliases').insert({ alias: rawLabel, site_id: site.id, source: 'mileage_timesheet' });
+    if (aliasInsertErr) console.error(`[mileage-check] alias write failed for "${rawLabel}" (non-fatal):`, aliasInsertErr.message);
+    else aliasMap[rawLabel.toLowerCase()] = site; // so later legs in this same run also benefit
+  }
+
+  // ── Score every leg against its (now possibly pass-2-resolved) places ──
   const flaggedLegs = [];
   const unmatchedLegs = [];
   let matchedCount = 0;
   let totalClaimed = 0;
   let totalExpected = 0;
 
-  for (const leg of legs) {
+  for (const { leg, fromPlace, toPlace } of resolved) {
     totalClaimed += leg.claimedMiles;
-    const fromPlace = resolvePlace(leg.fromRaw);
-    const toPlace = resolvePlace(leg.toRaw);
+    if ((fromPlace && fromPlace.type === 'errand') || (toPlace && toPlace.type === 'errand')) {
+      unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'errand_stop' });
+      continue;
+    }
+    const fromClean = normalizePlaceLabel(leg.fromRaw).toLowerCase();
+    const toClean = normalizePlaceLabel(leg.toRaw).toLowerCase();
+    if (fromClean && fromClean === toClean && !(fromPlace.type === 'home' && toPlace.type === 'home')) {
+      unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'same_label_both_ends' });
+      continue;
+    }
     if (!fromPlace || !toPlace) {
       unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'site_not_matched' });
       continue;
@@ -294,7 +635,8 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
   }
 
-  const needsReview = flaggedLegs.length > 0 || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow;
+  const needsReview = flaggedLegs.length > 0 || aliasConflicts.length > 0
+    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow;
 
   const row = {
     technician_id: techRow ? techRow.id : null,
@@ -309,6 +651,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     total_expected_miles: Math.round(totalExpected * 10) / 10,
     flagged_legs: flaggedLegs,
     unmatched_legs: unmatchedLegs,
+    resolved_via_closed_tickets: resolvedViaClosedTickets,
     needs_review: needsReview,
   };
 
@@ -316,10 +659,14 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     .from('technician_mileage_reports').insert(row).select().single();
   if (insertErr) throw new Error('Mileage report insert failed: ' + insertErr.message);
 
+  if (aliasConflicts.length) {
+    console.warn('[mileage-check] alias conflicts needing manual review:', JSON.stringify(aliasConflicts));
+  }
+
   return inserted;
 }
 
 module.exports = {
-  tokenize, matchSiteByName, isHomeLabel, haversineMiles,
+  tokenize, matchSiteByName, isHomeLabel, isErrandLabel, normalizePlaceLabel, haversineMiles,
   extractMileageLegs, parseMileageWorkbookBuffer, evaluateMileageReport,
 };
