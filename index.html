@@ -2143,7 +2143,17 @@ function distanceMatrixStatus(state) {
             return null;
         }
 
+        function bounceTechOffDispatch(user) {
+            if (user && user.role === 'tech') {
+                sessionStorage.setItem('dispatchUser', JSON.stringify(user));
+                window.location.replace('/mileage-log.html');
+                return true;
+            }
+            return false;
+        }
+
         function applyDispatcherSession(user) {
+            if (bounceTechOffDispatch(user)) return;
             window.CURRENT_USER = user;
             const chip = document.getElementById('boardUserChip');
             if (chip) {
