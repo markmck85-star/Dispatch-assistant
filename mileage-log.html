@@ -35,7 +35,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.10</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.11</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -96,6 +96,7 @@
   <div class="row">
     <button type="button" onclick="saveLog('draft')">Save draft</button>
     <button type="button" onclick="printLog()">Print / PDF</button>
+    <button type="button" onclick="exportExcel()">Export Excel</button>
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
   <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
@@ -449,6 +450,62 @@ async function saveLog(status) {
   legs = data.log.legs || legs;
   renderLegs();
   document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
+}
+
+function exportExcel() {
+  if (!ctx) return;
+  const esc = (v) => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rows = [];
+  const push = (cells) => {
+    rows.push('<Row>' + cells.map((c) => {
+      const t = (c && c.t === 'n') ? 'Number' : 'String';
+      const v = c && c.v != null ? c.v : '';
+      return '<Cell><Data ss:Type="' + t + '">' + esc(v) + '</Data></Cell>';
+    }).join('') + '</Row>');
+  };
+  push([{ v: 'MCR TECHNICAL SERVICE, LLC' }]);
+  push([{ v: '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)' }]);
+  push([]);
+  push([{ v: 'NAME:' }, { v: ctx.technician.name }]);
+  push([]);
+  push([{ v: 'Date' }, { v: 'Start' }, { v: 'Odometer' }, { v: 'To' }, { v: 'Odometer' }, { v: 'Mileage' }, { v: 'Daily sub.' }]);
+  const byDay = {};
+  legs.forEach(l => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push(l);
+  });
+  let total = 0;
+  Object.keys(byDay).sort().forEach(d => {
+    let sub = 0;
+    byDay[d].forEach((l, idx) => {
+      const mi = typeof l.miles === 'number' ? l.miles : '';
+      if (typeof mi === 'number') { sub += mi; total += mi; }
+      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
+      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
+      push([
+        { v: idx === 0 ? weekdayLabel(d) : '' },
+        { v: from },
+        { t: 'n', v: l.odo_start != null ? l.odo_start : '' },
+        { v: to },
+        { t: 'n', v: l.odo_end != null ? l.odo_end : '' },
+        { t: 'n', v: mi },
+        { t: 'n', v: idx === byDay[d].length - 1 ? sub : '' }
+      ]);
+    });
+  });
+  push([{ v: 'TOTAL MILEAGE (SUM OF SUBTOTALS)' }, {}, {}, {}, {}, {}, { t: 'n', v: total }]);
+  const xml = '<?xml version="1.0"?>\n' +
+    '<?mso-application progid="Excel.Sheet"?>\n' +
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
+    '<Worksheet ss:Name="Mileage"><Table>' + rows.join('') + '</Table></Worksheet></Workbook>';
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+  const a = document.createElement('a');
+  const start = document.getElementById('periodStart').value || '';
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Mileage-' + (ctx.technician.name || 'tech').replace(/\s+/g, '_') + '-' + start + '.xls';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function printLog() {
