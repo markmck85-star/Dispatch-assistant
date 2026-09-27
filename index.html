@@ -6284,22 +6284,35 @@ function distanceMatrixStatus(state) {
         }
 
         function notifyStop(tech, index) {
-            const item = (assignments[tech] || [])[index];
-            if (!item) { alert('Stop not found.'); return; }
-            const loc = (typeof LOCATIONS !== 'undefined' && LOCATIONS[item.code]) || {};
-            const first = (tech || '').split(' ')[0] || 'there';
-            const wo = item.ticketWo ? 'WO ' + item.ticketWo : '';
-            const issue = item.ticketIssue || (item.urgent ? 'Trouble ticket' : 'Assigned stop');
-            const sla = item.ticketSlaEnd ? formatServerSlaTime(item.ticketSlaEnd, item.code) : '';
-            const site = (loc.name || item.code || '').replace(/\s+/g, ' ').trim();
-            let txt = 'Hey ' + first + ', this one is yours:\n\n';
-            txt += site;
-            if (wo) txt += ' — ' + wo;
-            txt += '\n' + issue;
-            if (sla) txt += '\nSLA ends: ' + sla;
-            txt += '\n\nPlease acknowledge.';
-            sendPlainMessage(tech, txt, wo ? ('MCR Dispatch — ' + wo) : 'MCR Dispatch — assigned stop');
+            try {
+                const assignments = window.currentAssignments || {};
+                const item = (assignments[tech] || [])[index];
+                if (!item) { alert('Stop not found.'); return; }
+                const loc = (window.LOCATIONS && window.LOCATIONS[item.code])
+                    || (typeof LOCATIONS !== 'undefined' && LOCATIONS[item.code])
+                    || {};
+                const first = (tech || '').split(' ')[0] || 'there';
+                const wo = item.ticketWo ? 'WO ' + item.ticketWo : '';
+                const issue = item.ticketIssue || (item.urgent ? 'Trouble ticket' : 'Assigned stop');
+                let sla = '';
+                try {
+                    if (item.ticketSlaEnd && typeof formatServerSlaTime === 'function') {
+                        sla = formatServerSlaTime(item.ticketSlaEnd, item.code) || '';
+                    }
+                } catch (e) {}
+                const site = (loc.name || item.code || '').replace(/\s+/g, ' ').trim();
+                let txt = 'Hey ' + first + ', this one is yours:\n\n';
+                txt += site;
+                if (wo) txt += ' — ' + wo;
+                txt += '\n' + issue;
+                if (sla) txt += '\nSLA ends: ' + sla;
+                txt += '\n\nPlease acknowledge.';
+                sendPlainMessage(tech, txt, wo ? ('MCR Dispatch — ' + wo) : 'MCR Dispatch — assigned stop');
+            } catch (e) {
+                alert('Text this stop failed: ' + (e && e.message ? e.message : e));
+            }
         }
+        window.notifyStop = notifyStop;
 
         async function sendMessage(id, techName) {
             const el = document.getElementById(`msg-${id}`);
