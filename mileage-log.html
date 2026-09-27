@@ -49,19 +49,19 @@
   <div class="status" id="status"></div>
 
   <div class="card">
-    <div class="row">
-      <label>Date <input type="date" id="legDate"></label>
-      <label>Odometer start <input type="number" id="odoStart" inputmode="numeric"></label>
-      <label>Odometer end <input type="number" id="odoEnd" inputmode="numeric"></label>
-    </div>
+    <label>Date <span id="legDow" class="muted"></span>
+      <input type="date" id="legDate" style="width:100%;box-sizing:border-box;" onchange="updateDow()">
+    </label>
     <label>From</label>
-    <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off">
+    <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="fromSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="fromPicked"></div>
+    <label>Odometer at From <input type="number" id="odoStart" inputmode="numeric" style="width:100%;box-sizing:border-box;"></label>
     <label>To</label>
-    <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off">
+    <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="toSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="toPicked"></div>
+    <label>Odometer at To <input type="number" id="odoEnd" inputmode="numeric" style="width:100%;box-sizing:border-box;"></label>
     <div class="row" style="margin-top:10px;">
       <button type="button" onclick="addLeg()">Add leg</button>
       <button type="button" class="secondary" onclick="endDay()">End day at home</button>
@@ -132,11 +132,26 @@ function addDays(iso, n) {
   return x.toISOString().slice(0,10);
 }
 
+function weekdayLabel(iso) {
+  if (!iso) return '';
+  const x = new Date(iso + 'T12:00:00');
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return days[x.getDay()] + ' ' + months[x.getMonth()] + ' ' + x.getDate();
+}
+
+function updateDow() {
+  const el = document.getElementById('legDow');
+  const d = document.getElementById('legDate').value;
+  if (el) el.textContent = weekdayLabel(d);
+}
+
 function initPeriod() {
   const s = sundayOf(new Date());
   document.getElementById('periodStart').value = s;
   document.getElementById('periodEnd').value = addDays(s, 13);
   document.getElementById('legDate').value = new Date().toISOString().slice(0,10);
+  updateDow();
 }
 
 function shiftPeriod(days) {
@@ -291,16 +306,16 @@ function renderLegs() {
   let html = '';
   days.forEach(d => {
     let sub = 0;
-    html += '<div class="card"><strong>' + d + '</strong>';
+    html += '<div class="card"><strong>' + weekdayLabel(d) + '</strong> <span class="muted">' + d + '</span>';
     byDay[d].forEach(({ l, i }) => {
       if (typeof l.miles === 'number') sub += l.miles;
       const flag = l.flag === 'negative' ? '<div class="flag neg">Odometer went down — check the reading.</div>' :
         (l.flag === 'over' ? '<div class="flag">About ' + l.expected_mi + ' mi on the matrix; you entered ' + l.miles + '.</div>' : '');
-      html += '<div style="padding:6px 0;border-bottom:1px solid #333;">' +
-        (l.from_print || l.from_picker) + ' → ' + (l.to_print || l.to_picker) +
-        ' · ' + (l.odo_start || '?') + '–' + (l.odo_end || '?') +
-        ' = <strong>' + (l.miles == null ? '?' : l.miles) + '</strong>' +
-        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">x</button>' +
+      html += '<div style="padding:8px 0;border-bottom:1px solid #333;">' +
+        '<div>' + (l.from_print || l.from_picker) + ' <span class="muted">odo ' + (l.odo_start || '?') + '</span></div>' +
+        '<div>' + (l.to_print || l.to_picker) + ' <span class="muted">odo ' + (l.odo_end || '?') + '</span>' +
+        ' · <strong>' + (l.miles == null ? '?' : l.miles) + ' mi</strong>' +
+        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">x</button></div>' +
         flag + '</div>';
     });
     html += '<div class="day-total">' + sub + '</div></div>';
@@ -347,7 +362,7 @@ function printLog() {
       if (typeof mi === 'number') { sub += mi; total += mi; }
       const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || '');
       const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || '');
-      rows += '<tr><td>' + d + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
+      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
     });
     rows += '<tr><td colspan="6"></td><td><strong>' + sub + '</strong></td></tr>';
   });
