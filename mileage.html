@@ -70,6 +70,10 @@
     padding: 4px 10px; font-size: 12px;
   }
   button.del:hover { background: #2a1010; color: #e05555; }
+  button.secondary {
+    background: transparent; border-color: var(--border); color: var(--text);
+  }
+  button.secondary:hover { background: #1c2230; }
   #status {
     color: #ccc; font-size: 13px; min-height: 22px;
     padding: 8px 10px; background: #11151c; border-radius: 4px;
@@ -90,6 +94,7 @@
   }
   .ok { color: var(--green); font-weight: 600; }
   .bad { color: var(--red); font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px; }
   a { color: var(--accent); }
 </style>
@@ -98,7 +103,7 @@
 <body>
 <header>
   <div class="inner">
-    <div class="tag">MCR Technical Service · for Mike</div>
+    <div class="tag">MCR Technical Service · Mileage Sanity Check</div>
     <h1>Mileage Check</h1>
     <p>A quick look at each technician’s biweekly mileage log — not an audit. It flags numbers that cannot be a real drive (a dropped digit, a backward odometer, 200 miles between two stores next door).</p>
   </div>
@@ -143,7 +148,10 @@
 
   <section>
     <h2>Recent reports</h2>
-    <button type="button" id="refreshBtn">Refresh</button>
+    <div class="toolbar">
+      <button type="button" id="refreshBtn">Refresh</button>
+      <button type="button" id="exportCsvBtn" class="secondary">⬇ Export CSV</button>
+    </div>
     <div id="list" style="margin-top:12px;">Loading…</div>
   </section>
 </main>
@@ -199,6 +207,11 @@ function mcFmtDate(iso) {
   return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Cache of whatever's currently on screen, so Export CSV doesn't need a
+// second round-trip to the server -- it just serializes what mcLoadReports
+// already fetched and rendered.
+let mcCurrentReports = [];
+
 async function mcLoadReports() {
   const el = document.getElementById('list');
   el.textContent = 'Loading…';
@@ -206,6 +219,7 @@ async function mcLoadReports() {
     const res = await fetch('/.netlify/functions/get-mileage-reports?limit=25');
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    mcCurrentReports = data.reports || [];
     if (!data.reports.length) { el.innerHTML = '<div class="muted">No reports yet.</div>'; return; }
     el.innerHTML = data.reports.map(r => {
       const flagCount = (r.flagged_legs || []).length;
@@ -236,6 +250,53 @@ async function mcLoadReports() {
 }
 
 document.getElementById('refreshBtn').addEventListener('click', mcLoadReports);
+
+// Export CSV -- one row per report (the summary line), plus a second
+// section listing every flagged/unmatched leg, so Mike can skim the
+// summary in a spreadsheet and still see exactly which hops to question,
+// without needing to click into this page at all.
+document.getElementById('exportCsvBtn').addEventListener('click', () => {
+  if (!mcCurrentReports.length) { alert('Nothing to export yet -- hit Refresh first.'); return; }
+  const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const rows = [];
+  rows.push(['Technician','Period Ending','Source','File','Legs Matched','Total Legs','Claimed Miles','Expected Miles','Unmatched Legs','Flagged Legs','Status'].map(esc).join(','));
+  for (const r of mcCurrentReports) {
+    const flagCount = (r.flagged_legs || []).length;
+    const unmatchedCount = (r.unmatched_legs || []).length;
+    const statusText = flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine');
+    rows.push([
+      r.technicianName || r.technician_name_raw || 'Unknown tech',
+      mcFmtDate(r.pay_period_end),
+      r.source === 'email' ? 'email' : 'upload',
+      r.source_filename || '',
+      r.matched_legs, r.total_legs, r.total_claimed_miles, r.total_expected_miles,
+      unmatchedCount, flagCount, statusText,
+    ].map(esc).join(','));
+  }
+  rows.push([]);
+  rows.push(['-- Flagged / unmatched leg detail --'].map(esc).join(','));
+  rows.push(['Technician','Date','From','To','Claimed Miles','Expected Miles','Reason'].map(esc).join(','));
+  for (const r of mcCurrentReports) {
+    const who = r.technicianName || r.technician_name_raw || 'Unknown tech';
+    for (const f of (r.flagged_legs || [])) {
+      const reason = f.reason === 'negative_or_zero' ? 'negative/zero mileage' : `${f.ratio}x expected (${f.expectedSource})`;
+      rows.push([who, mcFmtDate(f.date), f.fromRaw, f.toRaw, f.claimedMiles, f.expectedMiles ?? '', reason].map(esc).join(','));
+    }
+    for (const u of (r.unmatched_legs || [])) {
+      const reason = u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop';
+      rows.push([who, mcFmtDate(u.date), u.fromRaw, u.toRaw, u.claimedMiles, '', reason].map(esc).join(','));
+    }
+  }
+  const csv = rows.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'mileage-check-' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
 document.getElementById('list').addEventListener('click', async (ev) => {
   const btn = ev.target.closest('button.del');
   if (!btn) return;
