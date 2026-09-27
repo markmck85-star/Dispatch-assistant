@@ -78,17 +78,21 @@ exports.handler = async (event) => {
       else if (leg.to_kind === 'home' && leg.from_site_id) key = 'HOME|' + leg.from_site_id;
       else if (leg.from_site_id && leg.to_site_id) key = leg.from_site_id + '|' + leg.to_site_id;
       const exp = key ? expected[key] : null;
+      if (exp != null) leg.expected_mi = exp;
       if (exp != null && claimed > exp + 100) {
         leg.flag = 'over';
-        leg.expected_mi = exp;
         flagged.push({ date: leg.date, reason: 'over', claimed, expected: exp });
-      } else if (claimed > 200) {
+      } else if (exp != null && claimed > exp + 50) {
+        leg.flag = 'check';
+        flagged.push({ date: leg.date, reason: 'check', claimed, expected: exp });
+      } else if (claimed > 400) {
         leg.flag = 'over';
-        if (exp != null) leg.expected_mi = exp;
         flagged.push({ date: leg.date, reason: 'over', claimed, expected: exp });
-      } else {
-        if (exp != null) leg.expected_mi = exp;
-        if (!leg.flag) leg.flag = null;
+      } else if (exp == null && claimed > 150) {
+        leg.flag = 'check';
+        flagged.push({ date: leg.date, reason: 'check', claimed });
+      } else if (!leg.flag) {
+        leg.flag = null;
       }
     }
 
