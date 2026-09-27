@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.14</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.15</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -493,12 +493,15 @@ function exportExcel() {
   }
   put(0, 0, 'MCR TECHNICAL SERVICE, LLC', { font: { name: 'Arial', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
   put(1, 0, '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)', { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
+  function shortDate(iso) {
+    if (!iso) return '';
+    const p = iso.split('-');
+    return Number(p[1]) + '/' + Number(p[2]) + '/' + String(p[0]).slice(-2);
+  }
+  const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   put(3, 0, 'NAME:', { font: fontB, border: false });
   put(3, 1, ctx.technician.name, { font: fontB, border: false });
-  put(3, 3, 'PERIOD BEGINNING:', { font: fontB, border: false });
-  put(3, 4, start, { font: fontB, border: false });
-  put(4, 3, 'PERIOD ENDING:', { font: fontB, border: false });
-  put(4, 4, end, { font: fontB, border: false });
+  put(3, 3, 'PAY PERIOD: ' + shortDate(start) + ' - ' + shortDate(end), { font: fontB, border: false });
   const headers = ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.'];
   headers.forEach((h, i) => put(5, i, h, { font: fontB, fill: headerFill, alignment: { horizontal: 'center', vertical: 'center' } }));
   const byDay = {};
@@ -506,28 +509,43 @@ function exportExcel() {
     if (!byDay[l.date]) byDay[l.date] = [];
     byDay[l.date].push(l);
   });
+  function eachDate(a, b, fn) {
+    const t = new Date(a + 'T12:00:00');
+    const last = new Date(b + 'T12:00:00');
+    while (t <= last) {
+      const iso = t.toISOString().slice(0, 10);
+      fn(iso, shortDays[t.getDay()]);
+      t.setDate(t.getDate() + 1);
+    }
+  }
   let row = 6;
   let total = 0;
-  const days = Object.keys(byDay).sort();
-  days.forEach(d => {
+  eachDate(start, end, (d, dow) => {
+    const dayLegs = byDay[d] || [];
     let sub = 0;
-    byDay[d].forEach(l => { if (typeof l.miles === 'number') sub += l.miles; });
+    dayLegs.forEach(l => { if (typeof l.miles === 'number') sub += l.miles; });
     total += sub;
-    byDay[d].forEach((l, idx) => {
-      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
-      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
-      put(row, 0, idx === 0 ? weekdayLabel(d) : '');
-      put(row, 1, from);
-      put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' } });
-      put(row, 3, to);
-      put(row, 4, l.odo_end != null ? l.odo_end : '', { alignment: { horizontal: 'center', vertical: 'center' } });
-      put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' } });
-      put(row, 6, idx === byDay[d].length - 1 ? sub : '', { font: idx === byDay[d].length - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' } });
-      row++;
-    });
-    // spare blank lined rows like his template block
-    for (let i = 0; i < 2; i++) {
-      for (let c = 0; c < 7; c++) put(row, c, '');
+    const block = Math.max(9, dayLegs.length + 1);
+    for (let i = 0; i < block; i++) {
+      const l = dayLegs[i];
+      let dateCell = '';
+      if (i === 0) dateCell = dow;
+      else if (i === 1) dateCell = d;
+      if (l) {
+        const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
+        const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
+        put(row, 0, dateCell);
+        put(row, 1, from);
+        put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' } });
+        put(row, 3, to);
+        put(row, 4, l.odo_end != null ? l.odo_end : '', { alignment: { horizontal: 'center', vertical: 'center' } });
+        put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' } });
+        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' } });
+      } else {
+        put(row, 0, dateCell);
+        for (let c = 1; c < 6; c++) put(row, c, '');
+        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' } });
+      }
       row++;
     }
   });
