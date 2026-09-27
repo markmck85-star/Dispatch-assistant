@@ -226,12 +226,16 @@ async function mcLoadReports() {
       const unmatchedCount = (r.unmatched_legs || []).length;
       const statusClass = flagCount > 0 ? 'bad' : 'ok';
       const statusText = flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine');
-      const flagRows = (r.flagged_legs || []).map(f =>
-        `<div class="flag">${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> — `
+      const flagRows = (r.flagged_legs || []).map(f => {
+        const clusterNote = f.cluster
+          ? ' <strong style="color:var(--amber);">— part of a run of flags this day; the ORDER of stops may be off, not just this number</strong>'
+          : '';
+        return `<div class="flag">${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> — `
         + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
         + (f.reason === 'negative_or_zero' ? ' — negative/zero mileage' : (f.ratio != null ? ` — ${f.ratio}x expected` : ' — flagged'))
-        + `</div>`
-      ).join('');
+        + clusterNote
+        + `</div>`;
+      }).join('');
       const unmatchedRows = (r.unmatched_legs || []).map(u =>
         `<div class="unmatched">${mcFmtDate(u.date)}: <strong>"${u.fromRaw}"</strong> → <strong>"${u.toRaw}"</strong> — claimed ${u.claimedMiles} mi `
         + `(${u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop'})</div>`
@@ -279,7 +283,8 @@ document.getElementById('exportCsvBtn').addEventListener('click', () => {
   for (const r of mcCurrentReports) {
     const who = r.technicianName || r.technician_name_raw || 'Unknown tech';
     for (const f of (r.flagged_legs || [])) {
-      const reason = f.reason === 'negative_or_zero' ? 'negative/zero mileage' : `${f.ratio}x expected (${f.expectedSource})`;
+      const base = f.reason === 'negative_or_zero' ? 'negative/zero mileage' : `${f.ratio}x expected (${f.expectedSource})`;
+      const reason = f.cluster ? `${base} -- part of a same-day run, check the order` : base;
       rows.push([who, mcFmtDate(f.date), f.fromRaw, f.toRaw, f.claimedMiles, f.expectedMiles ?? '', reason].map(esc).join(','));
     }
     for (const u of (r.unmatched_legs || [])) {
