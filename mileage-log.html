@@ -12,7 +12,7 @@
   input, select, button { font-size:16px; padding:8px; border-radius:6px; border:1px solid #c5ced6; background:#fff; color:#1a1a1a; }
   button { background:#1d4e89; border:none; color:#fff; cursor:pointer; }
   button.secondary { background:#5b6570; color:#fff; }
-  button.warn { background:#8a2f2f; color:#fff; }
+  button.warn { background:#fff; color:#8a2f2f; border:1px solid #c9a0a0; padding:2px 8px; font-size:13px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
   .card { background:#fff; border:1px solid #d5dde3; border-radius:8px; padding:10px; margin:10px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
   .flag { color:#8a6d12; font-size:12px; }
@@ -35,7 +35,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.8</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.10</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -68,7 +68,7 @@
       </div>
       <div class="odo">
         <label>Odo</label>
-        <input type="number" id="odoStart" inputmode="numeric">
+        <input type="number" id="odoStart" inputmode="numeric" oninput="previewFlag()">
       </div>
     </div>
     <div id="fromSuggest" class="suggest" style="display:none;"></div>
@@ -80,11 +80,12 @@
       </div>
       <div class="odo">
         <label>Odo</label>
-        <input type="number" id="odoEnd" inputmode="numeric">
+        <input type="number" id="odoEnd" inputmode="numeric" oninput="previewFlag()">
       </div>
     </div>
     <div id="toSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="toPicked"></div>
+    <div id="liveFlag" class="flag" style="display:none;margin-top:8px;"></div>
     <div class="row" style="margin-top:10px;">
       <button type="button" onclick="addLeg()">Add leg</button>
       <button type="button" class="secondary" onclick="endDay()">End day at home</button>
@@ -107,6 +108,30 @@ let legs = [];
 
 function currentUser() {
   try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
+}
+
+function localKey() {
+  const tech = (ctx && ctx.technician && ctx.technician.id) || (currentUser() && currentUser().technician_id) || 'unknown';
+  const start = document.getElementById('periodStart').value || '';
+  return 'mileageDraft:' + tech + ':' + start;
+}
+
+function persistLocal() {
+  try {
+    localStorage.setItem(localKey(), JSON.stringify({
+      legs: legs,
+      odoStart: document.getElementById('odoStart').value,
+      odoEnd: document.getElementById('odoEnd').value,
+      savedAt: Date.now()
+    }));
+  } catch (e) {}
+}
+
+function readLocal() {
+  try {
+    const raw = localStorage.getItem(localKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
 }
 
 async function doLogin() {
@@ -272,6 +297,13 @@ async function loadContext() {
     if (!data.ok) throw new Error(data.error || 'Load failed');
     ctx = data;
     legs = (data.log && data.log.legs) || [];
+    const local = readLocal();
+    if (local && Array.isArray(local.legs) && local.legs.length > legs.length) {
+      legs = local.legs;
+    } else if ((!legs || !legs.length) && local && local.legs && local.legs.length) {
+      legs = local.legs;
+    }
+    persistLocal();
     document.getElementById('who').textContent = ctx.technician.name + ' · home prints as “' + ctx.technician.home_label_print + '”';
     document.getElementById('fromQ').value = ctx.technician.home_label_picker;
     picked.from = homeStop();
@@ -284,6 +316,32 @@ async function loadContext() {
     status.textContent = legs.length + ' legs in this period (draft).';
   } catch (e) {
     status.textContent = e.message;
+  }
+}
+
+function previewFlag() {
+  const a = Number(document.getElementById('odoStart').value);
+  const b = Number(document.getElementById('odoEnd').value);
+  const box = document.getElementById('liveFlag');
+  if (!Number.isFinite(a) || !Number.isFinite(b) || document.getElementById('odoEnd').value === '') {
+    box.style.display = 'none';
+    return;
+  }
+  const miles = b - a;
+  if (miles < 0) {
+    box.className = 'flag neg';
+    box.textContent = 'Odometer went down (' + miles + ' mi). Check the reading before adding.';
+    box.style.display = 'block';
+  } else if (miles > 400) {
+    box.className = 'flag neg';
+    box.textContent = 'That would be ' + miles + ' miles. Extra digit? Check before adding.';
+    box.style.display = 'block';
+  } else if (miles > 150) {
+    box.className = 'flag';
+    box.textContent = 'That would be ' + miles + ' miles. Fine for a long run — glance at the odometer.';
+    box.style.display = 'block';
+  } else {
+    box.style.display = 'none';
   }
 }
 
@@ -324,6 +382,7 @@ function addLeg() {
   document.getElementById('toPicked').textContent = '';
   document.getElementById('odoStart').value = odoEnd;
   document.getElementById('odoEnd').value = '';
+  persistLocal();
   renderLegs();
   saveLog('draft');
 }
@@ -336,7 +395,9 @@ function endDay() {
 
 function removeLeg(i) {
   legs.splice(i, 1);
+  persistLocal();
   renderLegs();
+  saveLog('draft');
 }
 
 function renderLegs() {
@@ -360,7 +421,7 @@ function renderLegs() {
         '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + '</div></div>' +
         '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong></div></div>' +
         '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' +
-        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">x</button></div>' +
+        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button></div>' +
         flag + '</div>';
     });
     html += '<div class="day-total">Day total ' + sub + '</div></div>';
@@ -426,6 +487,7 @@ function printLog() {
 }
 
 initPeriod();
+window.addEventListener('beforeunload', persistLocal);
 if (currentUser()) { showApp(); loadContext(); }
 </script>
 </body>
