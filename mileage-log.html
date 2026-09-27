@@ -28,6 +28,13 @@
 <body>
   <h1>Mileage log</h1>
   <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved.</div>
+  <div id="loginBox" class="card">
+    <label>Username <input id="loginUser" autocomplete="username"></label>
+    <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
+    <button type="button" onclick="doLogin()">Log in</button>
+    <div class="status" id="loginErr"></div>
+  </div>
+  <div id="appBox" style="display:none;">
   <div id="who" class="muted"></div>
   <div class="row">
     <label>Period start (Sunday)
@@ -67,6 +74,8 @@
     <button type="button" onclick="printLog()">Print / PDF</button>
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
+  <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
+  </div>
 
 <script>
 let ctx = null;
@@ -75,6 +84,40 @@ let legs = [];
 
 function currentUser() {
   try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUser').value.trim();
+  const pin = document.getElementById('loginPin').value.trim();
+  const err = document.getElementById('loginErr');
+  err.textContent = '';
+  try {
+    const res = await fetch('/.netlify/functions/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, pin: pin })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Login failed');
+    if (data.role !== 'tech' && data.role !== 'admin' && data.role !== 'dispatcher') {
+      throw new Error('This login cannot use the mileage log.');
+    }
+    sessionStorage.setItem('dispatchUser', JSON.stringify(data));
+    showApp();
+    loadContext();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+function doLogout() {
+  sessionStorage.removeItem('dispatchUser');
+  location.reload();
+}
+
+function showApp() {
+  document.getElementById('loginBox').style.display = 'none';
+  document.getElementById('appBox').style.display = 'block';
 }
 
 function sundayOf(d) {
@@ -323,7 +366,7 @@ function printLog() {
 }
 
 initPeriod();
-loadContext();
+if (currentUser()) { showApp(); loadContext(); }
 </script>
 </body>
 </html>
