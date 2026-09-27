@@ -105,6 +105,18 @@ const MIN_RATIO = 0.4;
 const MAX_RATIO = 2.5;
 const SITE_MATCH_THRESHOLD = 0.65;
 
+// 2026-09-27: for the new period-vs-history comparison (see
+// evaluateMileageReport's history-comparison block) -- deliberately much
+// tighter than the per-leg MIN_RATIO/MAX_RATIO above. A single leg has
+// every reason to vary widely (a detour, an errand, genuine route choice)
+// and the wide band accounts for that; a whole PERIOD's total, averaged
+// against a technician's own recent history, has much less excuse to
+// swing by more than ~40% either way -- his territory, route pattern, and
+// workload don't typically change that fast. First-pass numbers, easy to
+// retune once there's more real history to compare against.
+const HISTORY_MIN_RATIO = 0.6;
+const HISTORY_MAX_RATIO = 1.6;
+
 // 2026-09-20: found via a real false positive on Mark's own timesheet --
 // "Lawrenceville Suwanee Kroger" (a real place, not yet in `sites` at
 // all) scored 0.667 against "Gwinnett County Kroger - Lawrenceville
@@ -846,8 +858,79 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
   }
 
+  // ── Day-level summary (Mike's own way of spot-checking, per Mark: does
+  // ── a day's TOTAL look right for its stop count) ────────────────────
+  // Deliberately independent of whether every individual leg's place name
+  // resolved -- an absurd day total is obvious without knowing exactly
+  // which store was which, the same way Mike already eyeballs the daily
+  // subtotal cell rather than tracing every named stop. Uses whatever
+  // portion of the day DID resolve to compute an expected total; a day
+  // with too little resolved coverage (coverage < 0.5) is reported with
+  // no verdict rather than a guess built on mostly-unknown legs.
+  const daySummaries = [];
+  for (const [date, dayLegsForSummary] of Object.entries(legsByDate)) {
+    const dayClaimed = dayLegsForSummary.reduce((sum, l) => sum + l.claimedMiles, 0);
+    let dayExpected = 0;
+    let dayMatchedCount = 0;
+    for (const r of resolved) {
+      if (r.leg.date !== date) continue;
+      if ((r.fromPlace && r.fromPlace.type === 'errand') || (r.toPlace && r.toPlace.type === 'errand')) continue;
+      if (!r.fromPlace || !r.toPlace) continue;
+      const exp = expectedMilesFor(r.fromPlace, r.toPlace);
+      if (!exp) continue;
+      dayExpected += exp.miles;
+      dayMatchedCount++;
+    }
+    const coverage = dayLegsForSummary.length > 0 ? dayMatchedCount / dayLegsForSummary.length : 0;
+    let ratio = null, flagged = false;
+    if (coverage >= 0.5 && dayExpected > 0.5) {
+      ratio = Math.round((dayClaimed / dayExpected) * 100) / 100;
+      if (ratio > MAX_RATIO || ratio < MIN_RATIO) flagged = true;
+    }
+    daySummaries.push({
+      date,
+      stopCount: dayLegsForSummary.length,
+      claimedMiles: Math.round(dayClaimed * 10) / 10,
+      expectedMiles: dayExpected > 0.5 ? Math.round(dayExpected * 10) / 10 : null,
+      coverage: Math.round(coverage * 100) / 100,
+      ratio,
+      flagged,
+    });
+  }
+  daySummaries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // ── Period-vs-history comparison (Mark's other description: does THIS
+  // ── period look off compared to what Mike's used to seeing from this
+  // ── specific technician) ────────────────────────────────────────────
+  // Needs at least 2 prior periods on file to say anything -- a single
+  // past period is one data point, not a "usual" to compare against.
+  let historyComparison = null;
+  if (techRow) {
+    const { data: pastReports, error: historyErr } = await supabase
+      .from('technician_mileage_reports')
+      .select('pay_period_end, total_claimed_miles')
+      .eq('technician_id', techRow.id)
+      .order('pay_period_end', { ascending: false })
+      .limit(6);
+    if (historyErr) console.error('[mileage-check] history lookup failed (non-fatal):', historyErr.message);
+    const priorReports = (pastReports || []).filter((r) => r.pay_period_end !== payPeriodEnd);
+    if (priorReports.length >= 2) {
+      const avgPastClaimed = priorReports.reduce((s, r) => s + Number(r.total_claimed_miles || 0), 0) / priorReports.length;
+      const currentClaimedTotal = Math.round(totalClaimed * 10) / 10;
+      const ratio = avgPastClaimed > 0.5 ? Math.round((currentClaimedTotal / avgPastClaimed) * 100) / 100 : null;
+      historyComparison = {
+        periodsCompared: priorReports.length,
+        averagePastClaimedMiles: Math.round(avgPastClaimed * 10) / 10,
+        currentClaimedMiles: currentClaimedTotal,
+        ratio,
+        flagged: ratio != null && (ratio > HISTORY_MAX_RATIO || ratio < HISTORY_MIN_RATIO),
+      };
+    }
+  }
+
   const needsReview = flaggedLegs.length > 0 || aliasConflicts.length > 0
-    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow;
+    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow
+    || daySummaries.some((d) => d.flagged) || (historyComparison && historyComparison.flagged);
 
   const row = {
     technician_id: techRow ? techRow.id : null,
@@ -863,6 +946,8 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     flagged_legs: flaggedLegs,
     unmatched_legs: unmatchedLegs,
     resolved_via_closed_tickets: resolvedViaClosedTickets,
+    day_summaries: daySummaries,
+    history_comparison: historyComparison,
     needs_review: needsReview,
   };
 
