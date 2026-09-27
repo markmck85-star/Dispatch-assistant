@@ -2149,6 +2149,7 @@
                 statusEl.textContent = data.results.length + ' site' + (data.results.length === 1 ? '' : 's') + ' flagged.';
 
                 var html = '';
+                window._riTicketNotes = [];
                 data.results.forEach(function(r) {
                     var firstDate = r.first_seen ? new Date(r.first_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '?';
                     var lastDate = r.last_seen ? new Date(r.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
@@ -2156,9 +2157,25 @@
                         var d = t.received_at ? new Date(t.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
                         var detailBadge = t.issue_detail ? ' · ' + esc(t.issue_detail) : '';
                         var desc = t.description ? '<div style="color:#666;font-style:italic;margin-top:2px;">' + esc(t.description) + '</div>' : '';
+                        var noteIdx = window._riTicketNotes.length;
+                        window._riTicketNotes.push(t);
+                        var saDisplay = '';
+                        if (t.appointment_number) {
+                            if (t.inbound_email_id) {
+                                saDisplay = '<div><button type="button" onclick="viewRepeatIssueEmail(\'' + escAttr(t.inbound_email_id) + '\')" style="background:none;border:none;padding:0;color:#1a56c4;font-weight:600;text-decoration:underline;cursor:pointer;font-size:inherit;">' + esc(t.appointment_number) + '</button></div>';
+                            } else {
+                                saDisplay = '<div style="color:#333;font-weight:600;">' + esc(t.appointment_number) + '</div>';
+                            }
+                        }
+                        var noteBtn = t.closing_note
+                            ? '<button type="button" onclick="viewRepeatIssueNote(' + noteIdx + ')" style="background:none;border:none;padding:0;margin-top:4px;color:#1b7a3d;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">📝 View Note</button>'
+                            : '';
                         return '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #ddd;font-size:13px;">' +
-                            '<strong>' + d + '</strong>' + detailBadge + (t.wo_number ? ' · WO ' + esc(t.wo_number) : '') +
+                            '<strong>' + d + '</strong>' + detailBadge +
                             desc +
+                            saDisplay +
+                            (t.wo_number ? '<div style="color:#999;font-size:11px;">WO ' + esc(t.wo_number) + '</div>' : '') +
+                            noteBtn +
                             '</div>';
                     }).join('');
                     html += '<div class="card" style="border-left-color:#dc3545;">' +
@@ -2172,6 +2189,57 @@
             } catch (e) {
                 statusEl.textContent = 'Error loading repeat issues: ' + e.message;
             }
+        }
+
+        function closeRepeatIssueOverlay() {
+            var el = document.getElementById('riSourceOverlay');
+            if (el) el.remove();
+        }
+
+        function ensureRepeatIssueOverlay() {
+            var overlay = document.getElementById('riSourceOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'riSourceOverlay';
+                overlay.innerHTML = '<div style="background:#fff;color:#1a1a1a;border-radius:10px;max-width:640px;width:100%;max-height:calc(100dvh - 20px);overflow-y:auto;padding:18px 16px 20px;position:relative;box-sizing:border-box;margin:0;">' +
+                    '<button type="button" onclick="closeRepeatIssueOverlay()" style="position:absolute;top:10px;right:10px;background:#eee;border:none;border-radius:16px;width:32px;height:32px;font-size:18px;cursor:pointer;color:#333;">✕</button>' +
+                    '<div id="riSourceBody">Loading…</div></div>';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;height:100dvh;background:rgba(0,0,0,0.55);z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding:10px;padding-top:max(10px,env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
+            overlay.onclick = function(e) { if (e.target === overlay) closeRepeatIssueOverlay(); };
+            overlay.scrollTop = 0;
+            return overlay;
+        }
+
+        async function viewRepeatIssueEmail(inboundEmailId) {
+            ensureRepeatIssueOverlay();
+            var body = document.getElementById('riSourceBody');
+            body.textContent = 'Loading…';
+            try {
+                var res = await fetch('/.netlify/functions/get-source-email?id=' + encodeURIComponent(inboundEmailId));
+                var data = await res.json();
+                if (!data.ok) { body.textContent = 'Failed to load email: ' + (data.error || 'unknown error'); return; }
+                var dateStr = data.receivedAt ? new Date(data.receivedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+                body.innerHTML =
+                    '<div style="font-weight:600;font-size:16px;margin-bottom:4px;padding-right:24px;">' + esc(data.subject) + '</div>' +
+                    '<div style="color:#666;font-size:13px;margin-bottom:12px;">' + (data.sender ? esc(data.sender) + ' · ' : '') + dateStr + '</div>' +
+                    '<div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">' + (data.bodyText ? esc(data.bodyText) : '<span style="color:#999;">(empty body)</span>') + '</div>';
+            } catch (e) {
+                body.textContent = 'Failed to load email: ' + e.message;
+            }
+        }
+
+        function viewRepeatIssueNote(i) {
+            var t = window._riTicketNotes && window._riTicketNotes[i];
+            if (!t || !t.closing_note) return;
+            ensureRepeatIssueOverlay();
+            var body = document.getElementById('riSourceBody');
+            var date = t.received_at ? new Date(t.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+            body.innerHTML =
+                '<div style="font-weight:600;font-size:16px;margin-bottom:6px;padding-right:24px;">📝 Closing Note</div>' +
+                '<div style="font-size:12px;color:#666;margin-bottom:12px;">' + esc(date) + (t.tech_name_raw ? ' · ' + esc(t.tech_name_raw) : '') + (t.wo_number ? ' · WO ' + esc(t.wo_number) : '') + '</div>' +
+                '<div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">' + esc(t.closing_note) + '</div>';
         }
 
         // --- LOCATIONS ---
