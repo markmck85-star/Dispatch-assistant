@@ -5,36 +5,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mileage Log</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background:#111; color:#eee; margin:0; padding:12px; }
-  h1 { font-size:18px; margin:0 0 8px; }
-  .sub { color:#aaa; font-size:13px; margin-bottom:14px; }
-  label { display:block; font-size:12px; color:#aaa; margin:8px 0 4px; }
-  input, select, button { font-size:16px; padding:8px; border-radius:6px; border:1px solid #444; background:#1a1a1a; color:#eee; }
-  button { background:#2b6cb0; border:none; color:#fff; cursor:pointer; }
-  button.secondary { background:#444; }
-  button.warn { background:#744; }
+  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background:#f4f6f8; color:#1a1a1a; margin:0; padding:12px; }
+  h1 { font-size:18px; margin:0 0 8px; color:#12325a; }
+  .sub { color:#5b6570; font-size:13px; margin-bottom:14px; }
+  label { display:block; font-size:12px; color:#5b6570; margin:8px 0 4px; }
+  input, select, button { font-size:16px; padding:8px; border-radius:6px; border:1px solid #c5ced6; background:#fff; color:#1a1a1a; }
+  button { background:#1d4e89; border:none; color:#fff; cursor:pointer; }
+  button.secondary { background:#5b6570; color:#fff; }
+  button.warn { background:#8a2f2f; color:#fff; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
-  .card { background:#1c1c1c; border:1px solid #333; border-radius:8px; padding:10px; margin:10px 0; }
-  .flag { color:#f6c344; font-size:12px; }
-  .flag.neg { color:#ff8a80; }
-  .day-total { text-align:right; color:#8ab4f8; font-weight:600; }
-  .status { font-size:13px; color:#ccc; min-height:18px; }
-  .suggest { background:#222; border:1px solid #444; max-height:180px; overflow:auto; }
-  .suggest div { padding:8px; border-bottom:1px solid #333; cursor:pointer; }
-  .suggest div:hover { background:#2a2a2a; }
-  .muted { color:#888; font-size:12px; }
-  .dow { display:block; font-size:22px; font-weight:700; color:#fff; line-height:1.25; margin:2px 0 8px; }
-  .dayhead { font-size:22px; font-weight:700; color:#fff; display:block; margin-bottom:6px; }
+  .card { background:#fff; border:1px solid #d5dde3; border-radius:8px; padding:10px; margin:10px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .flag { color:#8a6d12; font-size:12px; }
+  .flag.neg { color:#8a2f2f; }
+  .day-total { text-align:right; color:#1d4e89; font-weight:600; }
+  .status { font-size:13px; color:#5b6570; min-height:18px; }
+  .suggest { background:#fff; border:1px solid #c5ced6; max-height:180px; overflow:auto; }
+  .suggest div { padding:8px; border-bottom:1px solid #e6ebef; cursor:pointer; }
+  .suggest div:hover { background:#eef3f8; }
+  .muted { color:#6b7580; font-size:12px; }
+  .dow { display:block; font-size:22px; font-weight:700; color:#12325a; line-height:1.25; margin:2px 0 8px; }
+  .dayhead { font-size:22px; font-weight:700; color:#12325a; display:block; margin-bottom:6px; }
   input[type="date"] { font-size:18px; }
-  .stop-row { display:flex; gap:8px; align-items:flex-end; }
-  .stop-row .grow { flex:1 1 auto; min-width:0; max-width:calc(100% - 132px); }
-  .stop-row .odo { width:124px; flex-shrink:0; text-align:right; }
+  .stop-row { display:flex; gap:8px; align-items:flex-end; justify-content:flex-start; }
+  .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
+  .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
 </style>
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved.</div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.5 light</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
