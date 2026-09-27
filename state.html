@@ -188,7 +188,7 @@
           Show completed stops (✓, muted)
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0 0;">
-          <input type="checkbox" id="mapShowAllSitesToggle" onchange="window._stateMapShowAllSites = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
+          <input type="checkbox" id="mapShowAllSitesToggle" onchange="toggleStateMapShowAllSites(this.checked)">
           Show all service locations (not just today's stops)
         </label>
         <div style="font-size:11px;color:#777;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
@@ -1309,6 +1309,67 @@ async function renderStateMap(state, dispatchDate) {
   }
 }
 
+window._restockScheduleByCode = window._restockScheduleByCode || {};
+async function ensureRestockScheduleCache(state) {
+  if (window._restockScheduleByCode._state === state && window._restockScheduleByCode._loaded) return;
+  try {
+    const res = await fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(state), { cache: 'no-store' });
+    const data = await res.json();
+    const map = {};
+    (data.locations || data.sites || []).forEach(function(r) { if (r && r.site_code) map[r.site_code] = r; });
+    window._restockScheduleByCode = map;
+    window._restockScheduleByCode._state = state;
+    window._restockScheduleByCode._loaded = true;
+  } catch (e) {
+    window._restockScheduleByCode = { _state: state, _loaded: false };
+  }
+}
+function formatRestockPopup(code) {
+  const r = (window._restockScheduleByCode || {})[code];
+  if (!r) return '<div style="color:#888;font-size:11px;margin-top:4px;">Restock timing not loaded</div>';
+  const status = r.status || '';
+  const last = r.last ? new Date(r.last) : null;
+  const next = r.next1 ? new Date(r.next1) : null;
+  const lastStr = last ? last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+  let nextStr = '—';
+  let color = '#888';
+  if (status === 'nodata') { nextStr = 'no history'; color = '#888'; }
+  else if (status === 'single') { nextStr = 'too few visits'; color = '#5b8def'; }
+  else if (status === 'overdue') {
+    const days = (typeof r.daysSince === 'number' && r.avg) ? Math.round(r.daysSince - r.avg) : null;
+    nextStr = days != null ? ('overdue ' + days + 'd') : 'overdue';
+    color = '#e05555';
+  } else if (status === 'soon') {
+    nextStr = next ? next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · due soon' : 'due soon';
+    color = '#d4a017';
+  } else if (status === 'anomalous') {
+    nextStr = (next ? next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'see note') + ' · treat with caution';
+    color = '#c07a3a';
+  } else if (next) {
+    nextStr = next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    color = '#4caf50';
+  }
+  const visitBit = r.visitedSinceRestock ? ' · visited since last restock' : '';
+  return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">'
+    + 'Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
+    + '<div style="font-size:11px;color:#888;">Last restock: ' + lastStr
+    + (r.daysSince != null ? ' · ' + Math.round(r.daysSince) + 'd ago' : '')
+    + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>';
+}
+function restockPinColor(code) {
+  const r = (window._restockScheduleByCode || {})[code];
+  if (!r) return '#5a6a7a';
+  if (r.status === 'overdue') return '#c0392b';
+  if (r.status === 'soon') return '#d4a017';
+  if (r.status === 'ok') return '#3d7a4a';
+  return '#5a6a7a';
+}
+function toggleStateMapShowAllSites(checked) {
+  window._stateMapShowAllSites = !!checked;
+  const state = document.getElementById('stateSel').value;
+  if (checked) ensureRestockScheduleCache(state).then(function() { renderStateMap(state, window._stateMapDate); });
+  else renderStateMap(state, window._stateMapDate);
+}
 function plotStateAllSites(map, LOCATIONS, routes) {
   const box = document.getElementById('mapShowAllSitesToggle');
   if (box) box.checked = !!window._stateMapShowAllSites;
@@ -1331,7 +1392,7 @@ function plotStateAllSites(map, LOCATIONS, routes) {
     const name = loc.name || code;
     if (/unassigned|placeholder|tmp[-_]?site/i.test(name + ' ' + code)) return;
     L.marker([Number(loc.lat), Number(loc.lng)], {
-      icon: L.divIcon({ className: '', html: '<div class="map-site-pin"></div>', iconSize: [12, 12], iconAnchor: [6, 6], popupAnchor: [0, -8] }),
+      icon: L.divIcon({ className: '', html: '<div class="map-site-pin" style="background:' + restockPinColor(code) + ';"></div>', iconSize: [12, 12], iconAnchor: [6, 6], popupAnchor: [0, -8] }),
       title: code + ' — ' + name,
       zIndexOffset: -200
     }).bindPopup(
@@ -1339,6 +1400,7 @@ function plotStateAllSites(map, LOCATIONS, routes) {
       + '<div>' + escapeHtml(name) + '</div>'
       + (loc.address ? '<div style="color:#666;">' + escapeHtml(loc.address) + '</div>' : '')
       + '<div style="color:#888;font-size:11px;margin-top:4px;">Not on this date\'s board</div>'
+      + formatRestockPopup(code)
     ).addTo(group);
     n++;
   });
