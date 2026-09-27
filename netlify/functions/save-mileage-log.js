@@ -82,6 +82,10 @@ exports.handler = async (event) => {
         leg.flag = 'over';
         leg.expected_mi = exp;
         flagged.push({ date: leg.date, reason: 'over', claimed, expected: exp });
+      } else if (claimed > 200) {
+        leg.flag = 'over';
+        if (exp != null) leg.expected_mi = exp;
+        flagged.push({ date: leg.date, reason: 'over', claimed, expected: exp });
       } else {
         if (exp != null) leg.expected_mi = exp;
         if (!leg.flag) leg.flag = null;
