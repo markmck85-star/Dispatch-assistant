@@ -23,6 +23,9 @@
   .suggest div { padding:8px; border-bottom:1px solid #333; cursor:pointer; }
   .suggest div:hover { background:#2a2a2a; }
   .muted { color:#888; font-size:12px; }
+  .dow { display:block; font-size:22px; font-weight:700; color:#fff; line-height:1.25; margin:2px 0 8px; }
+  .dayhead { font-size:22px; font-weight:700; color:#fff; display:block; margin-bottom:6px; }
+  input[type="date"] { font-size:18px; }
 </style>
 </head>
 <body>
@@ -49,7 +52,8 @@
   <div class="status" id="status"></div>
 
   <div class="card">
-    <label>Date <span id="legDow" class="muted"></span>
+    <div id="legDow" class="dow"></div>
+    <label>Date
       <input type="date" id="legDate" style="width:100%;box-sizing:border-box;" onchange="updateDow()">
     </label>
     <label>From</label>
@@ -306,7 +310,7 @@ function renderLegs() {
   let html = '';
   days.forEach(d => {
     let sub = 0;
-    html += '<div class="card"><strong>' + weekdayLabel(d) + '</strong> <span class="muted">' + d + '</span>';
+    html += '<div class="card"><span class="dayhead">' + weekdayLabel(d) + '</span>';
     byDay[d].forEach(({ l, i }) => {
       if (typeof l.miles === 'number') sub += l.miles;
       const flag = l.flag === 'negative' ? '<div class="flag neg">Odometer went down — check the reading.</div>' :
