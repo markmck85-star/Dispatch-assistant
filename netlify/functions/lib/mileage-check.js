@@ -35,6 +35,28 @@
  *   raw label appears inside the technician's own home_address -- not
  *   matched against `sites` at all.
  *
+ *   2026-09-26 fix: removed a second, undocumented heuristic
+ *   (isCityOnlyLabel) that used to ALSO classify any short, storeless,
+ *   digit-free label as home -- added to catch Mark's own "Johns Creek"
+ *   shorthand, but isHomeLabel's own city match already covers that
+ *   correctly. The extra heuristic couldn't tell "this is genuinely
+ *   home" from "this technician just writes every stop as a bare city
+ *   name" -- found via a real Terril King (MI) timesheet where EVERY
+ *   leg (westland, lincoln park, detroit, chelsea, dearborn, taylor,
+ *   adrain, etc.) got misclassified as home, so every leg scored as a
+ *   0-mile "same-place" hop and all 39 got flagged.
+ *
+ *   Replaced with a day-bookend check per Mark's own framing: a workday
+ *   both STARTS and ENDS at home, so if the day's very first leg's
+ *   `from` and very last leg's `to` are both bare city-style labels and
+ *   they match each other, THAT specific label is home for that day --
+ *   and only in those two bookend slots. Any other leg using the same
+ *   literal text mid-day is deliberately left alone and falls through to
+ *   position-based matching against the closed-ticket report (Pass 2
+ *   below) or fuzzy name-matching (Pass 3), exactly the mechanisms built
+ *   to handle a technician's own naming quirks -- rather than assuming
+ *   every occurrence of that text means home.
+ *
  * DISTANCE LOOKUP:
  *   Prefers real driving-distance rows already in tech_site_distances /
  *   site_site_distances (same tables the dispatch board's Map View and
@@ -154,7 +176,18 @@ function isErrandLabel(rawLabel) {
   return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
 }
 
-function isCityOnlyLabel(rawLabel) {
+/**
+ * True if rawLabel LOOKS like a bare city name (short, no store word, no
+ * digits) -- on its own this says nothing about whether it means home,
+ * since a technician who writes every stop this way (found on Terril
+ * King's real timesheet, see the file header) would make every leg match.
+ * Used ONLY as one half of the day-bookend check below: a bare city name
+ * repeated at the day's start AND end is a much safer signal than any
+ * single occurrence, since a workday both starting and ending at the same
+ * place strongly implies that place is home, regardless of what a
+ * technician calls it.
+ */
+function looksLikeBareCityLabel(rawLabel) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label || label.length < 3) return false;
   if (isErrandLabel(label)) return false;
@@ -452,9 +485,30 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // checks are unambiguous and free (no DB round trip), so they still run
   // first. Fuzzy name-matching (matchSiteByName) is deliberately NOT
   // called here anymore -- see the precedence rationale below.
-  function resolveHomeOrAlias(rawLabel) {
+  //
+  // 2026-09-26: day-bookend home detection. Grouped by date so each day's
+  // first leg's `from` and last leg's `to` can be compared -- if both are
+  // bare city-style labels and match each other, that label is home for
+  // THIS DAY specifically, and only in those two positions (see file
+  // header for why not every occurrence).
+  const legsByDate = {};
+  for (const leg of legs) (legsByDate[leg.date] = legsByDate[leg.date] || []).push(leg);
+  const dayHomeLabel = {}; // date -> lowercased normalized label, or absent
+  for (const [date, dayLegs] of Object.entries(legsByDate)) {
+    const first = dayLegs[0], last = dayLegs[dayLegs.length - 1];
+    if (!first || !last) continue;
+    const firstLabel = normalizePlaceLabel(first.fromRaw).toLowerCase();
+    const lastLabel = normalizePlaceLabel(last.toRaw).toLowerCase();
+    if (firstLabel && firstLabel === lastLabel && looksLikeBareCityLabel(first.fromRaw)) {
+      dayHomeLabel[date] = firstLabel;
+    }
+  }
+
+  function resolveEnd(rawLabel, isBookendSlot, date) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
-    if (isCityOnlyLabel(rawLabel)) return { type: 'home' };
+    if (isBookendSlot && dayHomeLabel[date] && normalizePlaceLabel(rawLabel).toLowerCase() === dayHomeLabel[date]) {
+      return { type: 'home' };
+    }
     if (isErrandLabel(rawLabel)) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
     const cleaned = normalizePlaceLabel(rawLabel).toLowerCase();
     const aliasHit = aliasMap[cleaned] || aliasMap[String(rawLabel || '').trim().toLowerCase()];
@@ -482,11 +536,16 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   }
 
   // ── Pass 1: home + exact alias only (unambiguous, no guessing) ─────────
-  const resolved = legs.map((leg) => ({
-    leg,
-    fromPlace: resolveHomeOrAlias(leg.fromRaw),
-    toPlace: resolveHomeOrAlias(leg.toRaw),
-  }));
+  const resolved = legs.map((leg) => {
+    const dayLegs = legsByDate[leg.date] || [];
+    const isFirstOfDay = dayLegs[0] === leg;
+    const isLastOfDay = dayLegs[dayLegs.length - 1] === leg;
+    return {
+      leg,
+      fromPlace: resolveEnd(leg.fromRaw, isFirstOfDay, leg.date),
+      toPlace: resolveEnd(leg.toRaw, isLastOfDay, leg.date),
+    };
+  });
 
   // ── Pass 2: position against the closed-ticket report, BEFORE fuzzy
   // ── name-matching is even attempted ─────────────────────────────────
@@ -538,8 +597,11 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
 
     for (const date of datesNeedingLookup) {
       const dayLegs = legs.filter((l) => l.date === date);
+      const homeLabel = dayHomeLabel[date];
       const stops = dayLegs.map((l) => l.toRaw).filter((label) =>
-        !(techRow && isHomeLabel(label, techRow.home_address)) && !isErrandLabel(label)
+        !(techRow && isHomeLabel(label, techRow.home_address))
+        && !isErrandLabel(label)
+        && !(homeLabel && normalizePlaceLabel(label).toLowerCase() === homeLabel && label === dayLegs[dayLegs.length - 1].toRaw)
       );
       const visitSites = (visitsByDate[date] || []).map((v) => v.sites).filter(Boolean);
       if (!stops.length || !visitSites.length) continue;
@@ -631,29 +693,55 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // If one end of a leg is known and the other is not, keep only sites
   // whose drive (or haversine) is within the same loose ratio band as
   // flagging. One survivor → lock it. Two or more → leave unmatched.
+  //
+  // 2026-09-26: also tests 'home' as a candidate, not just real sites --
+  // an ambiguous mid-day bare-city label (the exact case a day-bookend
+  // match doesn't cover -- e.g. Terril King's "westland" showing up
+  // again mid-route) could genuinely be a trip back home, or a real site
+  // that happens to share the city's name; the text alone can't say
+  // which. If the claimed mileage lines up with the known trip home (and
+  // not with any real site, or vice versa), that's real evidence rather
+  // than a guess -- and if it lines up with BOTH home and a site, this
+  // correctly falls through to "more than one hit" below and stays
+  // unmatched, rather than picking one arbitrarily.
   function milesFromKnown(knownPlace, site) {
     return expectedMilesFor(knownPlace, { type: 'site', site });
   }
   function candidatesForClaimed(knownPlace, claimed) {
     if (!knownPlace || knownPlace.type === 'errand' || !(claimed > 0)) return [];
     const hits = [];
+    if (knownPlace.type === 'site') {
+      const expHome = expectedMilesFor(knownPlace, { type: 'home' });
+      if (expHome && expHome.miles >= 0.5) {
+        const ratio = claimed / expHome.miles;
+        if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push({ type: 'home' });
+      }
+    }
     for (const site of candidateSites) {
       if (knownPlace.type === 'site' && knownPlace.site.id === site.id) continue;
       const exp = milesFromKnown(knownPlace, site);
       if (!exp || exp.miles < 0.5) continue;
       const ratio = claimed / exp.miles;
-      if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push(site);
+      if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push({ type: 'site', site });
     }
     return hits;
   }
   for (const r of resolved) {
     if (!r.fromPlace && r.toPlace && r.toPlace.type !== 'errand') {
       const hits = candidatesForClaimed(r.toPlace, r.leg.claimedMiles);
-      if (hits.length === 1) r.fromPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+      if (hits.length === 1) {
+        r.fromPlace = hits[0].type === 'home'
+          ? { type: 'home', via: 'neighbor-miles' }
+          : { type: 'site', site: hits[0].site, via: 'neighbor-miles' };
+      }
     }
     if (!r.toPlace && r.fromPlace && r.fromPlace.type !== 'errand') {
       const hits = candidatesForClaimed(r.fromPlace, r.leg.claimedMiles);
-      if (hits.length === 1) r.toPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+      if (hits.length === 1) {
+        r.toPlace = hits[0].type === 'home'
+          ? { type: 'home', via: 'neighbor-miles' }
+          : { type: 'site', site: hits[0].site, via: 'neighbor-miles' };
+      }
     }
   }
 
