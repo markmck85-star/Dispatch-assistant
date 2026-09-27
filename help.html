@@ -466,6 +466,15 @@ Please acknowledge receipt.</div>
     <ul>
       <li>Flags sites with 3+ trouble tickets for the same issue category within a rolling window (default 90 days) -- standard practice is to consider replacing hardware on the 3rd repeat, though it's worth confirming with the tech what they actually found on-site before deciding, since the same category can cover very different root causes.</li>
       <li>Adjustable scope (state or all), window, and minimum ticket count.</li>
+      <li>Each row can open the same site-history overlay used on the board (clickable SA / WO numbers and notes). Problem-type filters (journal printer, registration printer, print quality, connectivity, and other frequent categories) can be left on one state or set to all states to see whether a problem is local or multi-state.</li>
+      <li>Print PDF is available, same idea as the dispatch-summary print on the board.</li>
+    </ul>
+    <h3>Issue Trends Tab</h3>
+    <ul>
+      <li>Looks across closed tickets (and closing notes where we have them) to show whether a problem type is getting better or worse over time -- not just which site has had three of the same thing.</li>
+      <li>Use it for questions like “are Florida registration-form tickets cooling off” or “is a journal-printer / ribbon pattern showing up in more than one state.” Leave the state filter on All to surface multi-state spikes.</li>
+      <li>Same problem-type families as Repeat Issues (journal, registration, print quality, connectivity / offline / power, plus other frequent buckets). Print PDF is on this tab as well.</li>
+      <li>This is a trend view, not a work order. Confirm with the field before treating a spike as a parts or driver campaign.</li>
     </ul>
     <h3>Unmatched Sites Tab</h3>
     <ul>
@@ -526,7 +535,8 @@ Please acknowledge receipt.</div>
           <li>Quick Add -- one-item, price-shown-first matrix updates, prompted automatically after saving a tech/location</li>
           <li>Fill Missing Pairs Only -- tops up incomplete site-to-site coverage without a full rebuild</li>
           <li>Closed-ticket sync (manual or automatic)</li>
-          <li>Repeat-issue and unmatched-site detection tools</li>
+          <li>Repeat Issues and Issue Trends (site repeats vs. category over time; print PDF on both)</li>
+          <li>Unmatched-site detection tools</li>
           <li>Backup and restore per state</li>
           <li>Users tab -- add/deactivate logins, reset PINs, set territories</li>
           <li>Mark a technician as a dispatcher from the employee form</li>
