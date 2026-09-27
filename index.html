@@ -8366,26 +8366,41 @@ ${content}</body></html>`;
         }
 
         window._restockScheduleByCode = window._restockScheduleByCode || {};
+        function restockScheduleStatesFor(state) {
+            if (state === 'GA') return ['GA', 'NC', 'SC'];
+            return [state];
+        }
         async function ensureRestockScheduleCache() {
             const state = (typeof CURRENT_STATE !== 'undefined' && CURRENT_STATE) || 'GA';
-            if (window._restockScheduleByCode._state === state && window._restockScheduleByCode._loaded) return;
+            const key = restockScheduleStatesFor(state).join('+');
+            if (window._restockScheduleByCode._state === key && window._restockScheduleByCode._loaded) return;
             try {
-                const res = await fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(state), { cache: 'no-store' });
-                const data = await res.json();
                 const map = {};
-                (data.locations || data.sites || []).forEach(function(r) {
-                    if (r && r.site_code) map[r.site_code] = r;
+                const parts = restockScheduleStatesFor(state);
+                const results = await Promise.all(parts.map(function(st) {
+                    return fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(st), { cache: 'no-store' })
+                        .then(function(res) { return res.json(); })
+                        .catch(function() { return {}; });
+                }));
+                results.forEach(function(data) {
+                    (data.locations || data.sites || []).forEach(function(r) {
+                        if (r && r.site_code) map[r.site_code] = r;
+                    });
                 });
                 window._restockScheduleByCode = map;
-                window._restockScheduleByCode._state = state;
+                window._restockScheduleByCode._state = key;
                 window._restockScheduleByCode._loaded = true;
             } catch (e) {
-                window._restockScheduleByCode = { _state: state, _loaded: false };
+                window._restockScheduleByCode = { _state: key, _loaded: false };
             }
         }
         function formatRestockPopup(code) {
-            const r = (window._restockScheduleByCode || {})[code];
-            if (!r) return '<div style="color:#888;font-size:11px;margin-top:4px;">Restock timing not loaded</div>';
+            const bag = window._restockScheduleByCode || {};
+            const r = bag[code];
+            if (!r) {
+                if (!bag._loaded) return '<div style="color:#888;font-size:11px;margin-top:4px;">Restock timing loading…</div>';
+                return '<div style="color:#888;font-size:11px;margin-top:4px;">No restock history</div>';
+            }
             const status = r.status || '';
             const last = r.last ? new Date(r.last) : null;
             const next = r.next1 ? new Date(r.next1) : null;
