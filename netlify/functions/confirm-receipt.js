@@ -36,7 +36,8 @@ function html(statusCode, title, message) {
 exports.handler = async (event) => {
   if (event.httpMethod !== 'GET') return html(405, 'Method not allowed', '');
 
-  const token = String((event.queryStringParameters || {}).token || '').trim();
+  const qs = event.queryStringParameters || {};
+  const token = String(qs.t || qs.token || '').trim();
   if (!token) return html(400, 'Missing link', 'This confirmation link looks incomplete.');
 
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
