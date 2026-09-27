@@ -264,7 +264,7 @@
         <!-- BACKUP TAB -->
         <div id="sectionNotifications" class="section">
             <h2>SMS Notification Settings</h2>
-            <p style="color:#666;font-size:13px;margin-bottom:20px;">Control who receives SMS alerts when trouble tickets arrive. Check specific states to filter alerts, or check "All States" to receive alerts for every state.</p>
+            <p style="color:#666;font-size:13px;margin-bottom:20px;">Control who receives SMS alerts when trouble tickets arrive, which states they cover, and their active hours. If the recipient name matches a technician card (or their dispatcher login is linked to one), Watchdog uses the SMS address from that card. Set Verizon/AT&amp;T/T-Mobile there once. Hours and states stay on this tab.</p>
             <div id="notifRecipientList" style="margin-bottom:20px;"></div>
             <div style="background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:20px;">
                 <h3 style="margin:0 0 12px;">Add Recipient</h3>
@@ -981,8 +981,9 @@
       if (!geoData.ok) throw new Error(geoData.error || 'Geocoding failed');
       geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
       if (geoResult.geocoded === 0) {
-        qaSetStatus('⚠️ Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). If you expected a new ' + noun + ', double-check it was saved with a real address first.');
-        return;
+        qaSetStatus('Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). Checking whether drive-time still needs this ' + noun + '…');
+        // Do not return -- first click often geocodes, then a bad password
+        // stops the paid step. Second click must still price missing pairs.
       }
     } catch (e) {
       qaSetStatus('❌ ' + e.message);
