@@ -186,6 +186,7 @@
         .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
         .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
+        .map-site-pin { display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:#5a6a7a;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);opacity:.85; }
         .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
         .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
         .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
@@ -561,6 +562,10 @@
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
                             <input type="checkbox" id="mapShowCompletedToggle" checked onchange="toggleMapShowCompleted(this.checked)">
                             Show completed stops (✓, muted)
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
+                            <input type="checkbox" id="mapShowAllSitesToggle" onchange="toggleMapShowAllSites(this.checked)">
+                            Show all service locations (not just today's stops)
                         </label>
                         <div style="font-size:11px;color:#777;margin:0 0 4px;">&#x1F4C5; dashed pin = pushed to a later date (not part of today's route/mileage)</div>
                         <div id="dispatchMapLegend"></div>
@@ -7778,6 +7783,7 @@ ${content}</body></html>`;
         let _dispatchMap = null;
         let _dispatchMapLayers = {};              // tech name -> L.LayerGroup
         let _dispatchMapHiddenTechs = new Set();  // legend chips toggled off
+        let _dispatchMapAllSitesLayer = null;
         let _dispatchMapBounds = null;            // last fit target, for re-fits
 
         /**
@@ -8145,6 +8151,7 @@ ${content}</body></html>`;
             // dispatcher has hidden every route.
             _dispatchMapBounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
             fitDispatchMapBounds();
+            renderDispatchMapAllSites(map);
             renderDispatchMapLegend(routes);
 
             const meta = document.getElementById('dispatchMapMeta');
@@ -8351,6 +8358,55 @@ ${content}</body></html>`;
         function toggleMapShowCompleted(checked) {
             window._dispatchMapShowCompleted = checked;
             renderDispatchMap();
+        }
+
+        function toggleMapShowAllSites(checked) {
+            window._dispatchMapShowAllSites = !!checked;
+            renderDispatchMap();
+            const box = document.getElementById('mapShowAllSitesToggle');
+            if (box) box.checked = !!checked;
+        }
+
+        function renderDispatchMapAllSites(map) {
+            if (_dispatchMapAllSitesLayer && map) {
+                map.removeLayer(_dispatchMapAllSitesLayer);
+                _dispatchMapAllSitesLayer = null;
+            }
+            if (!window._dispatchMapShowAllSites || !map || typeof L === 'undefined') return;
+            const onBoard = new Set();
+            const assignments = window.currentAssignments || {};
+            Object.keys(assignments).forEach(tech => {
+                (assignments[tech] || []).forEach(item => { if (item && item.code) onBoard.add(item.code); });
+            });
+            (window.removedStops || []).forEach(r => { if (r && r.code) onBoard.add(r.code); });
+            const group = L.layerGroup();
+            let n = 0;
+            Object.keys(LOCATIONS || {}).forEach(code => {
+                const loc = LOCATIONS[code];
+                if (!loc || loc.lat == null || loc.lng == null) return;
+                if (onBoard.has(code)) return;
+                const name = loc.name || code;
+                if (/unassigned|placeholder|tmp[-_]?site/i.test(name + ' ' + code)) return;
+                L.marker([Number(loc.lat), Number(loc.lng)], {
+                    icon: L.divIcon({
+                        className: '',
+                        html: '<div class="map-site-pin"></div>',
+                        iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -8]
+                    }),
+                    title: code + ' — ' + name,
+                    zIndexOffset: -200
+                }).bindPopup(
+                    '<div class="map-pop-code">' + escapeAiHtml(code) + '</div>'
+                    + '<div>' + escapeAiHtml(name) + '</div>'
+                    + (loc.address ? '<div style="color:#666;">' + escapeAiHtml(loc.address) + '</div>' : '')
+                    + '<div style="color:#888;font-size:11px;margin-top:4px;">Not on today\'s board</div>'
+                ).addTo(group);
+                n++;
+            });
+            _dispatchMapAllSitesLayer = group;
+            group.addTo(map);
+            const meta = document.getElementById('dispatchMapMeta');
+            if (meta && n) meta.textContent = (meta.textContent || '') + ' · ' + n + ' other sites';
         }
 
         function restoreDispatchMapState() {
