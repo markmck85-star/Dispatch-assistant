@@ -229,7 +229,7 @@ async function mcLoadReports() {
       const flagRows = (r.flagged_legs || []).map(f =>
         `<div class="flag">${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> — `
         + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
-        + (f.reason === 'negative_or_zero' ? ' — negative/zero mileage' : ` — ${f.ratio}x expected`)
+        + (f.reason === 'negative_or_zero' ? ' — negative/zero mileage' : (f.ratio != null ? ` — ${f.ratio}x expected` : ' — flagged'))
         + `</div>`
       ).join('');
       const unmatchedRows = (r.unmatched_legs || []).map(u =>
