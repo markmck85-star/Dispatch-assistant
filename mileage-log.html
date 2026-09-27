@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mileage Log</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background:#111; color:#eee; margin:0; padding:12px; }
+  h1 { font-size:18px; margin:0 0 8px; }
+  .sub { color:#aaa; font-size:13px; margin-bottom:14px; }
+  label { display:block; font-size:12px; color:#aaa; margin:8px 0 4px; }
+  input, select, button { font-size:16px; padding:8px; border-radius:6px; border:1px solid #444; background:#1a1a1a; color:#eee; }
+  button { background:#2b6cb0; border:none; color:#fff; cursor:pointer; }
+  button.secondary { background:#444; }
+  button.warn { background:#744; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
+  .card { background:#1c1c1c; border:1px solid #333; border-radius:8px; padding:10px; margin:10px 0; }
+  .flag { color:#f6c344; font-size:12px; }
+  .flag.neg { color:#ff8a80; }
+  .day-total { text-align:right; color:#8ab4f8; font-weight:600; }
+  .status { font-size:13px; color:#ccc; min-height:18px; }
+  .suggest { background:#222; border:1px solid #444; max-height:180px; overflow:auto; }
+  .suggest div { padding:8px; border-bottom:1px solid #333; cursor:pointer; }
+  .suggest div:hover { background:#2a2a2a; }
+  .muted { color:#888; font-size:12px; }
+</style>
+</head>
+<body>
+  <h1>Mileage log</h1>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved.</div>
+  <div id="who" class="muted"></div>
+  <div class="row">
+    <label>Period start (Sunday)
+      <input type="date" id="periodStart" onchange="loadContext()">
+    </label>
+    <label>Period end
+      <input type="date" id="periodEnd">
+    </label>
+    <button type="button" onclick="shiftPeriod(-14)">Previous</button>
+    <button type="button" class="secondary" onclick="shiftPeriod(14)">Next</button>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="card">
+    <div class="row">
+      <label>Date <input type="date" id="legDate"></label>
+      <label>Odometer start <input type="number" id="odoStart" inputmode="numeric"></label>
+      <label>Odometer end <input type="number" id="odoEnd" inputmode="numeric"></label>
+    </div>
+    <label>From</label>
+    <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off">
+    <div id="fromSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="fromPicked"></div>
+    <label>To</label>
+    <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off">
+    <div id="toSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="toPicked"></div>
+    <div class="row" style="margin-top:10px;">
+      <button type="button" onclick="addLeg()">Add leg</button>
+      <button type="button" class="secondary" onclick="endDay()">End day at home</button>
+    </div>
+  </div>
+
+  <div id="legs"></div>
+  <div class="row">
+    <button type="button" onclick="saveLog('draft')">Save draft</button>
+    <button type="button" onclick="printLog()">Print / PDF</button>
+  </div>
+  <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
+
+<script>
+let ctx = null;
+let picked = { from: null, to: null };
+let legs = [];
+
+function currentUser() {
+  try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
+}
+
+function sundayOf(d) {
+  const x = new Date(d);
+  x.setDate(x.getDate() - x.getDay());
+  return x.toISOString().slice(0,10);
+}
+
+function addDays(iso, n) {
+  const x = new Date(iso + 'T12:00:00');
+  x.setDate(x.getDate() + n);
+  return x.toISOString().slice(0,10);
+}
+
+function initPeriod() {
+  const s = sundayOf(new Date());
+  document.getElementById('periodStart').value = s;
+  document.getElementById('periodEnd').value = addDays(s, 13);
+  document.getElementById('legDate').value = new Date().toISOString().slice(0,10);
+}
+
+function shiftPeriod(days) {
+  const s = document.getElementById('periodStart').value;
+  const ns = addDays(s, days);
+  document.getElementById('periodStart').value = ns;
+  document.getElementById('periodEnd').value = addDays(ns, 13);
+  loadContext();
+}
+
+function homeStop() {
+  if (!ctx) return null;
+  return {
+    kind: 'home',
+    id: 'home',
+    picker: ctx.technician.home_label_picker,
+    print: ctx.technician.home_label_print
+  };
+}
+
+function allStops() {
+  if (!ctx) return [];
+  const out = [homeStop()];
+  const push = (s) => {
+    const aliases = (s.aliases || []).join(' ');
+    out.push({
+      kind: 'site',
+      id: s.id,
+      site_code: s.site_code,
+      picker: (s.site_code ? s.site_code + ' — ' : '') + s.name,
+      print: s.name,
+      search: (s.site_code + ' ' + s.name + ' ' + aliases + ' ' + (s.sst_name || '')).toLowerCase(),
+      usual: s.usual
+    });
+  };
+  (ctx.sites_usual || []).forEach(push);
+  (ctx.sites_other || []).forEach(push);
+  out.push({ kind: 'other', id: 'other', picker: 'Other / UPS / not in list', print: '', search: 'other ups store tag' });
+  return out;
+}
+
+function searchStops(side) {
+  const q = document.getElementById(side + 'Q').value.toLowerCase().trim();
+  const box = document.getElementById(side + 'Suggest');
+  if (!q) { box.style.display = 'none'; return; }
+  const hits = allStops().filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1).slice(0, 20);
+  // Prefer usual + home first
+  hits.sort((a,b) => (b.kind === 'home') - (a.kind === 'home') || (b.usual?1:0) - (a.usual?1:0));
+  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + s.picker + '</div>').join('') || '<div>No match — pick Other</div>';
+  box._hits = hits;
+  box.style.display = 'block';
+}
+
+function chooseStop(side, i) {
+  const box = document.getElementById(side + 'Suggest');
+  const s = box._hits[i];
+  if (!s) return;
+  if (s.kind === 'other') {
+    const typed = document.getElementById(side + 'Q').value.trim();
+    picked[side] = { kind: 'other', id: null, picker: typed || 'Other', print: typed || 'Other' };
+  } else {
+    picked[side] = s;
+  }
+  document.getElementById(side + 'Q').value = picked[side].picker;
+  document.getElementById(side + 'Picked').textContent = 'Using: ' + picked[side].picker;
+  box.style.display = 'none';
+}
+
+async function loadContext() {
+  const user = currentUser();
+  const status = document.getElementById('status');
+  const start = document.getElementById('periodStart').value;
+  const end = document.getElementById('periodEnd').value;
+  let url = '/.netlify/functions/get-mileage-log?period_start=' + start + '&period_end=' + end;
+  if (user && user.technician_id) url += '&technician_id=' + encodeURIComponent(user.technician_id);
+  else if (user && (user.displayName || user.name)) url += '&name=' + encodeURIComponent(user.displayName || user.name);
+  else {
+    status.textContent = 'Log in on the dispatch app first, then open this page.';
+    return;
+  }
+  status.textContent = 'Loading…';
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Load failed');
+    ctx = data;
+    legs = (data.log && data.log.legs) || [];
+    document.getElementById('who').textContent = ctx.technician.name + ' · home prints as “' + ctx.technician.home_label_print + '”';
+    document.getElementById('fromQ').value = ctx.technician.home_label_picker;
+    picked.from = homeStop();
+    document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
+    if (legs.length) {
+      const last = legs[legs.length - 1];
+      if (last.odo_end) document.getElementById('odoStart').value = last.odo_end;
+    }
+    renderLegs();
+    status.textContent = legs.length + ' legs in this period (draft).';
+  } catch (e) {
+    status.textContent = e.message;
+  }
+}
+
+function addLeg() {
+  if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
+  const date = document.getElementById('legDate').value;
+  const odoStart = document.getElementById('odoStart').value;
+  const odoEnd = document.getElementById('odoEnd').value;
+  const miles = (odoEnd !== '' && odoStart !== '') ? Number(odoEnd) - Number(odoStart) : null;
+  legs.push({
+    date,
+    from_kind: picked.from.kind,
+    from_site_id: picked.from.kind === 'site' ? picked.from.id : null,
+    from_print: picked.from.print,
+    from_picker: picked.from.picker,
+    to_kind: picked.to.kind,
+    to_site_id: picked.to.kind === 'site' ? picked.to.id : null,
+    to_print: picked.to.print,
+    to_picker: picked.to.picker,
+    odo_start: odoStart === '' ? null : Number(odoStart),
+    odo_end: odoEnd === '' ? null : Number(odoEnd),
+    miles
+  });
+  picked.from = picked.to;
+  document.getElementById('fromQ').value = picked.from.picker;
+  document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
+  picked.to = null;
+  document.getElementById('toQ').value = '';
+  document.getElementById('toPicked').textContent = '';
+  document.getElementById('odoStart').value = odoEnd;
+  document.getElementById('odoEnd').value = '';
+  renderLegs();
+}
+
+function endDay() {
+  picked.to = homeStop();
+  document.getElementById('toQ').value = picked.to.picker;
+  document.getElementById('toPicked').textContent = 'Using: ' + picked.to.picker;
+}
+
+function removeLeg(i) {
+  legs.splice(i, 1);
+  renderLegs();
+}
+
+function renderLegs() {
+  const byDay = {};
+  legs.forEach((l, i) => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push({ l, i });
+  });
+  const days = Object.keys(byDay).sort();
+  let html = '';
+  days.forEach(d => {
+    let sub = 0;
+    html += '<div class="card"><strong>' + d + '</strong>';
+    byDay[d].forEach(({ l, i }) => {
+      if (typeof l.miles === 'number') sub += l.miles;
+      const flag = l.flag === 'negative' ? '<div class="flag neg">Odometer went down — check the reading.</div>' :
+        (l.flag === 'over' ? '<div class="flag">About ' + l.expected_mi + ' mi on the matrix; you entered ' + l.miles + '.</div>' : '');
+      html += '<div style="padding:6px 0;border-bottom:1px solid #333;">' +
+        (l.from_print || l.from_picker) + ' → ' + (l.to_print || l.to_picker) +
+        ' · ' + (l.odo_start || '?') + '–' + (l.odo_end || '?') +
+        ' = <strong>' + (l.miles == null ? '?' : l.miles) + '</strong>' +
+        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">x</button>' +
+        flag + '</div>';
+    });
+    html += '<div class="day-total">' + sub + '</div></div>';
+  });
+  const total = legs.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
+  html += '<div class="card"><strong>TOTAL MILEAGE</strong> ' + total + '</div>';
+  document.getElementById('legs').innerHTML = html;
+}
+
+async function saveLog(status) {
+  if (!ctx) return;
+  const res = await fetch('/.netlify/functions/save-mileage-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      technician_id: ctx.technician.id,
+      period_start: document.getElementById('periodStart').value,
+      period_end: document.getElementById('periodEnd').value,
+      status,
+      legs
+    })
+  });
+  const data = await res.json();
+  if (!data.ok) { document.getElementById('status').textContent = data.error; return; }
+  legs = data.log.legs || legs;
+  renderLegs();
+  document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
+}
+
+function printLog() {
+  if (!ctx) return;
+  const name = ctx.technician.name;
+  const byDay = {};
+  legs.forEach(l => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push(l);
+  });
+  let rows = '';
+  let total = 0;
+  Object.keys(byDay).sort().forEach(d => {
+    let sub = 0;
+    byDay[d].forEach(l => {
+      const mi = typeof l.miles === 'number' ? l.miles : '';
+      if (typeof mi === 'number') { sub += mi; total += mi; }
+      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || '');
+      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || '');
+      rows += '<tr><td>' + d + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
+    });
+    rows += '<tr><td colspan="6"></td><td><strong>' + sub + '</strong></td></tr>';
+  });
+  rows += '<tr><td colspan="6"><strong>TOTAL MILEAGE (SUM OF SUBTOTALS)</strong></td><td><strong>' + total + '</strong></td></tr>';
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Mileage Log</title>' +
+    '<style>body{font-family:Arial,sans-serif;padding:16px;font-size:13px;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #999;padding:4px;} h2,h3{text-align:center;margin:4px;} @media print {.btn{display:none;}}</style></head><body>' +
+    '<button class="btn" onclick="window.print()">Save as PDF / Print</button>' +
+    '<h2>MCR TECHNICAL SERVICE, LLC</h2>' +
+    '<h3>(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)</h3>' +
+    '<p>NAME: ' + name + '</p>' +
+    '<table><tr><th>Date</th><th>Start</th><th>Odometer</th><th>To</th><th>Odometer</th><th>Mileage</th><th>Daily sub.</th></tr>' +
+    rows + '</table></body></html>';
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+}
+
+initPeriod();
+loadContext();
+</script>
+</body>
+</html>
