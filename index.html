@@ -3524,7 +3524,7 @@ function distanceMatrixStatus(state) {
             const pastedByCode = {};
             relevant.forEach(item => { pastedByCode[item.code] = item; });
             Object.entries(existingByCode).forEach(([code, existing]) => {
-                if (existing.status === 'planned' && existing.ticket) {
+                if ((existing.status === 'planned' || existing.status === 'notified') && existing.ticket) {
                     // 2026-08-06: `urgent` was being set to true unconditionally
                     // for ANY ticket-linked stop, including routine "Maintenance
                     // / Consumable Restock" tickets -- causing the ⚡ SAME DAY
@@ -3597,6 +3597,7 @@ function distanceMatrixStatus(state) {
                         pastedItem.ticketDueToday = ticketDueToday;
                         pastedItem.ticketLineItems = existing.ticket.lineItems || [];
                         pastedItem.ticketNeedsReview = existing.ticket.needsReview || false;
+                        pastedItem.receivedAt = existing.receivedAt || null;
                         // 2026-09-10 fix: isSameDay (used ONLY to split the
                         // board into the "Today"/"Tomorrow" section headers
                         // further down) was never set for ticket-linked
@@ -3635,11 +3636,12 @@ function distanceMatrixStatus(state) {
                         ticketDueToday: ticketDueToday,
                         ticketLineItems: existing.ticket.lineItems || [],
                         ticketNeedsReview: existing.ticket.needsReview || false,
+                        receivedAt: existing.receivedAt || null,
                         // See the 2026-09-10 comment on the pastedItem branch
                         // above -- same fix, fresh-item case.
                         isSameDay: ticketDueToday,
                     });
-                } else if (existing.status === 'planned' && !existing.ticket) {
+                } else if ((existing.status === 'planned' || existing.status === 'notified') && !existing.ticket) {
                     // 2026-08-23: the ticket-linked branch above already solved
                     // "board is blank on an empty Location Codes box" for
                     // trouble/maintenance tickets, but the vast majority of daily
@@ -3942,7 +3944,8 @@ function distanceMatrixStatus(state) {
                 // sticks forever even after the primary tech comes back available,
                 // which was the actual bug behind "re-enabled Robert but reprocessing
                 // still leaves it on his backup," found 2026-07-21.
-                const isManualOverride = existing && existing.status === 'planned' && existing.assignedBy === 'manual';
+                const isManualOverride = existing && (existing.status === 'planned' || existing.status === 'notified') && existing.assignedBy === 'manual';
+                if (existing && existing.receivedAt) item.receivedAt = existing.receivedAt;
 
                 // Check this item's OWN effective date, not the globally-selected
                 // Dispatch Date -- see getItemEffectiveDateStr() above.
@@ -4460,6 +4463,9 @@ function distanceMatrixStatus(state) {
                         ? `<span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;background:#c98a1e;color:#1a1a1a;font-weight:bold;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="Another ticket for this site today — tap to open history with the other WO">⚠ Another ticket today — tap for WO / notes</span>`
                         : '';
                     const restockByStr = item.restockBy ? `<span style="font-size:11px;color:#888;margin-left:6px;">by ${item.restockBy}</span>` : '';
+                    const receivedStr = item.receivedAt
+                        ? `<div style="font-size:11px;color:#2e7d32;margin-top:3px;font-weight:600;">✓ ${((tech||'').split(' ')[0]||'Tech')} confirmed receipt ${new Date(item.receivedAt).toLocaleString('en-US',{weekday:'short',hour:'numeric',minute:'2-digit'})}</div>`
+                        : '';
                     const ticketInfoStr = (item.fromTicket || item.ticketWo || item.ticketSlaEnd || item.ticketNeedsReview)
                         ? `<div style="font-size:12px;color:#c0392b;margin-top:4px;line-height:1.35;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? `<br><strong style="font-size:13px;">SLA / Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : (item.ticketNeedsReview ? '<br><strong>SLA on the other ticket — tap the amber badge</strong>' : '')}</div>`
                         : '';
@@ -4495,6 +4501,7 @@ function distanceMatrixStatus(state) {
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">${isFuturePushed ? legLabel : '📏 ' + legLabel + (index === 0 ? ' from home' : ' from prev. stop')}</div>
                                     ${ticketInfoStr}
+                                    ${receivedStr}
                                     ${lineItemsStr}
                                 </div>
                                 <div style="margin-left:auto;display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
@@ -4992,8 +4999,8 @@ function distanceMatrixStatus(state) {
                 const byCode = {};
                 const rank = (x) => {
                     if (!x) return -1;
-                    if (x.status === 'planned' && x.ticket) return 3;
-                    if (x.status === 'planned') return 2;
+                    if ((x.status === 'planned' || x.status === 'notified') && x.ticket) return 3;
+                    if (x.status === 'planned' || x.status === 'notified') return 2;
                     if (x.ticket && x.status !== 'completed' && x.status !== 'removed') return 1;
                     return 0;
                 };
@@ -6293,7 +6300,7 @@ function distanceMatrixStatus(state) {
             navigator.clipboard.writeText(txt).then(() => alert("Copied!")).catch(() => alert("Failed"));
         }
 
-        function notifyStop(tech, index) {
+        async function notifyStop(tech, index) {
             try {
                 const assignments = window.currentAssignments || {};
                 const item = (assignments[tech] || [])[index];
@@ -6311,12 +6318,38 @@ function distanceMatrixStatus(state) {
                     }
                 } catch (e) {}
                 const site = (loc.name || item.code || '').replace(/\s+/g, ' ').trim();
-                let txt = 'Hey ' + first + ', this one is yours:\n\n';
-                txt += site;
+                const hasRestock = !!(item.restockBy || (window.parsedFormCounts && window.parsedFormCounts[item.code]));
+                let txt = 'Hey ' + first + ', ';
+                if (item.fromTicket && item.urgent && hasRestock) {
+                    txt += 'a trouble ticket was added to the ' + site + ' restock:\n\n';
+                    txt += site;
+                } else if (item.fromTicket && item.urgent) {
+                    txt += 'trouble ticket:\n\n' + site;
+                } else {
+                    txt += 'assigned stop:\n\n' + site;
+                }
                 if (wo) txt += ' — ' + wo;
                 txt += '\n' + issue;
                 if (sla) txt += '\nSLA ends: ' + sla;
-                txt += '\n\nPlease acknowledge.';
+
+                const dateInput = document.getElementById('dispatchDate');
+                const dispatchDate = dateInput && dateInput.value;
+                let ackUrl = '';
+                if (dispatchDate && item.code) {
+                    try {
+                        const tr = await fetch('/.netlify/functions/generate-receipt-token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ dispatchDate, siteCode: item.code })
+                        });
+                        const td = await tr.json();
+                        if (td && td.ok && td.token) {
+                            ackUrl = (location.origin || 'https://mcrdispatch.net') + '/.netlify/functions/confirm-receipt?token=' + td.token;
+                        }
+                    } catch (e) {}
+                }
+                if (ackUrl) txt += '\n\nTap to confirm you got this: ' + ackUrl;
+
                 sendPlainMessage(tech, txt, wo ? ('MCR Dispatch — ' + wo) : 'MCR Dispatch — assigned stop');
             } catch (e) {
                 alert('Text this stop failed: ' + (e && e.message ? e.message : e));
