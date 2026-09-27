@@ -17,7 +17,8 @@
   .card { background:#fff; border:1px solid #d5dde3; border-radius:8px; padding:10px; margin:10px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
   .flag { color:#8a6d12; font-size:12px; }
   .flag.neg { color:#8a2f2f; }
-  .day-total { text-align:right; color:#1d4e89; font-weight:600; }
+  .day-total { text-align:left; color:#1d4e89; font-weight:600; margin-top:8px; }
+  .leg-mi { font-weight:700; color:#1d4e89; margin-top:4px; }
   .status { font-size:13px; color:#5b6570; min-height:18px; }
   .suggest { background:#fff; border:1px solid #c5ced6; max-height:180px; overflow:auto; }
   .suggest div { padding:8px; border-bottom:1px solid #e6ebef; cursor:pointer; }
@@ -34,7 +35,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.5 light</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.6</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -286,12 +287,20 @@ async function loadContext() {
   }
 }
 
+function flagMiles(miles) {
+  if (miles == null || !Number.isFinite(miles)) return null;
+  if (miles < 0) return 'negative';
+  if (miles > 200) return 'over';
+  return null;
+}
+
 function addLeg() {
   if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
   const date = document.getElementById('legDate').value;
   const odoStart = document.getElementById('odoStart').value;
   const odoEnd = document.getElementById('odoEnd').value;
   const miles = (odoEnd !== '' && odoStart !== '') ? Number(odoEnd) - Number(odoStart) : null;
+  const flag = flagMiles(miles);
   legs.push({
     date,
     from_kind: picked.from.kind,
@@ -304,7 +313,8 @@ function addLeg() {
     to_picker: picked.to.picker,
     odo_start: odoStart === '' ? null : Number(odoStart),
     odo_end: odoEnd === '' ? null : Number(odoEnd),
-    miles
+    miles,
+    flag
   });
   picked.from = picked.to;
   document.getElementById('fromQ').value = picked.from.picker;
@@ -341,16 +351,17 @@ function renderLegs() {
     html += '<div class="card"><span class="dayhead">' + weekdayLabel(d) + '</span>';
     byDay[d].forEach(({ l, i }) => {
       if (typeof l.miles === 'number') sub += l.miles;
-      const flag = l.flag === 'negative' ? '<div class="flag neg">Odometer went down — check the reading.</div>' :
-        (l.flag === 'over' ? '<div class="flag">About ' + l.expected_mi + ' mi on the matrix; you entered ' + l.miles + '.</div>' : '');
-      html += '<div style="padding:8px 0;border-bottom:1px solid #333;">' +
+      let flag = '';
+      if (l.flag === 'negative') flag = '<div class="flag neg">Odometer went down — check the reading.</div>';
+      else if (l.flag === 'over') flag = '<div class="flag">That leg is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
+      html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
         '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + '</div></div>' +
         '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong></div></div>' +
-        '<div class="day-total">' + (l.miles == null ? '?' : l.miles) + ' mi' +
+        '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' +
         ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">x</button></div>' +
         flag + '</div>';
     });
-    html += '<div class="day-total">' + sub + '</div></div>';
+    html += '<div class="day-total">Day total ' + sub + '</div></div>';
   });
   const total = legs.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
   html += '<div class="card"><strong>TOTAL MILEAGE</strong> ' + total + '</div>';
