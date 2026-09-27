@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.15</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.16</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -479,13 +479,31 @@ function exportExcel() {
     left: { style: 'thin', color: { rgb: '000000' } },
     right: { style: 'thin', color: { rgb: '000000' } }
   };
+  const dayEnd = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'medium', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
+  const box = {
+    top: { style: 'medium', color: { rgb: '000000' } },
+    bottom: { style: 'medium', color: { rgb: '000000' } },
+    left: { style: 'medium', color: { rgb: '000000' } },
+    right: { style: 'medium', color: { rgb: '000000' } }
+  };
+  const headBorder = {
+    top: { style: 'medium', color: { rgb: '000000' } },
+    bottom: { style: 'medium', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
   const font = { name: 'Arial', sz: 8 };
   const fontB = { name: 'Arial', sz: 8, bold: true };
   const headerFill = { fgColor: { rgb: 'D9E2F3' } };
   const ws = {};
   function put(r, c, v, extra) {
     extra = extra || {};
-    const cell = { s: Object.assign({ font: extra.font || font, alignment: extra.alignment || { vertical: 'center' } }, extra.border === false ? {} : { border: thin }) };
+    const cell = { s: Object.assign({ font: extra.font || font, alignment: extra.alignment || { vertical: 'center' } }, extra.border === false ? {} : { border: extra.border || thin }) };
     if (extra.fill) cell.s.fill = { patternType: 'solid', fgColor: extra.fill.fgColor };
     if (typeof v === 'number' && Number.isFinite(v)) { cell.t = 'n'; cell.v = v; }
     else { cell.t = 's'; cell.v = v == null ? '' : String(v); }
@@ -503,7 +521,7 @@ function exportExcel() {
   put(3, 1, ctx.technician.name, { font: fontB, border: false });
   put(3, 3, 'PAY PERIOD: ' + shortDate(start) + ' - ' + shortDate(end), { font: fontB, border: false });
   const headers = ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.'];
-  headers.forEach((h, i) => put(5, i, h, { font: fontB, fill: headerFill, alignment: { horizontal: 'center', vertical: 'center' } }));
+  headers.forEach((h, i) => put(5, i, h, { font: fontB, fill: headerFill, alignment: { horizontal: 'center', vertical: 'center' }, border: headBorder }));
   const byDay = {};
   legs.forEach(l => {
     if (!byDay[l.date]) byDay[l.date] = [];
@@ -531,27 +549,28 @@ function exportExcel() {
       let dateCell = '';
       if (i === 0) dateCell = dow;
       else if (i === 1) dateCell = d;
+      const edge = i === block - 1 ? dayEnd : thin;
       if (l) {
         const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
         const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
-        put(row, 0, dateCell);
-        put(row, 1, from);
-        put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' } });
-        put(row, 3, to);
-        put(row, 4, l.odo_end != null ? l.odo_end : '', { alignment: { horizontal: 'center', vertical: 'center' } });
-        put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' } });
-        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' } });
+        put(row, 0, dateCell, { border: edge });
+        put(row, 1, from, { border: edge });
+        put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+        put(row, 3, to, { border: edge });
+        put(row, 4, l.odo_end != null ? l.odo_end : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+        put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
       } else {
-        put(row, 0, dateCell);
-        for (let c = 1; c < 6; c++) put(row, c, '');
-        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' } });
+        put(row, 0, dateCell, { border: edge });
+        for (let c = 1; c < 6; c++) put(row, c, '', { border: edge });
+        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
       }
       row++;
     }
   });
-  put(row, 0, 'TOTAL MILEAGE (SUM OF SUBTOTALS)', { font: fontB });
-  for (let c = 1; c < 6; c++) put(row, c, '', { font: fontB });
-  put(row, 6, total, { font: fontB, alignment: { horizontal: 'center', vertical: 'center' } });
+  put(row, 0, 'TOTAL MILEAGE (SUM OF SUBTOTALS)', { font: fontB, border: box });
+  for (let c = 1; c < 6; c++) put(row, c, '', { font: fontB, border: box });
+  put(row, 6, total, { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: box });
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: row, c: 6 } });
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
