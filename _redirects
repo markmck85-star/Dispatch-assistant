@@ -7,8 +7,12 @@
 /restock-tracker         /restock-tracker.html    200
 /shipments.html          /shipments.html          200
 /mileage.html            /mileage.html            200
+/mileage-log.html        /mileage-log.html        200
+/mileage-log             /mileage-log.html        200
 /help.html               /help.html               200
 /bluefolder.html         /bluefolder.html         200
+
+/ack             /.netlify/functions/confirm-receipt  200
 
 /:state          /state.html?state=:state    200
 /watchdog/:state /watchdog-log.html?state=:state    200
