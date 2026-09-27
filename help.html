@@ -80,7 +80,7 @@
 <body>
 <header>
   <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.87 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>v9.88 &nbsp;·&nbsp; 27 Sep 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
@@ -94,6 +94,7 @@
   <a href="#state-console">State Console</a>
   <a href="#ai-assistant">AI Assistant</a>
   <a href="#session-actions">Session Actions</a>
+  <a href="#text-stop">Text this stop</a>
   <a href="#urgent">Urgent / Trouble Ticket</a>
   <a href="#armored-meet">Armored Truck Meets</a>
   <a href="#unknown">Unknown Codes</a>
@@ -113,6 +114,9 @@
       <tr><th>I want to...</th><th>Do this</th></tr>
       <tr><td>Run today's normal dispatch</td><td><strong>Generate Dispatches</strong> → review/reassign → <strong>✅ Messages</strong> or <strong>📤 Send</strong>. See <a href="#daily">Daily Dispatch</a>.</td></tr>
       <tr><td>Handle a trouble ticket right now</td><td>Set Paste Mode to <strong>⚡ URGENT</strong>, paste the ticket email, generate. SLA deadline is calculated automatically. See <a href="#urgent">Urgent Dispatch</a>.</td></tr>
+      <tr><td>Text one trouble stop to the assigned tech</td><td>On that stop card tap <strong>📱 Text this stop</strong>. Edit the draft, Confirm Send. See <a href="#text-stop">Text this stop</a>.</td></tr>
+      <tr><td>See a second ticket at a site already on the board</td><td>Amber chip <strong>⚠ Another ticket today — tap for WO / notes</strong>. Red SLA line sits under the restock. Do not assign a second tech.</td></tr>
+      <tr><td>Collect a technician's cell carrier</td><td>Admin → Technicians → Carrier dropdown (builds number@vtext.com). Watchdog and Text this stop both use that field.</td></tr>
       <tr><td>See where everyone is today, at a glance</td><td><strong>🗺️ Map View</strong> on the dispatch board (today's board only), or the <strong>📍 State Console</strong> for any saved date, any state. See <a href="#state-console">State Console</a>.</td></tr>
       <tr><td>Check if today's routes are efficient</td><td><strong>🧭 Analyze Routes</strong> (dispatch board or State Console) -- suggests specific stop swaps with the mileage each one saves. See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
       <tr><td>Move a stop with a typed/spoken command</td><td>Type or dictate into the AI command bar, e.g. "move stop 2 from Robert to Sean." See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
@@ -129,6 +133,23 @@
   <!-- WHAT'S NEW -->
   <section id="whats-new">
     <h2>🆕 What's New</h2>
+
+    <p style="color:var(--muted);font-size:13px;">Updated 27 September 2026. Print this page (button top right) if you want a paper copy.</p>
+
+    <h3>Text this stop (trouble tickets)</h3>
+    <p>Each assigned trouble WO on the board has <strong>📱 Text this stop</strong> under Done / Cancel. Restocks stay on the big Messages list. The draft names the site, WO, issue, and SLA. If the site was already a restock, the wording is that a trouble ticket was added to that restock — same truck, now timed. There is no “please acknowledge”; replies to the carrier gateway do not come back into the app.</p>
+    <p>The text includes a short link <code>mcrdispatch.net/ack?t=…</code>. When the technician taps it they see a one-line confirmation page. The stop card gets a green <strong>✓ confirmed receipt</strong> line. The first tap can ping the on-call dispatcher; a second tap does not.</p>
+    <p>If that technician has no carrier on file, a centered sheet asks for <code>number@vtext.com</code> / AT&amp;T / T-Mobile, with an option to save on their technician record or send email only. Fill Carrier once on Admin → Technicians and both Text this stop and Watchdog use it.</p>
+
+    <h3>Same site, restock plus trouble</h3>
+    <p>The board still shows <em>one stop per site</em>. If a morning restock was completed and an afternoon trouble WO lands, the board now prefers the open ticket over the completed restock so the WO does not vanish. The restock details stay on the card; the red <strong>SLA / Due</strong> line is added underneath. A second unrelated WO the same day is the amber <strong>⚠ Another ticket today — tap for WO / notes</strong> chip (opens site history). Do not assign a second technician — they are already going.</p>
+
+    <h3>Watchdog uses the technician card</h3>
+    <p>Notifications still control who is on, which states, and active hours. The actual SMS address now comes from the matching technician card (or the dispatcher login’s linked technician) when that gateway is valid. Office-only logins with no technician row still use the number typed on Notifications.</p>
+
+    <h3>Mileage log (technicians)</h3>
+    <p>Technicians with the <code>tech</code> role land on the mileage page only — not the dispatch board. Dispatchers can open it from the sidebar. Drafts survive a refresh. Export matches Mike’s mileage tab. Optional until he blesses it; the spreadsheet remains the backup.</p>
+
 
     <h3>Board login and home state</h3>
     <p>Opening the dispatch board now asks for the same username and PIN as Admin. The region list is limited to that person's territories (admins see every state). The board opens on the last state they used, or their first territory if they have no last-used state. <strong>Switch user</strong> is at the top for a shared tablet. The splash stays up until the board has actually loaded, so the empty map/cards should not flash on a fresh start.</p>
@@ -301,6 +322,16 @@
   </section>
 
   <!-- URGENT -->
+
+  <section id="text-stop">
+    <h2>📱 Text this stop</h2>
+    <div class="step"><strong>1.</strong> Assign the trouble ticket on the board (Reassign if needed).</div>
+    <div class="step"><strong>2.</strong> On that card tap <strong>📱 Text this stop</strong>. Only real trouble WOs show the button.</div>
+    <div class="step"><strong>3.</strong> If the carrier sheet appears, enter their gateway or choose Email only. Check Save so it sticks on their technician record.</div>
+    <div class="step"><strong>4.</strong> Edit the draft if you want. Confirm Send. They get SMS (short ping + ack link) and email with the full text.</div>
+    <div class="note"><strong>Do not</strong> use this to assign Salesforce. Drop the ticket on the Gantt yourself. This only tells the technician.</div>
+  </section>
+
   <section id="urgent">
     <h2>Urgent / Trouble Ticket Dispatch</h2>
     <div class="step"><strong>Step 1.</strong> Select <strong>⚡ URGENT (Same Day)</strong> from the Paste Mode dropdown. On Saturdays this is selected automatically.</div>
