@@ -32,11 +32,11 @@
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
 </style>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.min.js"></script>
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.12</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.13</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -453,43 +453,6 @@ async function saveLog(status) {
   document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
 }
 
-function mileageRows() {
-  const aoa = [
-    ['MCR TECHNICAL SERVICE, LLC'],
-    ['(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)'],
-    [],
-    ['NAME:', ctx.technician.name],
-    [],
-    ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.']
-  ];
-  const byDay = {};
-  legs.forEach(l => {
-    if (!byDay[l.date]) byDay[l.date] = [];
-    byDay[l.date].push(l);
-  });
-  let total = 0;
-  Object.keys(byDay).sort().forEach(d => {
-    let sub = 0;
-    byDay[d].forEach((l, idx) => {
-      const mi = typeof l.miles === 'number' ? l.miles : '';
-      if (typeof mi === 'number') { sub += mi; total += mi; }
-      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
-      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
-      aoa.push([
-        idx === 0 ? weekdayLabel(d) : '',
-        from,
-        l.odo_start != null ? l.odo_start : '',
-        to,
-        l.odo_end != null ? l.odo_end : '',
-        mi,
-        idx === byDay[d].length - 1 ? sub : ''
-      ]);
-    });
-  });
-  aoa.push(['TOTAL MILEAGE (SUM OF SUBTOTALS)', '', '', '', '', '', total]);
-  return aoa;
-}
-
 function downloadBlob(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -502,20 +465,78 @@ function exportExcel() {
   if (!ctx) return;
   const start = document.getElementById('periodStart').value || '';
   const base = 'Mileage-' + (ctx.technician.name || 'tech').replace(/\s+/g, '_') + '-' + start;
-  const aoa = mileageRows();
-  if (window.XLSX) {
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, ws, 'Mileage');
-    XLSX.writeFile(wb, base + '.xlsx');
+  if (!window.XLSX) {
+    document.getElementById('status').textContent = 'Excel library did not load — try Print / PDF.';
     return;
   }
-  const csv = aoa.map(r => r.map(c => {
-    const s = String(c == null ? '' : c);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  }).join(',')).join('\n');
-  downloadBlob(new Blob([csv], { type: 'text/csv' }), base + '.csv');
+  const thin = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
+  const font = { name: 'Arial', sz: 8 };
+  const fontB = { name: 'Arial', sz: 8, bold: true };
+  const headerFill = { fgColor: { rgb: 'D9E2F3' } };
+  const ws = {};
+  function put(r, c, v, extra) {
+    extra = extra || {};
+    const cell = { s: Object.assign({ font: extra.font || font, alignment: extra.alignment || { vertical: 'center' } }, extra.border === false ? {} : { border: thin }) };
+    if (extra.fill) cell.s.fill = { patternType: 'solid', fgColor: extra.fill.fgColor };
+    if (typeof v === 'number' && Number.isFinite(v)) { cell.t = 'n'; cell.v = v; }
+    else { cell.t = 's'; cell.v = v == null ? '' : String(v); }
+    ws[XLSX.utils.encode_cell({ r: r, c: c })] = cell;
+  }
+  put(0, 0, 'MCR TECHNICAL SERVICE, LLC', { font: { name: 'Arial', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
+  put(1, 0, '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)', { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
+  put(3, 0, 'NAME:', { font: fontB, border: false });
+  put(3, 1, ctx.technician.name, { font: fontB, border: false });
+  const headers = ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.'];
+  headers.forEach((h, i) => put(5, i, h, { font: fontB, fill: headerFill, alignment: { horizontal: 'center', vertical: 'center' } }));
+  const byDay = {};
+  legs.forEach(l => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push(l);
+  });
+  let row = 6;
+  let total = 0;
+  const days = Object.keys(byDay).sort();
+  days.forEach(d => {
+    let sub = 0;
+    byDay[d].forEach(l => { if (typeof l.miles === 'number') sub += l.miles; });
+    total += sub;
+    byDay[d].forEach((l, idx) => {
+      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
+      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
+      put(row, 0, idx === 0 ? weekdayLabel(d) : '');
+      put(row, 1, from);
+      put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' } });
+      put(row, 3, to);
+      put(row, 4, l.odo_end != null ? l.odo_end : '', { alignment: { horizontal: 'center', vertical: 'center' } });
+      put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' } });
+      put(row, 6, idx === byDay[d].length - 1 ? sub : '', { font: idx === byDay[d].length - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' } });
+      row++;
+    });
+    // spare blank lined rows like his template block
+    for (let i = 0; i < 2; i++) {
+      for (let c = 0; c < 7; c++) put(row, c, '');
+      row++;
+    }
+  });
+  put(row, 0, 'TOTAL MILEAGE (SUM OF SUBTOTALS)', { font: fontB });
+  for (let c = 1; c < 6; c++) put(row, c, '', { font: fontB });
+  put(row, 6, total, { font: fontB, alignment: { horizontal: 'center', vertical: 'center' } });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: row, c: 6 } });
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } }
+  ];
+  ws['!cols'] = [
+    { wch: 22 }, { wch: 24 }, { wch: 11 }, { wch: 24 }, { wch: 11 }, { wch: 9 }, { wch: 12 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Mileage');
+  XLSX.writeFile(wb, base + '.xlsx');
 }
 
 function printLog() {
