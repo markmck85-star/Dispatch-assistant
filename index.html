@@ -8439,8 +8439,8 @@ ${content}</body></html>`;
             const st = r && r.status;
             if (st === 'overdue') return { color: '#c0392b', size: 22 };
             if (st === 'soon') return { color: '#d4a017', size: 18 };
-            if (st === 'ok') return { color: '#3d7a4a', size: 12 };
-            return { color: '#5a6a7a', size: 12 };
+            if (st === 'ok') return { color: '#3d7a4a', size: 14 };
+            return { color: '#5a6a7a', size: 14 };
         }
         function toggleMapShowAllSites(checked) {
             window._dispatchMapShowAllSites = !!checked;
@@ -8470,7 +8470,6 @@ ${content}</body></html>`;
                 if (onBoard.has(code)) return;
                 const name = loc.name || code;
                 if (/unassigned|placeholder|tmp[-_]?site/i.test(name + ' ' + code)) return;
-                const ps = restockPinStyle(code);
                 const ps = restockPinStyle(code);
                 L.marker([Number(loc.lat), Number(loc.lng)], {
                     icon: L.divIcon({
