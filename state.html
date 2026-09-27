@@ -109,15 +109,19 @@
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; }
   .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
   .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
-  .map-site-pin { display:flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:50%;background:#5a6a7a;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);opacity:.85; }
+  .map-site-pin { display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#5a6a7a;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);opacity:.9; }
   /* Service-window-flagged stop: an at-risk/overdue trouble-ticket SLA.
      Pulsing amber ring rather than changing the pin's own tech color, so
      the tech-color coding stays intact and this reads as an overlay. */
   .map-stop-pin-flagged { box-shadow: 0 0 0 3px #f0a500, 0 1px 4px rgba(0,0,0,0.6); animation: mapFlagPulse 1.4s ease-in-out infinite; }
   @keyframes mapFlagPulse { 0%, 100% { box-shadow: 0 0 0 3px #f0a500, 0 1px 4px rgba(0,0,0,0.6); } 50% { box-shadow: 0 0 0 5px rgba(240,165,0,0.55), 0 1px 4px rgba(0,0,0,0.6); } }
   .map-home-pin { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); font-size: 10px; }
-  .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
-  .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
+  .leaflet-popup-content { font-size: 15px; line-height: 1.45; min-width: 200px; }
+  .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; font-size: 16px; }
+  @media (max-width: 700px) {
+    .leaflet-popup-content { font-size: 16px; min-width: 220px; }
+    .leaflet-popup-content .map-pop-code { font-size: 17px; }
+  }
   @media (min-width: 700px) { #stateMap { height: 520px; } }
 
   /* Desktop: stop looking like a phone column in the middle of a 27" monitor.
@@ -1392,7 +1396,7 @@ function plotStateAllSites(map, LOCATIONS, routes) {
     const name = loc.name || code;
     if (/unassigned|placeholder|tmp[-_]?site/i.test(name + ' ' + code)) return;
     L.marker([Number(loc.lat), Number(loc.lng)], {
-      icon: L.divIcon({ className: '', html: '<div class="map-site-pin" style="background:' + restockPinColor(code) + ';"></div>', iconSize: [12, 12], iconAnchor: [6, 6], popupAnchor: [0, -8] }),
+      icon: L.divIcon({ className: '', html: '<div class="map-site-pin" style="background:' + restockPinColor(code) + ';"></div>', iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -10] }),
       title: code + ' — ' + name,
       zIndexOffset: -200
     }).bindPopup(

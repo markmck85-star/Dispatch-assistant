@@ -186,10 +186,14 @@
         .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
         .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
-        .map-site-pin { display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:#5a6a7a;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);opacity:.85; }
+        .map-site-pin { display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#5a6a7a;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);opacity:.9; }
         .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
-        .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
-        .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; }
+        .leaflet-popup-content { font-size: 15px; line-height: 1.45; min-width: 200px; }
+        .leaflet-popup-content .map-pop-code { font-weight: bold; margin-bottom: 2px; font-size: 16px; }
+        @media (max-width: 700px) {
+            .leaflet-popup-content { font-size: 16px; min-width: 220px; }
+            .leaflet-popup-content .map-pop-code { font-size: 17px; }
+        }
 
         /* ── Desktop responsive layout ── */
         @media (min-width: 960px) {
@@ -8470,7 +8474,7 @@ ${content}</body></html>`;
                     icon: L.divIcon({
                         className: '',
                         html: '<div class="map-site-pin" style="background:' + restockPinColor(code) + ';"></div>',
-                        iconSize: [14, 14], iconAnchor: [7, 7], popupAnchor: [0, -8]
+                        iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -10]
                     }),
                     title: code + ' — ' + name,
                     zIndexOffset: -200
