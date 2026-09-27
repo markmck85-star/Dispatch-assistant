@@ -32,10 +32,11 @@
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
 </style>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.11</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.12</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -452,24 +453,15 @@ async function saveLog(status) {
   document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
 }
 
-function exportExcel() {
-  if (!ctx) return;
-  const esc = (v) => String(v == null ? '' : v)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const rows = [];
-  const push = (cells) => {
-    rows.push('<Row>' + cells.map((c) => {
-      const t = (c && c.t === 'n') ? 'Number' : 'String';
-      const v = c && c.v != null ? c.v : '';
-      return '<Cell><Data ss:Type="' + t + '">' + esc(v) + '</Data></Cell>';
-    }).join('') + '</Row>');
-  };
-  push([{ v: 'MCR TECHNICAL SERVICE, LLC' }]);
-  push([{ v: '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)' }]);
-  push([]);
-  push([{ v: 'NAME:' }, { v: ctx.technician.name }]);
-  push([]);
-  push([{ v: 'Date' }, { v: 'Start' }, { v: 'Odometer' }, { v: 'To' }, { v: 'Odometer' }, { v: 'Mileage' }, { v: 'Daily sub.' }]);
+function mileageRows() {
+  const aoa = [
+    ['MCR TECHNICAL SERVICE, LLC'],
+    ['(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)'],
+    [],
+    ['NAME:', ctx.technician.name],
+    [],
+    ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.']
+  ];
   const byDay = {};
   legs.forEach(l => {
     if (!byDay[l.date]) byDay[l.date] = [];
@@ -483,29 +475,47 @@ function exportExcel() {
       if (typeof mi === 'number') { sub += mi; total += mi; }
       const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
       const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
-      push([
-        { v: idx === 0 ? weekdayLabel(d) : '' },
-        { v: from },
-        { t: 'n', v: l.odo_start != null ? l.odo_start : '' },
-        { v: to },
-        { t: 'n', v: l.odo_end != null ? l.odo_end : '' },
-        { t: 'n', v: mi },
-        { t: 'n', v: idx === byDay[d].length - 1 ? sub : '' }
+      aoa.push([
+        idx === 0 ? weekdayLabel(d) : '',
+        from,
+        l.odo_start != null ? l.odo_start : '',
+        to,
+        l.odo_end != null ? l.odo_end : '',
+        mi,
+        idx === byDay[d].length - 1 ? sub : ''
       ]);
     });
   });
-  push([{ v: 'TOTAL MILEAGE (SUM OF SUBTOTALS)' }, {}, {}, {}, {}, {}, { t: 'n', v: total }]);
-  const xml = '<?xml version="1.0"?>\n' +
-    '<?mso-application progid="Excel.Sheet"?>\n' +
-    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
-    '<Worksheet ss:Name="Mileage"><Table>' + rows.join('') + '</Table></Worksheet></Workbook>';
-  const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+  aoa.push(['TOTAL MILEAGE (SUM OF SUBTOTALS)', '', '', '', '', '', total]);
+  return aoa;
+}
+
+function downloadBlob(blob, name) {
   const a = document.createElement('a');
-  const start = document.getElementById('periodStart').value || '';
   a.href = URL.createObjectURL(blob);
-  a.download = 'Mileage-' + (ctx.technician.name || 'tech').replace(/\s+/g, '_') + '-' + start + '.xls';
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function exportExcel() {
+  if (!ctx) return;
+  const start = document.getElementById('periodStart').value || '';
+  const base = 'Mileage-' + (ctx.technician.name || 'tech').replace(/\s+/g, '_') + '-' + start;
+  const aoa = mileageRows();
+  if (window.XLSX) {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Mileage');
+    XLSX.writeFile(wb, base + '.xlsx');
+    return;
+  }
+  const csv = aoa.map(r => r.map(c => {
+    const s = String(c == null ? '' : c);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\n');
+  downloadBlob(new Blob([csv], { type: 'text/csv' }), base + '.csv');
 }
 
 function printLog() {
