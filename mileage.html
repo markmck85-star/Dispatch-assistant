@@ -223,7 +223,6 @@ async function mcLoadReports() {
     if (!data.reports.length) { el.innerHTML = '<div class="muted">No reports yet.</div>'; return; }
     el.innerHTML = data.reports.map(r => {
       const flagCount = (r.flagged_legs || []).length;
-      const unmatchedCount = (r.unmatched_legs || []).length;
       const statusClass = flagCount > 0 ? 'bad' : 'ok';
       const statusText = flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine');
       const flagRows = (r.flagged_legs || []).map(f => {
@@ -236,17 +235,60 @@ async function mcLoadReports() {
         + clusterNote
         + `</div>`;
       }).join('');
+      const unmatchedCountForToggle = (r.unmatched_legs || []).length;
       const unmatchedRows = (r.unmatched_legs || []).map(u =>
         `<div class="unmatched">${mcFmtDate(u.date)}: <strong>"${u.fromRaw}"</strong> → <strong>"${u.toRaw}"</strong> — claimed ${u.claimedMiles} mi `
         + `(${u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop'})</div>`
       ).join('');
+      // Hidden by default -- most of these are just names the system
+      // hasn't learned yet, not evidence of a problem, and Mike's own
+      // review style (per Mark) doesn't involve tracing individual stop
+      // names anyway. A toggle keeps them one tap away for whoever DOES
+      // want to dig in (Mark, or TJ on his own territory).
+      const unmatchedBlock = unmatchedCountForToggle
+        ? `<div style="margin-top:8px;">`
+          + `<button type="button" class="secondary mc-toggle-unmatched" data-id="${r.id}" style="padding:4px 10px;font-size:12px;">`
+          + `${unmatchedCountForToggle} stop${unmatchedCountForToggle === 1 ? '' : 's'} unidentified — show</button>`
+          + `<div class="mc-unmatched-block" data-id="${r.id}" style="display:none;margin-top:6px;">${unmatchedRows}</div>`
+          + `</div>`
+        : '';
+
+      // Period-vs-history line -- Mike's own way of judging a report,
+      // per Mark: does this look unusual for THIS tech specifically.
+      const hc = r.history_comparison;
+      const historyLine = hc
+        ? `<div style="margin-top:6px;font-size:13px;${hc.flagged ? 'color:var(--bad);font-weight:600;' : 'color:var(--muted);'}">`
+          + `This period: ${hc.currentClaimedMiles} mi vs his own last ${hc.periodsCompared}-period average of ~${hc.averagePastClaimedMiles} mi`
+          + (hc.ratio != null ? ` (${hc.ratio}x usual)` : '')
+          + `${hc.flagged ? ' — worth a look' : ''}</div>`
+        : '';
+
+      // Daily totals -- collapsed to just flagged days by default (Mike's
+      // actual habit, per Mark: eyeball the day subtotal, not every leg).
+      const days = r.day_summaries || [];
+      const flaggedDays = days.filter((d) => d.flagged);
+      const dayLine = (d) => `${mcFmtDate(d.date)}: ${d.stopCount} stop${d.stopCount === 1 ? '' : 's'}, ${d.claimedMiles} mi`
+        + (d.expectedMiles != null ? ` (expected ~${d.expectedMiles} mi${d.ratio != null ? `, ${d.ratio}x` : ''})` : ' (not enough matched stops to judge)');
+      const flaggedDayRows = flaggedDays.map((d) => `<div class="flag">${dayLine(d)}</div>`).join('');
+      const allDayRows = days.map((d) => `<div class="${d.flagged ? 'flag' : 'unmatched'}" style="${d.flagged ? '' : 'background:#11151c;border-left-color:var(--border);color:#bbb;'}">${dayLine(d)}</div>`).join('');
+      const daysBlock = days.length
+        ? `<div style="margin-top:8px;">`
+          + (flaggedDays.length
+            ? `<div class="muted" style="font-size:12px;margin-bottom:4px;">${flaggedDays.length} day${flaggedDays.length === 1 ? '' : 's'} with an off-looking total:</div>${flaggedDayRows}`
+            : `<div class="muted" style="font-size:12px;">No day's total looks out of line.</div>`)
+          + `<button type="button" class="secondary mc-toggle-days" data-id="${r.id}" style="padding:4px 10px;font-size:12px;margin-top:6px;">Show all ${days.length} days</button>`
+          + `<div class="mc-days-block" data-id="${r.id}" style="display:none;margin-top:6px;">${allDayRows}</div>`
+          + `</div>`
+        : '';
       return `<div class="card" data-id="${r.id}">`
         + `<div class="card-top"><strong>${r.technicianName || r.technician_name_raw || 'Unknown tech'}</strong>`
         + `<span class="muted">period ending ${mcFmtDate(r.pay_period_end)} · ${r.source === 'email' ? 'email' : 'upload'}${r.source_filename ? ' · ' + r.source_filename : ''} · <button type="button" class="del" data-id="${r.id}">Delete</button></span></div>`
         + `<div style="margin-top:6px;">${r.matched_legs}/${r.total_legs} legs matched · claimed ${r.total_claimed_miles} mi vs expected ~${r.total_expected_miles} mi`
-        + (unmatchedCount ? ` · ${unmatchedCount} unmatched` : '')
+        + (unmatchedCountForToggle ? ` · ${unmatchedCountForToggle} unmatched` : '')
         + ` · <span class="${statusClass}">${statusText}</span></div>`
-        + flagRows + unmatchedRows + `</div>`;
+        + historyLine
+        + daysBlock
+        + flagRows + unmatchedBlock + `</div>`;
     }).join('');
   } catch (err) {
     el.textContent = 'Error loading reports: ' + err.message;
@@ -303,6 +345,31 @@ document.getElementById('exportCsvBtn').addEventListener('click', () => {
 });
 
 document.getElementById('list').addEventListener('click', async (ev) => {
+  const toggleUnmatched = ev.target.closest('button.mc-toggle-unmatched');
+  if (toggleUnmatched) {
+    const id = toggleUnmatched.getAttribute('data-id');
+    const block = document.querySelector(`.mc-unmatched-block[data-id="${id}"]`);
+    const count = toggleUnmatched.getAttribute('data-count') || (toggleUnmatched.textContent.match(/^(\d+)/) || [])[1];
+    if (block) {
+      const nowShowing = block.style.display === 'none';
+      block.style.display = nowShowing ? 'block' : 'none';
+      const label = count + ' stop' + (count === '1' ? '' : 's') + ' unidentified — ' + (nowShowing ? 'hide' : 'show');
+      toggleUnmatched.textContent = label;
+      toggleUnmatched.setAttribute('data-count', count);
+    }
+    return;
+  }
+  const toggleDays = ev.target.closest('button.mc-toggle-days');
+  if (toggleDays) {
+    const id = toggleDays.getAttribute('data-id');
+    const block = document.querySelector(`.mc-days-block[data-id="${id}"]`);
+    if (block) {
+      const showing = block.style.display !== 'none';
+      block.style.display = showing ? 'none' : 'block';
+      toggleDays.textContent = showing ? toggleDays.textContent.replace('Hide', 'Show') : toggleDays.textContent.replace('Show', 'Hide');
+    }
+    return;
+  }
   const btn = ev.target.closest('button.del');
   if (!btn) return;
   const id = btn.getAttribute('data-id');
