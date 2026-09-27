@@ -35,7 +35,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.6</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.8</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -290,7 +290,7 @@ async function loadContext() {
 function flagMiles(miles) {
   if (miles == null || !Number.isFinite(miles)) return null;
   if (miles < 0) return 'negative';
-  if (miles > 200) return 'over';
+  if (miles > 400) return 'over';
   return null;
 }
 
@@ -325,6 +325,7 @@ function addLeg() {
   document.getElementById('odoStart').value = odoEnd;
   document.getElementById('odoEnd').value = '';
   renderLegs();
+  saveLog('draft');
 }
 
 function endDay() {
@@ -353,7 +354,8 @@ function renderLegs() {
       if (typeof l.miles === 'number') sub += l.miles;
       let flag = '';
       if (l.flag === 'negative') flag = '<div class="flag neg">Odometer went down — check the reading.</div>';
-      else if (l.flag === 'over') flag = '<div class="flag">That leg is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
+      else if (l.flag === 'over') flag = '<div class="flag neg">That leg is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
+      else if (l.flag === 'check') flag = '<div class="flag">About ' + (l.expected_mi != null ? l.expected_mi + ' mi expected' : 'a shorter hop') + '; you entered ' + l.miles + '. Detour is fine — worth a glance.</div>';
       html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
         '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + '</div></div>' +
         '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong></div></div>' +
