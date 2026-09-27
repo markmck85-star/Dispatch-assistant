@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.18</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.19</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -90,7 +90,11 @@
     <div class="row" style="margin-top:10px;">
       <button type="button" onclick="addLeg()">Add leg</button>
       <button type="button" class="secondary" onclick="endDay()">End day at home</button>
+      <button type="button" class="secondary" onclick="shiftLegDate(-1)">← Prev day</button>
+      <button type="button" class="secondary" onclick="shiftLegDate(1)">Next day →</button>
+      <button type="button" class="secondary" onclick="skipEmptyDay()">Off / no miles — next day</button>
     </div>
+    <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a leg. Use Next day or Off. Add leg only when there are miles.</p>
   </div>
 
   <div id="legs"></div>
@@ -98,7 +102,7 @@
     <button type="button" onclick="saveLog('draft')">Save draft</button>
     <button type="button" onclick="printLog()">Print / PDF</button>
     <button type="button" onclick="exportExcel()">Export Excel</button>
-    <button type="button" class="secondary" onclick="loadSampleTwoWeeks()">Load sample 2 weeks</button>
+    <button type="button" class="secondary" onclick="loadSampleTwoWeeks()">Load demo days</button>
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
   <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
@@ -201,8 +205,35 @@ function initPeriod() {
   const s = sundayOf(new Date());
   document.getElementById('periodStart').value = s;
   document.getElementById('periodEnd').value = addDays(s, 13);
-  document.getElementById('legDate').value = new Date().toISOString().slice(0,10);
+  const today = new Date();
+  const todayIso = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  const end = addDays(s, 13);
+  document.getElementById('legDate').value = (todayIso >= s && todayIso <= end) ? todayIso : s;
   updateDow();
+}
+
+function shiftLegDate(n) {
+  const cur = document.getElementById('legDate').value;
+  if (!cur) return;
+  let next = addDays(cur, n);
+  const start = document.getElementById('periodStart').value;
+  const end = document.getElementById('periodEnd').value;
+  if (end && next > end) {
+    if (!confirm('That day is after this pay period. Move the period forward two weeks?')) return;
+    shiftPeriod(14);
+    next = document.getElementById('periodStart').value;
+  }
+  if (start && next < start) {
+    if (!confirm('That day is before this pay period. Move the period back two weeks?')) return;
+    shiftPeriod(-14);
+    next = document.getElementById('periodEnd').value;
+  }
+  document.getElementById('legDate').value = next;
+  updateDow();
+}
+
+function skipEmptyDay() {
+  shiftLegDate(1);
 }
 
 function shiftPeriod(days) {
@@ -456,8 +487,9 @@ async function saveLog(status) {
 
 function loadSampleTwoWeeks() {
   if (!ctx) return;
+  if (!confirm('Load a few demo days with made-up store names? This replaces the current draft on screen.')) return;
   const start = document.getElementById('periodStart').value;
-  const homePrint = ctx.technician.home_label_print || 'Johns Creek';
+  const homePrint = ctx.technician.home_label_print || 'Home city';
   const plan = {
     0: ['State Bridge Kroger','Lawrenceville-Suwanee Kroger','Tucker Kroger','Walton Kroger','Lawrenceville Tag'],
     1: ['Steve Reynolds Kroger','North Decatur Kroger','Glenwood Kroger','Tucker Kroger'],
@@ -527,7 +559,6 @@ function loadSampleTwoWeeks() {
     }
     odo += 3;
   }
-  if (!confirm('Replace the current draft with a sample two-week log for this pay period? Your real entries will be overwritten until you reload a saved draft.')) return;
   legs = next;
   persistLocal();
   renderLegs();
