@@ -486,6 +486,7 @@
                 <a href="closing-email-reconstructor.html" class="closing-email-link" style="display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉️ Closing Notes</a>
                 <button type="button" onclick="generateFinalMessages()" class="messages-link" style="display:block; width:100%; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; border:none; cursor:pointer;">✅ Messages</button>
                 <a id="inboundMailLink" href="/inbound-mail.html" class="messages-link" style="display:block; width:100%; background:#181818; color:#9ad0ff; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉ Inbound Mail</a>
+                <a href="/mileage-log.html" class="mileage-log-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🚗 Mileage log</a>
                 <a href="/admin.html" class="admin-panel-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
                 <a href="help.html" target="_blank" class="help-link" style="display:block; background:#181818; color:#aaa; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">❓ Help</a>
 
@@ -4511,6 +4512,7 @@ function distanceMatrixStatus(state) {
                                         <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'completed')" style="font-size:10px;padding:2px 6px;background:#1a6b1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Done</button>
                                         <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'canceled')" style="font-size:10px;padding:2px 6px;background:#6b1a1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✗ Cancel</button>
                                     </div>
+                                    ${(item.fromTicket || item.urgent) ? `<button class="control-btn" onclick="notifyStop('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#1d4e89;color:#fff;border:none;border-radius:3px;cursor:pointer;">📱 Text this stop</button>` : ''}
                                 </div>
                              </div>`;
                 });
@@ -6281,9 +6283,66 @@ function distanceMatrixStatus(state) {
             navigator.clipboard.writeText(txt).then(() => alert("Copied!")).catch(() => alert("Failed"));
         }
 
+        function notifyStop(tech, index) {
+            const item = (assignments[tech] || [])[index];
+            if (!item) { alert('Stop not found.'); return; }
+            const loc = (typeof LOCATIONS !== 'undefined' && LOCATIONS[item.code]) || {};
+            const first = (tech || '').split(' ')[0] || 'there';
+            const wo = item.ticketWo ? 'WO ' + item.ticketWo : '';
+            const issue = item.ticketIssue || (item.urgent ? 'Trouble ticket' : 'Assigned stop');
+            const sla = item.ticketSlaEnd ? formatServerSlaTime(item.ticketSlaEnd, item.code) : '';
+            const site = (loc.name || item.code || '').replace(/\s+/g, ' ').trim();
+            let txt = 'Hey ' + first + ', this one is yours:\n\n';
+            txt += site;
+            if (wo) txt += ' — ' + wo;
+            txt += '\n' + issue;
+            if (sla) txt += '\nSLA ends: ' + sla;
+            txt += '\n\nPlease acknowledge.';
+            sendPlainMessage(tech, txt, wo ? ('MCR Dispatch — ' + wo) : 'MCR Dispatch — assigned stop');
+        }
+
         async function sendMessage(id, techName) {
-            const txt = document.getElementById(`msg-${id}`).innerText;
+            const el = document.getElementById(`msg-${id}`);
+            const txt = el ? el.innerText : '';
             if (!txt.trim()) { alert('No message to send.'); return; }
+            return sendPlainMessage(techName, txt);
+        }
+
+        function promptMissingSms(techName, techEmail) {
+            return new Promise((resolve) => {
+                const wrap = document.createElement('div');
+                wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+                wrap.innerHTML = `<div style="background:#1e1e2e;color:#f0f0f0;border-radius:10px;padding:16px;width:min(92vw,420px);border:1px solid #c98a1e;">
+                    <div style="font-weight:700;margin-bottom:8px;">No cell carrier on file for ${techName}</div>
+                    <div style="font-size:13px;color:#ccc;margin-bottom:10px;">Texts use the carrier email gateway (e.g. 6785551212@vtext.com). Add it once, or send email only this time.</div>
+                    <label style="font-size:12px;color:#aaa;">Carrier address</label>
+                    <input id="sms-missing-addr" placeholder="number@vtext.com / @txt.att.net / @tmomail.net" style="width:100%;box-sizing:border-box;margin:4px 0 8px;padding:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#fff;">
+                    <label style="font-size:13px;display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                        <input id="sms-missing-save" type="checkbox" checked> Save on their technician record
+                    </label>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        <button id="sms-missing-ok" style="flex:1;padding:8px;background:#1d4e89;color:#fff;border:none;border-radius:5px;cursor:pointer;">Use this number</button>
+                        ${techEmail ? '<button id="sms-missing-email" style="flex:1;padding:8px;background:#0a6e5c;color:#fff;border:none;border-radius:5px;cursor:pointer;">Email only<br><span style="font-size:11px;font-weight:normal;">' + techEmail + '</span></button>' : '<button id="sms-missing-email" disabled style="flex:1;padding:8px;background:#444;color:#888;border:none;border-radius:5px;">No email on file</button>'}
+                        <button id="sms-missing-cancel" style="padding:8px 12px;background:#444;color:#fff;border:none;border-radius:5px;cursor:pointer;">Cancel</button>
+                    </div>
+                </div>`;
+                document.body.appendChild(wrap);
+                const done = (v) => { wrap.remove(); resolve(v); };
+                wrap.querySelector('#sms-missing-cancel').onclick = () => done(null);
+                wrap.querySelector('#sms-missing-ok').onclick = () => {
+                    const addr = (wrap.querySelector('#sms-missing-addr').value || '').trim();
+                    if (!addr || addr.indexOf('@') < 0) { alert('Enter a carrier email like 6785551212@vtext.com'); return; }
+                    done({ mode: 'sms', smsAddress: addr, save: wrap.querySelector('#sms-missing-save').checked });
+                };
+                wrap.querySelector('#sms-missing-email').onclick = () => {
+                    if (!techEmail) return;
+                    done({ mode: 'email-only' });
+                };
+            });
+        }
+
+        async function sendPlainMessage(techName, txt, subjectOverride) {
+            if (!txt || !txt.trim()) { alert('No message to send.'); return; }
 
             // Look up SMS address and email from loaded tech data
             const techKey = techName.toLowerCase().replace(/\s+/g, '-');
@@ -6298,15 +6357,21 @@ function distanceMatrixStatus(state) {
                 techEmail = tech && tech.email ? tech.email : null;
             } catch(e) {}
 
-            if (!smsAddress && !techEmail) {
-                smsAddress = prompt(`No SMS address set for ${techName}.\nEnter their carrier email (e.g. 6781234567@vtext.com):`);
-                if (!smsAddress) return;
-                if (confirm(`Save ${smsAddress} as ${techName}'s SMS address permanently?`)) {
-                    fetch('/.netlify/functions/save-technician', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: techName, state: CURRENT_STATE, smsAddress })
-                    }).catch(() => {});
+            if (!smsAddress) {
+                const picked = await promptMissingSms(techName, techEmail);
+                if (!picked) return;
+                if (picked.mode === 'email-only') {
+                    if (!techEmail) { alert('No email on file for ' + techName + ' either.'); return; }
+                    smsAddress = null;
+                } else {
+                    smsAddress = picked.smsAddress;
+                    if (picked.save && smsAddress) {
+                        fetch('/.netlify/functions/save-technician', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: techName, state: CURRENT_STATE, smsAddress })
+                        }).catch(() => {});
+                    }
                 }
             }
 
@@ -6334,7 +6399,10 @@ function distanceMatrixStatus(state) {
                 const isTodayForMsg = dispatchDateForMsg.toDateString() === new Date().toDateString();
                 dateStr = isTodayForMsg ? 'today' : 'tomorrow';
             }
-            const smsPing = `MCR Dispatch: You have ${stopCount} stop${stopCount !== 1 ? 's' : ''} for ${dateStr}. Details sent to your email.`;
+            const smsPing = stopCount > 0
+                ? `MCR Dispatch: You have ${stopCount} stop${stopCount !== 1 ? 's' : ''} for ${dateStr}. Details sent to your email.`
+                : String(txt).slice(0, 300);
+            const mailSubject = subjectOverride || `MCR Dispatch — ${dateStr}`;
 
             // Convert plain text to simple HTML email
             const htmlBody = '<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">' + 
@@ -6370,7 +6438,7 @@ function distanceMatrixStatus(state) {
                             email: techEmail,
                             body: smsPing,
                             htmlBody: finalHtml,
-                            subject: `MCR Dispatch — ${dateStr}`
+                            subject: mailSubject
                         })
                     });
                     const d = await r.json();
