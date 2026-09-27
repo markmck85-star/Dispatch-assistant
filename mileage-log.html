@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.16</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.17</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -98,6 +98,7 @@
     <button type="button" onclick="saveLog('draft')">Save draft</button>
     <button type="button" onclick="printLog()">Print / PDF</button>
     <button type="button" onclick="exportExcel()">Export Excel</button>
+    <button type="button" class="secondary" onclick="loadSampleTwoWeeks()">Load sample 2 weeks</button>
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
   <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
@@ -451,6 +452,86 @@ async function saveLog(status) {
   legs = data.log.legs || legs;
   renderLegs();
   document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
+}
+
+function loadSampleTwoWeeks() {
+  if (!ctx) return;
+  const start = document.getElementById('periodStart').value;
+  const homePrint = ctx.technician.home_label_print || 'Johns Creek';
+  const plan = {
+    0: ['State Bridge Kroger','Lawrenceville-Suwanee Kroger','Tucker Kroger','Walton Kroger','Lawrenceville Tag'],
+    1: ['Steve Reynolds Kroger','North Decatur Kroger','Glenwood Kroger','Tucker Kroger'],
+    2: ['Lawrenceville Tag','Five Forks Kroger','Centerville Hwy Publix'],
+    3: ['Maxwell Kroger','Mall of Georgia Tag','State Bridge Kroger','Lawrenceville Tag','Dacula Kroger'],
+    4: ['Steve Reynolds Kroger','Rockbridge Kroger'],
+    5: ['Five Forks Kroger','Lawrenceville-Suwanee Kroger','Bethelview Kroger','Atlanta Hwy Kroger'],
+    6: ['Lawrenceville-Suwanee Kroger','Pendergrass Kroger'],
+    7: [],
+    8: ['Freedom Parkway Kroger'],
+    9: ['Lilburn Kroger','Singleton Kroger'],
+    10: ['Loganville Publix','Lawrenceville-Suwanee Kroger'],
+    11: ['Piedmont Kroger'],
+    12: ['Lilburn Kroger','Chamblee Tucker Kroger','State Bridge Kroger'],
+    13: ['Singleton Kroger','Lawrenceville Tag']
+  };
+  const dist = {
+    'Johns Creek|State Bridge Kroger': 8, 'State Bridge Kroger|Lawrenceville-Suwanee Kroger': 14,
+    'Lawrenceville-Suwanee Kroger|Tucker Kroger': 18, 'Tucker Kroger|Walton Kroger': 22,
+    'Walton Kroger|Lawrenceville Tag': 11, 'Lawrenceville Tag|Johns Creek': 17,
+    'Johns Creek|Steve Reynolds Kroger': 9, 'Steve Reynolds Kroger|North Decatur Kroger': 17,
+    'North Decatur Kroger|Glenwood Kroger': 10, 'Glenwood Kroger|Tucker Kroger': 8,
+    'Tucker Kroger|Johns Creek': 16, 'Johns Creek|Lawrenceville Tag': 17,
+    'Lawrenceville Tag|Five Forks Kroger': 8, 'Five Forks Kroger|Centerville Hwy Publix': 12,
+    'Centerville Hwy Publix|Johns Creek': 22, 'Johns Creek|Maxwell Kroger': 9,
+    'Maxwell Kroger|Mall of Georgia Tag': 14, 'Mall of Georgia Tag|State Bridge Kroger': 18,
+    'State Bridge Kroger|Lawrenceville Tag': 12, 'Lawrenceville Tag|Dacula Kroger': 11,
+    'Dacula Kroger|Johns Creek': 19, 'Steve Reynolds Kroger|Rockbridge Kroger': 10,
+    'Rockbridge Kroger|Johns Creek': 16, 'Johns Creek|Five Forks Kroger': 15,
+    'Five Forks Kroger|Lawrenceville-Suwanee Kroger': 6, 'Lawrenceville-Suwanee Kroger|Bethelview Kroger': 22,
+    'Bethelview Kroger|Atlanta Hwy Kroger': 12, 'Atlanta Hwy Kroger|Johns Creek': 18,
+    'Lawrenceville-Suwanee Kroger|Pendergrass Kroger': 28, 'Pendergrass Kroger|Johns Creek': 36,
+    'Johns Creek|Freedom Parkway Kroger': 18, 'Freedom Parkway Kroger|Johns Creek': 18,
+    'Johns Creek|Lilburn Kroger': 14, 'Lilburn Kroger|Singleton Kroger': 8,
+    'Singleton Kroger|Johns Creek': 12, 'Johns Creek|Loganville Publix': 24,
+    'Loganville Publix|Lawrenceville-Suwanee Kroger': 16, 'Lawrenceville-Suwanee Kroger|Johns Creek': 14,
+    'Johns Creek|Piedmont Kroger': 22, 'Piedmont Kroger|Johns Creek': 22,
+    'Lilburn Kroger|Chamblee Tucker Kroger': 10, 'Chamblee Tucker Kroger|State Bridge Kroger': 14,
+    'State Bridge Kroger|Johns Creek': 8, 'Johns Creek|Singleton Kroger': 12,
+    'Singleton Kroger|Lawrenceville Tag': 11
+  };
+  function mi(a,b) { return dist[a + '|' + b] || 12; }
+  function stop(name) {
+    if (name === homePrint || name === 'Johns Creek') return { kind: 'home', print: homePrint, picker: homePrint };
+    return { kind: 'site', print: name, picker: name };
+  }
+  const t0 = new Date(start + 'T12:00:00');
+  let odo = 30400;
+  const next = [];
+  for (let day = 0; day < 14; day++) {
+    const dt = new Date(t0); dt.setDate(t0.getDate() + day);
+    const iso = dt.toISOString().slice(0, 10);
+    const stops = plan[day] || [];
+    if (!stops.length) continue;
+    const path = [homePrint].concat(stops).concat([homePrint]);
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = stop(path[i]), b = stop(path[i + 1]);
+      const miles = mi(path[i] === homePrint ? 'Johns Creek' : path[i], path[i + 1] === homePrint ? 'Johns Creek' : path[i + 1]);
+      const end = odo + miles;
+      next.push({
+        date: iso,
+        from_kind: a.kind, from_site_id: null, from_print: a.print, from_picker: a.picker,
+        to_kind: b.kind, to_site_id: null, to_print: b.print, to_picker: b.picker,
+        odo_start: odo, odo_end: end, miles: miles, flag: null
+      });
+      odo = end;
+    }
+    odo += 3;
+  }
+  if (!confirm('Replace the current draft with a sample two-week log for this pay period? Your real entries will be overwritten until you reload a saved draft.')) return;
+  legs = next;
+  persistLocal();
+  renderLegs();
+  document.getElementById('status').textContent = 'Sample two weeks loaded — export to see the full sheet. Not official.';
 }
 
 function downloadBlob(blob, name) {
