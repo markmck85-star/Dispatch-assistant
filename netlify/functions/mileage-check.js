@@ -35,6 +35,28 @@
  *   raw label appears inside the technician's own home_address -- not
  *   matched against `sites` at all.
  *
+ *   2026-09-26 fix: removed a second, undocumented heuristic
+ *   (isCityOnlyLabel) that used to ALSO classify any short, storeless,
+ *   digit-free label as home -- added to catch Mark's own "Johns Creek"
+ *   shorthand, but isHomeLabel's own city match already covers that
+ *   correctly. The extra heuristic couldn't tell "this is genuinely
+ *   home" from "this technician just writes every stop as a bare city
+ *   name" -- found via a real Terril King (MI) timesheet where EVERY
+ *   leg (westland, lincoln park, detroit, chelsea, dearborn, taylor,
+ *   adrain, etc.) got misclassified as home, so every leg scored as a
+ *   0-mile "same-place" hop and all 39 got flagged.
+ *
+ *   Replaced with a day-bookend check per Mark's own framing: a workday
+ *   both STARTS and ENDS at home, so if the day's very first leg's
+ *   `from` and very last leg's `to` are both bare city-style labels and
+ *   they match each other, THAT specific label is home for that day --
+ *   and only in those two bookend slots. Any other leg using the same
+ *   literal text mid-day is deliberately left alone and falls through to
+ *   position-based matching against the closed-ticket report (Pass 2
+ *   below) or fuzzy name-matching (Pass 3), exactly the mechanisms built
+ *   to handle a technician's own naming quirks -- rather than assuming
+ *   every occurrence of that text means home.
+ *
  * DISTANCE LOOKUP:
  *   Prefers real driving-distance rows already in tech_site_distances /
  *   site_site_distances (same tables the dispatch board's Map View and
@@ -82,6 +104,18 @@ function tokenize(s) {
 const MIN_RATIO = 0.4;
 const MAX_RATIO = 2.5;
 const SITE_MATCH_THRESHOLD = 0.65;
+
+// 2026-09-27: for the new period-vs-history comparison (see
+// evaluateMileageReport's history-comparison block) -- deliberately much
+// tighter than the per-leg MIN_RATIO/MAX_RATIO above. A single leg has
+// every reason to vary widely (a detour, an errand, genuine route choice)
+// and the wide band accounts for that; a whole PERIOD's total, averaged
+// against a technician's own recent history, has much less excuse to
+// swing by more than ~40% either way -- his territory, route pattern, and
+// workload don't typically change that fast. First-pass numbers, easy to
+// retune once there's more real history to compare against.
+const HISTORY_MIN_RATIO = 0.6;
+const HISTORY_MAX_RATIO = 1.6;
 
 // 2026-09-20: found via a real false positive on Mark's own timesheet --
 // "Lawrenceville Suwanee Kroger" (a real place, not yet in `sites` at
@@ -154,7 +188,18 @@ function isErrandLabel(rawLabel) {
   return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
 }
 
-function isCityOnlyLabel(rawLabel) {
+/**
+ * True if rawLabel LOOKS like a bare city name (short, no store word, no
+ * digits) -- on its own this says nothing about whether it means home,
+ * since a technician who writes every stop this way (found on Terril
+ * King's real timesheet, see the file header) would make every leg match.
+ * Used ONLY as one half of the day-bookend check below: a bare city name
+ * repeated at the day's start AND end is a much safer signal than any
+ * single occurrence, since a workday both starting and ending at the same
+ * place strongly implies that place is home, regardless of what a
+ * technician calls it.
+ */
+function looksLikeBareCityLabel(rawLabel) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label || label.length < 3) return false;
   if (isErrandLabel(label)) return false;
@@ -452,9 +497,30 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // checks are unambiguous and free (no DB round trip), so they still run
   // first. Fuzzy name-matching (matchSiteByName) is deliberately NOT
   // called here anymore -- see the precedence rationale below.
-  function resolveHomeOrAlias(rawLabel) {
+  //
+  // 2026-09-26: day-bookend home detection. Grouped by date so each day's
+  // first leg's `from` and last leg's `to` can be compared -- if both are
+  // bare city-style labels and match each other, that label is home for
+  // THIS DAY specifically, and only in those two positions (see file
+  // header for why not every occurrence).
+  const legsByDate = {};
+  for (const leg of legs) (legsByDate[leg.date] = legsByDate[leg.date] || []).push(leg);
+  const dayHomeLabel = {}; // date -> lowercased normalized label, or absent
+  for (const [date, dayLegs] of Object.entries(legsByDate)) {
+    const first = dayLegs[0], last = dayLegs[dayLegs.length - 1];
+    if (!first || !last) continue;
+    const firstLabel = normalizePlaceLabel(first.fromRaw).toLowerCase();
+    const lastLabel = normalizePlaceLabel(last.toRaw).toLowerCase();
+    if (firstLabel && firstLabel === lastLabel && looksLikeBareCityLabel(first.fromRaw)) {
+      dayHomeLabel[date] = firstLabel;
+    }
+  }
+
+  function resolveEnd(rawLabel, isBookendSlot, date) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
-    if (isCityOnlyLabel(rawLabel)) return { type: 'home' };
+    if (isBookendSlot && dayHomeLabel[date] && normalizePlaceLabel(rawLabel).toLowerCase() === dayHomeLabel[date]) {
+      return { type: 'home' };
+    }
     if (isErrandLabel(rawLabel)) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
     const cleaned = normalizePlaceLabel(rawLabel).toLowerCase();
     const aliasHit = aliasMap[cleaned] || aliasMap[String(rawLabel || '').trim().toLowerCase()];
@@ -482,11 +548,16 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   }
 
   // ── Pass 1: home + exact alias only (unambiguous, no guessing) ─────────
-  const resolved = legs.map((leg) => ({
-    leg,
-    fromPlace: resolveHomeOrAlias(leg.fromRaw),
-    toPlace: resolveHomeOrAlias(leg.toRaw),
-  }));
+  const resolved = legs.map((leg) => {
+    const dayLegs = legsByDate[leg.date] || [];
+    const isFirstOfDay = dayLegs[0] === leg;
+    const isLastOfDay = dayLegs[dayLegs.length - 1] === leg;
+    return {
+      leg,
+      fromPlace: resolveEnd(leg.fromRaw, isFirstOfDay, leg.date),
+      toPlace: resolveEnd(leg.toRaw, isLastOfDay, leg.date),
+    };
+  });
 
   // ── Pass 2: position against the closed-ticket report, BEFORE fuzzy
   // ── name-matching is even attempted ─────────────────────────────────
@@ -538,8 +609,11 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
 
     for (const date of datesNeedingLookup) {
       const dayLegs = legs.filter((l) => l.date === date);
+      const homeLabel = dayHomeLabel[date];
       const stops = dayLegs.map((l) => l.toRaw).filter((label) =>
-        !(techRow && isHomeLabel(label, techRow.home_address)) && !isErrandLabel(label)
+        !(techRow && isHomeLabel(label, techRow.home_address))
+        && !isErrandLabel(label)
+        && !(homeLabel && normalizePlaceLabel(label).toLowerCase() === homeLabel && label === dayLegs[dayLegs.length - 1].toRaw)
       );
       const visitSites = (visitsByDate[date] || []).map((v) => v.sites).filter(Boolean);
       if (!stops.length || !visitSites.length) continue;
@@ -631,29 +705,55 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // If one end of a leg is known and the other is not, keep only sites
   // whose drive (or haversine) is within the same loose ratio band as
   // flagging. One survivor → lock it. Two or more → leave unmatched.
+  //
+  // 2026-09-26: also tests 'home' as a candidate, not just real sites --
+  // an ambiguous mid-day bare-city label (the exact case a day-bookend
+  // match doesn't cover -- e.g. Terril King's "westland" showing up
+  // again mid-route) could genuinely be a trip back home, or a real site
+  // that happens to share the city's name; the text alone can't say
+  // which. If the claimed mileage lines up with the known trip home (and
+  // not with any real site, or vice versa), that's real evidence rather
+  // than a guess -- and if it lines up with BOTH home and a site, this
+  // correctly falls through to "more than one hit" below and stays
+  // unmatched, rather than picking one arbitrarily.
   function milesFromKnown(knownPlace, site) {
     return expectedMilesFor(knownPlace, { type: 'site', site });
   }
   function candidatesForClaimed(knownPlace, claimed) {
     if (!knownPlace || knownPlace.type === 'errand' || !(claimed > 0)) return [];
     const hits = [];
+    if (knownPlace.type === 'site') {
+      const expHome = expectedMilesFor(knownPlace, { type: 'home' });
+      if (expHome && expHome.miles >= 0.5) {
+        const ratio = claimed / expHome.miles;
+        if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push({ type: 'home' });
+      }
+    }
     for (const site of candidateSites) {
       if (knownPlace.type === 'site' && knownPlace.site.id === site.id) continue;
       const exp = milesFromKnown(knownPlace, site);
       if (!exp || exp.miles < 0.5) continue;
       const ratio = claimed / exp.miles;
-      if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push(site);
+      if (ratio >= MIN_RATIO && ratio <= MAX_RATIO) hits.push({ type: 'site', site });
     }
     return hits;
   }
   for (const r of resolved) {
     if (!r.fromPlace && r.toPlace && r.toPlace.type !== 'errand') {
       const hits = candidatesForClaimed(r.toPlace, r.leg.claimedMiles);
-      if (hits.length === 1) r.fromPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+      if (hits.length === 1) {
+        r.fromPlace = hits[0].type === 'home'
+          ? { type: 'home', via: 'neighbor-miles' }
+          : { type: 'site', site: hits[0].site, via: 'neighbor-miles' };
+      }
     }
     if (!r.toPlace && r.fromPlace && r.fromPlace.type !== 'errand') {
       const hits = candidatesForClaimed(r.fromPlace, r.leg.claimedMiles);
-      if (hits.length === 1) r.toPlace = { type: 'site', site: hits[0], via: 'neighbor-miles' };
+      if (hits.length === 1) {
+        r.toPlace = hits[0].type === 'home'
+          ? { type: 'home', via: 'neighbor-miles' }
+          : { type: 'site', site: hits[0].site, via: 'neighbor-miles' };
+      }
     }
   }
 
@@ -684,8 +784,10 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   let matchedCount = 0;
   let totalClaimed = 0;
   let totalExpected = 0;
+  const flagMarkers = new Array(resolved.length).fill(null); // idx -> the flaggedLeg object pushed for that leg, or null
 
-  for (const { leg, fromPlace, toPlace } of resolved) {
+  for (let idx = 0; idx < resolved.length; idx++) {
+    const { leg, fromPlace, toPlace } = resolved[idx];
     totalClaimed += leg.claimedMiles;
     if ((fromPlace && fromPlace.type === 'errand') || (toPlace && toPlace.type === 'errand')) {
       unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'errand_stop' });
@@ -716,19 +818,119 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       if (ratio > MAX_RATIO || ratio < MIN_RATIO) reason = 'ratio_outlier';
     }
     if (reason) {
-      flaggedLegs.push({
+      const flaggedLeg = {
         date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw,
         claimedMiles: leg.claimedMiles,
         expectedMiles: Math.round(expected.miles * 10) / 10,
         expectedSource: expected.type,
         ratio: expected.miles > 0 ? Math.round((leg.claimedMiles / expected.miles) * 100) / 100 : null,
         reason,
-      });
+      };
+      flaggedLegs.push(flaggedLeg);
+      flagMarkers[idx] = flaggedLeg;
+    }
+  }
+
+  // 2026-09-26: flag a run of 3+ CONSECUTIVE same-day flagged legs
+  // distinctly from an isolated one -- per Mark's own reasoning, a
+  // cluster like this more often means the ASSUMED ORDER for that
+  // stretch of the day is off (e.g. a technician closing tickets out of
+  // sequence, which Pass 2's position-matching has no way to detect on
+  // its own and just quietly trusts) than that several individual
+  // mileage numbers all happened to be mistyped in the same short
+  // stretch. A single flag among otherwise-clean legs stays a plain
+  // "check this number" case. Deliberately bounded to the SAME day --
+  // two flags either side of a day boundary are unrelated events, not
+  // one ordering problem.
+  let runStart = null;
+  for (let idx = 0; idx <= flagMarkers.length; idx++) {
+    const marker = idx < flagMarkers.length ? flagMarkers[idx] : null;
+    const sameDayAsRunStart = runStart != null && marker && resolved[idx].leg.date === resolved[runStart].leg.date;
+    if (marker && (runStart == null || sameDayAsRunStart)) {
+      if (runStart == null) runStart = idx;
+    } else {
+      if (runStart != null && idx - runStart >= 3) {
+        for (let j = runStart; j < idx; j++) {
+          if (flagMarkers[j]) flagMarkers[j].cluster = true;
+        }
+      }
+      runStart = marker ? idx : null;
+    }
+  }
+
+  // ── Day-level summary (Mike's own way of spot-checking, per Mark: does
+  // ── a day's TOTAL look right for its stop count) ────────────────────
+  // Deliberately independent of whether every individual leg's place name
+  // resolved -- an absurd day total is obvious without knowing exactly
+  // which store was which, the same way Mike already eyeballs the daily
+  // subtotal cell rather than tracing every named stop. Uses whatever
+  // portion of the day DID resolve to compute an expected total; a day
+  // with too little resolved coverage (coverage < 0.5) is reported with
+  // no verdict rather than a guess built on mostly-unknown legs.
+  const daySummaries = [];
+  for (const [date, dayLegsForSummary] of Object.entries(legsByDate)) {
+    const dayClaimed = dayLegsForSummary.reduce((sum, l) => sum + l.claimedMiles, 0);
+    let dayExpected = 0;
+    let dayMatchedCount = 0;
+    for (const r of resolved) {
+      if (r.leg.date !== date) continue;
+      if ((r.fromPlace && r.fromPlace.type === 'errand') || (r.toPlace && r.toPlace.type === 'errand')) continue;
+      if (!r.fromPlace || !r.toPlace) continue;
+      const exp = expectedMilesFor(r.fromPlace, r.toPlace);
+      if (!exp) continue;
+      dayExpected += exp.miles;
+      dayMatchedCount++;
+    }
+    const coverage = dayLegsForSummary.length > 0 ? dayMatchedCount / dayLegsForSummary.length : 0;
+    let ratio = null, flagged = false;
+    if (coverage >= 0.5 && dayExpected > 0.5) {
+      ratio = Math.round((dayClaimed / dayExpected) * 100) / 100;
+      if (ratio > MAX_RATIO || ratio < MIN_RATIO) flagged = true;
+    }
+    daySummaries.push({
+      date,
+      stopCount: dayLegsForSummary.length,
+      claimedMiles: Math.round(dayClaimed * 10) / 10,
+      expectedMiles: dayExpected > 0.5 ? Math.round(dayExpected * 10) / 10 : null,
+      coverage: Math.round(coverage * 100) / 100,
+      ratio,
+      flagged,
+    });
+  }
+  daySummaries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // ── Period-vs-history comparison (Mark's other description: does THIS
+  // ── period look off compared to what Mike's used to seeing from this
+  // ── specific technician) ────────────────────────────────────────────
+  // Needs at least 2 prior periods on file to say anything -- a single
+  // past period is one data point, not a "usual" to compare against.
+  let historyComparison = null;
+  if (techRow) {
+    const { data: pastReports, error: historyErr } = await supabase
+      .from('technician_mileage_reports')
+      .select('pay_period_end, total_claimed_miles')
+      .eq('technician_id', techRow.id)
+      .order('pay_period_end', { ascending: false })
+      .limit(6);
+    if (historyErr) console.error('[mileage-check] history lookup failed (non-fatal):', historyErr.message);
+    const priorReports = (pastReports || []).filter((r) => r.pay_period_end !== payPeriodEnd);
+    if (priorReports.length >= 2) {
+      const avgPastClaimed = priorReports.reduce((s, r) => s + Number(r.total_claimed_miles || 0), 0) / priorReports.length;
+      const currentClaimedTotal = Math.round(totalClaimed * 10) / 10;
+      const ratio = avgPastClaimed > 0.5 ? Math.round((currentClaimedTotal / avgPastClaimed) * 100) / 100 : null;
+      historyComparison = {
+        periodsCompared: priorReports.length,
+        averagePastClaimedMiles: Math.round(avgPastClaimed * 10) / 10,
+        currentClaimedMiles: currentClaimedTotal,
+        ratio,
+        flagged: ratio != null && (ratio > HISTORY_MAX_RATIO || ratio < HISTORY_MIN_RATIO),
+      };
     }
   }
 
   const needsReview = flaggedLegs.length > 0 || aliasConflicts.length > 0
-    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow;
+    || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3) || !techRow
+    || daySummaries.some((d) => d.flagged) || (historyComparison && historyComparison.flagged);
 
   const row = {
     technician_id: techRow ? techRow.id : null,
@@ -744,6 +946,8 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     flagged_legs: flaggedLegs,
     unmatched_legs: unmatchedLegs,
     resolved_via_closed_tickets: resolvedViaClosedTickets,
+    day_summaries: daySummaries,
+    history_comparison: historyComparison,
     needs_review: needsReview,
   };
 
