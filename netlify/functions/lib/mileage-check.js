@@ -772,8 +772,10 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   let matchedCount = 0;
   let totalClaimed = 0;
   let totalExpected = 0;
+  const flagMarkers = new Array(resolved.length).fill(null); // idx -> the flaggedLeg object pushed for that leg, or null
 
-  for (const { leg, fromPlace, toPlace } of resolved) {
+  for (let idx = 0; idx < resolved.length; idx++) {
+    const { leg, fromPlace, toPlace } = resolved[idx];
     totalClaimed += leg.claimedMiles;
     if ((fromPlace && fromPlace.type === 'errand') || (toPlace && toPlace.type === 'errand')) {
       unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'errand_stop' });
@@ -804,14 +806,43 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       if (ratio > MAX_RATIO || ratio < MIN_RATIO) reason = 'ratio_outlier';
     }
     if (reason) {
-      flaggedLegs.push({
+      const flaggedLeg = {
         date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw,
         claimedMiles: leg.claimedMiles,
         expectedMiles: Math.round(expected.miles * 10) / 10,
         expectedSource: expected.type,
         ratio: expected.miles > 0 ? Math.round((leg.claimedMiles / expected.miles) * 100) / 100 : null,
         reason,
-      });
+      };
+      flaggedLegs.push(flaggedLeg);
+      flagMarkers[idx] = flaggedLeg;
+    }
+  }
+
+  // 2026-09-26: flag a run of 3+ CONSECUTIVE same-day flagged legs
+  // distinctly from an isolated one -- per Mark's own reasoning, a
+  // cluster like this more often means the ASSUMED ORDER for that
+  // stretch of the day is off (e.g. a technician closing tickets out of
+  // sequence, which Pass 2's position-matching has no way to detect on
+  // its own and just quietly trusts) than that several individual
+  // mileage numbers all happened to be mistyped in the same short
+  // stretch. A single flag among otherwise-clean legs stays a plain
+  // "check this number" case. Deliberately bounded to the SAME day --
+  // two flags either side of a day boundary are unrelated events, not
+  // one ordering problem.
+  let runStart = null;
+  for (let idx = 0; idx <= flagMarkers.length; idx++) {
+    const marker = idx < flagMarkers.length ? flagMarkers[idx] : null;
+    const sameDayAsRunStart = runStart != null && marker && resolved[idx].leg.date === resolved[runStart].leg.date;
+    if (marker && (runStart == null || sameDayAsRunStart)) {
+      if (runStart == null) runStart = idx;
+    } else {
+      if (runStart != null && idx - runStart >= 3) {
+        for (let j = runStart; j < idx; j++) {
+          if (flagMarkers[j]) flagMarkers[j].cluster = true;
+        }
+      }
+      runStart = marker ? idx : null;
     }
   }
 
