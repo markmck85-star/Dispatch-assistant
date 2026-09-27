@@ -1,18 +1,12 @@
 /**
- * login.js — v2 — dispatcher-territories migration
+ * login.js — v3 — tech role for mileage log only
  *
- * Now authenticates against the Supabase `dispatchers` table instead of
- * the hardcoded USERS array. Adding/disabling a dispatcher is now a data
- * change (insert a row / flip `active`), not a code edit + deploy.
- *
- * Falls back to the old hardcoded array only if Supabase isn't configured
- * (mirrors the fallback pattern already used in get-locations.js), so a
- * Supabase outage doesn't lock everyone out of the app.
+ * Authenticates against dispatchers. New role: tech
+ * (mileage-log.html only; not dispatch or admin).
  */
 
 const { createClient } = require("@supabase/supabase-js");
 
-// Fallback only — used if SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY aren't set.
 const FALLBACK_USERS = [
   { username: "gina",  pin: "4084", states: ["GA", "NC", "SC"], role: "dispatcher" },
   { username: "admin", pin: "9602", states: ["GA", "NC", "SC", "FL"], role: "admin" },
@@ -51,7 +45,7 @@ exports.handler = async (event) => {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
       const { data, error } = await supabase
         .from("dispatchers")
-        .select("username, role, states, active")
+        .select("username, role, states, active, technician_id")
         .ilike("username", username)
         .eq("pin", pin)
         .eq("active", true)
@@ -67,11 +61,11 @@ exports.handler = async (event) => {
         ok: true,
         username: data.username,
         role:     data.role   || "dispatcher",
-        states:   data.states || []
+        states:   data.states || [],
+        technician_id: data.technician_id || null
       });
     } catch (err) {
       console.error("login.js: Supabase query failed, falling back to hardcoded users:", err.message);
-      // fall through to FALLBACK_USERS below
     }
   }
 
@@ -87,6 +81,7 @@ exports.handler = async (event) => {
     ok: true,
     username: user.username,
     role:     user.role   || "dispatcher",
-    states:   user.states || []
+    states:   user.states || [],
+    technician_id: null
   });
 };
