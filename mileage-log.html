@@ -27,8 +27,8 @@
   .dayhead { font-size:22px; font-weight:700; color:#fff; display:block; margin-bottom:6px; }
   input[type="date"] { font-size:18px; }
   .stop-row { display:flex; gap:8px; align-items:flex-end; }
-  .stop-row .grow { flex:1; min-width:0; }
-  .stop-row .odo { width:108px; flex-shrink:0; text-align:right; }
+  .stop-row .grow { flex:1 1 auto; min-width:0; max-width:calc(100% - 132px); }
+  .stop-row .odo { width:124px; flex-shrink:0; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
 </style>
 </head>
@@ -194,18 +194,28 @@ function homeStop() {
   };
 }
 
+function shortName(s) {
+  const aliases = (s.aliases || []).filter(a => a && a.length >= 4).sort((a,b) => a.length - b.length);
+  let n = (aliases[0] && aliases[0].length <= 28) ? aliases[0] : (s.name || '');
+  n = n.replace(/\s+County\s+/gi, ' ').replace(/\s+County$/i, '');
+  n = n.replace(/\s+Tag Office/gi, ' Tag');
+  n = n.replace(/\s+/g, ' ').trim();
+  return n || s.name;
+}
+
 function allStops() {
   if (!ctx) return [];
   const out = [homeStop()];
   const push = (s) => {
     const aliases = (s.aliases || []).join(' ');
+    const brief = shortName(s);
     out.push({
       kind: 'site',
       id: s.id,
       site_code: s.site_code,
-      picker: (s.site_code ? s.site_code + ' — ' : '') + s.name,
-      print: s.name,
-      search: (s.site_code + ' ' + s.name + ' ' + aliases + ' ' + (s.sst_name || '')).toLowerCase(),
+      picker: brief,
+      print: brief,
+      search: (s.site_code + ' ' + s.name + ' ' + aliases + ' ' + brief + ' ' + (s.sst_name || '')).toLowerCase(),
       usual: s.usual
     });
   };
@@ -237,8 +247,8 @@ function chooseStop(side, i) {
   } else {
     picked[side] = s;
   }
-  document.getElementById(side + 'Q').value = picked[side].picker;
-  document.getElementById(side + 'Picked').textContent = 'Using: ' + picked[side].picker;
+  document.getElementById(side + 'Q').value = picked[side].print || picked[side].picker;
+  document.getElementById(side + 'Picked').textContent = picked[side].picker !== picked[side].print ? picked[side].picker : '';
   box.style.display = 'none';
 }
 
