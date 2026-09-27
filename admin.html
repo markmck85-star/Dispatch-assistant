@@ -1331,7 +1331,10 @@
                     </label>
                 </div>
 
-                <div id="riStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+                    <div id="riStatus" style="flex:1; color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px;">Loading…</div>
+                    <button type="button" id="riPrintBtn" onclick="printRepeatIssues()" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">🖨️ Save as PDF</button>
+                </div>
                 <div id="riResults"></div>
             </div>
         </div>
@@ -2185,6 +2188,7 @@
             var filtered = all.filter(function(r) { return riGroupMatchesType(r, type); });
             var typeLabel = typeEl && typeEl.options[typeEl.selectedIndex] ? typeEl.options[typeEl.selectedIndex].text : 'All types';
 
+            window._riFiltered = filtered;
             if (!all.length) {
                 statusEl.textContent = 'No repeat issues found for this scope/window.';
                 resultsEl.innerHTML = '';
@@ -2239,6 +2243,92 @@
                         '</div>';
                 });
             resultsEl.innerHTML = html;
+        }
+
+        function printRepeatIssues() {
+            var all = window._riResults || [];
+            var typeEl = document.getElementById('riType');
+            var type = typeEl ? typeEl.value : 'all';
+            var filtered = window._riFiltered || all.filter(function(r) { return riGroupMatchesType(r, type); });
+            if (!filtered.length) {
+                alert('No repeat issues loaded to export yet.');
+                return;
+            }
+
+            var typeLabel = typeEl && typeEl.options[typeEl.selectedIndex] ? typeEl.options[typeEl.selectedIndex].text : 'All types';
+            var scopeEl = document.getElementById('riScope');
+            var daysEl = document.getElementById('riDays');
+            var minEl = document.getElementById('riMinCount');
+            var scope = scopeEl ? scopeEl.value : 'state';
+            var scopeLabel = (scope === 'all') ? 'All states' : ('State: ' + (typeof currentState !== 'undefined' && currentState ? currentState : '?'));
+            var days = daysEl ? daysEl.value : '90';
+            var minCount = minEl ? minEl.value : '3';
+            var generatedOn = new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+
+            var content = '<div class="print-header">' +
+                '<div class="print-title">Repeat Issues</div>' +
+                '<div class="print-date">Exported ' + generatedOn +
+                    ' · ' + filtered.length + ' site' + (filtered.length === 1 ? '' : 's') +
+                    ' · ' + scopeLabel +
+                    ' · ' + days + ' day window' +
+                    ' · ' + minCount + '+ tickets' +
+                    ' · ' + typeLabel +
+                '</div>' +
+            '</div>';
+
+            content += filtered.map(function(r) {
+                var firstDate = r.first_seen ? new Date(r.first_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '?';
+                var lastDate = r.last_seen ? new Date(r.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+                var ticketsHtml = (r.tickets || []).map(function(t) {
+                    var d = t.received_at ? new Date(t.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+                    var detail = t.issue_detail ? ' · ' + esc(t.issue_detail) : '';
+                    var desc = t.description ? '<div class="print-stop-addr" style="font-style:italic;">' + esc(t.description) + '</div>' : '';
+                    return '<div class="print-stop">' +
+                        '<div><strong>' + d + '</strong>' + detail + '</div>' +
+                        desc +
+                        (t.appointment_number ? '<div style="font-weight:600;">' + esc(t.appointment_number) + '</div>' : '') +
+                        (t.wo_number ? '<div class="print-stop-addr">WO ' + esc(t.wo_number) + '</div>' : '') +
+                    '</div>';
+                }).join('');
+                return '<div class="print-tech-section">' +
+                    '<div class="print-tech-header">' + esc(r.site_code) + ' — ' + esc(r.site_name) + '</div>' +
+                    '<div class="print-tech-sub"><strong>' + esc(r.issue_category) + '</strong> · ' + r.count + ' tickets · ' + esc(r.state) + ' · ' + firstDate + ' → ' + lastDate + '</div>' +
+                    ticketsHtml +
+                '</div>';
+            }).join('');
+
+            var docTitle = ('Repeat_Issues_' + scopeLabel + '_' + typeLabel + '_' + generatedOn)
+                .replace(/[^\w\s-]/g, '')
+                .replace(/\s+/g, '_');
+            var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+                '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+                '<title>' + docTitle + '</title>' +
+                '<style>' +
+                'body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; padding: 16px; font-size: 15px; color: #222; max-width: 700px; margin: 0 auto; }' +
+                '.print-btn { display: block; width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-bottom: 16px; cursor: pointer; }' +
+                '.print-header { margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px; }' +
+                '.print-title { font-size: 20px; font-weight: bold; }' +
+                '.print-date { font-size: 14px; color: #555; margin-top: 2px; }' +
+                '.print-tech-section { margin-bottom: 16px; border: 1px solid #ccc; border-radius: 6px; padding: 12px; page-break-inside: avoid; break-inside: avoid; }' +
+                '.print-tech-header { font-size: 16px; font-weight: bold; margin-bottom: 2px; }' +
+                '.print-tech-sub { font-size: 13px; color: #666; margin-bottom: 8px; }' +
+                '.print-stop { padding: 8px 0; border-bottom: 1px solid #eee; }' +
+                '.print-stop:last-child { border-bottom: none; }' +
+                '.print-stop-addr { font-size: 13px; color: #555; margin-top: 2px; }' +
+                '@media print { .print-btn { display: none; } body { padding: 0; } }' +
+                '</style></head><body>' +
+                '<button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>' +
+                content + '</body></html>';
+
+            var blob = new Blob([html], { type: 'text/html' });
+            var blobUrl = URL.createObjectURL(blob);
+            var printWin = window.open(blobUrl, '_blank');
+            if (!printWin) {
+                alert('Please allow popups to export this, or long-press the Save as PDF button and choose \"Open in new tab\".');
+                URL.revokeObjectURL(blobUrl);
+                return;
+            }
+            setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 10000);
         }
 
         async function loadRepeatIssues() {
