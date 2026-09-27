@@ -1316,6 +1316,19 @@
                             <option value="4">4+</option>
                         </select>
                     </label>
+                    <label style="flex:1; min-width:180px; margin:0;">
+                        <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Problem type</span>
+                        <select id="riType" onchange="renderRepeatIssues()" style="margin:0;">
+                            <option value="all" selected>All types</option>
+                            <option value="journal">Journal Printer</option>
+                            <option value="registration">Registration Printer</option>
+                            <option value="print_quality">Print Quality</option>
+                            <option value="connectivity">Connectivity</option>
+                            <option value="card">Card Reader</option>
+                            <option value="touchscreen">Touchscreen</option>
+                            <option value="cash">Cash (dispense / accept)</option>
+                        </select>
+                    </label>
                 </div>
 
                 <div id="riStatus" style="color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px; margin-bottom:12px;">Loading…</div>
@@ -2124,33 +2137,73 @@
         }
 
 
-        async function loadRepeatIssues() {
+        function riTicketMatchesType(category, ticket, type) {
+            var cat = (category || '').toLowerCase();
+            var detail = ((ticket && ticket.issue_detail) || '').toLowerCase();
+            var desc = ((ticket && ticket.description) || '').toLowerCase();
+            var blob = cat + ' ' + detail + ' ' + desc;
+            if (type === 'all' || !type) return true;
+            if (type === 'journal') return cat === 'journal printer';
+            if (type === 'registration') return cat === 'registration printer';
+            if (type === 'print_quality') {
+                return (cat === 'journal printer' || cat === 'registration printer') &&
+                    /print quality|ribbon|unable to print/.test(detail);
+            }
+            if (type === 'connectivity') {
+                return cat === 'offline' ||
+                    /connection failure|connection issue|power|cell modem|internal wiring|offline/.test(blob);
+            }
+            if (type === 'card') return cat === 'card reader';
+            if (type === 'touchscreen') return cat === 'touchscreen';
+            if (type === 'cash') return cat === 'cash dispenser' || cat === 'cash acceptor' || cat === 'coin dispenser';
+            return true;
+        }
+
+        function riGroupMatchesType(group, type) {
+            if (type === 'all' || !type) return true;
+            if (type === 'journal') return (group.issue_category || '') === 'Journal Printer';
+            if (type === 'registration') return (group.issue_category || '') === 'Registration Printer';
+            if (type === 'card') return (group.issue_category || '') === 'Card Reader';
+            if (type === 'touchscreen') return (group.issue_category || '') === 'Touchscreen';
+            if (type === 'cash') {
+                var c = group.issue_category || '';
+                return c === 'Cash Dispenser' || c === 'Cash Acceptor' || c === 'Coin Dispenser';
+            }
+            var tickets = group.tickets || [];
+            for (var i = 0; i < tickets.length; i++) {
+                if (riTicketMatchesType(group.issue_category, tickets[i], type)) return true;
+            }
+            return false;
+        }
+
+        function renderRepeatIssues() {
             var statusEl = document.getElementById('riStatus');
             var resultsEl = document.getElementById('riResults');
-            var scope = document.getElementById('riScope').value;
-            var days = document.getElementById('riDays').value;
-            var minCount = document.getElementById('riMinCount').value;
+            var all = window._riResults || [];
+            var typeEl = document.getElementById('riType');
+            var type = typeEl ? typeEl.value : 'all';
+            var filtered = all.filter(function(r) { return riGroupMatchesType(r, type); });
+            var typeLabel = typeEl && typeEl.options[typeEl.selectedIndex] ? typeEl.options[typeEl.selectedIndex].text : 'All types';
 
-            statusEl.textContent = 'Loading…';
-            resultsEl.innerHTML = '';
+            if (!all.length) {
+                statusEl.textContent = 'No repeat issues found for this scope/window.';
+                resultsEl.innerHTML = '';
+                return;
+            }
+            if (!filtered.length) {
+                statusEl.textContent = '0 of ' + all.length + ' flagged site' + (all.length === 1 ? '' : 's') + ' match “' + typeLabel + '”.';
+                resultsEl.innerHTML = '';
+                return;
+            }
+            if (type === 'all') {
+                statusEl.textContent = all.length + ' site' + (all.length === 1 ? '' : 's') + ' flagged.';
+            } else {
+                statusEl.textContent = filtered.length + ' of ' + all.length + ' flagged site' + (all.length === 1 ? '' : 's') + ' — ' + typeLabel + '.';
+            }
 
-            var url = '/.netlify/functions/get-repeat-issues?days=' + encodeURIComponent(days) + '&minCount=' + encodeURIComponent(minCount);
-            if (scope === 'state' && currentState) url += '&state=' + encodeURIComponent(currentState);
-
-            try {
-                var res = await fetch(url, { cache: 'no-store' });
-                var data = await res.json();
-                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-
-                if (!data.results.length) {
-                    statusEl.textContent = 'No repeat issues found for this scope/window.';
-                    return;
-                }
-                statusEl.textContent = data.results.length + ' site' + (data.results.length === 1 ? '' : 's') + ' flagged.';
-
-                var html = '';
-                window._riTicketNotes = [];
-                data.results.forEach(function(r) {
+            var html = '';
+            window._riTicketNotes = [];
+            filtered.forEach(function(r) {
                     var firstDate = r.first_seen ? new Date(r.first_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '?';
                     var lastDate = r.last_seen ? new Date(r.last_seen).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
                     var ticketsHtml = r.tickets.map(function(t) {
@@ -2185,7 +2238,29 @@
                         ticketsHtml +
                         '</div>';
                 });
-                resultsEl.innerHTML = html;
+            resultsEl.innerHTML = html;
+        }
+
+        async function loadRepeatIssues() {
+            var statusEl = document.getElementById('riStatus');
+            var resultsEl = document.getElementById('riResults');
+            var scope = document.getElementById('riScope').value;
+            var days = document.getElementById('riDays').value;
+            var minCount = document.getElementById('riMinCount').value;
+
+            statusEl.textContent = 'Loading…';
+            resultsEl.innerHTML = '';
+            window._riResults = [];
+
+            var url = '/.netlify/functions/get-repeat-issues?days=' + encodeURIComponent(days) + '&minCount=' + encodeURIComponent(minCount);
+            if (scope === 'state' && currentState) url += '&state=' + encodeURIComponent(currentState);
+
+            try {
+                var res = await fetch(url, { cache: 'no-store' });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                window._riResults = data.results || [];
+                renderRepeatIssues();
             } catch (e) {
                 statusEl.textContent = 'Error loading repeat issues: ' + e.message;
             }
