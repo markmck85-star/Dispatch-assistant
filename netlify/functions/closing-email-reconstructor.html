@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Closing Notes — MCR Dispatch</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 16px;
+        background: #14161a; color: #e8e8e8;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .subtitle { color: #9aa0a6; font-size: 14px; margin-bottom: 18px; }
+    a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; }
+    .filters {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 14px; margin: 16px 0;
+    }
+    .filters label { font-size: 13px; color: #b8bcc2; }
+    select, input[type=text] {
+        background: #14161a; color: #e8e8e8; border: 1px solid #3a3e46;
+        border-radius: 6px; padding: 8px 10px; font-size: 14px;
+    }
+    .search-wrap { position: relative; flex: 1; min-width: 220px; }
+    .results-dropdown {
+        position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+        background: #1e2126; border: 1px solid #3a3e46; border-top: none;
+        border-radius: 0 0 8px 8px; max-height: 320px; overflow-y: auto;
+        display: none;
+    }
+    .results-dropdown.open { display: block; }
+    .result-row { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #22252b; font-size: 13.5px; }
+    .result-row:hover, .result-row.active { background: #262a31; }
+    .result-row .code { color: #6cb2ff; font-weight: 600; margin-right: 8px; }
+    .result-row .state-tag {
+        display: inline-block; font-size: 11px; font-weight: 700; color: #7ec4ff;
+        background: #24303f; padding: 1px 6px; border-radius: 4px; margin-right: 8px;
+    }
+    .card {
+        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        padding: 18px; margin-top: 18px;
+    }
+    .card h2 { font-size: 18px; margin: 0 0 4px; }
+    .card .meta { color: #9aa0a6; font-size: 13px; margin-bottom: 14px; }
+    h3.section-label { font-size: 13px; color: #b8bcc2; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .visit-row {
+        padding: 10px 12px; border-bottom: 1px solid #22252b; font-size: 13.5px;
+        cursor: pointer; border-radius: 6px;
+    }
+    .visit-row:hover { background: #262a31; }
+    .visit-row:last-child { border-bottom: none; }
+    .visit-row.no-note { cursor: not-allowed; opacity: 0.45; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #c7cad1; }
+    .muted { color: #7a7f87; }
+    .note-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+    .note-badge.yes { color: #7edb8e; background: #16321f; }
+    .note-badge.no { color: #7a7f87; background: #24272d; }
+    .empty-state, .loading { text-align: center; color: #7a7f87; padding: 20px 0; }
+    textarea#emailOutput {
+        width: 100%; min-height: 380px; background: #14161a; color: #e8e8e8;
+        border: 1px solid #3a3e46; border-radius: 8px; padding: 12px; font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.5; resize: vertical;
+    }
+    input#subjectOutput {
+        width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; margin-bottom: 8px;
+    }
+    button.primary-btn {
+        background: #2e7d5b; color: #fff; border: none; border-radius: 6px;
+        padding: 10px 16px; font-size: 14px; cursor: pointer; margin-top: 10px;
+    }
+    button.secondary-btn {
+        background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px;
+        padding: 10px 16px; font-size: 14px; cursor: pointer; margin-top: 10px; margin-left: 8px;
+    }
+</style>
+</head>
+<body>
+    <a href="/" class="back-link">← Back to Dispatch Tool</a>
+    <h1>📝 Closing Notes</h1>
+
+    <div class="filters">
+        <label>State:</label>
+        <select id="stateFilter"><option value="">All states</option></select>
+        <div class="search-wrap">
+            <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off" style="padding-right:32px;">
+            <button type="button" id="searchClearBtn" aria-label="Clear search" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#888;font-size:18px;line-height:1;cursor:pointer;padding:4px;">✕</button>
+            <div class="results-dropdown" id="resultsDropdown"></div>
+        </div>
+    </div>
+    <div class="filters" id="dateFilters">
+        <label>Date:</label>
+        <input type="date" id="dateSingle">
+        <button type="button" id="useRangeBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Use a range instead</button>
+        <span id="rangeInputs" style="display:none;gap:10px;align-items:center;">
+            <label>From:</label>
+            <input type="date" id="dateFrom">
+            <label>To:</label>
+            <input type="date" id="dateTo">
+        </span>
+        <button type="button" id="clearDateBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear date filter</button>
+        <label>Technician:</label>
+        <select id="techFilter"><option value="">All technicians</option></select>
+    </div>
+    <div class="filters">
+        <label>Search notes:</label>
+        <div class="search-wrap" style="min-width:280px;">
+            <input type="text" id="noteSearchInput" placeholder="Search closing note text…" autocomplete="off">
+        </div>
+        <button type="button" id="clearNoteSearchBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear</button>
+    </div>
+
+    <div id="output"></div>
+    <div id="emailCard"></div>
+
+<script>
+let allSites = [];
+let filteredResults = [];
+let siteVisits = [];
+
+const stateFilter = document.getElementById('stateFilter');
+const searchInput = document.getElementById('searchInput');
+const resultsDropdown = document.getElementById('resultsDropdown');
+const output = document.getElementById('output');
+const emailCard = document.getElementById('emailCard');
+const dateSingle = document.getElementById('dateSingle');
+const dateFrom = document.getElementById('dateFrom');
+const dateTo = document.getElementById('dateTo');
+const rangeInputs = document.getElementById('rangeInputs');
+const useRangeBtn = document.getElementById('useRangeBtn');
+const clearDateBtn = document.getElementById('clearDateBtn');
+const techFilter = document.getElementById('techFilter');
+const noteSearchInput = document.getElementById('noteSearchInput');
+const clearNoteSearchBtn = document.getElementById('clearNoteSearchBtn');
+let useRange = false;
+let noteSearchDebounce = null;
+
+useRangeBtn.addEventListener('click', () => {
+    useRange = !useRange;
+    rangeInputs.style.display = useRange ? 'flex' : 'none';
+    dateSingle.style.display = useRange ? 'none' : '';
+    useRangeBtn.textContent = useRange ? 'Use a single day instead' : 'Use a range instead';
+    runSearch();
+});
+clearDateBtn.addEventListener('click', () => {
+    dateSingle.value = ''; dateFrom.value = ''; dateTo.value = '';
+    runSearch();
+});
+dateSingle.addEventListener('change', runSearch);
+dateFrom.addEventListener('change', runSearch);
+dateTo.addEventListener('change', runSearch);
+techFilter.addEventListener('change', runSearch);
+noteSearchInput.addEventListener('input', () => {
+    clearTimeout(noteSearchDebounce);
+    noteSearchDebounce = setTimeout(runSearch, 350);
+});
+clearNoteSearchBtn.addEventListener('click', () => {
+    noteSearchInput.value = '';
+    runSearch();
+});
+
+async function loadTechsForState(state) {
+    techFilter.innerHTML = '<option value="">All technicians</option>';
+    if (!state) return;
+    try {
+        const res = await fetch(`/.netlify/functions/get-state-techs?state=${encodeURIComponent(state)}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        for (const t of (data.techs || [])) {
+            const opt = document.createElement('option');
+            opt.value = t; opt.textContent = t;
+            techFilter.appendChild(opt);
+        }
+    } catch (err) {
+        // Non-fatal -- feed still works with "All technicians" if this fails.
+    }
+}
+
+function currentDateFilter() {
+    if (useRange) return { from: dateFrom.value || null, to: dateTo.value || null };
+    return { date: dateSingle.value || null };
+}
+function dateFilterQueryString() {
+    const f = currentDateFilter();
+    const parts = [];
+    if (f.date) parts.push('date=' + encodeURIComponent(f.date));
+    if (f.from) parts.push('from=' + encodeURIComponent(f.from));
+    if (f.to) parts.push('to=' + encodeURIComponent(f.to));
+    if (techFilter.value) parts.push('tech=' + encodeURIComponent(techFilter.value));
+    const noteQ = noteSearchInput.value.trim();
+    if (noteQ) parts.push('q=' + encodeURIComponent(noteQ));
+    return parts.length ? '&' + parts.join('&') : '';
+}
+
+// Short context window around the first match of `q` inside a closing
+// note, so a search-results row shows *why* it matched instead of just
+// the "Note captured" badge.
+function noteSnippet(note, q) {
+    const idx = note.toLowerCase().indexOf(q.toLowerCase());
+    if (idx === -1) return escapeHtml(note.slice(0, 120));
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(note.length, idx + q.length + 60);
+    const before = escapeHtml(note.slice(start, idx));
+    const match = escapeHtml(note.slice(idx, idx + q.length));
+    const after = escapeHtml(note.slice(idx + q.length, end));
+    return `${before}<strong style="color:#e8c46c;">${match}</strong>${after}`;
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function loadSites() {
+    output.innerHTML = '<div class="loading">Loading site list…</div>';
+    try {
+        const res = await fetch('/.netlify/functions/get-site-list');
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        allSites = data.sites || [];
+        const states = [...new Set(allSites.map(s => s.state))].sort();
+        for (const st of states) {
+            const opt = document.createElement('option');
+            opt.value = st; opt.textContent = st;
+            stateFilter.appendChild(opt);
+        }
+        output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Search above, then pick a visit with a captured closing note.</div>`;
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading site list: ${err.message}</div>`;
+    }
+}
+loadSites();
+
+function runSearch() {
+    const q = searchInput.value.trim().toLowerCase();
+    const st = stateFilter.value;
+    // Same "picking a suggestion fills the whole box" annoyance Location
+    // Lookup's search had -- same fix, same reasoning, applied here too.
+    searchClearBtn.style.display = searchInput.value ? 'block' : 'none';
+    if (!q) {
+        resultsDropdown.classList.remove('open'); resultsDropdown.innerHTML = '';
+        emailCard.innerHTML = '';
+        if (st || noteSearchInput.value.trim()) {
+            loadStateFeed(st, 0);
+        } else {
+            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to browse recent visits, or search above.</div>`;
+        }
+        return;
+    }
+    filteredResults = allSites.filter(s =>
+        (!st || s.state === st) &&
+        ((s.name || '').toLowerCase().includes(q) || (s.site_code || '').toLowerCase().includes(q))
+    ).slice(0, 30);
+    if (!filteredResults.length) {
+        resultsDropdown.innerHTML = '<div class="result-row muted">No matching sites</div>';
+        resultsDropdown.classList.add('open');
+        return;
+    }
+    resultsDropdown.innerHTML = filteredResults.map((s, i) =>
+        `<div class="result-row" data-i="${i}"><span class="state-tag">${escapeHtml(s.state)}</span><span class="code">${escapeHtml(s.site_code || '')}</span>${escapeHtml(s.name)}</div>`
+    ).join('');
+    resultsDropdown.classList.add('open');
+    resultsDropdown.querySelectorAll('.result-row[data-i]').forEach(row => {
+        row.addEventListener('click', () => selectSite(filteredResults[+row.dataset.i]));
+    });
+}
+searchInput.addEventListener('input', runSearch);
+const searchClearBtn = document.getElementById('searchClearBtn');
+searchClearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    runSearch();
+    searchInput.focus();
+});
+stateFilter.addEventListener('change', async () => {
+    await loadTechsForState(stateFilter.value);
+    runSearch();
+});
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-wrap')) resultsDropdown.classList.remove('open');
+});
+
+let feedState = null; // { state, visits, hasMore, total }
+
+async function loadStateFeed(state, offset) {
+    if (offset === 0) output.innerHTML = '<div class="loading">Loading recent visits…</div>';
+    try {
+        const res = await fetch(`/.netlify/functions/get-recent-visits?state=${encodeURIComponent(state)}&offset=${offset}${dateFilterQueryString()}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        const techWanted = (techFilter.value || '').trim().toLowerCase();
+        const incoming = (data.visits || []).filter(v => {
+            if (!techWanted) return true;
+            return String(v.tech_name_raw || '').trim().toLowerCase() === techWanted;
+        });
+        if (offset === 0) {
+            feedState = { state, visits: incoming, hasMore: data.hasMore, total: data.total, tech: techFilter.value || '' };
+        } else {
+            feedState.visits = feedState.visits.concat(incoming);
+            feedState.hasMore = data.hasMore;
+        }
+        renderStateFeed();
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading visits: ${err.message}</div>`;
+    }
+}
+
+async function loadMoreStateFeed() {
+    const btn = document.getElementById('loadMoreFeedBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    await loadStateFeed(feedState.state, feedState.visits.length);
+}
+
+function renderStateFeed() {
+    const scopeLabel = feedState.state || 'All States';
+    const techLabel = feedState.tech ? ' · ' + feedState.tech : '';
+    if (!feedState.visits.length) {
+        output.innerHTML = `<div class="empty-state">No visits found for ${escapeHtml(scopeLabel)}${escapeHtml(techLabel)}${noteSearchInput.value.trim() ? ` matching "${escapeHtml(noteSearchInput.value.trim())}"` : ''}${dateFilterQueryString() ? ' in that date range' : ''}.</div>`;
+        return;
+    }
+    let html = `<div class="card"><h3 class="section-label">Recent Visits — ${escapeHtml(scopeLabel)}${feedState.tech ? ' · ' + escapeHtml(feedState.tech) : ''}${feedState.total != null ? ` (${feedState.total} total)` : ''}</h3>`;
+    html += feedState.visits.map((v, i) => {
+        const dateSource = v.started_at || v.ended_at;
+        const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+        const hasNote = !!v.closing_note;
+        const q = noteSearchInput.value.trim();
+        const snippet = (q && v.closing_note) ? noteSnippet(v.closing_note, q) : '';
+        const preview = (!q && hasNote) ? escapeHtml(String(v.closing_note).trim().slice(0, 160)) + (v.closing_note.length > 160 ? '…' : '') : '';
+        return `<div class="visit-row${hasNote ? '' : ' no-note'}">
+            <div ${hasNote ? `onclick="viewClosingNoteFromFeed(${i})"` : ''}>
+            <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')} · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span>
+            ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
+            <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+            </div>
+            ${snippet ? `<div class="muted" style="margin-top:4px;font-size:12.5px;">…${snippet}…</div>` : (preview ? `<div class="muted" style="margin-top:6px;font-size:12.5px;white-space:pre-wrap;">${preview}</div>` : '')}
+            ${hasNote ? `<div style="margin-top:8px;">
+                <button type="button" class="secondary-btn" style="margin:0 8px 0 0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();viewClosingNoteFromFeed(${i})">View note</button>
+                <button type="button" class="secondary-btn" style="margin:0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();generateEmailFromFeed(${i})">Reconstruct email</button>
+            </div>` : ''}
+        </div>`;
+    }).join('');
+    if (feedState.hasMore) {
+        html += `<button id="loadMoreFeedBtn" style="width:100%;margin-top:10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;" onclick="loadMoreStateFeed()">Load 50 more${feedState.total != null ? ` (${feedState.total - feedState.visits.length} remaining)` : ''}</button>`;
+    }
+    html += `</div>`;
+    output.innerHTML = html;
+}
+
+function generateEmailFromFeed(i) {
+    generateEmailFromVisit(feedState.visits[i], feedState.visits[i].site_name || '');
+}
+
+let historyState = null; // { site, visits, hasMore, totalVisits }
+
+async function selectSite(site) {
+    searchInput.value = site.name;
+    resultsDropdown.classList.remove('open');
+    emailCard.innerHTML = '';
+    output.innerHTML = '<div class="loading">Loading visit history…</div>';
+    try {
+        const res = await fetch(`/.netlify/functions/get-site-history?code=${encodeURIComponent(site.site_code)}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        historyState = {
+            site,
+            visits: data.visits || [],
+            hasMore: !!data.hasMore,
+            totalVisits: data.totalVisits,
+        };
+        siteVisits = historyState.visits;
+        renderVisitList();
+    } catch (err) {
+        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading history: ${err.message}</div>`;
+    }
+}
+
+async function loadMoreHistory() {
+    if (!historyState || !historyState.site) return;
+    const btn = document.getElementById('loadMoreHistoryBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+        const res = await fetch(`/.netlify/functions/get-site-history?code=${encodeURIComponent(historyState.site.site_code)}&offset=${historyState.visits.length}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        historyState.visits = historyState.visits.concat(data.visits || []);
+        historyState.hasMore = !!data.hasMore;
+        historyState.totalVisits = data.totalVisits;
+        siteVisits = historyState.visits;
+        renderVisitList();
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Error loading more — tap to retry'; }
+    }
+}
+
+function renderVisitList() {
+    const site = historyState.site;
+    const visits = historyState.visits;
+    let html = `<div class="card">
+        <h2>${escapeHtml(site.name)}</h2>
+        <div class="meta">${escapeHtml(site.state)} · ${escapeHtml(site.site_code || '')}${historyState.totalVisits != null ? ` · ${historyState.totalVisits} visits` : ''}</div>
+        <h3 class="section-label">Visit notes</h3>`;
+    if (!visits.length) {
+        html += '<div class="empty-state">No visit history for this site yet.</div>';
+    } else {
+        html += visits.map((v, i) => {
+            const dateSource = v.started_at || v.ended_at;
+            const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+            const hasNote = !!(v.closing_note && String(v.closing_note).trim());
+            const preview = hasNote ? escapeHtml(String(v.closing_note).trim().slice(0, 180)) + (v.closing_note.length > 180 ? '…' : '') : '';
+            return `<div class="visit-row${hasNote ? '' : ' no-note'}">
+                <div onclick="${hasNote ? `viewClosingNote(${i})` : ''}">
+                    <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')}
+                    ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
+                    <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+                </div>
+                ${preview ? `<div class="muted" style="margin-top:6px;font-size:12.5px;white-space:pre-wrap;line-height:1.4;">${preview}</div>` : ''}
+                ${hasNote ? `<div style="margin-top:8px;">
+                    <button type="button" class="secondary-btn" style="margin:0 8px 0 0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();viewClosingNote(${i})">View note</button>
+                    <button type="button" class="secondary-btn" style="margin:0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();generateEmail(${i})">Reconstruct email</button>
+                </div>` : ''}
+            </div>`;
+        }).join('');
+    }
+    if (historyState.hasMore) {
+        html += `<button id="loadMoreHistoryBtn" style="width:100%;margin-top:10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;" onclick="loadMoreHistory()">Load more visits${historyState.totalVisits != null ? ` (${historyState.totalVisits - historyState.visits.length} remaining)` : ''}</button>`;
+    }
+    html += `</div>`;
+    output.innerHTML = html;
+}
+
+function viewClosingNote(i) {
+    const v = (historyState && historyState.visits[i]) || siteVisits[i] || (feedState && feedState.visits[i]);
+    if (!v || !v.closing_note) return;
+    showNoteOverlay(v);
+}
+
+function viewClosingNoteFromFeed(i) {
+    const v = feedState && feedState.visits[i];
+    if (!v || !v.closing_note) return;
+    showNoteOverlay(v);
+}
+
+function showNoteOverlay(v) {
+    let overlay = document.getElementById('closingNoteOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'closingNoteOverlay';
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+    }
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;height:100dvh;background:rgba(0,0,0,0.55);z-index:2147483000;display:flex;align-items:flex-start;justify-content:center;padding:10px;padding-top:max(10px,env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
+    document.body.appendChild(overlay);
+    overlay.scrollTop = 0;
+    const dateSource = v.started_at || v.ended_at;
+    const date = dateSource ? new Date(dateSource).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    overlay.innerHTML = `<div style="background:#fff;color:#1a1a1a;border-radius:10px;max-width:640px;width:100%;max-height:calc(100dvh - 20px);overflow:auto;padding:18px 16px 20px;position:relative;box-sizing:border-box;">
+        <button type="button" onclick="document.getElementById('closingNoteOverlay').style.display='none'" style="position:absolute;top:10px;right:10px;border:none;background:#eee;border-radius:16px;width:32px;height:32px;font-size:18px;cursor:pointer;">×</button>
+        <div style="font-weight:700;font-size:16px;margin-bottom:4px;padding-right:28px;">✏️ Closing Note</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px;">${escapeHtml(date)} · ${escapeHtml(v.tech_name_raw || '')}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>
+        <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">${escapeHtml(v.closing_note)}</div>
+    </div>`;
+}
+
+function fmtDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+function fmtTime(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+// Fields with no current data source (Component, Contact, Issue, Travel
+// Time, Mileage, PCI/rogue-device/card-reader) are omitted entirely per
+// Mark's call, rather than shown blank -- only fields we actually have
+// data for appear in the reconstructed email.
+function generateEmail(i) {
+    generateEmailFromVisit(siteVisits[i], searchInput.value);
+}
+
+function generateEmailFromVisit(v, locationLabel) {
+    const subject = `ITI Technician Service Response - Ticket #${v.wo_number || '?'} from ${v.tech_name_raw || 'Unknown'} (TW)`;
+    const lines = [
+        `Service Call Date: ${fmtDate(v.started_at)}`,
+        `Technician: ${v.tech_name_raw || ''}`,
+        `Location: ${locationLabel}`,
+        `Ticket Number: ${v.wo_number || ''}`,
+        `Call Type: ${v.remediation || ''}${v.remediation_detail ? ' — ' + v.remediation_detail : ''}`,
+        `Status: CLOSED`,
+        ``,
+        `Resolution and Notes:`,
+        v.closing_note || '',
+        ``,
+        `Arrival Time: ${fmtTime(v.started_at)}`,
+        `End Time: ${fmtTime(v.ended_at)}`
+    ];
+    emailCard.innerHTML = `<div class="card">
+        <h3 class="section-label">Reconstructed Closing Email</h3>
+        <div class="meta">Editable before sending — this is a best-effort reconstruction from captured data, not the original Neumo email.</div>
+        <input type="text" id="subjectOutput" value="${escapeHtml(subject)}">
+        <textarea id="emailOutput">${escapeHtml(lines.join('\n'))}</textarea>
+        <div>
+            <button class="primary-btn" onclick="copyEmail()">📋 Copy Body</button>
+            <button class="secondary-btn" onclick="copySubject()">Copy Subject</button>
+        </div>
+        <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select id="closingEmailRecipient" style="padding:8px; border-radius:4px; background:#181818; color:#eee; border:1px solid #444;">
+                <option value="">-- Select recipient --</option>
+                <option value="gownby@mcrtechservice.com">Gina Ownbey</option>
+                <option value="mckelvey@mcrtechservice.com">Mark McKelvey</option>
+                <option value="ccaroen@mcrtechservice.com">Caleb Caroen</option>
+                <option value="jhaines@mcrtechservice.com">Justin Haines</option>
+                <option value="pgerhart@mcrtechservice.com">Rich Gerhart</option>
+                <option value="tkadri@mcrtechservice.com">TJ Kadri</option>
+            </select>
+            <button class="primary-btn" onclick="sendClosingEmail()">✉️ Send Email</button>
+        </div>
+        <div id="copyStatus" class="muted" style="margin-top:8px;font-size:12px;"></div>
+    </div>`;
+    emailCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 2026-09-12: recipient list is a short, hand-maintained set of dispatchers
+// (per Mark) rather than pulled from the technicians table -- TJ isn't a
+// technician record at all (he's Director of Operations, not field/dispatch
+// staff), so a DB-driven list would need a separate lookup anyway for just
+// one extra name. Add a line here if another dispatcher needs to be
+// reachable from this dropdown.
+async function sendClosingEmail() {
+    const recipient = document.getElementById('closingEmailRecipient').value;
+    const statusEl = document.getElementById('copyStatus');
+    if (!recipient) {
+        statusEl.textContent = 'Pick a recipient first.';
+        return;
+    }
+    const subject = document.getElementById('subjectOutput').value;
+    const body = document.getElementById('emailOutput').value;
+    statusEl.textContent = 'Sending...';
+    try {
+        const resp = await fetch('/.netlify/functions/send-sms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: recipient, subject, body })
+        });
+        const data = await resp.json();
+        statusEl.textContent = (resp.ok && data.ok) ? `Sent to ${recipient}.` : 'Send failed — try Copy Body/Subject instead.';
+    } catch (e) {
+        statusEl.textContent = 'Send failed — try Copy Body/Subject instead.';
+    }
+}
+
+async function copyEmail() {
+    const el = document.getElementById('emailOutput');
+    try {
+        await navigator.clipboard.writeText(el.value);
+        document.getElementById('copyStatus').textContent = 'Body copied.';
+    } catch {
+        el.select();
+        document.getElementById('copyStatus').textContent = 'Select-and-copy manually (clipboard access blocked).';
+    }
+}
+async function copySubject() {
+    const el = document.getElementById('subjectOutput');
+    try {
+        await navigator.clipboard.writeText(el.value);
+        document.getElementById('copyStatus').textContent = 'Subject copied.';
+    } catch {
+        el.select();
+        document.getElementById('copyStatus').textContent = 'Select-and-copy manually (clipboard access blocked).';
+    }
+}
+</script>
+</body>
+</html>

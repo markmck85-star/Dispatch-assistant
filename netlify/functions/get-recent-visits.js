@@ -79,7 +79,7 @@ exports.handler = async (event) => {
       if (params.to) query = query.lte('started_at', `${params.to}T23:59:59`);
     }
     if (params.tech) {
-      query = query.eq('tech_name_raw', params.tech);
+      query = query.ilike('tech_name_raw', params.tech.trim());
     }
 
     const { data, error, count } = await query;
