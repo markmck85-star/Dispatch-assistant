@@ -8,52 +8,67 @@
     * { box-sizing: border-box; }
     body {
         margin: 0; padding: 16px;
-        background: #14161a; color: #e8e8e8;
+        background: #f3f5f8; color: #1f2933;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    .subtitle { color: #9aa0a6; font-size: 14px; margin-bottom: 18px; }
-    a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; }
+    h1 { font-size: 22px; margin: 0 0 4px; color: #1f3a5f; }
+    .subtitle { color: #6b7785; font-size: 14px; margin-bottom: 18px; }
+    a.back-link { color: #1a56a8; text-decoration: none; font-size: 14px; font-weight: 600; }
+    a.back-link:hover { text-decoration: underline; }
     .filters {
         display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(16,24,40,0.06);
         padding: 14px; margin: 16px 0;
     }
-    .filters label { font-size: 13px; color: #b8bcc2; }
+    .filters label { font-size: 13px; color: #52606d; font-weight: 600; }
     select, input[type=text] {
-        background: #14161a; color: #e8e8e8; border: 1px solid #3a3e46;
+        background: #ffffff; color: #1f2933; border: 1px solid #c5cdd8;
         border-radius: 6px; padding: 8px 10px; font-size: 14px;
     }
+    select:focus, input[type=text]:focus {
+        outline: none; border-color: #1a56a8; box-shadow: 0 0 0 2px rgba(26,86,168,0.15);
+    }
     .toggle-btn {
-        background: #2a2d33; color: #e8e8e8; border: 1px solid #3a3e46;
-        border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+        background: #ffffff; color: #1f3a5f; border: 1px solid #c5cdd8;
+        border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
     }
-    .toggle-btn.active { background: #7a3b1e; border-color: #c9601f; color: #ffd7b0; }
-    .toggle-btn:hover { filter: brightness(1.15); }
-    table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 14px; }
+    .toggle-btn:hover { background: #f3f5f8; }
+    .toggle-btn.active { background: #9b3b3b; border-color: #9b3b3b; color: #ffffff; }
+    .toggle-btn.active:hover { background: #832f2f; }
+
+    /* Table sits in a white card and scrolls sideways on narrow screens
+       instead of squeezing nine columns together. */
+    #content {
+        background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(16,24,40,0.06);
+        overflow-x: auto;
+    }
+    table { width: 100%; min-width: 900px; border-collapse: collapse; margin-top: 0; font-size: 14px; }
     th {
-        text-align: left; padding: 10px 12px; color: #9aa0a6; font-weight: 600;
-        border-bottom: 2px solid #2c2f36; position: sticky; top: 0; background: #14161a;
+        text-align: left; padding: 10px 12px; color: #ffffff; font-weight: 600; font-size: 13px;
+        border-bottom: 1px solid #435063; position: sticky; top: 0; background: #2b3644;
     }
-    td { padding: 10px 12px; border-bottom: 1px solid #22252b; vertical-align: top; }
-    tr:hover td { background: #1a1d22; }
+    td { padding: 10px 12px; border-bottom: 1px solid #e3e8ee; vertical-align: top; }
+    tr:hover td { background: #f8fafc; }
     .badge {
         display: inline-block; padding: 3px 9px; border-radius: 999px;
-        font-size: 12px; font-weight: 600;
+        font-size: 12px; font-weight: 600; color: #ffffff;
     }
-    .badge.state { background: #24303f; color: #7ec4ff; }
-    .badge.return-needed { background: #4a2020; color: #ff9a9a; }
-    .badge.returned { background: #1f3a24; color: #7edb8e; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #c7cad1; }
-    .muted { color: #7a7f87; }
+    .badge.state { background: #2f5f8f; }
+    .badge.return-needed { background: #9b3b3b; }
+    .badge.returned { background: #3d7a4a; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #3e4c59; }
+    .muted { color: #6b7785; }
     .action-btn {
-        background: #1f3a24; color: #7edb8e; border: 1px solid #2e5a37;
-        border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+        background: #3d7a4a; color: #ffffff; border: 1px solid #3d7a4a;
+        border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
     }
-    .action-btn.undo { background: #2a2d33; color: #b8bcc2; border-color: #3a3e46; }
-    .action-btn:hover { filter: brightness(1.2); }
-    .empty-state { text-align: center; color: #7a7f87; padding: 40px 0; }
-    .loading { text-align: center; color: #7a7f87; padding: 30px 0; }
+    .action-btn:hover { background: #2f6039; }
+    .action-btn.undo { background: #ffffff; color: #3e4c59; border-color: #c5cdd8; }
+    .action-btn.undo:hover { background: #f3f5f8; }
+    .empty-state { text-align: center; color: #6b7785; padding: 40px 0; }
+    .loading { text-align: center; color: #6b7785; padding: 30px 0; }
     .req-details { max-width: 260px; white-space: pre-wrap; }
 </style>
 </head>
@@ -239,7 +254,7 @@ function render() {
         const stateBadge = s.state ? `<span class="badge state">${s.state}</span>` : '';
         const siteLabel = s.siteCode || s.accountName || '<span class="muted">—</span>';
         const techLabel = s.technicianName || (s.warehouseName ? `<span class="muted">${s.warehouseName}</span>` : '<span class="muted">—</span>');
-        const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#5b9dd9;">${num}</a>`;
+        const upsLink = (num) => `<a href="https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(num)}" target="_blank" rel="noopener" style="color:#1a56a8;">${num}</a>`;
         const outT = s.outboundTracking ? `<div class="mono" style="margin-bottom:6px;"><span class="muted" style="font-family:inherit;">Out:</span> ${upsLink(s.outboundTracking)}</div>` : '';
         const inT = s.inboundTracking ? `<div class="mono"><span class="muted" style="font-family:inherit;">In:</span> ${upsLink(s.inboundTracking)}</div>` : '';
         let returnCell = '<span class="muted">—</span>';
@@ -262,7 +277,7 @@ function render() {
         const emailId = s.dispatchInboundEmailId || s.shipmentInboundEmailId || null;
         const woCell = s.woNumber
             ? (emailId
-                ? `<button onclick="viewSourceEmail('${emailId}')" style="background:none;border:none;padding:0;color:#5b9dd9;font-weight:600;text-decoration:underline;cursor:pointer;font-size:inherit;font-family:inherit;">${s.woNumber}</button>`
+                ? `<button onclick="viewSourceEmail('${emailId}')" style="background:none;border:none;padding:0;color:#1a56a8;font-weight:600;text-decoration:underline;cursor:pointer;font-size:inherit;font-family:inherit;">${s.woNumber}</button>`
                 : s.woNumber)
             : '';
         html += `<tr>
