@@ -887,13 +887,17 @@
                     continue;
                 }
 
-                // Extract date
-                const dateMatch = window.match(dateRe);
-                if (!dateMatch) continue;
+                // Extract date — LAST M/D/YYYY in the row is Restock By.
+                // CA (and some leftover lists) put another date in Consumable
+                // Needed; taking the first date assigned the wrong day and
+                // desynced the rest of a multi-state paste.
+                const dateMatches = [...window.matchAll(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/g)];
+                if (!dateMatches.length) continue;
+                const dateMatch = dateMatches[dateMatches.length - 1];
                 const restockBy = dateMatch[1];
 
                 // Extract numbers (1-4 digits, not part of dates or phone numbers)
-                const cleanWindow = window.replace(dateRe, '');
+                const cleanWindow = window.replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g, '');
                 const nums = [...cleanWindow.matchAll(/(?<![\/\-\.\d])\b(\d{1,4})\b(?![\/\-\.\d])/g)]
                     .map(m => parseInt(m[1]))
                     .filter(n => n <= 9999 && n > 0);
@@ -3269,7 +3273,7 @@ function distanceMatrixStatus(state) {
                         let consumables = '', restockBy = '', nj = nj_start;
                         while (nj < allLines.length) {
                             const l = allLines[nj];
-                            if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(l)) { restockBy = l; nj++; break; }
+                            if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(l)) { restockBy = l; nj++; continue; }
                             if (/^\d{1,4}$/.test(l) && nums.length < 5) { nums.push(parseInt(l)); }
                             else if (/journal|forms|ribbon|p\d forms/i.test(l)) { consumables = l; }
                             else if (STATE_TOKENS.has(l) || /\b[A-Z]{2}\d{3,5}\b/.test(l) || /[-–]\s*\d{3,4}\s*$/.test(l)) { break; }
