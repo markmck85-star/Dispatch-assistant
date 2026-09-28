@@ -1689,6 +1689,15 @@ async function loadDistanceMatrix(state) {
   return _dmInflight[key];
 }
 
+        async function loadDistanceMatrixSoon(state, ms) {
+            try {
+                await Promise.race([
+                    loadDistanceMatrix(state),
+                    new Promise(function(resolve) { setTimeout(resolve, ms || 2500); })
+                ]);
+            } catch (e) {}
+        }
+
 // ─── DISTANCE LOOKUP ─────────────────────────────────────────────────────────
 /**
  * Get distance info for a (techName, locationCode) pair.
@@ -3067,7 +3076,7 @@ function distanceMatrixStatus(state) {
             localStorage.setItem('lastSelectedState', CURRENT_STATE);
             // Await so processDispatch() below does not paint haversine
             // first-stop miles against an empty _dmCache for the new state.
-            await loadDistanceMatrix(CURRENT_STATE);
+            await loadDistanceMatrixSoon(CURRENT_STATE, 2500);
             // Map state code to location/tech database
             const STATE_MAP = {
                 'GA': { locs: LOCATIONS_GA, techs: TECHS_GA },
@@ -3226,7 +3235,7 @@ function distanceMatrixStatus(state) {
                     await window.__remoteDataPromise;
                     window.__remoteDataPromise = null;
                 }
-                await loadDistanceMatrix(CURRENT_STATE);
+                await loadDistanceMatrixSoon(CURRENT_STATE, 2500);
                 await _processDispatchCore(true);
                 return;
             }
@@ -3238,7 +3247,7 @@ function distanceMatrixStatus(state) {
             }
             // Same matrix the reassign dropdown already reads -- wait for it
             // so "from home" / "To 1st Stop" is driving miles, not haversine.
-            await loadDistanceMatrix(CURRENT_STATE);
+            await loadDistanceMatrixSoon(CURRENT_STATE, 2500);
 
             // Parse form counts and ticket metadata (includes automatic SLA from Earliest Start Permitted)
             window._skippedCarryover = [];
