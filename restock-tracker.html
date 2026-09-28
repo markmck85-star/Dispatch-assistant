@@ -1231,9 +1231,42 @@ async function confirmRestockedFromNote(siteCode) {
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
     closeSourceEmail();
-    await loadLiveDashboard();
+    applyLocalRestockConfirm(siteCode);
+    refreshLiveDashboardQuiet();
   } catch (err) {
     alert('Failed to mark restocked: ' + err.message);
+  }
+}
+
+function applyLocalRestockConfirm(siteCode) {
+  const d = currentDashboardData;
+  if (!d || !d.locs) return;
+  const loc = d.locs.find(l => l.siteCode === siteCode);
+  if (!loc) return;
+  loc.last = new Date();
+  loc.daysSince = 0;
+  loc.visitedSinceRestock = false;
+  if (loc.avg) {
+    const next = new Date(loc.last.getTime() + loc.avg * 86400000);
+    loc.n1 = next;
+    loc.status = 'ok';
+  } else {
+    loc.status = loc.status === 'nodata' ? 'single' : 'ok';
+  }
+  renderDashboard(d);
+}
+
+async function refreshLiveDashboardQuiet() {
+  try {
+    const state = (document.getElementById('liveState') || {}).value.trim().toUpperCase();
+    if (state && !/^[A-Z]{2}$/.test(state)) return;
+    const preset = (document.getElementById('liveRangePreset') || {}).value || 'nov1';
+    const { since, until } = resolveLiveRange(preset);
+    const dashboard = await fetchLiveRegion(state, since, until);
+    renderDashboard(dashboard);
+  } catch (err) {
+    // Confirm already saved and the row was updated locally. A 500 here is
+    // the heavy schedule reload, not the mark-site-restocked write.
   }
 }
 
