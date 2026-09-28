@@ -3317,7 +3317,7 @@ function colLetterRoster(n) {
                 const mergeCells = [];
 
                 if (includeLogo) {
-                    rowsXml += `<row r="${rowNum}" ht="105" customHeight="1">`;
+                    rowsXml += `<row r="${rowNum}" ht="172" customHeight="1">`;
                     for (let c = 1; c <= COLS; c++) rowsXml += cellXml(c, rowNum, S.plain, '');
                     rowsXml += `</row>`;
                     mergeCells.push(`A${rowNum}:E${rowNum}`);
@@ -3423,12 +3423,12 @@ ${drawing}
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
-            const DISPLAY_W_PX = 220, DISPLAY_H_PX = 137, EMU_PER_PX = 9525;
+            const DISPLAY_W_PX = 300, DISPLAY_H_PX = 187, EMU_PER_PX = 9525;
             const dispW = DISPLAY_W_PX * EMU_PER_PX, dispH = DISPLAY_H_PX * EMU_PER_PX;
             // A50 + B18 + C18 + D14 + E32 ≈ 350+126+126+98+224 = 924px at Calibri 11.
             const headerWidthPx = 924;
             const logoColOff = Math.round(((headerWidthPx - DISPLAY_W_PX) / 2) * EMU_PER_PX);
-            const rowHeightEmu = Math.round(105 * 12700);
+            const rowHeightEmu = Math.round(172 * 12700);
             const logoRowOff = Math.max(0, Math.round((rowHeightEmu - dispH) / 2));
             const drawingXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
