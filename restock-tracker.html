@@ -1221,8 +1221,7 @@ function viewClosingNoteInline(appt, note, siteCode) {
 }
 
 async function confirmRestockedFromNote(siteCode) {
-  if (!confirm(`Mark ${siteCode} as restocked today, based on this note?`)) return;
-  const note = prompt('Optional note (e.g. "confirmed via closing note on a trouble ticket"):', '') || null;
+  const note = 'Confirmed restocked from closing note';
   try {
     const res = await fetch('/.netlify/functions/mark-site-restocked', {
       method: 'POST',
