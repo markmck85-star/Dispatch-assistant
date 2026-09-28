@@ -1230,8 +1230,8 @@ async function confirmRestockedFromNote(siteCode) {
     });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    alert(`${siteCode} marked as restocked. Refresh the dashboard to see it drop off the overdue list.`);
     closeSourceEmail();
+    await loadLiveDashboard();
   } catch (err) {
     alert('Failed to mark restocked: ' + err.message);
   }
