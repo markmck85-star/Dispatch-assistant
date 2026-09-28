@@ -8,7 +8,7 @@
     * { box-sizing: border-box; }
     body {
         margin: 0 auto; padding: 16px;
-        background: #14161a; color: #e8e8e8;
+        background: #f3f5f8; color: #1f2933;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         max-width: 1100px;
     }
@@ -18,56 +18,88 @@
     @media (min-width: 1500px) {
         body { max-width: 1600px; padding: 28px 40px 56px; }
     }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    .subtitle { color: #9aa0a6; font-size: 14px; margin-bottom: 18px; }
-    a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; }
+    h1 { font-size: 22px; margin: 0 0 4px; color: #1f3a5f; }
+    .subtitle { color: #6b7785; font-size: 14px; margin-bottom: 18px; }
+    a.back-link { color: #1a56a8; text-decoration: none; font-size: 14px; font-weight: 600; }
+    a.back-link:hover { text-decoration: underline; }
     .filters {
         display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(16,24,40,0.06);
         padding: 14px; margin: 16px 0;
     }
-    .filters label { font-size: 13px; color: #b8bcc2; }
-    select, input[type=text] {
-        background: #14161a; color: #e8e8e8; border: 1px solid #3a3e46;
+    .filters label { font-size: 13px; color: #52606d; font-weight: 600; }
+    select, input[type=text], input[type=date] {
+        background: #ffffff; color: #1f2933; border: 1px solid #c5cdd8;
         border-radius: 6px; padding: 8px 10px; font-size: 14px;
+    }
+    select:focus, input[type=text]:focus, input[type=date]:focus {
+        outline: none; border-color: #1a56a8; box-shadow: 0 0 0 2px rgba(26,86,168,0.15);
     }
     #searchInput { flex: 1; min-width: 220px; }
     .search-wrap { position: relative; flex: 1; min-width: 220px; }
     .results-dropdown {
         position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
-        background: #1e2126; border: 1px solid #3a3e46; border-top: none;
+        background: #ffffff; border: 1px solid #c5cdd8; border-top: none;
+        box-shadow: 0 6px 16px rgba(16,24,40,0.12);
         border-radius: 0 0 8px 8px; max-height: 320px; overflow-y: auto;
         display: none;
     }
     .results-dropdown.open { display: block; }
     .result-row {
-        padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #22252b;
+        padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #e3e8ee;
         font-size: 13.5px;
     }
-    .result-row:hover, .result-row.active { background: #262a31; }
-    .result-row .code { color: #6cb2ff; font-weight: 600; margin-right: 8px; }
+    .result-row:hover, .result-row.active { background: #eef2f7; }
+    .result-row .code { color: #1a56a8; font-weight: 600; margin-right: 8px; }
     .result-row .state-tag {
-        display: inline-block; font-size: 11px; font-weight: 700; color: #7ec4ff;
-        background: #24303f; padding: 1px 6px; border-radius: 4px; margin-right: 8px;
+        display: inline-block; font-size: 11px; font-weight: 700; color: #ffffff;
+        background: #2f5f8f; padding: 1px 6px; border-radius: 4px; margin-right: 8px;
     }
     .card {
-        background: #1e2126; border: 1px solid #2c2f36; border-radius: 10px;
+        background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(16,24,40,0.06);
         padding: 18px; margin-top: 18px;
     }
-    .card h2 { font-size: 18px; margin: 0 0 4px; }
-    .card .meta { color: #9aa0a6; font-size: 13px; margin-bottom: 14px; }
+    .card h2 { font-size: 18px; margin: 0 0 4px; color: #1f3a5f; }
+    .card .meta { color: #6b7785; font-size: 13px; margin-bottom: 14px; }
     .visit-row, .ship-row {
-        padding: 10px 0; border-bottom: 1px solid #22252b; font-size: 13.5px;
+        padding: 10px 0; border-bottom: 1px solid #e3e8ee; font-size: 13.5px;
     }
     .visit-row:last-child, .ship-row:last-child { border-bottom: none; }
-    .kind-restock { color: #7edb8e; }
-    .kind-service { color: #ff9a9a; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #c7cad1; }
-    .muted { color: #7a7f87; }
-    a.ups-link { color: #6cb2ff; }
-    .empty-state { text-align: center; color: #7a7f87; padding: 30px 0; }
-    .loading { text-align: center; color: #7a7f87; padding: 20px 0; }
-    h3.section-label { font-size: 13px; color: #b8bcc2; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .kind-restock { color: #2f6f3d; font-weight: 600; }
+    .kind-service { color: #9b3b3b; font-weight: 600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #3e4c59; }
+    .muted { color: #6b7785; }
+    a.ups-link { color: #1a56a8; }
+    .empty-state { text-align: center; color: #6b7785; padding: 30px 0; }
+    .empty-state.error { color: #9b3b3b; }
+    .loading { text-align: center; color: #6b7785; padding: 20px 0; }
+    h3.section-label { font-size: 13px; color: #52606d; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* Shared button look (also used by the buttons that were previously
+       styled with inline dark-theme colors). */
+    .toggle-btn, .btn-secondary {
+        background: #ffffff; color: #1f3a5f; border: 1px solid #c5cdd8;
+        border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .toggle-btn:hover, .btn-secondary:hover { background: #f3f5f8; }
+    .toggle-btn:disabled, .btn-secondary:disabled { opacity: 0.6; cursor: default; }
+    .btn-full { width: 100%; margin-top: 10px; padding: 10px; }
+    .btn-nowrap { white-space: nowrap; padding: 6px 10px; font-size: 12px; }
+
+    .link-btn {
+        background: none; border: none; padding: 0; cursor: pointer;
+        font-family: inherit; font-weight: 600; text-decoration: underline;
+    }
+    .link-email { color: #1a56a8; }
+    .link-note { color: #2f6f3d; }
+    .note-badge {
+        display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px;
+        border-radius: 4px; margin-top: 4px; color: #ffffff;
+    }
+    .note-badge.yes { background: #3d7a4a; }
+    .note-badge.no { background: #e9edf2; color: #6b7785; }
 </style>
 </head>
 <body>
@@ -82,21 +114,21 @@
         </select>
         <div class="search-wrap">
             <input type="text" id="searchInput" placeholder="Search by name or site code…" autocomplete="off" style="padding-right:32px;">
-            <button type="button" id="searchClearBtn" aria-label="Clear search" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#888;font-size:18px;line-height:1;cursor:pointer;padding:4px;">✕</button>
+            <button type="button" id="searchClearBtn" aria-label="Clear search" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#6b7785;font-size:18px;line-height:1;cursor:pointer;padding:4px;">✕</button>
             <div class="results-dropdown" id="resultsDropdown"></div>
         </div>
     </div>
     <div class="filters" id="dateFilters">
         <label>Date:</label>
         <input type="date" id="dateSingle">
-        <button type="button" id="useRangeBtn" class="toggle-btn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Use a range instead</button>
+        <button type="button" id="useRangeBtn" class="btn-secondary">Use a range instead</button>
         <span id="rangeInputs" style="display:none;gap:10px;align-items:center;">
             <label>From:</label>
             <input type="date" id="dateFrom">
             <label>To:</label>
             <input type="date" id="dateTo">
         </span>
-        <button type="button" id="clearDateBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear date filter</button>
+        <button type="button" id="clearDateBtn" class="btn-secondary">Clear date filter</button>
         <label>Technician:</label>
         <select id="techFilter"><option value="">All technicians</option></select>
     </div>
@@ -183,7 +215,7 @@ async function loadSites() {
         }
         output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Start typing a name or code above.</div>`;
     } catch (err) {
-        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading site list: ${err.message}</div>`;
+        output.innerHTML = `<div class="empty-state error">Error loading site list: ${err.message}</div>`;
     }
 }
 loadSites();
@@ -303,7 +335,7 @@ async function loadStateFeed(state, offset) {
         }
         renderStateFeed();
     } catch (err) {
-        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading visits: ${err.message}</div>`;
+        output.innerHTML = `<div class="empty-state error">Error loading visits: ${err.message}</div>`;
     }
 }
 
@@ -330,11 +362,11 @@ function renderStateFeed() {
             <div><strong>${date}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span> · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span></div>
             <div class="muted">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}</div>
             ${v.appointment_number ? `<div class="mono">${escapeHtml(v.appointment_number)}${v.wo_number ? ' · WO ' + escapeHtml(v.wo_number) : ''}</div>` : ''}
-            <span class="note-badge ${hasNote ? 'yes' : 'no'}" style="display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;margin-top:4px;${hasNote ? 'color:#7edb8e;background:#16321f;' : 'color:#7a7f87;background:#24272d;'}">${hasNote ? 'Note captured' : 'No note yet'}</span>
+            <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note yet'}</span>
         </div>`;
     }).join('');
     if (feedState.hasMore) {
-        html += `<button id="loadMoreFeedBtn" class="toggle-btn" style="width:100%;margin-top:10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;" onclick="loadMoreStateFeed()">Load 50 more${feedState.total != null ? ` (${feedState.total - feedState.visits.length} remaining)` : ''}</button>`;
+        html += `<button id="loadMoreFeedBtn" class="toggle-btn btn-full" onclick="loadMoreStateFeed()">Load 50 more${feedState.total != null ? ` (${feedState.total - feedState.visits.length} remaining)` : ''}</button>`;
     }
     html += `</div>`;
     output.innerHTML = html;
@@ -373,7 +405,7 @@ async function selectSite(site) {
         };
         renderHistory();
     } catch (err) {
-        output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading history: ${err.message}</div>`;
+        output.innerHTML = `<div class="empty-state error">Error loading history: ${err.message}</div>`;
     }
 }
 
@@ -479,7 +511,7 @@ function renderHistory() {
                 <h2 style="margin-bottom:0;">${escapeHtml(data.site.name)}</h2>
                 <div class="meta">${escapeHtml(data.site.state)} · ${escapeHtml(data.site.code)}</div>
             </div>
-            <button onclick="printLocationHistory()" style="background:#3a3f4a;color:#e8e8e8;border:1px solid #555;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap;">🖨️ Save as PDF</button>
+            <button onclick="printLocationHistory()" class="btn-secondary btn-nowrap">🖨️ Save as PDF</button>
         </div>`;
 
     html += `<h3 class="section-label">Visit History</h3>`;
@@ -497,8 +529,8 @@ function renderHistory() {
         const reviewNote = v.needs_review ? ' <span class="muted">(site match unconfirmed)</span>' : '';
         const saDisplay = v.appointment_number
             ? (v.inbound_email_id
-                ? `<div class="mono"><button onclick="viewSourceEmail('${v.inbound_email_id}')" style="background:none;border:none;padding:0;color:#5b9bff;font-weight:600;text-decoration:underline;cursor:pointer;font-size:inherit;font-family:inherit;">${escapeHtml(v.appointment_number)}</button></div>`
-                : `<div class="mono" style="color:#e8e8e8;font-weight:600;">${escapeHtml(v.appointment_number)}</div>`)
+                ? `<div class="mono"><button onclick="viewSourceEmail('${v.inbound_email_id}')" class="link-btn link-email" style="font-size:inherit;">${escapeHtml(v.appointment_number)}</button></div>`
+                : `<div class="mono" style="color:#1f2933;font-weight:600;">${escapeHtml(v.appointment_number)}</div>`)
             : '';
         const metaStr = [date, v.tech_name_raw, v.wo_number ? ((v.source === 'bluefolder' ? 'BF ' : 'WO ') + v.wo_number) : null].filter(Boolean).join(' · ');
         return `<div class="visit-row">
@@ -506,13 +538,13 @@ function renderHistory() {
             <div class="muted">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}${reviewNote}</div>
             ${saDisplay}
             ${v.wo_number ? `<div class="mono">${v.source === 'bluefolder' ? 'BF ' : 'WO '}${escapeHtml(v.wo_number)}${v.ticket_status ? ' · ' + escapeHtml(v.ticket_status) : ''}</div>` : ''}
-            ${v.source === 'email_ticket' && v.inbound_email_id ? `<button onclick="viewSourceEmail('${v.inbound_email_id}')" style="background:none;border:none;padding:0;margin-top:4px;color:#5b9bff;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">✉️ View ticket email</button>` : ''}
-            ${v.closing_note ? `<button onclick="viewClosingNoteInline(decodeURIComponent('${encodeURIComponent(v.closing_note).replace(/'/g, '%27')}'), '${v.source === 'bluefolder' ? '📁 BlueFolder note' : '📝 Closing Note'}', decodeURIComponent('${encodeURIComponent(metaStr).replace(/'/g, '%27')}'))" style="background:none;border:none;padding:0;margin-top:4px;color:#7edb8e;font-weight:600;text-decoration:underline;cursor:pointer;font-size:12px;font-family:inherit;">${v.source === 'bluefolder' ? '📁 View BlueFolder note' : '📝 View Note'}</button>` : ''}
+            ${v.source === 'email_ticket' && v.inbound_email_id ? `<button onclick="viewSourceEmail('${v.inbound_email_id}')" class="link-btn link-email" style="margin-top:4px;font-size:12px;">✉️ View ticket email</button>` : ''}
+            ${v.closing_note ? `<button onclick="viewClosingNoteInline(decodeURIComponent('${encodeURIComponent(v.closing_note).replace(/'/g, '%27')}'), '${v.source === 'bluefolder' ? '📁 BlueFolder note' : '📝 Closing Note'}', decodeURIComponent('${encodeURIComponent(metaStr).replace(/'/g, '%27')}'))" class="link-btn link-note" style="margin-top:4px;font-size:12px;">${v.source === 'bluefolder' ? '📁 View BlueFolder note' : '📝 View Note'}</button>` : ''}
         </div>`;
     }).join('');
 
     if (historyState.hasMore) {
-        html += `<button id="loadMoreBtn" class="toggle-btn" style="width:100%;margin-top:10px;" onclick="loadMoreHistory()">Load 15 more (${historyState.totalVisits - historyState.visits.length} remaining)</button>`;
+        html += `<button id="loadMoreBtn" class="toggle-btn btn-full" onclick="loadMoreHistory()">Load 15 more (${historyState.totalVisits - historyState.visits.length} remaining)</button>`;
     }
 
     if (data.shipments && data.shipments.length) {
@@ -603,7 +635,7 @@ async function printLocationHistory() {
 <title>${docTitle}</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 16px; font-size: 15px; color: #222; max-width: 700px; margin: 0 auto; }
-  .print-btn { display: block; width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-bottom: 16px; cursor: pointer; }
+  .print-btn { display: block; width: 100%; padding: 14px; background: #1a56a8; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-bottom: 16px; cursor: pointer; }
   .print-header { margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px; }
   .print-title { font-size: 20px; font-weight: bold; }
   .print-date { font-size: 14px; color: #555; margin-top: 2px; }
