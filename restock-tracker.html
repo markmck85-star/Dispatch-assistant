@@ -357,6 +357,7 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
     </button>
   </div>
   <div class="section-label">projected restock schedule — sorted by urgency</div>
+  <p style="font-size:12px;color:var(--muted);margin:4px 0 10px;line-height:1.45;">On <b>overdue (visited)</b> or <b>due soon (visited)</b> rows, tap the last-visit SA number to read the closing note. If it says they restocked, use Confirm restocked.</p>
   <div class="table-wrap">
   <div class="table-scroll">
     <table>
@@ -366,7 +367,7 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
           <th style="width:82px;">status</th>
           <th class="sortable" data-col="n1" style="width:76px;" onclick="handleSort('n1')" title="Estimated next restock date">est. next</th>
           <th class="sortable" data-col="last" style="width:82px;" onclick="handleSort('last')" title="Date of most recent restock">last restock</th>
-          <th style="width:82px;">last visit</th>
+          <th style="width:82px;" title="Tap a blue SA number to read that visit's closing note and confirm a restock if the note says they did">last visit</th>
           <th class="sortable" data-col="daysSince" style="width:58px;" onclick="handleSort('daysSince')" title="Days since last restock">days ago</th>
           <th class="sortable" data-col="avg" style="width:68px;" onclick="handleSort('avg')" title="Average days between restocks">avg days</th>
           <th class="sortable" data-col="count" style="width:58px;" onclick="handleSort('count')" title="Number of restocks on record">visits</th>
@@ -1769,6 +1770,7 @@ function renderDashboard(d) {
      Status thresholds: overdue = more than 7 days past estimated next restock; due soon = within 7 days.<br>
      <strong>Overdue (red)</strong> — no visit since last restock; high confidence the machine is genuinely low.
      <strong>Overdue (amber)</strong> — a non-restock visit occurred after the last restock; tech may have informally topped up. Treat as lower confidence.<br>
+     Tap the last-visit SA on those amber rows to read the closing note and confirm the restock when the note is clear.<br>
      Location names have state prefix removed for readability. Hover for full name.`;
 }
 
