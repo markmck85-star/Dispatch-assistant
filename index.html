@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.86 (blobs-164)</title>
+    <title>MCR Dispatch Hub v9.88 (blobs-166)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -2262,6 +2262,9 @@ function distanceMatrixStatus(state) {
 
         window.onload = async function() {
             setBootStatus('Starting…');
+            setTimeout(function() {
+                if (window.__bootLoading) hideBootStatus();
+            }, 12000);
             await ensureBoardLogin();
             restoreJournalThreshold();
             restoreHeavyDayTrigger();
@@ -2610,7 +2613,11 @@ function distanceMatrixStatus(state) {
             // logout/login left the page showing stale/empty state until
             // that click re-ran the derivation logic that honors
             // assignedBy==='manual' overrides.
-            await processDispatch(true);
+            try {
+                await processDispatch(true);
+            } catch (bootErr) {
+                console.error('boot processDispatch', bootErr);
+            }
             setBootStatus('Map ready');
             hideBootStatus();
             startAssignmentPoll();
