@@ -174,7 +174,12 @@ exports.handler = async (event) => {
 
     const restockDates = data.restocks.map(r => r.date).sort((a, b) => a - b);
     const count = restockDates.length;
-    const last = restockDates[count - 1] || null;
+    let last = restockDates[count - 1] || null;
+    const manual = latestConfirmationBySite[siteId];
+    if (manual && manual.confirmed_at) {
+      const confirmed = new Date(manual.confirmed_at);
+      if (!last || confirmed > last) last = confirmed;
+    }
     const daysSince = last ? Math.round((TODAY - last) / 86400000) : null;
 
     let avg = null;
