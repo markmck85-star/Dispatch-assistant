@@ -46,6 +46,11 @@ exports.handler = async (event) => {
   try {
     let techId = params.technician_id || null;
     const nameQ = params.name || null;
+    const usernameQ = params.username || null;
+    if (!techId && usernameQ) {
+      const { data: d } = await supabase.from('dispatchers').select('technician_id').ilike('username', usernameQ).maybeSingle();
+      if (d && d.technician_id) techId = d.technician_id;
+    }
     if (!techId && nameQ) {
       const { data: techs } = await supabase.from('technicians').select('id, name').ilike('name', '%' + nameQ + '%').limit(5);
       if (techs && techs.length === 1) techId = techs[0].id;
@@ -60,10 +65,12 @@ exports.handler = async (event) => {
     if (tErr || !tech) return json(404, { ok: false, error: 'Technician not found' });
 
     const homeCity = cityFromAddress(tech.home_address) || tech.home_state;
+    const filterState = String(params.state || '').toUpperCase();
     const states = [tech.home_state].concat(tech.additional_states || []).filter(Boolean);
 
     let sitesQuery = supabase.from('sites').select('id, site_code, name, state, sst_name, lat, lng, primary_tech_id, fallback_tech_id');
-    if (states.length === 1) sitesQuery = sitesQuery.eq('state', states[0]);
+    if (/^[A-Z]{2}$/.test(filterState)) sitesQuery = sitesQuery.eq('state', filterState);
+    else if (states.length === 1) sitesQuery = sitesQuery.eq('state', states[0]);
     else if (states.length > 1) sitesQuery = sitesQuery.in('state', states);
     const { data: sites, error: sErr } = await sitesQuery;
     if (sErr) return json(500, { ok: false, error: sErr.message });

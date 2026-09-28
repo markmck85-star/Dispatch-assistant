@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mileage Log</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background:#f4f6f8; color:#1a1a1a; margin:0; padding:12px; }
+  h1 { font-size:18px; margin:0 0 8px; color:#12325a; }
+  .sub { color:#5b6570; font-size:13px; margin-bottom:14px; }
+  label { display:block; font-size:12px; color:#5b6570; margin:8px 0 4px; }
+  input, select, button { font-size:16px; padding:8px; border-radius:6px; border:1px solid #c5ced6; background:#fff; color:#1a1a1a; }
+  button { background:#1d4e89; border:none; color:#fff; cursor:pointer; }
+  button.secondary { background:#5b6570; color:#fff; }
+  button.warn { background:#fff; color:#8a2f2f; border:1px solid #c9a0a0; padding:2px 8px; font-size:13px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
+  .card { background:#fff; border:1px solid #d5dde3; border-radius:8px; padding:10px; margin:10px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .flag { color:#8a6d12; font-size:12px; }
+  .flag.neg { color:#8a2f2f; }
+  .day-total { text-align:left; color:#1d4e89; font-weight:600; margin-top:8px; }
+  .leg-mi { font-weight:700; color:#1d4e89; margin-top:4px; }
+  .status { font-size:13px; color:#5b6570; min-height:18px; }
+  .suggest { background:#fff; border:1px solid #c5ced6; max-height:180px; overflow:auto; }
+  .suggest div { padding:8px; border-bottom:1px solid #e6ebef; cursor:pointer; }
+  .suggest div:hover { background:#eef3f8; }
+  .muted { color:#6b7580; font-size:12px; }
+  .dow { display:block; font-size:22px; font-weight:700; color:#12325a; line-height:1.25; margin:2px 0 8px; }
+  .dayhead { font-size:22px; font-weight:700; color:#12325a; display:block; margin-bottom:6px; }
+  input[type="date"] { font-size:18px; }
+  .stop-row { display:flex; gap:8px; align-items:flex-end; justify-content:flex-start; }
+  .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
+  .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
+  .stop-row input { width:100%; box-sizing:border-box; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.min.js"></script>
+</head>
+<body>
+  <h1>Mileage log</h1>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.22</span></div>
+  <div id="loginBox" class="card">
+    <label>Username <input id="loginUser" autocomplete="username"></label>
+    <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
+    <button type="button" onclick="doLogin()">Log in</button>
+    <div class="status" id="loginErr"></div>
+  </div>
+  <div id="appBox" style="display:none;">
+  <div id="who" class="muted"></div>
+  <div class="row">
+    <label>Suggest sites in
+      <select id="siteState" onchange="loadContext()">
+        <option value="">Home state</option>
+        <option>AL</option><option>CA</option><option>CO</option><option>FL</option>
+        <option>GA</option><option>ID</option><option>IL</option><option>IN</option>
+        <option>MI</option><option>MN</option><option>NC</option><option>NV</option>
+        <option>OH</option><option>OR</option><option>SC</option><option>WV</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label>Period start (Sunday)
+      <input type="date" id="periodStart" onchange="loadContext()">
+    </label>
+    <label>Period end
+      <input type="date" id="periodEnd">
+    </label>
+    <button type="button" onclick="shiftPeriod(-14)">Previous</button>
+    <button type="button" class="secondary" onclick="shiftPeriod(14)">Next</button>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="card">
+    <div id="legDow" class="dow"></div>
+    <label>Date
+      <input type="date" id="legDate" style="width:100%;box-sizing:border-box;" onchange="updateDow()">
+    </label>
+    <div class="stop-row">
+      <div class="grow">
+        <label>From</label>
+        <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off">
+      </div>
+      <div class="odo">
+        <label>Odo</label>
+        <input type="number" id="odoStart" inputmode="numeric" oninput="previewFlag()">
+      </div>
+    </div>
+    <div id="fromSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="fromPicked"></div>
+    <div class="stop-row">
+      <div class="grow">
+        <label>To</label>
+        <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off">
+      </div>
+      <div class="odo">
+        <label>Odo</label>
+        <input type="number" id="odoEnd" inputmode="numeric" oninput="previewFlag()">
+      </div>
+    </div>
+    <div id="toSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="toPicked"></div>
+    <div id="liveFlag" class="flag" style="display:none;margin-top:8px;"></div>
+    <div class="row" style="margin-top:10px;">
+      <button type="button" onclick="addLeg()">Add leg</button>
+      <button type="button" class="secondary" onclick="endDay()">End day at home</button>
+      <button type="button" class="secondary" onclick="shiftLegDate(-1)">← Prev day</button>
+      <button type="button" class="secondary" onclick="shiftLegDate(1)">Next day →</button>
+      <button type="button" class="secondary" onclick="skipEmptyDay()">Off / no miles — next day</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a leg. Use Next day or Off. Add leg only when there are miles.</p>
+  </div>
+
+  <div id="legs"></div>
+  <div class="row">
+    <button type="button" onclick="saveLog('draft')">Save draft</button>
+    <button type="button" onclick="printLog()">Print / PDF</button>
+    <button type="button" onclick="exportExcel()">Export Excel</button>
+    <button type="button" class="secondary" onclick="loadSampleTwoWeeks()">Load demo days</button>
+  </div>
+  <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
+  <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
+  </div>
+
+<script>
+let ctx = null;
+let picked = { from: null, to: null };
+let legs = [];
+
+function currentUser() {
+  try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
+}
+
+function localKey() {
+  const tech = (ctx && ctx.technician && ctx.technician.id) || (currentUser() && currentUser().technician_id) || 'unknown';
+  const start = document.getElementById('periodStart').value || '';
+  return 'mileageDraft:' + tech + ':' + start;
+}
+
+function persistLocal() {
+  try {
+    localStorage.setItem(localKey(), JSON.stringify({
+      legs: legs,
+      odoStart: document.getElementById('odoStart').value,
+      odoEnd: document.getElementById('odoEnd').value,
+      savedAt: Date.now()
+    }));
+  } catch (e) {}
+}
+
+function readLocal() {
+  try {
+    const raw = localStorage.getItem(localKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUser').value.trim();
+  const pin = document.getElementById('loginPin').value.trim();
+  const err = document.getElementById('loginErr');
+  err.textContent = '';
+  try {
+    const res = await fetch('/.netlify/functions/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, pin: pin })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Login failed');
+    if (data.role !== 'tech' && data.role !== 'admin' && data.role !== 'dispatcher') {
+      throw new Error('This login cannot use the mileage log.');
+    }
+    sessionStorage.setItem('dispatchUser', JSON.stringify(data));
+    showApp();
+    loadContext();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+function doLogout() {
+  sessionStorage.removeItem('dispatchUser');
+  location.reload();
+}
+
+function showApp() {
+  document.getElementById('loginBox').style.display = 'none';
+  document.getElementById('appBox').style.display = 'block';
+}
+
+function sundayOf(d) {
+  const x = new Date(d);
+  x.setDate(x.getDate() - x.getDay());
+  return x.toISOString().slice(0,10);
+}
+
+function addDays(iso, n) {
+  const x = new Date(iso + 'T12:00:00');
+  x.setDate(x.getDate() + n);
+  return x.toISOString().slice(0,10);
+}
+
+function weekdayLabel(iso) {
+  if (!iso) return '';
+  const x = new Date(iso + 'T12:00:00');
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return days[x.getDay()] + ' ' + months[x.getMonth()] + ' ' + x.getDate();
+}
+
+function updateDow() {
+  const el = document.getElementById('legDow');
+  const d = document.getElementById('legDate').value;
+  if (el) el.textContent = weekdayLabel(d);
+}
+
+function initPeriod() {
+  const s = sundayOf(new Date());
+  document.getElementById('periodStart').value = s;
+  document.getElementById('periodEnd').value = addDays(s, 13);
+  const today = new Date();
+  const todayIso = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  const end = addDays(s, 13);
+  document.getElementById('legDate').value = (todayIso >= s && todayIso <= end) ? todayIso : s;
+  updateDow();
+}
+
+function shiftLegDate(n) {
+  const cur = document.getElementById('legDate').value;
+  if (!cur) return;
+  let next = addDays(cur, n);
+  const start = document.getElementById('periodStart').value;
+  const end = document.getElementById('periodEnd').value;
+  if (end && next > end) {
+    if (!confirm('That day is after this pay period. Move the period forward two weeks?')) return;
+    shiftPeriod(14);
+    next = document.getElementById('periodStart').value;
+  }
+  if (start && next < start) {
+    if (!confirm('That day is before this pay period. Move the period back two weeks?')) return;
+    shiftPeriod(-14);
+    next = document.getElementById('periodEnd').value;
+  }
+  document.getElementById('legDate').value = next;
+  updateDow();
+}
+
+function skipEmptyDay() {
+  shiftLegDate(1);
+}
+
+function shiftPeriod(days) {
+  const s = document.getElementById('periodStart').value;
+  const ns = addDays(s, days);
+  document.getElementById('periodStart').value = ns;
+  document.getElementById('periodEnd').value = addDays(ns, 13);
+  loadContext();
+}
+
+function homeStop() {
+  if (!ctx) return null;
+  return {
+    kind: 'home',
+    id: 'home',
+    picker: ctx.technician.home_label_picker,
+    print: ctx.technician.home_label_print
+  };
+}
+
+function shortName(s) {
+  const raw = [s.name].concat(s.aliases || []).filter(a => a && String(a).trim().length >= 3);
+  function tidy(n) {
+    return String(n)
+      .replace(/\s+County\s+/gi, ' ')
+      .replace(/\s+County$/i, '')
+      .replace(/\s+Tag Office/gi, ' Tag')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function score(n) {
+    const t = tidy(n);
+    const stripped = t.toLowerCase()
+      .replace(/\b(kroger|publix|safeway|meijer|walmart|target|albertsons|vons|king soopers|tag|dmv|sos)\b/g, ' ')
+      .replace(/\b(gwinnett|fulton|cobb|dekalb|hall|henry|newton|walton|douglas|clayton|cherokee|coweta|rockdale|bibb|carroll|forsyth|chatham)\b/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    if (!stripped) return -30; // "Gwinnett Kroger" — county + chain only
+    let sc = stripped.length + stripped.split(' ').length * 8;
+    if (t.length > 36) sc -= 8;
+    if (t.length < 8) sc -= 4;
+    return sc;
+  }
+  raw.sort((a,b) => score(b) - score(a));
+  return tidy(raw[0] || s.name || s.site_code);
+}
+
+function allStops() {
+  if (!ctx) return [];
+  const out = [homeStop()];
+  const push = (s) => {
+    const aliasList = s.aliases || [];
+    const aliases = aliasList.join(' ');
+    const brief = shortName(s);
+    out.push({
+      kind: 'site',
+      id: s.id,
+      site_code: s.site_code,
+      name: s.name || '',
+      aliases: aliasList,
+      picker: brief,
+      print: brief,
+      search: (s.site_code + ' ' + s.name + ' ' + aliases + ' ' + brief + ' ' + (s.sst_name || '')).toLowerCase(),
+      usual: s.usual
+    });
+  };
+  (ctx.sites_usual || []).forEach(push);
+  (ctx.sites_other || []).forEach(push);
+  out.push({ kind: 'other', id: 'other', picker: 'Other / UPS / not in list', print: '', search: 'other ups store tag' });
+  return out;
+}
+
+function labelForQuery(s, q) {
+  if (!s || s.kind !== 'site') return (s && (s.picker || s.print)) || '';
+  const ql = (q || '').toLowerCase();
+  const aliases = s.aliases || [];
+  const hit = aliases.find(a => a.toLowerCase().indexOf(ql) !== -1);
+  if (hit) return hit;
+  if ((s.name || '').toLowerCase().indexOf(ql) !== -1) {
+    return (s.name || '').replace(/\s+County\s+/gi, ' ').replace(/\s+County$/i, '');
+  }
+  return s.picker;
+}
+
+function searchStops(side) {
+  const q = document.getElementById(side + 'Q').value.toLowerCase().trim();
+  const box = document.getElementById(side + 'Suggest');
+  if (!q) { box.style.display = 'none'; return; }
+  const hits = allStops().filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1).slice(0, 20);
+  hits.sort((a,b) => (b.kind === 'home') - (a.kind === 'home') || (b.usual?1:0) - (a.usual?1:0));
+  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + labelForQuery(s, q) + '</div>').join('') || '<div>No match — pick Other</div>';
+  box._hits = hits;
+  box.style.display = 'block';
+}
+
+function chooseStop(side, i) {
+  const box = document.getElementById(side + 'Suggest');
+  const s = box._hits[i];
+  if (!s) return;
+  if (s.kind === 'other') {
+    const typed = document.getElementById(side + 'Q').value.trim();
+    picked[side] = { kind: 'other', id: null, picker: typed || 'Other', print: typed || 'Other' };
+  } else {
+    const q = document.getElementById(side + 'Q').value.toLowerCase().trim();
+    const label = labelForQuery(s, q);
+    picked[side] = Object.assign({}, s, { picker: label, print: label });
+  }
+  document.getElementById(side + 'Q').value = picked[side].print || picked[side].picker;
+  document.getElementById(side + 'Picked').textContent = picked[side].picker !== picked[side].print ? picked[side].picker : '';
+  box.style.display = 'none';
+}
+
+async function loadContext() {
+  const user = currentUser();
+  const status = document.getElementById('status');
+  const start = document.getElementById('periodStart').value;
+  const end = document.getElementById('periodEnd').value;
+  let url = '/.netlify/functions/get-mileage-log?period_start=' + start + '&period_end=' + end;
+  const st = (document.getElementById('siteState') || {}).value;
+  if (st) url += '&state=' + encodeURIComponent(st);
+  if (user && user.technician_id) url += '&technician_id=' + encodeURIComponent(user.technician_id);
+  else if (user && user.username) url += '&username=' + encodeURIComponent(user.username);
+  else if (user && (user.displayName || user.name)) url += '&name=' + encodeURIComponent(user.displayName || user.name);
+  else {
+    status.textContent = 'Log in on this page or the dispatch app first.';
+    return;
+  }
+  status.textContent = 'Loading…';
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Load failed');
+    ctx = data;
+    legs = (data.log && data.log.legs) || [];
+    const local = readLocal();
+    if (local && Array.isArray(local.legs) && local.legs.length > legs.length) {
+      legs = local.legs;
+    } else if ((!legs || !legs.length) && local && local.legs && local.legs.length) {
+      legs = local.legs;
+    }
+    persistLocal();
+    document.getElementById('who').textContent = ctx.technician.name + ' · home prints as “' + ctx.technician.home_label_print + '”';
+    document.getElementById('fromQ').value = ctx.technician.home_label_picker;
+    picked.from = homeStop();
+    document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
+    if (legs.length) {
+      const last = legs[legs.length - 1];
+      if (last.odo_end) document.getElementById('odoStart').value = last.odo_end;
+    }
+    renderLegs();
+    status.textContent = legs.length + ' legs in this period (draft).';
+  } catch (e) {
+    status.textContent = e.message;
+  }
+}
+
+function previewFlag() {
+  const a = Number(document.getElementById('odoStart').value);
+  const b = Number(document.getElementById('odoEnd').value);
+  const box = document.getElementById('liveFlag');
+  if (!Number.isFinite(a) || !Number.isFinite(b) || document.getElementById('odoEnd').value === '') {
+    box.style.display = 'none';
+    return;
+  }
+  const miles = b - a;
+  if (miles < 0) {
+    box.className = 'flag neg';
+    box.textContent = 'Odometer went down (' + miles + ' mi). Check the reading before adding.';
+    box.style.display = 'block';
+  } else if (miles > 400) {
+    box.className = 'flag neg';
+    box.textContent = 'That would be ' + miles + ' miles. Extra digit? Check before adding.';
+    box.style.display = 'block';
+  } else if (miles > 150) {
+    box.className = 'flag';
+    box.textContent = 'That would be ' + miles + ' miles. Fine for a long run — glance at the odometer.';
+    box.style.display = 'block';
+  } else {
+    box.style.display = 'none';
+  }
+}
+
+function flagMiles(miles) {
+  if (miles == null || !Number.isFinite(miles)) return null;
+  if (miles < 0) return 'negative';
+  if (miles > 400) return 'over';
+  return null;
+}
+
+function addLeg() {
+  if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
+  const date = document.getElementById('legDate').value;
+  const odoStart = document.getElementById('odoStart').value;
+  const odoEnd = document.getElementById('odoEnd').value;
+  const miles = (odoEnd !== '' && odoStart !== '') ? Number(odoEnd) - Number(odoStart) : null;
+  const flag = flagMiles(miles);
+  legs.push({
+    date,
+    from_kind: picked.from.kind,
+    from_site_id: picked.from.kind === 'site' ? picked.from.id : null,
+    from_print: picked.from.print,
+    from_picker: picked.from.picker,
+    to_kind: picked.to.kind,
+    to_site_id: picked.to.kind === 'site' ? picked.to.id : null,
+    to_print: picked.to.print,
+    to_picker: picked.to.picker,
+    odo_start: odoStart === '' ? null : Number(odoStart),
+    odo_end: odoEnd === '' ? null : Number(odoEnd),
+    miles,
+    flag
+  });
+  picked.from = picked.to;
+  document.getElementById('fromQ').value = picked.from.picker;
+  document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
+  picked.to = null;
+  document.getElementById('toQ').value = '';
+  document.getElementById('toPicked').textContent = '';
+  document.getElementById('odoStart').value = odoEnd;
+  document.getElementById('odoEnd').value = '';
+  persistLocal();
+  renderLegs();
+  saveLog('draft');
+}
+
+function endDay() {
+  picked.to = homeStop();
+  document.getElementById('toQ').value = picked.to.picker;
+  document.getElementById('toPicked').textContent = 'Using: ' + picked.to.picker;
+}
+
+function removeLeg(i) {
+  legs.splice(i, 1);
+  persistLocal();
+  renderLegs();
+  saveLog('draft');
+}
+
+function renderLegs() {
+  const byDay = {};
+  legs.forEach((l, i) => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push({ l, i });
+  });
+  const days = Object.keys(byDay).sort();
+  let html = '';
+  days.forEach(d => {
+    let sub = 0;
+    html += '<div class="card"><span class="dayhead">' + weekdayLabel(d) + '</span>';
+    byDay[d].forEach(({ l, i }) => {
+      if (typeof l.miles === 'number') sub += l.miles;
+      let flag = '';
+      if (l.flag === 'negative') flag = '<div class="flag neg">Odometer went down — check the reading.</div>';
+      else if (l.flag === 'over') flag = '<div class="flag neg">That leg is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
+      else if (l.flag === 'check') flag = '<div class="flag">About ' + (l.expected_mi != null ? l.expected_mi + ' mi expected' : 'a shorter hop') + '; you entered ' + l.miles + '. Detour is fine — worth a glance.</div>';
+      html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
+        '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + '</div></div>' +
+        '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong></div></div>' +
+        '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' +
+        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button></div>' +
+        flag + '</div>';
+    });
+    html += '<div class="day-total">Day total ' + sub + '</div></div>';
+  });
+  const total = legs.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
+  html += '<div class="card"><strong>TOTAL MILEAGE</strong> ' + total + '</div>';
+  document.getElementById('legs').innerHTML = html;
+}
+
+async function saveLog(status) {
+  if (!ctx) return;
+  const res = await fetch('/.netlify/functions/save-mileage-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      technician_id: ctx.technician.id,
+      period_start: document.getElementById('periodStart').value,
+      period_end: document.getElementById('periodEnd').value,
+      status,
+      legs
+    })
+  });
+  const data = await res.json();
+  if (!data.ok) { document.getElementById('status').textContent = data.error; return; }
+  legs = data.log.legs || legs;
+  renderLegs();
+  document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
+}
+
+function loadSampleTwoWeeks() {
+  if (!ctx) return;
+  if (!confirm('Load a few demo days with made-up store names? This replaces the current draft on screen.')) return;
+  const start = document.getElementById('periodStart').value;
+  const homePrint = ctx.technician.home_label_print || 'Home city';
+  const plan = {
+    0: ['State Bridge Kroger','Lawrenceville-Suwanee Kroger','Tucker Kroger','Walton Kroger','Lawrenceville Tag'],
+    1: ['Steve Reynolds Kroger','North Decatur Kroger','Glenwood Kroger','Tucker Kroger'],
+    2: ['Lawrenceville Tag','Five Forks Kroger','Centerville Hwy Publix'],
+    3: ['Maxwell Kroger','Mall of Georgia Tag','State Bridge Kroger','Lawrenceville Tag','Dacula Kroger'],
+    4: ['Steve Reynolds Kroger','Rockbridge Kroger'],
+    5: ['Five Forks Kroger','Lawrenceville-Suwanee Kroger','Bethelview Kroger','Atlanta Hwy Kroger'],
+    6: ['Lawrenceville-Suwanee Kroger','Pendergrass Kroger'],
+    7: [],
+    8: ['Freedom Parkway Kroger'],
+    9: ['Lilburn Kroger','Singleton Kroger'],
+    10: ['Loganville Publix','Lawrenceville-Suwanee Kroger'],
+    11: ['Piedmont Kroger'],
+    12: ['Lilburn Kroger','Chamblee Tucker Kroger','State Bridge Kroger'],
+    13: ['Singleton Kroger','Lawrenceville Tag']
+  };
+  const dist = {
+    'Johns Creek|State Bridge Kroger': 8, 'State Bridge Kroger|Lawrenceville-Suwanee Kroger': 14,
+    'Lawrenceville-Suwanee Kroger|Tucker Kroger': 18, 'Tucker Kroger|Walton Kroger': 22,
+    'Walton Kroger|Lawrenceville Tag': 11, 'Lawrenceville Tag|Johns Creek': 17,
+    'Johns Creek|Steve Reynolds Kroger': 9, 'Steve Reynolds Kroger|North Decatur Kroger': 17,
+    'North Decatur Kroger|Glenwood Kroger': 10, 'Glenwood Kroger|Tucker Kroger': 8,
+    'Tucker Kroger|Johns Creek': 16, 'Johns Creek|Lawrenceville Tag': 17,
+    'Lawrenceville Tag|Five Forks Kroger': 8, 'Five Forks Kroger|Centerville Hwy Publix': 12,
+    'Centerville Hwy Publix|Johns Creek': 22, 'Johns Creek|Maxwell Kroger': 9,
+    'Maxwell Kroger|Mall of Georgia Tag': 14, 'Mall of Georgia Tag|State Bridge Kroger': 18,
+    'State Bridge Kroger|Lawrenceville Tag': 12, 'Lawrenceville Tag|Dacula Kroger': 11,
+    'Dacula Kroger|Johns Creek': 19, 'Steve Reynolds Kroger|Rockbridge Kroger': 10,
+    'Rockbridge Kroger|Johns Creek': 16, 'Johns Creek|Five Forks Kroger': 15,
+    'Five Forks Kroger|Lawrenceville-Suwanee Kroger': 6, 'Lawrenceville-Suwanee Kroger|Bethelview Kroger': 22,
+    'Bethelview Kroger|Atlanta Hwy Kroger': 12, 'Atlanta Hwy Kroger|Johns Creek': 18,
+    'Lawrenceville-Suwanee Kroger|Pendergrass Kroger': 28, 'Pendergrass Kroger|Johns Creek': 36,
+    'Johns Creek|Freedom Parkway Kroger': 18, 'Freedom Parkway Kroger|Johns Creek': 18,
+    'Johns Creek|Lilburn Kroger': 14, 'Lilburn Kroger|Singleton Kroger': 8,
+    'Singleton Kroger|Johns Creek': 12, 'Johns Creek|Loganville Publix': 24,
+    'Loganville Publix|Lawrenceville-Suwanee Kroger': 16, 'Lawrenceville-Suwanee Kroger|Johns Creek': 14,
+    'Johns Creek|Piedmont Kroger': 22, 'Piedmont Kroger|Johns Creek': 22,
+    'Lilburn Kroger|Chamblee Tucker Kroger': 10, 'Chamblee Tucker Kroger|State Bridge Kroger': 14,
+    'State Bridge Kroger|Johns Creek': 8, 'Johns Creek|Singleton Kroger': 12,
+    'Singleton Kroger|Lawrenceville Tag': 11
+  };
+  function mi(a,b) { return dist[a + '|' + b] || 12; }
+  function stop(name) {
+    if (name === homePrint || name === 'Johns Creek') return { kind: 'home', print: homePrint, picker: homePrint };
+    return { kind: 'site', print: name, picker: name };
+  }
+  const t0 = new Date(start + 'T12:00:00');
+  let odo = 30400;
+  const next = [];
+  for (let day = 0; day < 14; day++) {
+    const dt = new Date(t0); dt.setDate(t0.getDate() + day);
+    const iso = dt.toISOString().slice(0, 10);
+    const stops = plan[day] || [];
+    if (!stops.length) continue;
+    const path = [homePrint].concat(stops).concat([homePrint]);
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = stop(path[i]), b = stop(path[i + 1]);
+      const miles = mi(path[i] === homePrint ? 'Johns Creek' : path[i], path[i + 1] === homePrint ? 'Johns Creek' : path[i + 1]);
+      const end = odo + miles;
+      next.push({
+        date: iso,
+        from_kind: a.kind, from_site_id: null, from_print: a.print, from_picker: a.picker,
+        to_kind: b.kind, to_site_id: null, to_print: b.print, to_picker: b.picker,
+        odo_start: odo, odo_end: end, miles: miles, flag: null
+      });
+      odo = end;
+    }
+    odo += 3;
+  }
+  legs = next;
+  persistLocal();
+  renderLegs();
+  document.getElementById('status').textContent = 'Sample two weeks loaded — export to see the full sheet. Not official.';
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportExcel() {
+  if (!ctx) return;
+  const start = document.getElementById('periodStart').value || '';
+  const end = document.getElementById('periodEnd').value || '';
+  const endParts = (end || start).split('-');
+  const fileEnd = endParts.length === 3 ? (Number(endParts[1]) + '_' + Number(endParts[2]) + '_' + endParts[0]) : (end || start);
+  const lastName = (ctx.technician.name || 'tech').trim().split(/\s+/).slice(-1)[0];
+  const base = lastName + '_Mileage_' + fileEnd;
+  if (!window.XLSX) {
+    document.getElementById('status').textContent = 'Excel library did not load — try Print / PDF.';
+    return;
+  }
+  const thin = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
+  const dayEnd = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'medium', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
+  const box = {
+    top: { style: 'medium', color: { rgb: '000000' } },
+    bottom: { style: 'medium', color: { rgb: '000000' } },
+    left: { style: 'medium', color: { rgb: '000000' } },
+    right: { style: 'medium', color: { rgb: '000000' } }
+  };
+  const headBorder = {
+    top: { style: 'medium', color: { rgb: '000000' } },
+    bottom: { style: 'medium', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
+  const font = { name: 'Arial', sz: 8 };
+  const fontB = { name: 'Arial', sz: 8, bold: true };
+  const headerFill = { fgColor: { rgb: 'D9E2F3' } };
+  const ws = {};
+  function put(r, c, v, extra) {
+    extra = extra || {};
+    const cell = { s: Object.assign({ font: extra.font || font, alignment: extra.alignment || { vertical: 'center' } }, extra.border === false ? {} : { border: extra.border || thin }) };
+    if (extra.fill) cell.s.fill = { patternType: 'solid', fgColor: extra.fill.fgColor };
+    if (typeof v === 'number' && Number.isFinite(v)) { cell.t = 'n'; cell.v = v; }
+    else { cell.t = 's'; cell.v = v == null ? '' : String(v); }
+    ws[XLSX.utils.encode_cell({ r: r, c: c })] = cell;
+  }
+  put(0, 0, 'MCR TECHNICAL SERVICE, LLC', { font: { name: 'Arial', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
+  put(1, 0, '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)', { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
+  function shortDate(iso) {
+    if (!iso) return '';
+    const p = iso.split('-');
+    return Number(p[1]) + '/' + Number(p[2]) + '/' + String(p[0]).slice(-2);
+  }
+  const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  put(3, 0, 'NAME:', { font: fontB, border: false });
+  put(3, 1, ctx.technician.name, { font: fontB, border: false });
+  put(3, 3, 'PAY PERIOD: ' + shortDate(start) + ' - ' + shortDate(end), { font: fontB, border: false });
+  const headers = ['Date', 'Start', 'Odometer', 'To', 'Odometer', 'Mileage', 'Daily sub.'];
+  headers.forEach((h, i) => put(5, i, h, { font: fontB, fill: headerFill, alignment: { horizontal: 'center', vertical: 'center' }, border: headBorder }));
+  const byDay = {};
+  legs.forEach(l => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push(l);
+  });
+  function eachDate(a, b, fn) {
+    const t = new Date(a + 'T12:00:00');
+    const last = new Date(b + 'T12:00:00');
+    while (t <= last) {
+      const iso = t.toISOString().slice(0, 10);
+      fn(iso, shortDays[t.getDay()]);
+      t.setDate(t.getDate() + 1);
+    }
+  }
+  let row = 6;
+  let total = 0;
+  eachDate(start, end, (d, dow) => {
+    const dayLegs = byDay[d] || [];
+    let sub = 0;
+    dayLegs.forEach(l => { if (typeof l.miles === 'number') sub += l.miles; });
+    total += sub;
+    const block = Math.max(9, dayLegs.length + 1);
+    for (let i = 0; i < block; i++) {
+      const l = dayLegs[i];
+      let dateCell = '';
+      if (i === 0) dateCell = dow;
+      else if (i === 1) dateCell = d;
+      const edge = i === block - 1 ? dayEnd : thin;
+      if (l) {
+        const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
+        const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
+        put(row, 0, dateCell, { border: edge });
+        put(row, 1, from, { border: edge });
+        put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+        put(row, 3, to, { border: edge });
+        put(row, 4, l.odo_end != null ? l.odo_end : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+        put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+      } else {
+        put(row, 0, dateCell, { border: edge });
+        for (let c = 1; c < 6; c++) put(row, c, '', { border: edge });
+        put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
+      }
+      row++;
+    }
+  });
+  put(row, 0, '', { border: thin });
+  put(row, 1, '', { border: thin });
+  put(row, 2, '', { border: box });
+  put(row, 3, 'TOTAL MILEAGE (SUM OF SUBTOTALS)', { font: fontB, alignment: { horizontal: 'right', vertical: 'center' }, border: box });
+  put(row, 4, '', { border: box });
+  put(row, 5, '', { border: box });
+  put(row, 6, total, { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: box });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: row, c: 6 } });
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } }
+  ];
+  ws['!cols'] = [
+    { wch: 8 }, { wch: 24 }, { wch: 11 }, { wch: 28 }, { wch: 11 }, { wch: 9 }, { wch: 12 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Mileage');
+  XLSX.writeFile(wb, base + '.xlsx');
+}
+
+function printLog() {
+  if (!ctx) return;
+  const name = ctx.technician.name;
+  const byDay = {};
+  legs.forEach(l => {
+    if (!byDay[l.date]) byDay[l.date] = [];
+    byDay[l.date].push(l);
+  });
+  let rows = '';
+  let total = 0;
+  Object.keys(byDay).sort().forEach(d => {
+    let sub = 0;
+    byDay[d].forEach(l => {
+      const mi = typeof l.miles === 'number' ? l.miles : '';
+      if (typeof mi === 'number') { sub += mi; total += mi; }
+      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || '');
+      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || '');
+      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
+    });
+    rows += '<tr><td colspan="6"></td><td><strong>' + sub + '</strong></td></tr>';
+  });
+  rows += '<tr><td colspan="6"><strong>TOTAL MILEAGE (SUM OF SUBTOTALS)</strong></td><td><strong>' + total + '</strong></td></tr>';
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Mileage Log</title>' +
+    '<style>body{font-family:Arial,sans-serif;padding:16px;font-size:13px;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #999;padding:4px;} h2,h3{text-align:center;margin:4px;} @media print {.btn{display:none;}}</style></head><body>' +
+    '<button class="btn" onclick="window.print()">Save as PDF / Print</button>' +
+    '<h2>MCR TECHNICAL SERVICE, LLC</h2>' +
+    '<h3>(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)</h3>' +
+    '<p>NAME: ' + name + '</p>' +
+    '<table><tr><th>Date</th><th>Start</th><th>Odometer</th><th>To</th><th>Odometer</th><th>Mileage</th><th>Daily sub.</th></tr>' +
+    rows + '</table></body></html>';
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+}
+
+initPeriod();
+window.addEventListener('beforeunload', persistLocal);
+if (currentUser()) { showApp(); loadContext(); }
+</script>
+</body>
+</html>
