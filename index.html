@@ -5928,11 +5928,93 @@ function distanceMatrixStatus(state) {
             }
         }
 
+
+        function isTSiteCode(code) {
+            return /^[A-Z]{2}T\d+/i.test(String(code || '').trim());
+        }
+        function isKioskSiteCode(code) {
+            return /^[A-Z]{2}\d+/i.test(String(code || '').trim()) && !isTSiteCode(code);
+        }
+        function addressStreetSig(address) {
+            var m = String(address || '').match(/^\s*(\d{2,6})\s+([A-Za-z][A-Za-z.']*)/);
+            return m ? (m[1] + '|' + m[2].toLowerCase()) : '';
+        }
+        function findSitesAtAddress(address, state) {
+            var sig = addressStreetSig(address);
+            if (!sig) return [];
+            return Object.values(LOCATIONS || {}).filter(function(loc) {
+                if (!loc || !loc.address || (state && loc.state && loc.state !== state)) return false;
+                return addressStreetSig(loc.address) === sig;
+            });
+        }
+        function ticketLooksTestingOrOtc(ticket) {
+            if (!ticket) return false;
+            if (ticket.isTestingStation) return true;
+            if (isTSiteCode(ticket.suggestedCode)) return true;
+            var blob = [ticket.issueCategory, ticket.issueDetail, ticket.suggestedName, ticket.suggestedMachineType].join(' ');
+            return /otc|over[\s-]?the[\s-]?counter|testing\s*station|\bpods?\b|\bdmv\b|\bsos\b|\bbmv\b/i.test(blob);
+        }
+
+
+        function linkTicketThenClose(ticket, siteCode, div, onComplete, statusEl) {
+            if (statusEl) statusEl.textContent = 'Linking ticket to ' + siteCode + '…';
+            return fetch('/.netlify/functions/link-ticket-to-site', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticketId: ticket.ticketId, siteCode: siteCode })
+            }).then(function(r) { return r.json(); }).then(function(linkData) {
+                if (!linkData || !linkData.ok) {
+                    if (statusEl) statusEl.textContent = 'Link failed: ' + ((linkData && linkData.error) || 'unknown error');
+                    return;
+                }
+                if (div) div.remove();
+                processDispatch();
+                if (onComplete) onComplete(siteCode);
+            }).catch(function(e) {
+                if (statusEl) statusEl.textContent = 'Network error: ' + e.message;
+            });
+        }
+
+        function showLinkExistingTSitePrompt(ticket, existing, onComplete) {
+            var existingEl = document.getElementById('add-location-prompt');
+            if (existingEl) existingEl.remove();
+            var div = document.createElement('div');
+            div.id = 'add-location-prompt';
+            div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #7ec8e3;border-radius:8px;padding:16px 18px;z-index:9999;width:min(92vw,400px);box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
+            div.innerHTML = ''
+                + '<div style="font-weight:bold;color:#7ec8e3;margin-bottom:8px;">Same testing / OTC site</div>'
+                + '<div style="font-size:13px;color:#ccc;line-height:1.45;margin-bottom:12px;">Testing stations and OTC at the same address share one site. This ticket matches <b>' + existing.code + '</b> — ' + (existing.name || '') + '.<br><span style="color:#888;font-size:12px;">' + (existing.address || '') + '</span></div>'
+                + '<div style="font-size:12px;color:#aaa;margin-bottom:12px;">WO ' + (ticket.woNumber || '?') + '</div>'
+                + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
+                + '<button id="alp-link" style="flex:1;min-width:120px;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Link to ' + existing.code + '</button>'
+                + '<button id="alp-skip" style="flex:1;min-width:90px;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:14px;cursor:pointer;">Skip</button>'
+                + '</div>'
+                + '<button id="alp-newanyway" style="margin-top:8px;background:none;border:none;color:#888;font-size:11px;cursor:pointer;text-decoration:underline;">Create a separate site anyway</button>'
+                + '<div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>';
+            document.body.appendChild(div);
+            document.getElementById('alp-skip').onclick = function() { div.remove(); if (onComplete) onComplete(); };
+            document.getElementById('alp-link').onclick = function() {
+                linkTicketThenClose(ticket, existing.code, div, onComplete, document.getElementById('alp-status'));
+            };
+            document.getElementById('alp-newanyway').onclick = function() {
+                div.remove();
+                ticket._skipTSiteAutoLink = true;
+                showAddLocationPromptForTicket(ticket, onComplete);
+            };
+        }
+
         function showAddLocationPromptForTicket(ticket, onComplete) {
             var existing = document.getElementById('add-location-prompt');
             if (existing) existing.remove();
 
             var state = CURRENT_STATE;
+            if (!ticket._skipTSiteAutoLink && ticketLooksTestingOrOtc(ticket)) {
+                var twins = findSitesAtAddress(ticket.suggestedAddress, state).filter(function(loc) { return isTSiteCode(loc.code); });
+                if (twins.length) {
+                    showLinkExistingTSitePrompt(ticket, twins[0], onComplete);
+                    return;
+                }
+            }
             var techOptions = buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false), state + '0000', state);
 
             var div = document.createElement('div');
@@ -6010,13 +6092,37 @@ function distanceMatrixStatus(state) {
                         return m && m[1] === typedNum && m[2].toLowerCase() === typedStreetWord;
                     });
                     if (possibleDup) {
-                        var proceed = confirm(
-                            'A site with a similar address already exists:\n\n' +
-                            possibleDup.code + ' — ' + possibleDup.name + '\n' + possibleDup.address +
-                            '\n\nSave ' + code + ' as a NEW, separate site anyway?\n\n' +
-                            '(Cancel this, then use "Skip for now" and link the ticket to ' + possibleDup.code + ' manually instead if this is the same location.)'
-                        );
-                        if (!proceed) { status.textContent = 'Cancelled -- consider linking to ' + possibleDup.code + ' instead.'; return; }
+                        var bothT = isTSiteCode(possibleDup.code) && (isTSiteCode(code) || machineType === 'OTHER');
+                        var kioskVsT = (isTSiteCode(possibleDup.code) && isKioskSiteCode(code)) || (isKioskSiteCode(possibleDup.code) && isTSiteCode(code));
+                        if (bothT) {
+                            var linkIt = confirm(
+                                possibleDup.code + ' already exists at this address (testing/OTC share one site).\n\n' +
+                                'Link this ticket to ' + possibleDup.code + ' — ' + possibleDup.name + '?\n\n' +
+                                'OK = link. Cancel = stay on this form.'
+                            );
+                            if (linkIt) {
+                                linkTicketThenClose(ticket, possibleDup.code, div, onComplete, status);
+                                return;
+                            }
+                            status.textContent = 'Not linked. Saving a second T-site needs a different address or an explicit reason.';
+                            return;
+                        }
+                        if (kioskVsT) {
+                            var proceedK = confirm(
+                                'A different kind of site already sits at this address:\n\n' +
+                                possibleDup.code + ' — ' + possibleDup.name + '\n' + possibleDup.address +
+                                '\n\nKiosks stay separate from testing/OTC. Save ' + code + ' as its own site?'
+                            );
+                            if (!proceedK) { status.textContent = 'Cancelled.'; return; }
+                        } else {
+                            var proceed = confirm(
+                                'A site with a similar address already exists:\n\n' +
+                                possibleDup.code + ' — ' + possibleDup.name + '\n' + possibleDup.address +
+                                '\n\nSave ' + code + ' as a NEW, separate site anyway?\n\n' +
+                                '(Cancel, then link to ' + possibleDup.code + ' if this is the same location.)'
+                            );
+                            if (!proceed) { status.textContent = 'Cancelled -- consider linking to ' + possibleDup.code + ' instead.'; return; }
+                        }
                     }
                 }
 
