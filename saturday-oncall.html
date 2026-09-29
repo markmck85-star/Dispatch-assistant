@@ -828,6 +828,43 @@ async function ensureRestockScheduleCache(force) {
     window._restockScheduleByCode = { _state: key, _loaded: false };
   }
 }
+
+function satHaversine(a, b) {
+  if (!a || !b || a.lat == null || b.lat == null) return null;
+  const toRad = d => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+  return 3958.8 * 2 * Math.asin(Math.sqrt(x));
+}
+function nearestSatBoardStopLine(code) {
+  const board = [];
+  const states = activeStateFilter ? [activeStateFilter] : (SAT_STATES || []).map(s => s.code);
+  states.forEach(function(st) {
+    const locs = LOCATIONS_BY_STATE[st] || {};
+    (ticketsByState[st] || []).forEach(function(ticket) {
+      const loc = resolveSiteLoc(ticket);
+      if (!loc || !loc.code || loc.code === code) return;
+      const key = typeof ticketKey === 'function' ? ticketKey(ticket, loc.code) : null;
+      const asg = key && assignmentsByKey[key] && assignmentsByKey[key].status !== 'removed' ? assignmentsByKey[key] : null;
+      board.push({ code: loc.code, name: loc.name, lat: loc.lat, lng: loc.lng, tech: asg ? asg.techName : '' });
+    });
+  });
+  if (!board.length) return '';
+  const hereLocs = LOCATIONS_BY_STATE[(code||'').slice(0,2)] || {};
+  const here = hereLocs[code];
+  if (!here) return '';
+  let best = null;
+  board.forEach(function(b) {
+    const mi = satHaversine(here, b);
+    if (mi == null) return;
+    if (!best || mi < best.mi) best = { mi: mi, code: b.code, tech: b.tech };
+  });
+  if (!best) return '';
+  const mi = Math.round(best.mi * 10) / 10;
+  const first = String(best.tech || '').split(' ')[0];
+  return '<div style="font-size:11px;color:#ccc;margin-top:4px;">' + mi + ' mi straight-line from nearest Saturday ticket: <b>' + best.code + '</b>' + (first ? ' (' + first + ')' : '') + '</div>';
+}
 function formatRestockPopup(code) {
   const r = (window._restockScheduleByCode || {})[code];
   if (!r) return '';
@@ -847,6 +884,7 @@ function formatRestockPopup(code) {
   const href = 'restock-tracker.html?state=' + encodeURIComponent(st) + '&q=' + encodeURIComponent(code);
   return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
     + '<div style="font-size:11px;color:#888;">Last restock: ' + lastStr + '</div>'
+    + nearestSatBoardStopLine(code)
     + '<div style="margin-top:4px;"><a href="' + href + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
 }
 

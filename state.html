@@ -1131,6 +1131,7 @@ async function renderStateMap(state, dispatchDate) {
     if (!techRes.ok) throw new Error('technicians HTTP ' + techRes.status);
     const dmData = await loadStateDistanceMatrix(state);
     const dmMatrix = (dmData && dmData.matrix) || null;
+    window._stateMapCtx = { matrix: dmMatrix, LOCATIONS: LOCATIONS };
 
     // get-technicians.js is keyed by slug, not name -- re-key by name for lookup.
     const TECHS = {};
@@ -1382,7 +1383,8 @@ function formatRestockPopup(code) {
   const visitBit = r.visitedSinceRestock ? ' · visited since last restock' : '';
   const st = (document.getElementById('stateSel') || {}).value || '';
   const trackerHref = 'restock-tracker.html?state=' + encodeURIComponent(st) + '&q=' + encodeURIComponent(code);
-  let extra = '<div style="margin-top:4px;"><a href="' + trackerHref + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
+  let extra = nearestStateBoardStopLine(code, (window._stateMapCtx && window._stateMapCtx.LOCATIONS) || {}, window._stateMapLastRoutes || []);
+  extra += '<div style="margin-top:4px;"><a href="' + trackerHref + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
   if (r.visitedSinceRestock && r.lastVisitAppt) {
     extra += '<div style="font-size:11px;color:#aaa;margin-top:2px;">Last visit ' + String(r.lastVisitAppt).replace(/</g,'') + ' — tap Notes in tracker</div>';
   }
@@ -1407,7 +1409,36 @@ function toggleStateMapShowAllSites(checked) {
   if (checked) ensureRestockScheduleCache(state).then(function() { renderStateMap(state, window._stateMapDate); });
   else renderStateMap(state, window._stateMapDate);
 }
+function nearestStateBoardStopLine(code, LOCATIONS, routes) {
+  const ctx = window._stateMapCtx || {};
+  const matrix = ctx.matrix;
+  const locs = LOCATIONS || ctx.LOCATIONS || {};
+  const board = [];
+  (routes || []).forEach(function(r) {
+    (r.pts || []).forEach(function(p, idx) {
+      if (p && p.code && p.code !== code) board.push({ code: p.code, tech: r.tech || r.name || '', stop: idx + 1 });
+    });
+  });
+  if (!board.length) return '';
+  let best = null;
+  board.forEach(function(b) {
+    const leg = stateMapLegInfo(matrix, locs, null, '', b.code, code);
+    if (!leg || leg.distanceMi == null) return;
+    if (!best || leg.distanceMi < best.mi) {
+      const loc = locs[b.code] || {};
+      best = { mi: leg.distanceMi, real: !!leg.isReal, mins: leg.durationMin, code: b.code, tech: b.tech, stop: b.stop, name: loc.name || b.code };
+    }
+  });
+  if (!best) return '';
+  const mi = Math.round(best.mi * 10) / 10;
+  const drive = best.real ? (mi + ' mi drive') : (mi + ' mi straight-line');
+  const time = (best.real && best.mins != null) ? (' · ' + Math.round(best.mins) + ' min') : '';
+  const first = String(best.tech || '').split(' ')[0];
+  return '<div style="font-size:11px;color:#ccc;margin-top:4px;">' + drive + time + ' from nearest board stop: <b>' + best.code + '</b>' + (first ? ' (' + first + ' #' + best.stop + ')' : '') + '</div>';
+}
+
 function plotStateAllSites(map, LOCATIONS, routes) {
+  window._stateMapLastRoutes = routes;
   const box = document.getElementById('mapShowAllSitesToggle');
   if (box) box.checked = !!window._stateMapShowAllSites;
   if (_stateMapAllSitesLayer && _stateMap) {

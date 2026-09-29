@@ -8459,6 +8459,43 @@ ${content}</body></html>`;
                 window._restockScheduleByCode = { _state: key, _loaded: false };
             }
         }
+
+        function nearestBoardStopLine(code) {
+            const assignments = window.currentAssignments || {};
+            const board = [];
+            Object.keys(assignments).forEach(function(tech) {
+                (assignments[tech] || []).forEach(function(item, idx) {
+                    if (!item || !item.code || item.code === code) return;
+                    if (item.isSameDay === false) return;
+                    board.push({ code: item.code, tech: tech, stop: idx + 1 });
+                });
+            });
+            if (!board.length || typeof getCachedLegInfo !== 'function') return '';
+            let best = null;
+            board.forEach(function(b) {
+                const dummyTech = Object.keys(assignments)[0];
+                const leg = getCachedLegInfo(dummyTech, b.code, code);
+                if (!leg || leg.distanceMi == null) return;
+                if (!best || leg.distanceMi < best.mi) {
+                    const loc = (typeof LOCATIONS !== 'undefined' && LOCATIONS[b.code]) || {};
+                    best = {
+                        mi: leg.distanceMi,
+                        real: !!leg.isReal,
+                        mins: leg.durationMin,
+                        code: b.code,
+                        tech: b.tech,
+                        stop: b.stop,
+                        name: loc.name || b.code
+                    };
+                }
+            });
+            if (!best) return '';
+            const mi = Math.round(best.mi * 10) / 10;
+            const drive = best.real ? (mi + ' mi drive') : (mi + ' mi straight-line');
+            const time = (best.real && best.mins != null) ? (' · ' + Math.round(best.mins) + ' min') : '';
+            const first = (best.tech || '').split(' ')[0];
+            return '<div style="font-size:11px;color:#ccc;margin-top:4px;">' + drive + time + ' from nearest board stop: <b>' + best.code + '</b> (' + first + ' #' + best.stop + ')</div>';
+        }
         function formatRestockPopup(code) {
             const bag = window._restockScheduleByCode || {};
             const r = bag[code];
@@ -8492,8 +8529,9 @@ ${content}</body></html>`;
             const st = (typeof CURRENT_STATE !== 'undefined' && CURRENT_STATE) ? CURRENT_STATE : '';
             const trackerHref = 'restock-tracker.html?state=' + encodeURIComponent(st) + '&q=' + encodeURIComponent(code);
             let extra = '<div style="margin-top:4px;"><a href="' + trackerHref + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
+            extra += nearestBoardStopLine(code);
             if (r.visitedSinceRestock && r.lastVisitAppt) {
-                extra += '<div style="font-size:11px;color:#aaa;margin-top:2px;">Last visit ' + String(r.lastVisitAppt).replace(/</g,'') + ' — check notes in tracker (often not a restock)</div>';
+                extra += '<div style="font-size:11px;color:#aaa;margin-top:2px;">Last visit ' + String(r.lastVisitAppt).replace(/</g,'') + ' — tap Notes in tracker</div>';
             }
             return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">'
                 + 'Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
