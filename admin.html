@@ -1452,7 +1452,7 @@
             <div class="form-section">
                 <h2>🚗 Mileage Check</h2>
                 <p style="margin:0 0 12px 0;">
-                    <a href="/inventory-tracker.html" style="color:#8ab4f8;font-size:13px;margin-right:14px;">Inventory received →</a>
+                    <a id="inventoryTrackerLink" href="/inventory-tracker.html" style="display:none;color:#8ab4f8;font-size:13px;margin-right:14px;">Inventory received →</a>
                     <a href="/mileage-log.html" style="color:#8ab4f8;font-size:13px;margin-right:14px;">Technician mileage entry →</a>
                     <a href="/mileage.html" style="color:#8ab4f8;font-size:13px;">Mileage Check (review tool) →</a>
                 </p>
@@ -1670,6 +1670,12 @@
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('userInfo').textContent = currentUser.username + ' (' + currentUser.role + ')';
 
+            var invUser = String(currentUser.username || '').toLowerCase();
+            var invLink = document.getElementById('inventoryTrackerLink');
+            if (invLink) {
+                invLink.style.display = (invUser === 'mark' || invUser === 'admin' || invUser === 'tj') ? 'inline-block' : 'none';
+            }
+
             // Distance Matrix builds can cost real money on a large state
             // (~$23-45/state for site-to-site, ~$5-6 for driving-mode
             // tech-to-site) -- restrict the tab to admin-role users only
@@ -1804,6 +1810,7 @@
                     return '<div class="card">'
                         + '<div class="card-title">'+u.username+' <span style="font-weight:400;color:#666;font-size:13px;">('+u.role+')</span></div>'
                         + '<div class="card-detail">'+badge+' · territories: '+states+'</div>'
+                        + '<div class="card-detail">Last login: '+(u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : 'never')+'</div>'
                         + '<div class="card-detail">PIN: <span id="'+pinId+'" data-pin="'+(u.pin||'')+'">••••</span> '
                         + '<button type="button" class="edit-btn" style="padding:2px 8px;" onclick="togglePinReveal(\''+pinId+'\')">Show</button></div>'
                         + '<div class="card-actions">'
