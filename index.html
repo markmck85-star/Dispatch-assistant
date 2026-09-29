@@ -2171,7 +2171,17 @@ function distanceMatrixStatus(state) {
         }
         function refreshDispatchTomorrowBtnLabel() {
             const btn = document.getElementById('dispatchTomorrowBtn');
+            const input = document.getElementById('dispatchDate');
             if (!btn) return;
+            const today = localDateISO(new Date());
+            const val = input && input.value;
+            if (val && val !== today) {
+                const picked = new Date(val + 'T12:00:00');
+                if (!isNaN(picked.getTime())) {
+                    btn.textContent = picked.toLocaleDateString('en-US', { weekday: 'short' });
+                    return;
+                }
+            }
             const dow = new Date().getDay();
             btn.textContent = (dow === 0 || dow === 6) ? 'Monday' : 'Tomorrow';
         }
