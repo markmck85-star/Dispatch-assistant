@@ -6610,10 +6610,7 @@ function distanceMatrixStatus(state) {
                         <label style="font-size:12px;color:#aaa;">Full carrier address</label>
                         <input id="sms-missing-addr" placeholder="6785551212@vtext.com" style="width:100%;box-sizing:border-box;margin:4px 0 8px;padding:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#fff;">
                     </div>
-                    <div id="sms-missing-preview" style="font-size:12px;color:#8ab;margin:0 0 10px;min-height:16px;"></div>
-                    <label style="font-size:13px;display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-                        <input id="sms-missing-save" type="checkbox" checked> Save on their technician record
-                    </label>
+                    <div id="sms-missing-preview" style="font-size:12px;color:#8ab;margin:0 0 12px;min-height:16px;"></div>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;">
                         <button id="sms-missing-ok" style="flex:1;padding:8px;background:#1d4e89;color:#fff;border:none;border-radius:5px;cursor:pointer;">Use this number</button>
                         ${techEmail ? '<button id="sms-missing-email" style="flex:1;padding:8px;background:#0a6e5c;color:#fff;border:none;border-radius:5px;cursor:pointer;">Email only<br><span style="font-size:11px;font-weight:normal;">' + techEmail + '</span></button>' : '<button id="sms-missing-email" disabled style="flex:1;padding:8px;background:#444;color:#888;border:none;border-radius:5px;">No email on file</button>'}
@@ -6652,7 +6649,7 @@ function distanceMatrixStatus(state) {
                             : 'Pick a carrier and a 10-digit cell number.');
                         return;
                     }
-                    done({ mode: 'sms', smsAddress: addr, save: wrap.querySelector('#sms-missing-save').checked });
+                    done({ mode: 'sms', smsAddress: addr, save: true });
                 };
                 wrap.querySelector('#sms-missing-email').onclick = () => {
                     if (!techEmail) return;
