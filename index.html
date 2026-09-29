@@ -1725,12 +1725,23 @@ async function loadDistanceMatrix(state) {
  *   or null
  */
 function getTechDistance(techName, locCode, state) {
-  const key = state ? state.toUpperCase() : null;
+  const siteKey = String(locCode || "").toUpperCase().slice(0, 2);
+  const passedKey = state ? String(state).toUpperCase() : null;
+  const keys = [];
+  if (/^[A-Z]{2}$/.test(siteKey)) keys.push(siteKey);
+  if (passedKey && keys.indexOf(passedKey) === -1) keys.push(passedKey);
 
-  // 1. Pre-computed matrix
-  if (key && _dmCache[key]?.matrix) {
-    const techKey = techName.toLowerCase().replace(/\s+/g, "-");
-    const entry = _dmCache[key].matrix[techKey + "|" + locCode];
+  const techKey = String(techName || "").toLowerCase().replace(/\s+/g, "-");
+  const locKey = String(locCode || "");
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (!_dmCache[key] || !_dmCache[key].matrix) {
+      if (typeof loadDistanceMatrix === "function") loadDistanceMatrix(key).catch(function() {});
+      continue;
+    }
+    const entry = _dmCache[key].matrix[techKey + "|" + locKey]
+      || _dmCache[key].matrix[techKey + "|" + locKey.toUpperCase()]
+      || _dmCache[key].matrix[techKey + "|" + locKey.toLowerCase()];
     if (entry) {
       let label;
       if (entry.type === "driving" && (entry.durationMin != null || entry.durationText)) {
@@ -1747,9 +1758,10 @@ function getTechDistance(techName, locCode, state) {
 
   // 2. Haversine from in-memory lat/lng
   const tech = (typeof TECHS !== "undefined" && TECHS[techName]) || null;
-  // LOCATIONS is the active-state alias; also try LOCATIONS_GA / LOCATIONS_FL etc.
   const loc =
-    (typeof LOCATIONS !== "undefined" && LOCATIONS[locCode]) || null;
+    (typeof LOCATIONS !== "undefined" && LOCATIONS[locCode])
+    || (typeof window !== "undefined" && window["LOCATIONS_" + siteKey] && window["LOCATIONS_" + siteKey][locCode])
+    || null;
 
   if (tech?.lat && tech?.lng && loc?.lat && loc?.lng) {
     const mi = haversineDistance(tech.lat, tech.lng, loc.lat, loc.lng);
@@ -8613,7 +8625,17 @@ ${content}</body></html>`;
             const first = (best.tech || '').split(' ')[0];
             return '<div style="font-size:11px;color:#ccc;margin-top:4px;">' + drive + time + ' from nearest board stop: <b>' + best.code + '</b> (' + first + ' #' + best.stop + ')</div>';
         }
+        function isTestingOrOtcSite(code) {
+            if (/^[A-Z]{2}T\d+/i.test(String(code||''))) return true;
+            const loc = (typeof LOCATIONS !== 'undefined' && LOCATIONS[code]) || {};
+            const mt = String(loc.machineType || loc.machine_type || '').toUpperCase();
+            return mt === 'OTHER';
+        }
         function formatRestockPopup(code) {
+            if (isTestingOrOtcSite(code)) {
+                return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:#8ab;">Testing / OTC — no kiosk restock cycle</div>'
+                    + nearestBoardStopLine(code);
+            }
             const bag = window._restockScheduleByCode || {};
             const r = bag[code];
             if (!r) {
@@ -8658,6 +8680,7 @@ ${content}</body></html>`;
                 + extra;
         }
         function restockPinStyle(code) {
+            if (isTestingOrOtcSite(code)) return { color: '#5a6a7a', size: 14 };
             const r = (window._restockScheduleByCode || {})[code];
             const st = r && r.status;
             if (st === 'overdue') return { color: '#c0392b', size: 22 };
