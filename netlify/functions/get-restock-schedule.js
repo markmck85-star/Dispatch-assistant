@@ -95,6 +95,18 @@ exports.handler = async (event) => {
     if (!latestConfirmationBySite[c.site_id]) latestConfirmationBySite[c.site_id] = c;
   }
 
+  const { data: nonRestockAcks, error: ackErr } = await supabase
+    .from('site_nonrestock_acks')
+    .select('site_id, appointment_number')
+    .in('site_id', siteIds);
+  if (ackErr) return json(500, { ok: false, error: 'non-restock ack fetch failed: ' + ackErr.message });
+  const ackedApptBySite = {};
+  for (const a of (nonRestockAcks || [])) {
+    if (!a.site_id) continue;
+    if (!ackedApptBySite[a.site_id]) ackedApptBySite[a.site_id] = new Set();
+    if (a.appointment_number) ackedApptBySite[a.site_id].add(String(a.appointment_number).trim());
+  }
+
   // Paginate -- a full state's visit history can run into the thousands of rows.
   let allVisits = [];
   let from = 0;
@@ -215,7 +227,11 @@ exports.handler = async (event) => {
 
     const lastVisitEntry = data.allVisits.reduce((best, v) => (!best || v.date > best.date) ? v : best, null);
     const lastVisit = lastVisitEntry ? lastVisitEntry.date : null;
-    const visitedSinceRestock = !!(lastVisit && last && lastVisit > last);
+    let visitedSinceRestock = !!(lastVisit && last && lastVisit > last);
+    const lastAppt = lastVisitEntry ? String(lastVisitEntry.appt || '').trim() : '';
+    if (visitedSinceRestock && lastAppt && ackedApptBySite[siteId] && ackedApptBySite[siteId].has(lastAppt)) {
+      visitedSinceRestock = false;
+    }
 
     const lastRestockEntry = data.restocks.reduce((best, r) => (!best || r.date > best.date) ? r : best, null);
 

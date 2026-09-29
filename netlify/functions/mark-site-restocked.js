@@ -54,7 +54,7 @@ exports.handler = async (event) => {
     return json(400, { ok: false, error: "Invalid JSON body" });
   }
 
-  const { site_code, note, undo } = body;
+  const { site_code, note, undo, not_restock, appointment_number } = body;
   if (!site_code) return json(400, { ok: false, error: "site_code is required" });
 
   try {
@@ -63,6 +63,18 @@ exports.handler = async (event) => {
       .from("sites").select("id").eq("site_code", site_code).maybeSingle();
     if (siteErr) return json(500, { ok: false, error: siteErr.message });
     if (!site) return json(404, { ok: false, error: `No site found with code ${site_code}` });
+
+    if (not_restock) {
+      const { error: insAck } = await supabase
+        .from("site_nonrestock_acks")
+        .insert({
+          site_id: site.id,
+          appointment_number: appointment_number || null,
+          note: note || "Closing notes were not a restock",
+        });
+      if (insAck) return json(500, { ok: false, error: insAck.message });
+      return json(200, { ok: true, not_restock: true });
+    }
 
     if (undo) {
       const { data: latest, error: latestErr } = await supabase
