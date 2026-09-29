@@ -33,7 +33,7 @@ const getWatchdogLog = require('./get-watchdog-log.js');
 const getEmails = require('./get-emails.js');
 const getSiteHistory = require('./get-site-history.js');
 const getDistance = require('./get-distance.js');
-const migrateDistanceMatrix = require('./migrate-distance-matrix-to-supabase.js');
+const getRecentVisits = require('./get-recent-visits.js');
 const getOnCall = require('./get-on-call.js');
 const getCalendar = require('./get-calendar.js');
 
@@ -185,19 +185,6 @@ const TOOLS = [
     },
   },
   {
-    name: 'migrate_distance_matrix',
-    description:
-      "The only tool on this connector that can write data -- moves one state's distance-matrix data from the old Netlify Blobs cache into the live Supabase tables (site_site_distances / tech_site_distances) that get_distance and the Reassign dropdown now read from. Safe to call anytime: idempotent (upserts, re-running is harmless), and defaults to a dry run that writes nothing -- pass commit:true to actually migrate. A dry run reports exactly what it would migrate and what it can't resolve (e.g. a site code renamed since the matrix was built, or a placeholder site code with no real site yet) so those can be reviewed before committing.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        state: { type: 'string', description: "2-letter state code, e.g. CO. blobEntryCount:0 in the response means that state never had a matrix built -- nothing to do." },
-        commit: { type: 'boolean', description: 'Defaults to false (dry run, nothing written). Pass true to actually write.' },
-      },
-      required: ['state'],
-    },
-  },
-  {
     name: 'get_on_call_schedule',
     description:
       'Saturday on-call rotation -- which technician covers a state on a given Saturday. Only states with Saturday coverage have any data (others correctly return empty). Omit dates for the next 60 days; omit state for every Saturday-coverage state at once.',
@@ -220,6 +207,23 @@ const TOOLS = [
         state: { type: 'string', description: "2-letter state code, filters by technician's home state. Omit for everyone. Company events are never state-filtered." },
         since: { type: 'string', description: 'YYYY-MM-DD, optional -- defaults to today' },
         until: { type: 'string', description: 'YYYY-MM-DD, optional -- defaults to 60 days out' },
+      },
+    },
+  },
+  {
+    name: 'search_closing_notes',
+    description:
+      'Search captured closing notes and recent site visits. Filter by state, technician name, note text, and optional date. Same data as the Closing Notes page. Use this for questions like "Robert Medley notes that say spare or earliest convenience" or "registration printer trouble last 90 days in GA". Does not run raw SQL. Read-only. Results capped.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', description: '2-letter state code, e.g. GA. Strongly recommended.' },
+        tech: { type: 'string', description: 'Technician name as stored on visits, e.g. Robert Medley' },
+        q: { type: 'string', description: 'Text that must appear in the closing note, e.g. spare, convenience, replaced' },
+        date: { type: 'string', description: 'Single day YYYY-MM-DD' },
+        from: { type: 'string', description: 'Range start YYYY-MM-DD' },
+        to: { type: 'string', description: 'Range end YYYY-MM-DD' },
+        offset: { type: 'number', description: 'Pagination offset, default 0' },
       },
     },
   },
@@ -309,13 +313,17 @@ async function callTool(name, args) {
       if (statusCode !== 200) return toolError(body.error || 'get_distance failed');
       return toolText(body);
     }
-    case 'migrate_distance_matrix': {
-      const v = validateState(args);
-      if (v.error) return toolError(v.error);
-      const qs = { state: v.state };
-      if (args && args.commit === true) qs.commit = 'true';
-      const { statusCode, body } = await callHandler(migrateDistanceMatrix, qs);
-      if (statusCode !== 200) return toolError(body.error || 'migrate_distance_matrix failed');
+    case 'search_closing_notes': {
+      const qs = {};
+      if (args && args.state) qs.state = String(args.state).toUpperCase();
+      if (args && args.tech) qs.tech = String(args.tech).trim();
+      if (args && args.q) qs.q = String(args.q).trim();
+      if (args && args.date) qs.date = String(args.date);
+      if (args && args.from) qs.from = String(args.from);
+      if (args && args.to) qs.to = String(args.to);
+      if (args && Number.isInteger(args.offset)) qs.offset = String(args.offset);
+      const { statusCode, body } = await callHandler(getRecentVisits, qs);
+      if (statusCode !== 200) return toolError(body.error || 'search_closing_notes failed');
       return toolText(body);
     }
     case 'get_on_call_schedule': {
