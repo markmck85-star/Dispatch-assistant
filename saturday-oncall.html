@@ -122,7 +122,7 @@
       <div id="satMapBody">
         <div id="satMap"></div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
-          <input type="checkbox" id="satShowAllSitesToggle" onchange="window._satShowAllSites = this.checked; renderMap();">
+          <input type="checkbox" id="satShowAllSitesToggle" onchange="window._satShowAllSites = this.checked; if (this.checked) ensureRestockScheduleCache(true).then(function(){ renderMap(); }); else renderMap();">
           Show all kiosks
         </label>
       </div>
@@ -800,6 +800,56 @@ function ensureMap() {
   });
 }
 
+
+window._restockScheduleByCode = window._restockScheduleByCode || {};
+async function ensureRestockScheduleCache(force) {
+  const states = (typeof SAT_STATES !== 'undefined') ? SAT_STATES.map(s => s.code) : [];
+  const key = states.join('+') || 'SAT';
+  const loadedAt = window._restockScheduleByCode._loadedAt || 0;
+  const stale = Date.now() - loadedAt > 45000;
+  if (!force && !stale && window._restockScheduleByCode._state === key && window._restockScheduleByCode._loaded) return;
+  try {
+    const map = {};
+    const results = await Promise.all(states.map(function(st) {
+      return fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(st), { cache: 'no-store' })
+        .then(function(res) { return res.json(); })
+        .catch(function() { return {}; });
+    }));
+    results.forEach(function(data) {
+      (data.locations || data.sites || []).forEach(function(r) {
+        if (r && r.site_code) map[r.site_code] = r;
+      });
+    });
+    window._restockScheduleByCode = map;
+    window._restockScheduleByCode._state = key;
+    window._restockScheduleByCode._loaded = true;
+    window._restockScheduleByCode._loadedAt = Date.now();
+  } catch (e) {
+    window._restockScheduleByCode = { _state: key, _loaded: false };
+  }
+}
+function formatRestockPopup(code) {
+  const r = (window._restockScheduleByCode || {})[code];
+  if (!r) return '';
+  const status = r.status || '';
+  const last = r.last ? new Date(r.last) : null;
+  const lastStr = last ? last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+  let nextStr = '—';
+  let color = '#888';
+  if (status === 'overdue') {
+    const days = (typeof r.daysSince === 'number' && r.avg) ? Math.round(r.daysSince - r.avg) : null;
+    nextStr = days != null ? ('overdue ' + days + 'd') : 'overdue';
+    color = '#e05555';
+  } else if (status === 'soon') { nextStr = 'due soon'; color = '#d4a017'; }
+  else if (status === 'ok') { nextStr = 'on track'; color = '#4caf50'; }
+  const visitBit = r.visitedSinceRestock ? ' · visited since last restock' : '';
+  const st = (code || '').slice(0, 2);
+  const href = 'restock-tracker.html?state=' + encodeURIComponent(st) + '&q=' + encodeURIComponent(code);
+  return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
+    + '<div style="font-size:11px;color:#888;">Last restock: ' + lastStr + '</div>'
+    + '<div style="margin-top:4px;"><a href="' + href + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
+}
+
 function renderMap() {
   ensureMap();
   mapMarkers.forEach(m => satMap.removeLayer(m));
@@ -881,6 +931,7 @@ function renderMap() {
           '<b>' + escapeHtml(name) + '</b><br>' + escapeHtml(siteCode)
           + (loc.address ? '<br>' + escapeHtml(loc.address) : '')
           + '<br><span style="color:#888">No Saturday ticket</span>'
+          + formatRestockPopup(siteCode)
         ).addTo(satMap);
         mapMarkers.push(m);
       });

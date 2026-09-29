@@ -1108,6 +1108,7 @@ async function renderStateMap(state, dispatchDate) {
   if (!panel) return;
   if (typeof L === 'undefined') { panel.style.opacity = '0.5'; return; }
   if (!dispatchDate) return; // set by loadConsole() once get-state-console.js's date is known
+  if (window._stateMapShowAllSites) await ensureRestockScheduleCache(state);
 
   const titleEl = document.getElementById('stateMapTitle');
   if (titleEl) {
@@ -1336,8 +1337,10 @@ async function renderStateMap(state, dispatchDate) {
 }
 
 window._restockScheduleByCode = window._restockScheduleByCode || {};
-async function ensureRestockScheduleCache(state) {
-  if (window._restockScheduleByCode._state === state && window._restockScheduleByCode._loaded) return;
+async function ensureRestockScheduleCache(state, force) {
+  const loadedAt = window._restockScheduleByCode._loadedAt || 0;
+  const stale = Date.now() - loadedAt > 45000;
+  if (!force && !stale && window._restockScheduleByCode._state === state && window._restockScheduleByCode._loaded) return;
   try {
     const res = await fetch('/.netlify/functions/get-restock-schedule?state=' + encodeURIComponent(state), { cache: 'no-store' });
     const data = await res.json();
@@ -1346,6 +1349,7 @@ async function ensureRestockScheduleCache(state) {
     window._restockScheduleByCode = map;
     window._restockScheduleByCode._state = state;
     window._restockScheduleByCode._loaded = true;
+    window._restockScheduleByCode._loadedAt = Date.now();
   } catch (e) {
     window._restockScheduleByCode = { _state: state, _loaded: false };
   }
@@ -1376,11 +1380,18 @@ function formatRestockPopup(code) {
     color = '#4caf50';
   }
   const visitBit = r.visitedSinceRestock ? ' · visited since last restock' : '';
+  const st = (document.getElementById('stateSel') || {}).value || '';
+  const trackerHref = 'restock-tracker.html?state=' + encodeURIComponent(st) + '&q=' + encodeURIComponent(code);
+  let extra = '<div style="margin-top:4px;"><a href="' + trackerHref + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
+  if (r.visitedSinceRestock && r.lastVisitAppt) {
+    extra += '<div style="font-size:11px;color:#aaa;margin-top:2px;">Last visit ' + String(r.lastVisitAppt).replace(/</g,'') + ' — tap Notes in tracker</div>';
+  }
   return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">'
     + 'Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
     + '<div style="font-size:11px;color:#888;">Last restock: ' + lastStr
     + (r.daysSince != null ? ' · ' + Math.round(r.daysSince) + 'd ago' : '')
-    + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>';
+    + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>'
+    + extra;
 }
 function restockPinColor(code) {
   const r = (window._restockScheduleByCode || {})[code];

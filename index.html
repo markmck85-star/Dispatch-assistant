@@ -8415,6 +8415,7 @@ ${content}</body></html>`;
             const btn = document.getElementById('mapRefreshBtn');
             if (btn) { btn.disabled = true; btn.textContent = '⏳ …'; }
             try {
+                await ensureRestockScheduleCache(true);
                 await processDispatch();
             } finally {
                 if (btn) { btn.disabled = false; btn.innerHTML = '&#x1F504; Refresh'; }
@@ -8431,10 +8432,12 @@ ${content}</body></html>`;
             if (state === 'GA') return ['GA', 'NC', 'SC'];
             return [state];
         }
-        async function ensureRestockScheduleCache() {
+        async function ensureRestockScheduleCache(force) {
             const state = (typeof CURRENT_STATE !== 'undefined' && CURRENT_STATE) || 'GA';
             const key = restockScheduleStatesFor(state).join('+');
-            if (window._restockScheduleByCode._state === key && window._restockScheduleByCode._loaded) return;
+            const loadedAt = window._restockScheduleByCode._loadedAt || 0;
+            const stale = Date.now() - loadedAt > 45000;
+            if (!force && !stale && window._restockScheduleByCode._state === key && window._restockScheduleByCode._loaded) return;
             try {
                 const map = {};
                 const parts = restockScheduleStatesFor(state);
@@ -8451,6 +8454,7 @@ ${content}</body></html>`;
                 window._restockScheduleByCode = map;
                 window._restockScheduleByCode._state = key;
                 window._restockScheduleByCode._loaded = true;
+                window._restockScheduleByCode._loadedAt = Date.now();
             } catch (e) {
                 window._restockScheduleByCode = { _state: key, _loaded: false };
             }
