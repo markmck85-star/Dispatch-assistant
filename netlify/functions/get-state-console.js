@@ -305,6 +305,26 @@ exports.handler = async (event) => {
       .limit(150);
     if (ticketsErr) return json(500, { ok: false, error: 'tickets fetch failed: ' + ticketsErr.message });
 
+    // Open armored-truck-meet tickets must stay visible even after the
+    // 3-day window. Scheduling often runs a week. Do not forward whole
+    // state mailboxes; pin the ticket row we already have.
+    const haveIds = new Set((tickets || []).map(row => row.id));
+    const { data: meetExtra, error: meetErr } = await supabase
+      .from('tickets')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at')
+      .in('site_id', siteIds)
+      .ilike('issue_category', 'Armored Truck Meet')
+      .is('manually_resolved_at', null)
+      .order('received_at', { ascending: false })
+      .limit(40);
+    if (meetErr) return json(500, { ok: false, error: 'armored meet fetch failed: ' + meetErr.message });
+    (meetExtra || []).forEach(row => {
+      if (!haveIds.has(row.id)) {
+        tickets.push(row);
+        haveIds.add(row.id);
+      }
+    });
+
     // Closed = a site_visit from the closed-ticket import has already
     // linked back to this ticket (import-service-appointments.js sets
     // site_visits.ticket_id by matching WO number). Take the earliest
@@ -454,6 +474,7 @@ exports.handler = async (event) => {
         needsReview: !!t.needs_review,
         lineItems: lineItemsByTicketId[t.id] || [],
         source: 'ticket_email',
+        pinnedMeet: isArmoredTruckMeet,
       };
     });
 
