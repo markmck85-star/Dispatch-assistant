@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GA SST Inventory — Monday Board</title>
+  <title>Inventory board</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -133,21 +133,36 @@
 </head>
 <body>
   <header>
-    <div class="kicker"><a href="/admin.html" style="color:inherit;">← Admin</a> · Neumo / ITI · Warehouse 101 — GA SST · Lean v1</div>
-    <h1>Monday inventory board</h1>
+    <div class="kicker"><a href="/admin.html" style="color:inherit;">← Admin</a> · Neumo / ITI · Inventory mailbox · all states</div>
+    <h1>Inventory board</h1>
     <p class="sub">
-      Technicians send the frozen Neumo count sheet to the <strong>inventory mailbox</strong>.
-      The app is copied so TJ can see who is in before he forwards the set to Melinda.
-      Cutoff and reminder wording are admin-editable below. Default: Monday 9:00 a.m. Eastern. Georgia-only.
+      Technicians send the Neumo count sheet to <strong>inventory@mcrtechservice.com</strong>.
+      This list is who is in vs missing so TJ can chase people before he forwards the set to Melinda.
+      Use the date when a holiday moves inventory off Monday. Filter by state if you only want one territory.
     </p>
   </header>
 
   <div class="wrap">
     <section class="stats">
-      <div class="stat ok"><b>1</b><span>Received — McKelvey 2026-09-21</span></div>
-      <div class="stat miss"><b>6</b><span>Expected GA names with no file in this slice</span></div>
-      <div class="stat"><b>7</b><span>GA home people who should submit a count</span></div>
-      <div class="stat"><b>Review</b><span>Option to send to Melinda after review</span></div>
+      <div class="stat ok"><b id="statIn">–</b><span>Received</span></div>
+      <div class="stat miss"><b id="statOut">–</b><span>Missing</span></div>
+      <div class="stat"><b id="statAll">–</b><span>People who should submit</span></div>
+      <div class="stat"><b>Review</b><span>Nothing goes to Melinda until TJ sends it</span></div>
+    </section>
+    <section class="panel" style="padding:12px 18px;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;">
+        <div style="min-width:160px;"><label>Count since</label><input id="since" type="date" /></div>
+        <div style="min-width:140px;"><label>State</label>
+          <select id="stateFilter">
+            <option value="">All states</option>
+            <option>AL</option><option>CA</option><option>CO</option><option>FL</option>
+            <option>GA</option><option>ID</option><option>IL</option><option>IN</option>
+            <option>MI</option><option>MN</option><option>NC</option><option>NV</option>
+            <option>OH</option><option>OR</option><option>SC</option><option>WV</option>
+          </select>
+        </div>
+        <button class="save" type="button" onclick="loadBoard()">Refresh</button>
+      </div>
     </section>
 
     <section class="panel">
@@ -163,77 +178,15 @@
             <th>Notes</th>
           </tr>
         </thead>
-        <tbody>
-          <tr>
-            <td>Gina Ownbey</td>
-            <td class="mono">GA · Field Support Manager</td>
-            <td class="mono">—</td>
-            <td>gownbey@mcrtechservice.com</td>
-            <td><span class="tag out">Missing</span></td>
-            <td>Submits a count · also covers calls + dispatch · (404) 723-5867</td>
-          </tr>
-          <tr>
-            <td>Mark McKelvey</td>
-            <td class="mono">GA · Senior Technical Lead</td>
-            <td class="mono">2026-09-21</td>
-            <td>mckelvey@mcrtechservice.com</td>
-            <td><span class="tag in">Received</span></td>
-            <td>CY 20/30 · ribbon 14/24 · SMS 6787794352@vtext.com</td>
-          </tr>
-          <tr>
-            <td>Keontae Johnson</td>
-            <td class="mono">GA · Field Technician</td>
-            <td class="mono">—</td>
-            <td>kjohnson@mcrtechservice.com</td>
-            <td><span class="tag out">Missing</span></td>
-            <td>No file in this slice · (443) 996-0860</td>
-          </tr>
-          <tr>
-            <td>Omari Williams</td>
-            <td class="mono">GA · Field Technician</td>
-            <td class="mono">—</td>
-            <td>owilliams@mcrtechservice.com</td>
-            <td><span class="tag out">Missing</span></td>
-            <td>(470) 587-3127</td>
-          </tr>
-          <tr>
-            <td>Randy Thomas</td>
-            <td class="mono">GA · Field Technician</td>
-            <td class="mono">—</td>
-            <td>rthomas@mcrtechservice.com</td>
-            <td><span class="tag out">Missing</span></td>
-            <td>(404) 626-8530</td>
-          </tr>
-          <tr>
-            <td>Robert Medley</td>
-            <td class="mono">GA · Field Technician</td>
-            <td class="mono">—</td>
-            <td>rmedley@mcrtechservice.com</td>
-            <td><span class="tag out">Missing</span></td>
-            <td>972-363-9330</td>
-          </tr>
-          <tr>
-            <td>Sean Reich</td>
-            <td class="mono">GA · Field Technician</td>
-            <td class="mono">—</td>
-            <td>sreich@mcrtechservice.com</td>
-            <td><span class="tag out">Missing</span></td>
-            <td>SMS 4783655879@vtext.com</td>
-          </tr>
-          <tr>
-            <td colspan="6" class="note">
-              Expected Monday submitters = Gina plus the six active GA-home field techs.
-              Not on this list: Evan Zent (NC) and Michael Newboult (SC) — they do not turn in a GA sheet.
-              Also off: Unassigned placeholder, inactive Nyzier Moore and Robert Whitehead.
-            </td>
-          </tr>
-        </tbody>
+        <tbody id="subBody">
+          <tr><td colspan="6" class="note">Loading…</td></tr>
+                </tbody>
       </table>
     </section>
 
     <section class="grid2">
       <div class="panel">
-        <h2>McKelvey — consumables that actually run out</h2>
+        <h2>Sample — McKelvey forms, ribbon, and supplies</h2>
         <table>
           <thead>
             <tr>
@@ -353,17 +306,17 @@
       </div>
       <div class="rule">
         <h3>Georgia form vintage</h3>
-        <p>Current year = next-year dated stock (red 2027 now). Previous year = this registration year’s stock (green 2026). Birthday renewals. Other states stay off this page.</p>
+        <p>Current year = next-year dated stock (red 2027 now). Previous year = this registration year’s stock (green 2026). Birthday renewals. State filter above hides other territories when you need a GA-only view.</p>
       </div>
       <div class="rule">
         <h3>Intentionally not in v1</h3>
-        <p>Per-tech velocity flags, auto call-tags, in-app counting, NC / FL profiles, spare-kit tracking. Those wait until submissions are reliable.</p>
+        <p>Per-tech velocity flags, auto call-tags, in-app counting, parsed spreadsheet counts, spare-kit tracking. Those wait until submissions are reliable.</p>
       </div>
     </section>
   </div>
 
   <footer>
-    Built as a lean Georgia slice from the Mark McKelvey Neumo sheet dated 2026-09-21.
+    Live received/missing from the inventory mailbox. Forms table below is still the sample McKelvey sheet until we parse attachments.
     Product codes are Neumo’s; this board does not rename them.
   </footer>
 <script>
@@ -396,6 +349,49 @@ function saveSettings() {
   document.getElementById("saveMsg").textContent = "Saved on this browser. Next step is a shared admin settings row in the database.";
 }
 loadSettings();
+
+function lastMonday() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().slice(0, 10);
+}
+function esc(s) {
+  return String(s || "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+}
+async function loadBoard() {
+  const since = document.getElementById("since").value;
+  const state = document.getElementById("stateFilter").value;
+  let url = "/.netlify/functions/get-inventory-receipts?since=" + encodeURIComponent(since);
+  if (state) url += "&state=" + encodeURIComponent(state);
+  const res = await fetch(url);
+  const data = await res.json();
+  const rec = data.received || [];
+  const miss = data.missing || [];
+  document.getElementById("statIn").textContent = rec.length;
+  document.getElementById("statOut").textContent = miss.length;
+  document.getElementById("statAll").textContent = data.techCount || (rec.length + miss.length);
+  const rows = [];
+  miss.forEach((t) => {
+    rows.push("<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
+      "</td><td class=\"mono\">—</td><td>" + esc(t.email || "") +
+      "</td><td><span class=\"tag out\">Missing</span></td><td></td></tr>");
+  });
+  rec.forEach((t) => {
+    const day = (t.receivedAt || "").slice(0, 10);
+    rows.push("<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
+      "</td><td class=\"mono\">" + esc(day) + "</td><td>" + esc(t.email || "") +
+      "</td><td><span class=\"tag in\">Received</span></td><td>" + esc(t.subject || "") + "</td></tr>");
+  });
+  (data.unmatched || []).forEach((t) => {
+    rows.push("<tr><td colspan=\"6\" class=\"note\">Unmatched: " + esc(t.subject) + " · " + esc(t.sender) + "</td></tr>");
+  });
+  document.getElementById("subBody").innerHTML = rows.join("") || "<tr><td colspan=\"6\" class=\"note\">No rows.</td></tr>";
+}
+document.getElementById("since").value = lastMonday();
+loadBoard();
+
 </script>
 </body>
 </html>
