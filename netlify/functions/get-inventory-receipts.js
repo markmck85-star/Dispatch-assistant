@@ -57,6 +57,7 @@ exports.handler = async (event) => {
     since = d.toISOString().slice(0, 10);
   }
   const sinceIso = since + "T00:00:00-04:00";
+  const stateFilter = String(params.state || "").trim().toUpperCase();
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -67,7 +68,10 @@ exports.handler = async (event) => {
     .order("home_state", { ascending: true })
     .order("name", { ascending: true });
   if (tErr) return json(500, { error: tErr.message });
-  const roster = [...(techs || []), ...EXTRA_ROSTER];
+  let roster = [...(techs || []), ...EXTRA_ROSTER];
+  if (/^[A-Z]{2}$/.test(stateFilter)) {
+    roster = roster.filter((t) => String(t.home_state || "").toUpperCase() === stateFilter);
+  }
 
   const { data: mails, error: mErr } = await supabase
     .from("inbound_emails")
@@ -112,6 +116,7 @@ exports.handler = async (event) => {
       received.push({
         name: tech.name,
         state: tech.home_state,
+        email: tech.email || null,
         subject: hit.subject,
         receivedAt: hit.received_at,
         emailId: hit.id,
