@@ -47,6 +47,7 @@
   #satMapPanel.map-fullscreen #satMapFullscreenBtn { display:none; }
   .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .map-site-pin { display:flex;align-items:center;justify-content:center;width:10px;height:10px;border-radius:50%;background:#6a7a88;border:1px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.4);opacity:.8; }
 
   .section-title { font-size:14.5px; font-weight:700; color:#f0a500; margin:18px 0 8px; }
   .ticket-card { background:#1e1e1e; border:1px solid #333; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
@@ -120,6 +121,10 @@
       </div>
       <div id="satMapBody">
         <div id="satMap"></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
+          <input type="checkbox" id="satShowAllSitesToggle" onchange="window._satShowAllSites = this.checked; renderMap();">
+          Show all kiosks
+        </label>
       </div>
     </div>
 
@@ -264,6 +269,7 @@ let activeStateFilter = null;   // null = overview, else a state code
 let satMap = null;
 let mapMarkers = [];
 let satMapBounds = null;
+window._satShowAllSites = false;
 let pendingMessageTicket = null;
 const PREVIEW = new URLSearchParams(location.search).has('preview');
 
@@ -771,6 +777,7 @@ function renderStateChips() {
   el.querySelectorAll('.state-chip').forEach(chip => {
     chip.onclick = () => {
       activeStateFilter = chip.dataset.state || null;
+      window._satMapUserView = null;
       renderStateChips();
       renderMap();
       renderTicketList();
@@ -784,6 +791,13 @@ function ensureMap() {
   satMap = L.map('satMap', { scrollWheelZoom: false });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(satMap);
   satMap.setView([37, -90], 4);
+  satMap.on('click', () => satMap.scrollWheelZoom.enable());
+  satMap.on('mouseout', () => satMap.scrollWheelZoom.disable());
+  satMap.on('zoomend moveend', function() {
+    if (window._satMapFitting) return;
+    const c = satMap.getCenter();
+    window._satMapUserView = { lat: c.lat, lng: c.lng, zoom: satMap.getZoom() };
+  });
 }
 
 function renderMap() {
@@ -842,11 +856,49 @@ function renderMap() {
         bounds.push([loc.lat, loc.lng]);
       }
     });
+
+    if (window._satShowAllSites) {
+      const ticketCodes = new Set();
+      (ticketsByState[code] || []).forEach(ticket => {
+        const loc = resolveSiteLoc(ticket);
+        if (loc && loc.code) ticketCodes.add(loc.code);
+      });
+      Object.keys(locs).forEach(siteCode => {
+        const loc = locs[siteCode];
+        if (!loc || loc.lat == null || loc.lng == null) return;
+        if (ticketCodes.has(siteCode) || ticketCodes.has(loc.code)) return;
+        const name = loc.name || siteCode;
+        if (/unassigned|placeholder|tmp[-_]?site/i.test(name + ' ' + siteCode)) return;
+        const m = L.marker([Number(loc.lat), Number(loc.lng)], {
+          icon: L.divIcon({
+            className: '',
+            html: '<div class="map-site-pin"></div>',
+            iconSize: [10, 10], iconAnchor: [5, 5], popupAnchor: [0, -6],
+          }),
+          title: siteCode + ' — ' + name,
+          zIndexOffset: -200,
+        }).bindPopup(
+          '<b>' + escapeHtml(name) + '</b><br>' + escapeHtml(siteCode)
+          + (loc.address ? '<br>' + escapeHtml(loc.address) : '')
+          + '<br><span style="color:#888">No Saturday ticket</span>'
+        ).addTo(satMap);
+        mapMarkers.push(m);
+      });
+    }
   }
 
   if (bounds.length) {
     satMapBounds = L.latLngBounds(bounds);
-    satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
+    window._satMapFitting = true;
+    try {
+      if (window._satMapUserView) {
+        satMap.setView([window._satMapUserView.lat, window._satMapUserView.lng], window._satMapUserView.zoom, { animate: false });
+      } else {
+        satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
+      }
+    } finally {
+      window._satMapFitting = false;
+    }
   }
 }
 
@@ -904,7 +956,9 @@ function _fitSatMapAfterResize() {
   requestAnimationFrame(() => {
     if (satMap) {
       satMap.invalidateSize();
-      if (satMapBounds && satMapBounds.isValid()) {
+      if (window._satMapUserView) {
+        satMap.setView([window._satMapUserView.lat, window._satMapUserView.lng], window._satMapUserView.zoom, { animate: false });
+      } else if (satMapBounds && satMapBounds.isValid()) {
         satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
       }
     }
