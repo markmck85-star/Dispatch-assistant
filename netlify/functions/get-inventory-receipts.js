@@ -69,6 +69,7 @@ exports.handler = async (event) => {
     .order("name", { ascending: true });
   if (tErr) return json(500, { error: tErr.message });
   let roster = [...(techs || []), ...EXTRA_ROSTER];
+  roster = roster.filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
   if (/^[A-Z]{2}$/.test(stateFilter)) {
     roster = roster.filter((t) => String(t.home_state || "").toUpperCase() === stateFilter);
   }
