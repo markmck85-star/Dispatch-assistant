@@ -100,6 +100,11 @@
      keeps its full height (input + Run button + diff text) rather than
      being squeezed by the map's flex:1 sibling on a short/landscape screen. */
   #stateMapPanel.map-fullscreen #stateAiCommandBar { flex-shrink: 0; }
+
+  #stateMapPanel.map-fullscreen #stateAiCommandBar { margin: 8px 0 0; flex-shrink: 0; }
+  #stateMapPanel.map-fullscreen #stateAiCommandInput { font-size: 16px; padding: 10px; }
+  #stateMapPanel.map-fullscreen #stateAiSendBtn, #stateMapPanel.map-fullscreen #stateAiMicBtn { padding: 10px 12px; font-size: 15px; }
+
   #stateMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
   .map-legend-chip:hover { border-color: #7ec8e3; }
@@ -204,7 +209,7 @@
            #stateMapBody (like index.html's bar is a sibling of its own map
            panel), so it stays usable and visible even if the map itself is
            hidden or the page hasn't been resized into fullscreen. -->
-      <div id="stateAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+      <div id="stateAiCommandBarHome"><div id="stateAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
         <div style="display:flex; gap:6px; align-items:center;">
           <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
           <input type="text" id="stateAiCommandInput" autocomplete="off"
@@ -221,7 +226,7 @@
         <button type="button" id="stateAiAnalyzeRoutesBtn" onclick="analyzeStateRoutes()"
             title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
             style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
-      </div>
+      </div></div>
     </div>
 
     <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
@@ -1568,6 +1573,9 @@ function _openStateMapFullscreen() {
     viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
   }
   document.addEventListener('keydown', _stateMapFullscreenEscHandler);
+  const bar = document.getElementById('stateAiCommandBar');
+  const body = document.getElementById('stateMapBody');
+  if (bar && body && bar.parentElement !== body) body.appendChild(bar);
   _fitStateMapAfterResize();
 }
 
@@ -1581,6 +1589,9 @@ function _closeStateMapFullscreen() {
   }
   document.removeEventListener('keydown', _stateMapFullscreenEscHandler);
   _stateMapFullscreenHistoryPushed = false;
+  const bar = document.getElementById('stateAiCommandBar');
+  const home = document.getElementById('stateAiCommandBarHome');
+  if (bar && home && bar.parentElement !== home) home.appendChild(bar);
   _fitStateMapAfterResize();
 }
 

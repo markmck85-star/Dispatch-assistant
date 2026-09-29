@@ -5,7 +5,167 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
 <title>Saturday On-Call – MCR Dispatch</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+// Saturday AI bar — same dispatch-ai backend as the weekday board / state console.
+let _satAiBusy = false;
+let _satAiListening = false;
+let _satAiRecognition = null;
+
+function satAiState() {
+  if (activeStateFilter) return activeStateFilter;
+  const states = new Set();
+  (SAT_STATES || []).forEach(s => {
+    (ticketsByState[s.code] || []).forEach(t => {
+      const loc = resolveSiteLoc(t);
+      const key = ticketKey(t, loc && loc.code);
+      const asg = key && assignmentsByKey[key];
+      if (asg && asg.status !== 'removed' && asg.techName) states.add(s.code);
+    });
+  });
+  if (states.size === 1) return [...states][0];
+  return null;
+}
+
+function satAiRoutesSnapshot() {
+  const st = satAiState();
+  if (!st) return [];
+  const byTech = {};
+  (ticketsByState[st] || []).forEach(ticket => {
+    const loc = resolveSiteLoc(ticket);
+    if (!loc || !loc.code) return;
+    const key = ticketKey(ticket, loc.code);
+    const asg = key && assignmentsByKey[key];
+    if (!asg || asg.status === 'removed' || !asg.techName) return;
+    if (!byTech[asg.techName]) byTech[asg.techName] = [];
+    byTech[asg.techName].push(loc.code);
+  });
+  const routes = Object.keys(byTech).map(tech => ({ tech, stops: byTech[tech], color: null }));
+  const routed = new Set(routes.map(r => r.tech));
+  Object.values(TECHS_BY_STATE[st] || {}).forEach(tech => {
+    if (!tech || !tech.name || routed.has(tech.name) || tech.active === false) return;
+    routes.push({ tech: tech.name, stops: [], color: null });
+  });
+  return routes;
+}
+
+function refreshSatAiBarState() {
+  const input = document.getElementById('satAiCommandInput');
+  const sendBtn = document.getElementById('satAiSendBtn');
+  const micBtn = document.getElementById('satAiMicBtn');
+  if (!input || !sendBtn) return;
+  const routes = satAiRoutesSnapshot();
+  window._satAiRoutes = routes;
+  const hasBoard = routes.some(r => (r.stops || []).length > 0);
+  const st = satAiState();
+  const enabled = hasBoard && !_satAiBusy && !!st && !PREVIEW;
+  input.disabled = !enabled;
+  sendBtn.disabled = !enabled;
+  sendBtn.style.opacity = enabled ? '1' : '0.5';
+  input.placeholder = PREVIEW ? 'Demo mode — assistant does not write'
+    : (!st ? 'Tap a state chip first'
+    : (hasBoard ? 'e.g. "move stop 1 from Terril to Ed"' : 'No assigned Saturday stops yet'));
+  if (micBtn) {
+    const speechSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    micBtn.style.display = speechSupported ? '' : 'none';
+    micBtn.disabled = !enabled;
+  }
+  const analyzeBtn = document.getElementById('satAiAnalyzeRoutesBtn');
+  if (analyzeBtn) {
+    analyzeBtn.disabled = !enabled;
+    analyzeBtn.style.opacity = enabled ? '1' : '0.5';
+  }
+}
+
+function setSatAiStatus(msg, color) {
+  const el = document.getElementById('satAiCommandStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = color || '#888';
+}
+
+function analyzeSatRoutes() { submitSatAiCommand('propose_route_rebalance'); }
+
+async function submitSatAiCommand(forceTool) {
+  if (_satAiBusy || PREVIEW) return;
+  const input = document.getElementById('satAiCommandInput');
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text && !forceTool) { setSatAiStatus('Type or dictate a command first.', '#ffb56b'); return; }
+  const state = satAiState();
+  const routes = satAiRoutesSnapshot();
+  if (!state) { setSatAiStatus('Tap a state chip so the assistant knows which board to edit.', '#ffb56b'); return; }
+  if (!routes.some(r => (r.stops || []).length > 0)) { setSatAiStatus('No assigned Saturday stops yet.', '#ffb56b'); return; }
+  if (_satAiListening) stopSatAiVoice();
+  _satAiBusy = true;
+  refreshSatAiBarState();
+  setSatAiStatus(forceTool ? 'Scanning the board…' : 'Working on it…', '#7ec8e3');
+  const diffEl = document.getElementById('satAiCommandDiff');
+  if (diffEl) diffEl.innerHTML = '';
+  try {
+    const res = await fetch('/.netlify/functions/dispatch-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: text || (forceTool ? 'Analyze routes for rebalancing opportunities' : ''),
+        state, dispatchDate: TARGET_DAY, routes, forceTool: forceTool || undefined
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.ok) {
+      setSatAiStatus((data && data.error) || ('Assistant failed (HTTP ' + res.status + ')'), '#ff8a80');
+      return;
+    }
+    if (!(data.actions || []).length) {
+      setSatAiStatus(data.reply || 'Nothing to change.', '#ffb56b');
+      return;
+    }
+    if ((data.changedTechs || []).length) {
+      await loadAssignments();
+      renderMap();
+    }
+    if (diffEl) {
+      const acts = data.actions || [];
+      diffEl.innerHTML = acts.map(a => '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;color:#e8f5ec;margin-top:4px;">' + escapeHtml(a.summary || a.type || 'Updated') + '</div>').join('');
+    }
+    setSatAiStatus('', '#888');
+    if ((data.changedTechs || []).length) input.value = '';
+  } catch (err) {
+    setSatAiStatus('Assistant unreachable: ' + err.message, '#ff8a80');
+  } finally {
+    _satAiBusy = false;
+    refreshSatAiBarState();
+  }
+}
+
+function toggleSatAiVoice() {
+  if (_satAiListening) { stopSatAiVoice(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { setSatAiStatus('Voice input is not supported — type instead.', '#ffb56b'); return; }
+  try { _satAiRecognition = new SR(); } catch (err) { setSatAiStatus('Could not start the microphone.', '#ff8a80'); return; }
+  _satAiRecognition.lang = 'en-US';
+  _satAiRecognition.interimResults = true;
+  _satAiRecognition.continuous = false;
+  _satAiRecognition.onresult = (event) => {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+    const input = document.getElementById('satAiCommandInput');
+    if (input) input.value = transcript.trim();
+    if (event.results[event.results.length - 1].isFinal) { stopSatAiVoice(); submitSatAiCommand(); }
+  };
+  _satAiRecognition.onerror = () => stopSatAiVoice();
+  _satAiRecognition.onend = () => { if (_satAiListening) stopSatAiVoice(); };
+  _satAiListening = true;
+  setSatAiStatus('Listening…', '#7edb8e');
+  try { _satAiRecognition.start(); } catch (err) { stopSatAiVoice(); }
+}
+function stopSatAiVoice() {
+  _satAiListening = false;
+  if (_satAiRecognition) { try { _satAiRecognition.stop(); } catch (e) {} _satAiRecognition = null; }
+  if ((document.getElementById('satAiCommandStatus') || {}).textContent === 'Listening…') setSatAiStatus('');
+}
+
+refreshSatAiBarState();
+</script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-text-size-adjust:100%; }
   body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f5f5f5; padding:8px; line-height:1.5; font-size:16px; }
@@ -45,6 +205,9 @@
   #satMapFullscreenCloseBtn { display:none; }
   #satMapPanel.map-fullscreen #satMapFullscreenCloseBtn { display:inline-block; }
   #satMapPanel.map-fullscreen #satMapFullscreenBtn { display:none; }
+  #satMapPanel.map-fullscreen #satAiCommandBar { margin:8px 0 0; flex-shrink:0; }
+  #satMapPanel.map-fullscreen #satAiCommandInput { font-size:16px; padding:10px; }
+  #satMapPanel.map-fullscreen #satAiSendBtn, #satMapPanel.map-fullscreen #satAiMicBtn { padding:10px 12px; font-size:15px; }
   .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   .map-site-pin { display:flex;align-items:center;justify-content:center;width:10px;height:10px;border-radius:50%;background:#6a7a88;border:1px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.4);opacity:.8; }
@@ -125,6 +288,25 @@
           <input type="checkbox" id="satShowAllSitesToggle" onchange="window._satShowAllSites = this.checked; if (this.checked) ensureRestockScheduleCache(true).then(function(){ renderMap(); }); else renderMap();">
           Show all kiosks
         </label>
+      </div>
+      <div id="satAiCommandBarHome">
+      <div id="satAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
+          <input type="text" id="satAiCommandInput" autocomplete="off"
+              placeholder='e.g. "move stop 1 from Terril to Ed"'
+              onkeydown="if(event.key==='Enter'){event.preventDefault();submitSatAiCommand();}"
+              style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+          <button type="button" id="satAiMicBtn" onclick="toggleSatAiVoice()" title="Dictate a command"
+              style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+          <button type="button" id="satAiSendBtn" onclick="submitSatAiCommand()"
+              style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+        </div>
+        <div id="satAiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
+        <div id="satAiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
+        <button type="button" id="satAiAnalyzeRoutesBtn" onclick="analyzeSatRoutes()"
+            style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
+      </div>
       </div>
     </div>
 
@@ -889,6 +1071,7 @@ function formatRestockPopup(code) {
 }
 
 function renderMap() {
+  setTimeout(refreshSatAiBarState, 0);
   ensureMap();
   mapMarkers.forEach(m => satMap.removeLayer(m));
   mapMarkers = [];
@@ -1025,6 +1208,9 @@ function _openSatMapFullscreen() {
     viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
   }
   document.addEventListener('keydown', _satMapFullscreenEscHandler);
+  const bar = document.getElementById('satAiCommandBar');
+  const body = document.getElementById('satMapBody');
+  if (bar && body && bar.parentElement !== body) body.appendChild(bar);
   _fitSatMapAfterResize();
 }
 
@@ -1038,6 +1224,9 @@ function _closeSatMapFullscreen() {
   }
   document.removeEventListener('keydown', _satMapFullscreenEscHandler);
   _satMapFullscreenHistoryPushed = false;
+  const bar = document.getElementById('satAiCommandBar');
+  const home = document.getElementById('satAiCommandBarHome');
+  if (bar && home && bar.parentElement !== home) home.appendChild(bar);
   _fitSatMapAfterResize();
 }
 
@@ -1641,6 +1830,7 @@ function escapeHtml(s) {
       if (JSON.stringify(assignmentsByKey) !== before) {
         renderTicketList();
         renderMap();
+        if (typeof refreshSatAiBarState === "function") refreshSatAiBarState();
       }
     }, 20000);
   }

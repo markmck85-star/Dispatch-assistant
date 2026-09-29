@@ -144,6 +144,11 @@
         #mapFullscreenBtn:hover, #mapFullscreenCloseBtn:hover { background: #33334a; }
         #mapFullscreenCloseBtn { display: none; }
         .map-panel.map-fullscreen #mapFullscreenCloseBtn { display: inline-block; }
+
+        .map-panel.map-fullscreen #aiCommandBar { margin: 8px 0 0; flex-shrink: 0; }
+        .map-panel.map-fullscreen #aiCommandInput { font-size: 16px; padding: 10px; }
+        .map-panel.map-fullscreen #aiSendBtn, .map-panel.map-fullscreen #aiMicBtn { padding: 10px 12px; font-size: 15px; }
+
         .map-panel.map-fullscreen #mapFullscreenBtn { display: none; }
         .map-panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .map-panel-title { font-weight: bold; color: #7ec8e3; font-size: 14px; }
@@ -435,7 +440,7 @@
                 <!-- Compact voice/text command bar. Only useful once a board
                      exists, so it stays disabled until processDispatch() has
                      populated window.currentAssignments (see refreshAiBarState). -->
-                <div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+                <div id="aiCommandBarHome"><div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
                     <div style="display:flex; gap:6px; align-items:center;">
                         <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
                         <input type="text" id="aiCommandInput" autocomplete="off"
@@ -452,7 +457,7 @@
                     <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
                         title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
                         style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
-                </div>
+                </div></div>
 
                 <!-- AVAILABILITY PANEL -->
                 <div id="availabilityPanel" style="margin-top:10px; padding:10px; background:#1e1e1e; border:1px solid #444; border-radius:8px; display:none;">
@@ -8337,6 +8342,9 @@ ${content}</body></html>`;
                 viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
             }
             document.addEventListener('keydown', _mapFullscreenEscHandler);
+            const bar = document.getElementById('aiCommandBar');
+            const body = document.getElementById('dispatchMapBody');
+            if (bar && body && bar.parentElement !== body) body.appendChild(bar);
             _fitDispatchMapAfterResize();
         }
 
@@ -8350,6 +8358,9 @@ ${content}</body></html>`;
             }
             document.removeEventListener('keydown', _mapFullscreenEscHandler);
             _mapFullscreenHistoryPushed = false;
+            const bar = document.getElementById('aiCommandBar');
+            const home = document.getElementById('aiCommandBarHome');
+            if (bar && home && bar.parentElement !== home) home.appendChild(bar);
             _fitDispatchMapAfterResize();
         }
 
