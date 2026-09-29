@@ -45,7 +45,7 @@ exports.handler = async (event) => {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
       const { data, error } = await supabase
         .from("dispatchers")
-        .select("username, role, states, active, technician_id")
+        .select("id, username, role, states, active, technician_id")
         .ilike("username", username)
         .eq("pin", pin)
         .eq("active", true)
@@ -55,6 +55,12 @@ exports.handler = async (event) => {
 
       if (!data) {
         return json(401, { error: "Invalid username or PIN" });
+      }
+
+      try {
+        await supabase.from("dispatchers").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
+      } catch (e) {
+        console.error("login.js: last_seen_at update failed:", e.message);
       }
 
       return json(200, {

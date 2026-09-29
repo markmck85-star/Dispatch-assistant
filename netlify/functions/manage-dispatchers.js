@@ -27,6 +27,7 @@ function publicUser(row) {
     technicianId: row.technician_id || null,
     phone: row.phone || '',
     pin: row.pin || '',
+    lastSeenAt: row.last_seen_at || null,
   };
 }
 
@@ -82,7 +83,7 @@ exports.handler = async (event) => {
     if (action === 'list') {
       const { data, error } = await sb
         .from('dispatchers')
-        .select('id, username, role, states, active, technician_id, phone, pin')
+        .select('id, username, role, states, active, technician_id, phone, pin, last_seen_at')
         .order('username', { ascending: true });
       if (error) throw error;
       return json(200, { ok: true, users: (data || []).map(publicUser) });
