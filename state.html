@@ -12,87 +12,86 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <style>
-  :root { --muted: #6b7785; }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f5f8; padding: 15px; line-height: 1.5; font-size: 16px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 15px; line-height: 1.5; font-size: 16px; }
   .container { max-width: 900px; margin: 0 auto; }
-  .back-link { display: inline-block; color: #1a56a8; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .back-link { display: inline-block; color: #007bff; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
   .back-btn {
-    display: block; background: #2b3644; color: #fff; text-align: center; padding: 12px;
+    display: block; background: #6c757d; color: #fff; text-align: center; padding: 12px;
     border-radius: 8px; font-weight: bold; font-size: 15px; text-decoration: none; margin-top: 16px;
   }
-  .import-box { background: #f6f8fa; border: 1px solid #dfe3e8; border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
+  .import-box { background: #1e1e1e; border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
   .import-box a.sf-link {
-    display: inline-block; background: #1a56a8; color: #fff; padding: 8px 16px; border-radius: 6px;
+    display: inline-block; background: #0070d2; color: #fff; padding: 8px 16px; border-radius: 6px;
     font-size: 13px; font-weight: 600; text-decoration: none; margin-bottom: 8px;
   }
   .import-box input[type=file] { width: 100%; padding: 6px; font-size: 13px; margin-bottom: 8px; }
 
-  .console { background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px; box-shadow: 0 1px 4px rgba(16,24,40,0.08); padding: 16px; color: #1f2933; }
-  .console h1 { color: #1f3a5f; font-size: 21px; margin-bottom: 2px; }
-  .console .subtitle { color: #6b7785; font-size: 12px; margin-bottom: 14px; }
+  .console { background: #181818; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); padding: 16px; color: #ddd; }
+  .console h1 { color: #f0a500; font-size: 21px; margin-bottom: 2px; }
+  .console .subtitle { color: #888; font-size: 12px; margin-bottom: 14px; }
 
   select#stateSel {
-    background: #ffffff; color: #1f2933; border: 1px solid #c5cdd8; border-radius: 6px;
+    background: #2a2a2a; color: #ddd; border: 1px solid #444; border-radius: 6px;
     padding: 8px 10px; font-size: 15px; margin-bottom: 16px; width: 100%;
   }
 
   h2.section-label {
-    font-size: 13px; color: #52606d; margin: 20px 0 8px; text-transform: uppercase;
-    letter-spacing: 0.04em; border-top: 1px solid #e3e8ee; padding-top: 14px;
+    font-size: 13px; color: #b8bcc2; margin: 20px 0 8px; text-transform: uppercase;
+    letter-spacing: 0.04em; border-top: 1px solid #2a2a2a; padding-top: 14px;
   }
   h2.section-label:first-of-type { border-top: none; padding-top: 0; }
 
-  .status-line { color: #6b7785; font-size: 12px; padding: 6px 0; }
+  .status-line { color: #888; font-size: 12px; padding: 6px 0; }
 
   .tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
   .tech-chip { border-radius: 8px; padding: 8px 10px; font-size: 13px; }
-  .tech-chip.avail { background: #3d7a4a; border: 1px solid #2f6039; }
-  .tech-chip.out { background: #9b3b3b; border: 1px solid #7d2e2e; }
-  .tech-chip .name { font-weight: 600; color: #ffffff; }
+  .tech-chip.avail { background: #16321f; border: 1px solid #2e5c3a; }
+  .tech-chip.out { background: #3a1c1c; border: 1px solid #6b2b2b; }
+  .tech-chip .name { font-weight: 600; color: #f0f0f0; }
   .tech-chip .status { font-size: 11px; margin-top: 2px; }
-  .tech-chip.avail .status { color: #e3f2e7; }
-  .tech-chip.out .status { color: #f6dcdc; }
+  .tech-chip.avail .status { color: #7bc796; }
+  .tech-chip.out .status { color: #e08a8a; }
 
-  .ticket-card { border-left: 5px solid #9aa5b1; background: #ffffff; border-top: 1px solid #e3e8ee; border-right: 1px solid #e3e8ee; border-bottom: 1px solid #e3e8ee; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
-  .ticket-card.trouble { border-left-color: #9b3b3b; background: linear-gradient(90deg, rgba(155,59,59,0.10), #ffffff 18px); }
-  .ticket-card.maintenance { border-left-color: #2f5f8f; background: linear-gradient(90deg, rgba(47,95,143,0.10), #ffffff 18px); }
-  .ticket-card .title { font-weight: 600; color: #1f2933; }
-  .ticket-card .meta { color: #52606d; font-size: 12px; margin-top: 2px; }
+  .ticket-card { border-left: 5px solid #444; background: #1e1e1e; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 13px; }
+  .ticket-card.trouble { border-left-color: #dc3545; background: linear-gradient(90deg, rgba(220,53,69,0.12), #1e1e1e 18px); }
+  .ticket-card.maintenance { border-left-color: #4a9eda; background: linear-gradient(90deg, rgba(74,158,218,0.12), #1e1e1e 18px); }
+  .ticket-card .title { font-weight: 600; color: #f0f0f0; }
+  .ticket-card .meta { color: #999; font-size: 12px; margin-top: 2px; }
   @keyframes importPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
   #importProgressBar.active { animation: importPulse 1.2s ease-in-out infinite; }
   #refreshProgressBar.active { animation: importPulse 1.2s ease-in-out infinite; }
-  #importStatus.importing { font-size: 15px; font-weight: 600; color: #2f6f3d; }
+  #importStatus.importing { font-size: 15px; font-weight: 600; color: #4fa87b; }
 
   .restock-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
   .restock-pill { border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
-  .restock-pill.overdue { background: #9b3b3b; color: #ffffff; }
-  .restock-pill.soon { background: #a86f1a; color: #ffffff; }
-  .restock-pill.ok { background: #3d7a4a; color: #ffffff; }
-  a.see-more { color: #1a56a8; font-size: 13px; text-decoration: none; }
+  .restock-pill.overdue { background: #3a1c1c; color: #e08a8a; }
+  .restock-pill.soon { background: #3a2e10; color: #e0c080; }
+  .restock-pill.ok { background: #16321f; color: #7bc796; }
+  a.see-more { color: #6cb2ff; font-size: 13px; text-decoration: none; }
 
-  .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 16px 10px; color: #6b7785; }
-  .error-state { color: #9b3b3b; }
+  .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 16px 10px; color: #666; }
+  .error-state { color: #e57373; }
 
   /* ── STATE MAP ──────────────────────────────────────────────────────
      Persistent (no expand/fullscreen) -- default height is generous
      precisely so it doesn't need one, per Mark: this needs to stay
      visible at the same time as the embedded AI panel so prompts like
      "move red to blue" can be judged spatially against the map. */
-  #stateMapPanel { background: #f6f8fa; border: 1px solid #dfe3e8; border-radius: 8px; padding: 10px 12px; }
+  #stateMapPanel { background: #1e1e1e; border: 1px solid #444; border-radius: 8px; padding: 10px 12px; }
   .map-panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .map-panel-title { font-weight: bold; color: #1f3a5f; font-size: 14px; }
-  .map-panel-meta { font-size: 11px; color: #6b7785; margin-left: auto; text-align: right; }
-  #mapRefreshBtn { padding: 4px 10px; background: #ffffff; color: #1f3a5f; border: 1px solid #c5cdd8; border-radius: 6px; font-size: 12px; cursor: pointer; }
-  #mapRefreshBtn:hover { background: #f3f5f8; }
-  #stateMap { height: 420px; border-radius: 6px; background: #e3e8ee; margin-top: 10px; }
+  .map-panel-title { font-weight: bold; color: #7ec8e3; font-size: 14px; }
+  .map-panel-meta { font-size: 11px; color: #888; margin-left: auto; text-align: right; }
+  #mapRefreshBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  #mapRefreshBtn:hover { background: #33334a; }
+  #stateMap { height: 420px; border-radius: 6px; background: #2a2a2a; margin-top: 10px; }
   /* Hide/Expand controls, mirroring index.html's dispatch-board map panel. */
   #stateMapPanel.collapsed #stateMapBody { display: none; }
   #stateMapPanel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
   #stateMapPanel.map-fullscreen #stateMapBody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #stateMapPanel.map-fullscreen #stateMap { flex: 1; height: auto; }
-  #stateMapToggleBtn, #stateMapFullscreenBtn, #stateMapFullscreenCloseBtn { padding: 4px 10px; background: #ffffff; color: #1f3a5f; border: 1px solid #c5cdd8; border-radius: 6px; font-size: 12px; cursor: pointer; }
-  #stateMapToggleBtn:hover, #stateMapFullscreenBtn:hover, #stateMapFullscreenCloseBtn:hover { background: #f3f5f8; }
+  #stateMapToggleBtn, #stateMapFullscreenBtn, #stateMapFullscreenCloseBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  #stateMapToggleBtn:hover, #stateMapFullscreenBtn:hover, #stateMapFullscreenCloseBtn:hover { background: #33334a; }
   #stateMapFullscreenCloseBtn { display: none; }
   #stateMapPanel.map-fullscreen #stateMapFullscreenCloseBtn { display: inline-block; }
   #stateMapPanel.map-fullscreen #stateMapFullscreenBtn { display: none; }
@@ -102,11 +101,11 @@
      being squeezed by the map's flex:1 sibling on a short/landscape screen. */
   #stateMapPanel.map-fullscreen #stateAiCommandBar { flex-shrink: 0; }
   #stateMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #ffffff; border: 1px solid #c5cdd8; border-radius: 12px; font-size: 11px; color: #1f2933; cursor: pointer; user-select: none; }
-  .map-legend-chip:hover { border-color: #1a56a8; }
+  .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
+  .map-legend-chip:hover { border-color: #7ec8e3; }
   .map-legend-chip.off { opacity: 0.45; text-decoration: line-through; }
   .map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .map-note { font-size: 11px; color: #8a5a12; margin-top: 6px; }
+  .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; }
   .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
   .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
@@ -145,13 +144,13 @@
 <body>
 <div class="container">
   <a href="/" id="backToDispatchTop" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
-  <a href="/inbound-mail.html" id="inboundMailLink" class="back-btn" style="margin-top:0;margin-bottom:10px;background:#3d7a4a;color:#ffffff;">✉ Inbound Mail</a>
-  <a href="/saturday-oncall.html" class="back-btn" style="margin-top:0;margin-bottom:10px;background:#1f6f78;color:#ffffff;">📞 Saturday On-Call</a>
+  <a href="/inbound-mail.html" id="inboundMailLink" class="back-btn" style="margin-top:0;margin-bottom:10px;background:#1e3a2f;color:#7edb8e;">✉ Inbound Mail</a>
+  <a href="/saturday-oncall.html" class="back-btn" style="margin-top:0;margin-bottom:10px;background:#0a2e2a;color:#5bd9c0;">📞 Saturday On-Call</a>
   <div class="console">
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
-    <select id="stateSel" onchange="try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} updateDispatchBackLinks(); loadAll()">
+    <select id="stateSel" onchange="window._stateMapUserView=null; try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} updateDispatchBackLinks(); loadAll()">
       <option value="AL">Alabama</option>
       <option value="CA">California</option>
       <option value="CO">Colorado</option>
@@ -176,7 +175,7 @@
       <div class="map-panel-head">
         <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
         <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; updateDispatchBackLinks(); (function(){ var d=document.getElementById('stateAiCommandDiff'); if(d) d.innerHTML=''; window._stateAiRebalanceTotalSavedMi=0; })(); renderStateMap(document.getElementById('stateSel').value, this.value);"
-          style="background:#ffffff;color:#1f2933;border:1px solid #c5cdd8;border-radius:6px;padding:4px 6px;font-size:12px;">
+          style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
         <button type="button" id="stateMapToggleBtn" onclick="toggleStateMap()"
           aria-expanded="true" aria-controls="stateMapBody">Hide Map</button>
         <button type="button" id="mapRefreshBtn" onclick="renderStateMap(document.getElementById('stateSel').value, window._stateMapDate)"
@@ -188,15 +187,15 @@
       </div>
       <div id="stateMapBody" class="map-panel-body">
         <div id="stateMap"></div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7785;margin:6px 0 0;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
           <input type="checkbox" id="mapShowCompletedToggle" checked onchange="window._stateMapShowCompleted = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
           Show completed stops (✓, muted)
         </label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7785;margin:4px 0 0;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0 0;">
           <input type="checkbox" id="mapShowAllSitesToggle" onchange="toggleStateMapShowAllSites(this.checked)">
           Show all service locations (not just today's stops)
         </label>
-        <div style="font-size:11px;color:#6b7785;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
+        <div style="font-size:11px;color:#777;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
         <div id="stateMapLegend"></div>
         <div id="stateMapNote" class="map-note" style="display:none;"></div>
       </div>
@@ -205,30 +204,30 @@
            #stateMapBody (like index.html's bar is a sibling of its own map
            panel), so it stays usable and visible even if the map itself is
            hidden or the page hasn't been resized into fullscreen. -->
-      <div id="stateAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#eef3f9; border:1px solid #b7cbe3; border-radius:8px;">
+      <div id="stateAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
         <div style="display:flex; gap:6px; align-items:center;">
           <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
           <input type="text" id="stateAiCommandInput" autocomplete="off"
               placeholder='e.g. "move stop 2 from Robert to Keontae"'
               onkeydown="if(event.key==='Enter'){event.preventDefault();submitStateAiCommand();}"
-              style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #c5cdd8; background:#ffffff; color:#1f2933; font-size:13px;">
+              style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
           <button type="button" id="stateAiMicBtn" onclick="toggleStateAiVoice()" title="Dictate a command"
-              style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #c5cdd8; background:#ffffff; color:#1f3a5f; font-size:14px; cursor:pointer;">🎤</button>
+              style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
           <button type="button" id="stateAiSendBtn" onclick="submitStateAiCommand()"
-              style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #1a56a8; background:#1a56a8; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+              style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
         </div>
-        <div id="stateAiCommandStatus" style="font-size:11px; color:#6b7785; margin-top:5px; min-height:14px;"></div>
+        <div id="stateAiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
         <div id="stateAiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
         <button type="button" id="stateAiAnalyzeRoutesBtn" onclick="analyzeStateRoutes()"
             title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
-            style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #c5cdd8; background:#ffffff; color:#1f3a5f; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
+            style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
       </div>
     </div>
 
     <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
       <span>🔄 Restock Status</span>
       <button type="button" id="restockToggleBtn" onclick="toggleRestockSection()"
-        style="font-size:11px;padding:3px 9px;background:#ffffff;color:#1f3a5f;border:1px solid #c5cdd8;border-radius:6px;cursor:pointer;">Show</button>
+        style="font-size:11px;padding:3px 9px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;cursor:pointer;">Show</button>
     </h2>
     <div id="restockSection" style="display:none;">
       <div id="restockStatus" class="status-line">Loading…</div>
@@ -238,18 +237,18 @@
     <h2 class="section-label">⚠️ Recent Trouble/Maintenance Tickets (last 3 days)</h2>
     <div id="ticketStatus" class="status-line">Loading…</div>
     <div id="importFreshness" class="status-line" style="font-size:11px;"></div>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#3e4c59;margin:8px 0;cursor:pointer;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:8px 0;cursor:pointer;">
       <input type="checkbox" id="troubleOnlyToggle" onchange="saveTroubleOnlyPref()">
       🔧 Trouble tickets only
     </label>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#3e4c59;margin:8px 0;cursor:pointer;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:8px 0;cursor:pointer;">
       <input type="checkbox" id="hideClosedToggle" onchange="saveHideClosedPref()">
       🙈 Hide closed tickets
     </label>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:8px 10px;background:#f6f8fa;border:1px solid #dfe3e8;border-radius:6px;">
-      <span style="font-size:12px;color:#6b7785;">Mark superseded restocks resolved, due on/before:</span>
-      <input type="date" id="bulkResolveCutoff" style="background:#ffffff;color:#1f2933;border:1px solid #c5cdd8;border-radius:6px;padding:4px 6px;font-size:12px;">
-      <button type="button" onclick="bulkResolveSuperseded()" style="padding:5px 10px;background:#ffffff;color:#1f3a5f;border:1px solid #c5cdd8;border-radius:6px;font-size:12px;cursor:pointer;">Mark resolved</button>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:8px 10px;background:#1e1e1e;border-radius:6px;">
+      <span style="font-size:12px;color:#aaa;">Mark superseded restocks resolved, due on/before:</span>
+      <input type="date" id="bulkResolveCutoff" style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
+      <button type="button" onclick="bulkResolveSuperseded()" style="padding:5px 10px;background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;font-size:12px;cursor:pointer;">Mark resolved</button>
     </div>
     <div id="ticketList"></div>
 
@@ -268,8 +267,8 @@
       </label>
       <div id="closingNotesToggleStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
       <div id="refreshProgressWrap" style="display:none;margin-top:6px;margin-bottom:8px;">
-        <div style="background:#e3e8ee;border-radius:6px;height:14px;overflow:hidden;">
-          <div id="refreshProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#2f6f3d);height:100%;width:0%;transition:width 0.4s ease;"></div>
+        <div style="background:#333;border-radius:6px;height:14px;overflow:hidden;">
+          <div id="refreshProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#4fa87b);height:100%;width:0%;transition:width 0.4s ease;"></div>
         </div>
       </div>
       <div id="refreshStatus" class="status-line" style="font-size:12px;margin-bottom:12px;"></div>
@@ -280,8 +279,8 @@
       <div style="font-size:12px;color:#999;margin-bottom:8px;">Or log in and export manually, then select it below — falls back to this if the automated sync is ever down.</div>
       <input type="file" id="importFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="autoImport(this.files[0])">
       <div id="importProgressWrap" style="display:none;margin-top:10px;">
-        <div style="background:#e3e8ee;border-radius:6px;height:14px;overflow:hidden;">
-          <div id="importProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#2f6f3d);height:100%;width:0%;transition:width 0.3s ease;"></div>
+        <div style="background:#333;border-radius:6px;height:14px;overflow:hidden;">
+          <div id="importProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#4fa87b);height:100%;width:0%;transition:width 0.3s ease;"></div>
         </div>
       </div>
       <div id="importStatus" class="status-line" style="padding:4px 0;">Ready.</div>
@@ -456,13 +455,13 @@ async function autoImport(file) {
     function renderImportStatus() {
       let html = `✅ ${totalInserted} imported, ${totalSkipped} already on file, ${totalNeedsReview} need site review.`;
       if (errors.length) {
-        html += `<div style="color:#9b3b3b;margin-top:6px;">${errors.length} request(s) failed entirely -- these rows are NOT in the database yet:</div>`;
-        html += errors.map(e => `<div style="font-size:12px;color:#9b3b3b;margin-left:8px;">Rows ${e.startRow}-${e.endRow}: ${escapeHtml(e.message)}</div>`).join('');
-        html += `<button id="retryBatchesBtn" style="margin-top:8px;padding:6px 14px;background:#9b3b3b;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${errors.length} failed request(s)</button>`;
+        html += `<div style="color:#e08a8a;margin-top:6px;">${errors.length} request(s) failed entirely -- these rows are NOT in the database yet:</div>`;
+        html += errors.map(e => `<div style="font-size:12px;color:#e08a8a;margin-left:8px;">Rows ${e.startRow}-${e.endRow}: ${escapeHtml(e.message)}</div>`).join('');
+        html += `<button id="retryBatchesBtn" style="margin-top:8px;padding:6px 14px;background:#dc3545;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${errors.length} failed request(s)</button>`;
       }
       if (rowErrors.length) {
-        html += `<div style="color:#a86f1a;margin-top:6px;">${rowErrors.length} row(s) failed individually -- everything else in their batch(es) still imported:</div>`;
-        html += rowErrors.map(e => `<div style="font-size:12px;color:#a86f1a;margin-left:8px;">${escapeHtml(e.appointmentNumber || '(no appt #)')} -- ${escapeHtml(e.accountName || '')}: ${escapeHtml(e.reason)}</div>`).join('');
+        html += `<div style="color:#e0a030;margin-top:6px;">${rowErrors.length} row(s) failed individually -- everything else in their batch(es) still imported:</div>`;
+        html += rowErrors.map(e => `<div style="font-size:12px;color:#e0a030;margin-left:8px;">${escapeHtml(e.appointmentNumber || '(no appt #)')} -- ${escapeHtml(e.accountName || '')}: ${escapeHtml(e.reason)}</div>`).join('');
         html += `<button id="retryRowsBtn" style="margin-top:8px;padding:6px 14px;background:#c98a1f;color:#fff;border:none;border-radius:5px;cursor:pointer;">Retry ${rowErrors.length} failed row(s)</button>`;
       }
       statusEl.innerHTML = html;
@@ -748,9 +747,9 @@ async function loadConsole(state, isRetry) {
         // of implying an import that never applies to them.
         const isBulk = t.source === 'bulk_dispatch_list';
         const statusBadge = t.status === 'closed'
-          ? `<span style="color:#2f6f3d;font-weight:600;">✓ ${isBulk ? 'Done' : 'Closed'}${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
+          ? `<span style="color:#7bc796;font-weight:600;">✓ ${isBulk ? 'Done' : 'Closed'}${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
           : t.status === 'cancelled'
-          ? `<span style="color:#6b7785;font-weight:600;">✖ Cancelled${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
+          ? `<span style="color:#888;font-weight:600;">✖ Cancelled${t.closedOn ? ' ' + fmtDateTime(t.closedOn) : ''}</span>`
           // 2026-09-09: manually-resolved tickets (mark-ticket-resolved.js
           // existed since 2026-08-08 but was never wired to any button) --
           // deliberately distinct wording/color from a real Salesforce
@@ -758,15 +757,15 @@ async function loadConsole(state, isRetry) {
           // one looking like it confirms the other. Undo link covers a
           // mistaken click without needing a separate confirm dialog.
           : t.status === 'resolved_local'
-          ? `<span style="color:#2f5f8f;font-weight:600;">✓ Marked resolved${t.manuallyResolvedAt ? ' ' + fmtDateTime(t.manuallyResolvedAt) : ''}</span>`
-            + (t.manuallyResolvedNote ? `<div class="meta" style="color:#6b7785;font-size:12px;">${escapeHtml(t.manuallyResolvedNote)}</div>` : '')
-            + ` <button onclick="undoResolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0;color:#6b7785;text-decoration:underline;cursor:pointer;font-size:12px;">undo</button>`
-          : `<span style="color:#a86f1a;font-weight:600;">● Open${isBulk ? ' (on board)' : ' (per last import)'}</span>`
-            + (t.woNumber ? ` <button onclick="resolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0 0 0 6px;color:#2f5f8f;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '')
-            + (isBulk && t.assignmentId ? ` <button onclick="resolveAssignment('${t.assignmentId}')" style="background:none;border:none;padding:0 0 0 6px;color:#2f5f8f;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '');
+          ? `<span style="color:#4a9eda;font-weight:600;">✓ Marked resolved${t.manuallyResolvedAt ? ' ' + fmtDateTime(t.manuallyResolvedAt) : ''}</span>`
+            + (t.manuallyResolvedNote ? `<div class="meta" style="color:#777;font-size:12px;">${escapeHtml(t.manuallyResolvedNote)}</div>` : '')
+            + ` <button onclick="undoResolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0;color:#888;text-decoration:underline;cursor:pointer;font-size:12px;">undo</button>`
+          : `<span style="color:#e0a030;font-weight:600;">● Open${isBulk ? ' (on board)' : ' (per last import)'}</span>`
+            + (t.woNumber ? ` <button onclick="resolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '')
+            + (isBulk && t.assignmentId ? ` <button onclick="resolveAssignment('${t.assignmentId}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '');
         const kindTag = t.ticketKind === 'maintenance'
-          ? '<span style="color:#2f5f8f;font-weight:700;">📦 RESTOCK</span> · '
-          : '<span style="color:#9b3b3b;font-weight:700;">🔧 TROUBLE</span> · ';
+          ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
+          : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
         // Open-shipment flag (2026-08-23) -- distinguishes an actual
         // pending return (a bad part still needs to come back) from a
         // plain parts request (something shipped out, nothing to send
@@ -782,12 +781,12 @@ async function loadConsole(state, isRetry) {
         // restock need (already handled) or something unrelated -- the
         // dispatcher's call, not the app's.
         const relatedTicketTag = t.relatedNewerTicket
-          ? `<div class="meta" style="color:#1a56a8;">ℹ️ A newer ticket for this site is also open${t.relatedNewerTicket.woNumber ? ' (WO ' + escapeHtml(t.relatedNewerTicket.woNumber) + ')' : ''}, due ${fmtDateOnly((t.relatedNewerTicket.dueAt || '').slice(0, 10))} -- this older entry may already be resolved.</div>`
+          ? `<div class="meta" style="color:#6cb2ff;">ℹ️ A newer ticket for this site is also open${t.relatedNewerTicket.woNumber ? ' (WO ' + escapeHtml(t.relatedNewerTicket.woNumber) + ')' : ''}, due ${fmtDateOnly((t.relatedNewerTicket.dueAt || '').slice(0, 10))} -- this older entry may already be resolved.</div>`
           : '';
         const shipmentTag = t.openShipment
           ? (t.openShipment.needsReturn
-              ? `<div class="meta" style="color:#a86f1a;">📦 Part return pending at this site${t.openShipment.count > 1 ? ' (' + t.openShipment.count + ')' : ''}</div>`
-              : `<div class="meta" style="color:#2f5f8f;">📦 Open parts request at this site (nothing to return)</div>`)
+              ? `<div class="meta" style="color:#e0a030;">📦 Part return pending at this site${t.openShipment.count > 1 ? ' (' + t.openShipment.count + ')' : ''}</div>`
+              : `<div class="meta" style="color:#4a9eda;">📦 Open parts request at this site (nothing to return)</div>`)
           : '';
 
         // 2026-09-08: line items appended to an existing ticket after the
@@ -805,9 +804,9 @@ async function loadConsole(state, isRetry) {
         // The line items themselves stay exactly as useful/clickable as
         // before; only the non-actionable badge wrapper is gone.
         const lineItemsTag = (t.lineItems && t.lineItems.length)
-          ? `<div class="meta" style="color:#8a5a12;">` + t.lineItems.map(li => {
+          ? `<div class="meta" style="color:#c98a1e;">` + t.lineItems.map(li => {
               const label = li.issueCategory || (li.text ? li.text.slice(0, 60) + (li.text.length > 60 ? '…' : '') : 'see email');
-              return `📝 <button onclick="viewSourceEmail('${li.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:#8a5a12;text-decoration:underline;cursor:pointer;font-size:inherit;text-align:left;">Line item added ${fmtDateTime(li.addedAt)} — ${escapeHtml(label)}</button>`;
+              return `📝 <button onclick="viewSourceEmail('${li.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:#c98a1e;text-decoration:underline;cursor:pointer;font-size:inherit;text-align:left;">Line item added ${fmtDateTime(li.addedAt)} — ${escapeHtml(label)}</button>`;
             }).join('<br>') + `</div>`
           : '';
 
@@ -832,11 +831,11 @@ async function loadConsole(state, isRetry) {
                     ? 'Carrier meet: date proposed, awaiting confirmation'
                     : 'Awaiting carrier response to schedule a meet'
             }</div>`
-          : `<div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDateOnly((t.dueAt || '').slice(0, 10)) : fmtDateTime(t.dueAt)}</strong> <span style="color:#6b7785;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>`;
+          : `<div class="meta">Due: <strong>${t.ticketKind === 'maintenance' ? fmtDateOnly((t.dueAt || '').slice(0, 10)) : fmtDateTime(t.dueAt)}</strong> <span style="color:#777;">(${isBulk ? 'dispatched' : 'received'} ${fmtDateTime(t.receivedAt)})</span></div>`;
 
         return `<div class="ticket-card ${t.ticketKind}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${t.siteCode || ''}')" title="View recent visit history">${escapeHtml(t.siteCode || '')} — ${escapeHtml(t.siteName)}</div>
-          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#2f5f8f);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
+          <div class="meta">${kindTag}${escapeHtml(t.issueCategory || t.ticketKind)}${t.issueDetail ? ' · ' + escapeHtml(t.issueDetail) : ''}${t.woNumber ? ' · WO ' + escapeHtml(t.woNumber) : ''}${t.technicianName ? ' · ' + escapeHtml(t.technicianName) : ''}${t.inboundEmailId ? ` · <button onclick="viewSourceEmail('${t.inboundEmailId}', '${(t.siteCode || '').replace(/'/g, "\\'")}')" style="background:none;border:none;padding:0;color:var(--info-tc,#4a9eda);text-decoration:underline;cursor:pointer;font-size:inherit;">✉️ View/Forward</button>` : ''}</div>
           ${loomisDueLine}
           <div class="meta">${statusBadge}</div>
           ${relatedTicketTag}
@@ -1078,6 +1077,11 @@ function ensureStateMap() {
   _stateMap.setView(stateCenterFor(initState), initState === 'CA' ? 6 : 7);
   _stateMap.on('click', () => _stateMap.scrollWheelZoom.enable());
   _stateMap.on('mouseout', () => _stateMap.scrollWheelZoom.disable());
+  _stateMap.on('zoomend moveend', function() {
+    if (window._stateMapFitting) return;
+    const c = _stateMap.getCenter();
+    window._stateMapUserView = { lat: c.lat, lng: c.lng, zoom: _stateMap.getZoom() };
+  });
   return _stateMap;
 }
 
@@ -1243,7 +1247,7 @@ async function renderStateMap(state, dispatchDate) {
           + '<div style="margin-top:3px;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + route.color + ';margin-right:5px;"></span>' + escapeHtml(route.tech) + '</div>'
           + (legLabel ? '<div style="color:#666;">📏 ' + escapeHtml(legLabel) + '</div>' : '')
           + (p.ticket ? '<div style="margin-top:3px;">' + (p.ticket.ticketKind === 'trouble' ? '🔧 TROUBLE' : '📦 RESTOCK') + (p.ticket.woNumber ? ' — WO ' + escapeHtml(String(p.ticket.woNumber)) : '') + '</div>' : '')
-          + (flagged ? '<div style="color:#8a5a12;font-weight:600;margin-top:3px;">⏰ SLA deadline ' + new Date(p.ticket.computedSlaDeadline).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '</div>' : '')
+          + (flagged ? '<div style="color:#c98a1e;font-weight:600;margin-top:3px;">⏰ SLA deadline ' + new Date(p.ticket.computedSlaDeadline).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) + '</div>' : '')
         ).addTo(group);
         collect([p.lat, p.lng]);
       });
@@ -1265,9 +1269,16 @@ async function renderStateMap(state, dispatchDate) {
     const bounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
     window._stateMapBounds = bounds; // reused by the Expand/fullscreen resize handler
     map.invalidateSize();
-    if (bounds.isValid()) {
-      if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(bounds.getCenter(), 12);
-      else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 14 });
+    window._stateMapFitting = true;
+    try {
+      if (window._stateMapUserView) {
+        map.setView([window._stateMapUserView.lat, window._stateMapUserView.lng], window._stateMapUserView.zoom, { animate: false });
+      } else if (bounds.isValid()) {
+        if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(bounds.getCenter(), 12);
+        else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 14 });
+      }
+    } finally {
+      window._stateMapFitting = false;
     }
 
     renderStateMapLegend(routes);
@@ -1331,14 +1342,14 @@ async function ensureRestockScheduleCache(state) {
 }
 function formatRestockPopup(code) {
   const r = (window._restockScheduleByCode || {})[code];
-  if (!r) return '<div style="color:#6b7785;font-size:11px;margin-top:4px;">Restock timing not loaded</div>';
+  if (!r) return '<div style="color:#888;font-size:11px;margin-top:4px;">Restock timing not loaded</div>';
   const status = r.status || '';
   const last = r.last ? new Date(r.last) : null;
   const next = r.next1 ? new Date(r.next1) : null;
   const lastStr = last ? last.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
   let nextStr = '—';
-  let color = '#6b7785';
-  if (status === 'nodata') { nextStr = 'no history'; color = '#6b7785'; }
+  let color = '#888';
+  if (status === 'nodata') { nextStr = 'no history'; color = '#888'; }
   else if (status === 'single') { nextStr = 'too few visits'; color = '#5b8def'; }
   else if (status === 'overdue') {
     const days = (typeof r.daysSince === 'number' && r.avg) ? Math.round(r.daysSince - r.avg) : null;
@@ -1355,9 +1366,9 @@ function formatRestockPopup(code) {
     color = '#4caf50';
   }
   const visitBit = r.visitedSinceRestock ? ' · visited since last restock' : '';
-  return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #e3e8ee;font-size:12px;color:' + color + ';">'
+  return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">'
     + 'Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
-    + '<div style="font-size:11px;color:#6b7785;">Last restock: ' + lastStr
+    + '<div style="font-size:11px;color:#888;">Last restock: ' + lastStr
     + (r.daysSince != null ? ' · ' + Math.round(r.daysSince) + 'd ago' : '')
     + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>';
 }
@@ -1404,7 +1415,7 @@ function plotStateAllSites(map, LOCATIONS, routes) {
       '<div class="map-pop-code">' + escapeHtml(code) + '</div>'
       + '<div>' + escapeHtml(name) + '</div>'
       + (loc.address ? '<div style="color:#666;">' + escapeHtml(loc.address) + '</div>' : '')
-      + '<div style="color:#6b7785;font-size:11px;margin-top:4px;">Not on this date\'s board</div>' + formatRestockPopup(code)
+      + '<div style="color:#888;font-size:11px;margin-top:4px;">Not on this date\'s board</div>' + formatRestockPopup(code)
       + formatRestockPopup(code)
     ).addTo(group);
     n++;
@@ -1525,7 +1536,9 @@ function _fitStateMapAfterResize() {
   requestAnimationFrame(() => {
     if (_stateMap) {
       _stateMap.invalidateSize();
-      if (window._stateMapBounds && window._stateMapBounds.isValid()) {
+      if (window._stateMapUserView) {
+        _stateMap.setView([window._stateMapUserView.lat, window._stateMapUserView.lng], window._stateMapUserView.zoom, { animate: false });
+      } else if (window._stateMapBounds && window._stateMapBounds.isValid()) {
         _stateMap.fitBounds(window._stateMapBounds, { padding: [28, 28], maxZoom: 14 });
       }
     }
@@ -1609,7 +1622,7 @@ function setStateAiStatus(msg, color) {
   const el = document.getElementById('stateAiCommandStatus');
   if (!el) return;
   el.textContent = msg || '';
-  el.style.color = color || '#6b7785';
+  el.style.color = color || '#888';
 }
 
 /** Same diff-card rendering as index.html's renderAiDiff. */
@@ -1617,7 +1630,7 @@ function setStateAiStatus(msg, color) {
 function renderStateRebalanceCardHtml(action) {
   const suggestions = action.suggestions || [];
   if (!suggestions.length) {
-    return '<div style="background:#eef6f0;border:1px solid #b9d8c2;border-radius:6px;padding:6px 8px;color:#1f2933;">' + escapeHtml(action.summary) + '</div>';
+    return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;color:#e8f5ec;">' + escapeHtml(action.summary) + '</div>';
   }
   // Reset on every fresh set of suggestions -- individual Apply/Revert clicks
   // update this in place (see applyStateRebalanceSwap) without re-rendering
@@ -1627,20 +1640,20 @@ function renderStateRebalanceCardHtml(action) {
     const rowId = 'stateAiRebalanceRow' + i;
     return '<div id="' + rowId + '" data-site="' + escapeHtml(s.siteCode) + '" data-from="' + escapeHtml(s.fromTech)
       + '" data-to="' + escapeHtml(s.toTech) + '" data-applied="false" '
-      + 'style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #d3e6d9;">'
-      + '<div style="flex:1;min-width:0;color:#1f2933;">' + escapeHtml(s.siteCode)
-      + (s.siteName ? ' <span style="color:#52606d;">(' + escapeHtml(s.siteName) + ')</span>' : '')
-      + '<br><span style="font-size:11px;color:#52606d;">' + escapeHtml(shortNameJs(s.fromTech)) + ' → ' + escapeHtml(shortNameJs(s.toTech))
+      + 'style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #234030;">'
+      + '<div style="flex:1;min-width:0;color:#e8f5ec;">' + escapeHtml(s.siteCode)
+      + (s.siteName ? ' <span style="color:#9fb8a8;">(' + escapeHtml(s.siteName) + ')</span>' : '')
+      + '<br><span style="font-size:11px;color:#9fb8a8;">' + escapeHtml(shortNameJs(s.fromTech)) + ' → ' + escapeHtml(shortNameJs(s.toTech))
       + ', net ' + escapeHtml((s.netMi > 0 ? '-' : '+') + Math.abs(s.netMi).toFixed(1) + ' mi') + '</span>'
-      + '<span class="rebalance-row-status" style="display:block;font-size:11px;color:#2f6f3d;"></span></div>'
+      + '<span class="rebalance-row-status" style="display:block;font-size:11px;color:#7edb8e;"></span></div>'
       + '<button type="button" onclick="applyStateRebalanceSwap(\'' + rowId + '\')" '
-      + 'style="flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid #1a56a8;background:#1a56a8;color:#fff;font-size:12px;cursor:pointer;">Apply</button>'
+      + 'style="flex-shrink:0;padding:4px 10px;border-radius:6px;border:1px solid #2a6496;background:#2a6496;color:#fff;font-size:12px;cursor:pointer;">Apply</button>'
       + '</div>';
   }).join('');
-  return '<div style="background:#eef6f0;border:1px solid #b9d8c2;border-radius:6px;padding:6px 8px;">'
-    + '<div style="color:#1f2933;font-weight:bold;">🧭 ' + escapeHtml(suggestions.length + ' suggested swap' + (suggestions.length === 1 ? '' : 's')) + '</div>'
+  return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+    + '<div style="color:#e8f5ec;font-weight:bold;">🧭 ' + escapeHtml(suggestions.length + ' suggested swap' + (suggestions.length === 1 ? '' : 's')) + '</div>'
     + rows
-    + '<div id="stateAiRebalanceTotalMi" style="margin-top:6px;padding-top:6px;border-top:1px solid #d3e6d9;font-size:12px;color:#2f6f3d;font-weight:bold;">Total mileage saved: 0.0 mi</div>'
+    + '<div id="stateAiRebalanceTotalMi" style="margin-top:6px;padding-top:6px;border-top:1px solid #234030;font-size:12px;color:#7edb8e;font-weight:bold;">Total mileage saved: 0.0 mi</div>'
     + '</div>';
 }
 
@@ -1666,7 +1679,7 @@ async function applyStateRebalanceSwap(rowId) {
   const state = document.getElementById('stateSel').value;
   const dispatchDate = window._stateMapDate;
   btn.disabled = true;
-  if (statusEl) { statusEl.style.color = '#2f5f8f'; statusEl.textContent = 'Applying…'; }
+  if (statusEl) { statusEl.style.color = '#7ec8e3'; statusEl.textContent = 'Applying…'; }
 
   try {
     const res = await fetch('/.netlify/functions/dispatch-ai', {
@@ -1698,7 +1711,7 @@ async function applyStateRebalanceSwap(rowId) {
       if (totalEl) {
         const t = window._stateAiRebalanceTotalSavedMi;
         totalEl.textContent = 'Total mileage saved: ' + (t < 0 ? '-' : '') + Math.abs(t).toFixed(1) + ' mi';
-        totalEl.style.color = t > 0 ? '#2f6f3d' : (t < 0 ? '#a86f1a' : '#52606d');
+        totalEl.style.color = t > 0 ? '#7edb8e' : (t < 0 ? '#ffb56b' : '#9fb8a8');
       }
     }
 
@@ -1709,9 +1722,9 @@ async function applyStateRebalanceSwap(rowId) {
     row.dataset.from = newFrom;
     row.dataset.to = newTo;
     btn.textContent = wasApplied ? 'Apply' : 'Revert';
-    if (statusEl) { statusEl.style.color = '#2f6f3d'; statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + result.toDelta + ')'; }
+    if (statusEl) { statusEl.style.color = '#7edb8e'; statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + result.toDelta + ')'; }
   } catch (err) {
-    if (statusEl) { statusEl.style.color = '#9b3b3b'; statusEl.textContent = 'Failed: ' + err.message; }
+    if (statusEl) { statusEl.style.color = '#ff8a80'; statusEl.textContent = 'Failed: ' + err.message; }
   } finally {
     btn.disabled = false;
   }
@@ -1731,19 +1744,19 @@ function renderStateAiDiff(data) {
 
   let html = rebalanceAction ? renderStateRebalanceCardHtml(rebalanceAction) : '';
   if (applied.length) {
-    const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#2f6f3d' : '#a86f1a';
-    html += '<div style="background:#eef6f0;border:1px solid #b9d8c2;border-radius:6px;padding:6px 8px;">'
-      + '<div style="color:#1f2933;font-weight:bold;">✅ ' + escapeHtml(applied.map(a => a.summary).join(' · ')) + '</div>';
+    const netColor = (data.fleetDelta || '').trim().startsWith('-') ? '#7edb8e' : '#ffb56b';
+    html += '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
+      + '<div style="color:#e8f5ec;font-weight:bold;">✅ ' + escapeHtml(applied.map(a => a.summary).join(' · ')) + '</div>';
     if (data.changedTechs && data.changedTechs.length) {
       html += '<div style="margin-top:3px;color:' + netColor + ';font-weight:bold;">Net Fleet: ' + escapeHtml(data.fleetDelta || '0.0 mi') + '</div>';
     }
     if (data.persisted === false && data.changedTechs && data.changedTechs.length) {
-      html += '<div style="margin-top:3px;color:#a86f1a;font-size:11px;">⚠ Not saved' + (data.reason ? ' (' + escapeHtml(data.reason) + ')' : '') + '</div>';
+      html += '<div style="margin-top:3px;color:#ffb56b;font-size:11px;">⚠ Not saved' + (data.reason ? ' (' + escapeHtml(data.reason) + ')' : '') + '</div>';
     }
     html += '</div>';
   }
   if (errors.length) {
-    html += '<div style="margin-top:4px;color:#a86f1a;font-size:11px;">' + escapeHtml(errors.map(a => a.summary).join(' · ')) + '</div>';
+    html += '<div style="margin-top:4px;color:#ffb56b;font-size:11px;">' + escapeHtml(errors.map(a => a.summary).join(' · ')) + '</div>';
   }
   el.innerHTML = html;
 }
@@ -1754,19 +1767,19 @@ async function submitStateAiCommand(forceTool) {
   if (!input) return;
 
   const text = (input.value || '').trim();
-  if (!text && !forceTool) { setStateAiStatus('Type or dictate a command first.', '#a86f1a'); return; }
+  if (!text && !forceTool) { setStateAiStatus('Type or dictate a command first.', '#ffb56b'); return; }
 
   const state = document.getElementById('stateSel').value;
   const dispatchDate = window._stateMapDate;
   if (!(window._stateAiRoutes || []).some(r => (r.stops || []).length > 0)) {
-    setStateAiStatus('No plottable stops for this date yet.', '#a86f1a');
+    setStateAiStatus('No plottable stops for this date yet.', '#ffb56b');
     return;
   }
 
   if (_stateAiListening) stopStateAiVoice();
   _stateAiBusy = true;
   refreshStateAiBarState();
-  setStateAiStatus(forceTool ? 'Scanning the board…' : 'Working on it…', '#2f5f8f');
+  setStateAiStatus(forceTool ? 'Scanning the board…' : 'Working on it…', '#7ec8e3');
   const diffEl = document.getElementById('stateAiCommandDiff');
   if (diffEl) diffEl.innerHTML = '';
 
@@ -1783,11 +1796,11 @@ async function submitStateAiCommand(forceTool) {
     const data = await res.json().catch(() => null);
 
     if (!res.ok || !data || !data.ok) {
-      setStateAiStatus((data && data.error) || ('Assistant failed (HTTP ' + res.status + ')'), '#9b3b3b');
+      setStateAiStatus((data && data.error) || ('Assistant failed (HTTP ' + res.status + ')'), '#ff8a80');
       return;
     }
     if (!(data.actions || []).length) {
-      setStateAiStatus(data.reply || 'Nothing to change.', '#a86f1a');
+      setStateAiStatus(data.reply || 'Nothing to change.', '#ffb56b');
       return;
     }
 
@@ -1800,10 +1813,10 @@ async function submitStateAiCommand(forceTool) {
     }
 
     renderStateAiDiff(data);
-    setStateAiStatus('', '#6b7785');
+    setStateAiStatus('', '#888');
     if (changed.length) input.value = '';
   } catch (err) {
-    setStateAiStatus('Assistant unreachable: ' + err.message, '#9b3b3b');
+    setStateAiStatus('Assistant unreachable: ' + err.message, '#ff8a80');
   } finally {
     _stateAiBusy = false;
     refreshStateAiBarState();
@@ -1824,12 +1837,12 @@ function toggleStateAiVoice() {
   if (_stateAiListening) { stopStateAiVoice(); return; }
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { setStateAiStatus('Voice input is not supported in this browser — type the command instead.', '#a86f1a'); return; }
+  if (!SR) { setStateAiStatus('Voice input is not supported in this browser — type the command instead.', '#ffb56b'); return; }
 
   try {
     _stateAiRecognition = new SR();
   } catch (err) {
-    setStateAiStatus('Could not start the microphone: ' + err.message, '#9b3b3b');
+    setStateAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
     return;
   }
 
@@ -1850,12 +1863,12 @@ function toggleStateAiVoice() {
   };
   _stateAiRecognition.onerror = (event) => {
     stopStateAiVoice();
-    setStateAiStatus(event.error === 'not-allowed' ? 'Microphone permission denied.' : 'Voice input error: ' + event.error, '#9b3b3b');
+    setStateAiStatus(event.error === 'not-allowed' ? 'Microphone permission denied.' : 'Voice input error: ' + event.error, '#ff8a80');
   };
   _stateAiRecognition.onend = () => { if (_stateAiListening) stopStateAiVoice(); };
 
   _stateAiListening = true;
-  setStateAiStatus('Listening…', '#2f6f3d');
+  setStateAiStatus('Listening…', '#7edb8e');
   const micBtn = document.getElementById('stateAiMicBtn');
   if (micBtn) { micBtn.style.background = '#8b2e2e'; micBtn.style.color = '#fff'; }
 
@@ -1863,7 +1876,7 @@ function toggleStateAiVoice() {
     _stateAiRecognition.start();
   } catch (err) {
     stopStateAiVoice();
-    setStateAiStatus('Could not start the microphone: ' + err.message, '#9b3b3b');
+    setStateAiStatus('Could not start the microphone: ' + err.message, '#ff8a80');
   }
 }
 
@@ -1874,7 +1887,7 @@ function stopStateAiVoice() {
     _stateAiRecognition = null;
   }
   const micBtn = document.getElementById('stateAiMicBtn');
-  if (micBtn) { micBtn.style.background = '#ffffff'; micBtn.style.color = '#1f3a5f'; }
+  if (micBtn) { micBtn.style.background = '#2a2a3e'; micBtn.style.color = '#ccc'; }
   if ((document.getElementById('stateAiCommandStatus') || {}).textContent === 'Listening…') setStateAiStatus('');
 }
 
@@ -1914,7 +1927,7 @@ async function loadRestock(state) {
         // timestamp -- anchor at noon local so it can't shift a day off
         // when parsed, same pattern used elsewhere in the app for this.
         const scheduledLine = l.scheduledDate
-          ? `<div class="meta" style="color:#2f6f3d;">✓ Already scheduled: ${new Date(l.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${l.scheduledTech ? ' (' + escapeHtml(l.scheduledTech) + ')' : ''}</div>`
+          ? `<div class="meta" style="color:#7bc796;">✓ Already scheduled: ${new Date(l.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${l.scheduledTech ? ' (' + escapeHtml(l.scheduledTech) + ')' : ''}</div>`
           : '';
         return `<div class="ticket-card ${cls}">
           <div class="title" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" onclick="showSiteHistory('${l.site_code}')" title="View recent visit history">${escapeHtml(l.site_code)} — ${escapeHtml(l.name)}</div>
@@ -2602,7 +2615,7 @@ async function pollSyncStatus() {
       const secsRunning = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : null;
       const stageLabel = data.stage || 'Starting';
       statusEl.textContent = `⏳ ${stageLabel}${secsRunning != null ? ' (' + secsRunning + 's)' : ''}…`;
-      statusEl.style.color = '#2f6f3d';
+      statusEl.style.color = '#4fa87b';
       statusEl.style.fontWeight = '600';
       statusEl.style.fontSize = '15px';
       btn.disabled = true;
@@ -2648,7 +2661,7 @@ async function pollSyncStatus() {
         progressBar.style.width = '100%';
         setTimeout(() => { progressWrap.style.display = 'none'; progressBar.style.width = '0%'; }, 1500);
         statusEl.textContent = `✅ Done — ${s.inserted} imported, ${s.skippedExisting} already on file, ${s.needsReview} need review${s.rowErrorCount ? `, ${s.rowErrorCount} row(s) failed` : ''}.`;
-        statusEl.style.color = s.rowErrorCount ? '#a86f1a' : '#2f6f3d';
+        statusEl.style.color = s.rowErrorCount ? '#e0a030' : '#7bc796';
         // 2026-09-11: closing-notes results, when the feature is on, ride
         // along in the same lastSuccess payload -- shown as a second line
         // so it's visible without needing to check server logs/Supabase
@@ -2663,7 +2676,7 @@ async function pollSyncStatus() {
         if (s.closingNotes) {
           const cn = s.closingNotes;
           notesStatusEl.textContent = `📝 Closing notes: ${cn.succeeded} captured, ${cn.blank || 0} blank, ${cn.notFound} not found, ${cn.failed} failed (of ${cn.attempted} attempted this run)${cn.stoppedByDeadline ? ' -- stopped early, time budget used up (more remain for next cycle)' : ''}.`;
-          notesStatusEl.style.color = cn.failed ? '#a86f1a' : '#2f6f3d';
+          notesStatusEl.style.color = cn.failed ? '#e0a030' : '#7bc796';
           notesStatusEl.style.display = '';
         } else {
           notesStatusEl.style.display = 'none';
@@ -2679,10 +2692,10 @@ async function pollSyncStatus() {
         if (s.insertedSamples && s.insertedSamples.length) {
           sampleListEl.innerHTML = '<div style="margin-top:6px;font-size:12px;color:var(--muted);">Imported this run' +
             (s.inserted > s.insertedSamples.length ? ` (showing ${s.insertedSamples.length} of ${s.inserted})` : '') + ':</div>' +
-            '<ul style="margin:4px 0 0 0;padding-left:18px;font-size:12px;color:#3e4c59;max-height:160px;overflow-y:auto;">' +
+            '<ul style="margin:4px 0 0 0;padding-left:18px;font-size:12px;color:#ccc;max-height:160px;overflow-y:auto;">' +
             s.insertedSamples.map(function(row) {
               const woLabel = row.woNumber ? 'WO ' + row.woNumber : '(no WO#)';
-              const flag = row.matched ? '' : ' <span style="color:#a86f1a;">(no site match)</span>';
+              const flag = row.matched ? '' : ' <span style="color:#e0a030;">(no site match)</span>';
               return '<li>' + (row.state || '') + ' — ' + (row.accountName || 'Unknown site') + ' — ' + woLabel + flag + '</li>';
             }).join('') + '</ul>';
           sampleListEl.style.display = 'block';
@@ -2702,7 +2715,7 @@ async function pollSyncStatus() {
         progressWrap.style.display = 'none';
         progressBar.style.width = '0%';
         statusEl.textContent = `❌ Sync failed: ${f.reason}`;
-        statusEl.style.color = '#9b3b3b';
+        statusEl.style.color = '#e08a8a';
         return;
       }
     }
@@ -2730,7 +2743,7 @@ async function pollSyncStatus() {
       btn.disabled = false;
       document.getElementById('refreshProgressBar').classList.remove('active');
       statusEl.textContent = 'Could not check sync status for over a minute: ' + err.message + ' (the sync itself may still be running or have finished -- check the Netlify function log).';
-      statusEl.style.color = '#9b3b3b';
+      statusEl.style.color = '#e08a8a';
       window._syncPollFirstFailureAt = null;
     }
     // else: stay quiet, keep the existing "Starting sync…" / "Sync

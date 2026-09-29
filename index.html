@@ -3079,6 +3079,7 @@ function distanceMatrixStatus(state) {
             });
 
             CURRENT_STATE = selector.value;
+            window._dispatchMapUserView = null;
             localStorage.setItem('lastSelectedState', CURRENT_STATE);
             // Await so processDispatch() below does not paint haversine
             // first-stop miles against an empty _dmCache for the new state.
@@ -7857,6 +7858,11 @@ ${content}</body></html>`;
             // long board doesn't hijack the page scroll into a zoom.
             _dispatchMap.on('click', () => _dispatchMap.scrollWheelZoom.enable());
             _dispatchMap.on('mouseout', () => _dispatchMap.scrollWheelZoom.disable());
+            _dispatchMap.on('zoomend moveend', function() {
+                if (window._dispatchMapFitting) return;
+                const c = _dispatchMap.getCenter();
+                window._dispatchMapUserView = { lat: c.lat, lng: c.lng, zoom: _dispatchMap.getZoom() };
+            });
             return _dispatchMap;
         }
 
@@ -8216,10 +8222,21 @@ ${content}</body></html>`;
             if (!panel || !panel.classList.contains('visible') || panel.classList.contains('collapsed')) return;
 
             _dispatchMap.invalidateSize();
-            if (_dispatchMapBounds.getNorthEast().equals(_dispatchMapBounds.getSouthWest())) {
-                _dispatchMap.setView(_dispatchMapBounds.getCenter(), 12); // single stop
-            } else {
-                _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
+            window._dispatchMapFitting = true;
+            try {
+                if (window._dispatchMapUserView) {
+                    _dispatchMap.setView(
+                        [window._dispatchMapUserView.lat, window._dispatchMapUserView.lng],
+                        window._dispatchMapUserView.zoom,
+                        { animate: false }
+                    );
+                } else if (_dispatchMapBounds.getNorthEast().equals(_dispatchMapBounds.getSouthWest())) {
+                    _dispatchMap.setView(_dispatchMapBounds.getCenter(), 12);
+                } else {
+                    _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
+                }
+            } finally {
+                window._dispatchMapFitting = false;
             }
         }
 
@@ -8334,7 +8351,13 @@ ${content}</body></html>`;
                     _dispatchMap.invalidateSize();
                     // Re-fit so the current route/pins are centered in the new
                     // viewport rather than left wherever they sat before.
-                    if (_dispatchMapBounds && _dispatchMapBounds.isValid()) {
+                    if (window._dispatchMapUserView) {
+                        _dispatchMap.setView(
+                            [window._dispatchMapUserView.lat, window._dispatchMapUserView.lng],
+                            window._dispatchMapUserView.zoom,
+                            { animate: false }
+                        );
+                    } else if (_dispatchMapBounds && _dispatchMapBounds.isValid()) {
                         _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
                     }
                 }
