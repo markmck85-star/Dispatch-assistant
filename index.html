@@ -212,6 +212,8 @@
                width, so 3-across would be too cramped to read. */
             .top-row label { margin-bottom: 4px; }
             .top-row select, .top-row input { margin-bottom: 10px; font-size: 17px; padding: 14px; }
+            #dispatchDate { width: 11.5em; max-width: 42vw; padding: 10px 8px; font-size: 15px; }
+            #dispatchTomorrowBtn { display:inline-block;margin:0 0 10px 6px;padding:10px 12px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:13px;font-weight:700;vertical-align:middle;cursor:pointer; }
 
             /* Availability grid — full width, 5-6 techs per row */
             #availabilityGrid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important; gap: 10px !important; flex-wrap: unset !important; }
@@ -414,6 +416,7 @@
                     <div>
                         <label>Dispatch Date:</label>
                         <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
+                        <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
                     </div>
                     <div>
                         <label>Journal Low At:</label>
@@ -2154,6 +2157,32 @@ function distanceMatrixStatus(state) {
         // href="state.html" the whole time, so it always opened whatever
         // state.html's own default landing state is (Georgia), regardless
         // of which region was actually selected on the board.
+        function localDateISO(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        function nextDispatchWorkday() {
+            const d = new Date();
+            const dow = d.getDay();
+            if (dow === 5) d.setDate(d.getDate() + 3);
+            else if (dow === 6) d.setDate(d.getDate() + 2);
+            else if (dow === 0) d.setDate(d.getDate() + 1);
+            else d.setDate(d.getDate() + 1);
+            return d;
+        }
+        function refreshDispatchTomorrowBtnLabel() {
+            const btn = document.getElementById('dispatchTomorrowBtn');
+            if (!btn) return;
+            const dow = new Date().getDay();
+            btn.textContent = (dow === 0 || dow === 6) ? 'Monday' : 'Tomorrow';
+        }
+        function jumpDispatchToNextWorkday() {
+            const input = document.getElementById('dispatchDate');
+            if (!input) return;
+            input.value = localDateISO(nextDispatchWorkday());
+            refreshAvailabilityPanel();
+            processDispatch(true);
+            updateStateConsoleLink();
+        }
         function updateStateConsoleLink() {
             const sel = document.getElementById('stateSelector');
             const link = document.getElementById('stateConsoleLink');
@@ -2167,6 +2196,7 @@ function distanceMatrixStatus(state) {
                 if (dateInput && dateInput.value) href += '&date=' + encodeURIComponent(dateInput.value);
                 link.href = href;
             }
+            refreshDispatchTomorrowBtnLabel();
         }
 
         const BOARD_STATE_MAP = { NC: 'GA', SC: 'GA' };
