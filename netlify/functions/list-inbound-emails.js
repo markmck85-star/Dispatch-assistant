@@ -139,6 +139,13 @@ exports.handler = async (event) => {
     .order("received_at", { ascending: false })
     .limit(fetchLimit);
 
+  // Inventory / expense mailbox forwards must not appear on the shared
+  // inbound-mail page or in "other". Admin can pass mailbox=payroll later.
+  if (mailbox !== "payroll") {
+    q = q.not("to_address", "ilike", "%inventory@mcrtechservice.com%");
+    q = q.not("to_address", "ilike", "%expense@mcrtechservice.com%");
+  }
+
   if (mailbox === "review") {
     q = q.eq("parse_status", "failed");
   } else if (mailbox === "testing") {

@@ -110,6 +110,8 @@ exports.handler = async (event) => {
   let q = supabase
     .from('inbound_emails')
     .select('id, mailbox, sender, subject, body_text, body_html, received_at, classified_as, parse_status')
+    .not('to_address', 'ilike', '%inventory@mcrtechservice.com%')
+    .not('to_address', 'ilike', '%expense@mcrtechservice.com%')
     .order('received_at', { ascending: false })
     .limit(limit);
 

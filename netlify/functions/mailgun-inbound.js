@@ -1426,7 +1426,38 @@ function recipientCoversState(recipientStates, tState) {
   if (GA_BUNDLED_STATES.includes(tState) && recipientStates.includes('GA')) return true;
   return false;
 }
-async function getSmsRecipientsForState(store, ticketState) {
+function gatewayLooksValid(addr) {
+  return !!(addr && String(addr).includes('@') && !/\s/.test(String(addr).trim()));
+}
+
+async function resolveWatchdogAddress(r, supabase) {
+  const fallback = (r.address || '').trim();
+  if (!supabase) return fallback;
+  try {
+    if (r.technicianId) {
+      const { data } = await supabase.from('technicians').select('sms_address').eq('id', r.technicianId).maybeSingle();
+      if (gatewayLooksValid(data && data.sms_address)) return data.sms_address.trim();
+    }
+    const name = (r.name || '').trim();
+    if (name) {
+      const { data: tech } = await supabase.from('technicians').select('id, sms_address, name').ilike('name', name).maybeSingle();
+      if (gatewayLooksValid(tech && tech.sms_address)) return tech.sms_address.trim();
+    }
+    const uname = (r.username || (name ? name.split(/\s+/)[0] : '') || '').toLowerCase();
+    if (uname) {
+      const { data: d } = await supabase.from('dispatchers').select('technician_id, username').ilike('username', uname).maybeSingle();
+      if (d && d.technician_id) {
+        const { data: tech } = await supabase.from('technicians').select('sms_address').eq('id', d.technician_id).maybeSingle();
+        if (gatewayLooksValid(tech && tech.sms_address)) return tech.sms_address.trim();
+      }
+    }
+  } catch (e) {
+    console.log('[mailgun-inbound] resolveWatchdogAddress failed:', e.message);
+  }
+  return fallback;
+}
+
+async function getSmsRecipientsForState(store, ticketState, supabase) {
   let smsRecipients = [];
   let hoursExcluded = [];
   try {
@@ -1438,6 +1469,8 @@ async function getSmsRecipientsForState(store, ticketState) {
         if (r.states && r.states.length > 0 && !r.states.includes('ALL') && !recipientCoversState(r.states, ticketState)) {
           continue;
         }
+        const addr = await resolveWatchdogAddress(r, supabase);
+        if (!gatewayLooksValid(addr)) continue;
         if (r.hoursStart && r.hoursEnd) {
           const tz = r.timezone || 'America/New_York';
           const now = new Date();
@@ -1453,11 +1486,11 @@ async function getSmsRecipientsForState(store, ticketState) {
             ? (nowMins >= startMins && nowMins <= endMins)
             : (nowMins >= startMins || nowMins <= endMins);
           if (!inWindow) {
-            hoursExcluded.push(r.address);
+            hoursExcluded.push(addr);
             continue;
           }
         }
-        smsRecipients.push(r.address);
+        smsRecipients.push(addr);
       }
     }
   } catch (e) {}
@@ -1675,8 +1708,11 @@ exports.handler = async (event) => {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
       const classifiedAsMap = { trouble: 'trouble', maintenance: 'maintenance', restock: 'dispatch_list', rma_shipping: 'rma_shipping', techweb_closing: 'closing_note_email' };
+      const toHeaderEarly = fields['To'] || fields['to'] || '';
+      const payrollHay = (toHeaderEarly + ' ' + (subject || '')).toLowerCase();
+      const isPayroll = /inventory@mcrtechservice\.com/.test(payrollHay) || /expense@mcrtechservice\.com/.test(payrollHay);
       const classifiedAs = isReplyOnly ? 'reply' : (classifiedAsMap[dispatchType] || 'unknown');
-      const parseStatus = isReplyOnly ? 'ignored' : (parsed ? 'parsed' : 'failed');
+      const parseStatus = (isReplyOnly || isPayroll) ? 'ignored' : (parsed ? 'parsed' : 'failed');
       const mailgunMessageId = fields['Message-Id'] || fields['message-id'] || null;
       // 2026-09-16: raw To: header (e.g. "gasstdispatch@neumo.com") --
       // Neumo's own internal routing address, distinct from `mailbox`
@@ -2080,7 +2116,7 @@ exports.handler = async (event) => {
               try {
                 const alertBody = `⚠️ Line item added -- review needed\nWO ${parsed.woNum}${existingTicket.site_text ? ' -- ' + existingTicket.site_text : ''}\n${addedText}\nWould be due ${slaStrForAlert} if urgent.`;
                 const { smsRecipients: lineItemRecipients, hoursExcluded: lineItemHoursExcluded } =
-                  await getSmsRecipientsForState(store, appendedTicketState);
+                  await getSmsRecipientsForState(store, appendedTicketState, supabase);
                 console.log(`[mailgun-inbound] Line-item review SMS recipients: ${lineItemRecipients.length}`);
                 for (const addr of lineItemRecipients) {
                   const ok = await sendSms(addr.trim(), alertBody, 'MCR Dispatch');
@@ -2751,7 +2787,7 @@ exports.handler = async (event) => {
       // shared getSmsRecipientsForState() helper (see above sendSms) so the
       // new line-item-review SMS path reuses this exact logic instead of a
       // second, possibly-diverging copy.
-      const { smsRecipients, hoursExcluded } = await getSmsRecipientsForState(store, ticketState);
+      const { smsRecipients, hoursExcluded } = await getSmsRecipientsForState(store, ticketState, supabase);
 
       // NOTE: previously fell back to a raw SMS_RECIPIENTS env var (a single
       // hardcoded, state-blind address) whenever the filtered list came back
