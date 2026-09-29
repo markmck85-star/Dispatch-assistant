@@ -8485,11 +8485,18 @@ ${content}</body></html>`;
                 color = '#4caf50';
             }
             const visitBit = r.visitedSinceRestock ? ' · visited since last restock' : '';
+            const st = (typeof CURRENT_STATE !== 'undefined' && CURRENT_STATE) ? CURRENT_STATE : '';
+            const trackerHref = 'restock-tracker.html?state=' + encodeURIComponent(st) + '&q=' + encodeURIComponent(code);
+            let extra = '<div style="margin-top:4px;"><a href="' + trackerHref + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
+            if (r.visitedSinceRestock && r.lastVisitAppt) {
+                extra += '<div style="font-size:11px;color:#aaa;margin-top:2px;">Last visit ' + String(r.lastVisitAppt).replace(/</g,'') + ' — check notes in tracker (often not a restock)</div>';
+            }
             return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;font-size:12px;color:' + color + ';">'
                 + 'Est. next: <b>' + nextStr + '</b>' + visitBit + '</div>'
                 + '<div style="font-size:11px;color:#888;">Last restock: ' + lastStr
                 + (r.daysSince != null ? ' · ' + Math.round(r.daysSince) + 'd ago' : '')
-                + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>';
+                + (r.avg ? ' · avg ' + Math.round(r.avg) + 'd' : '') + '</div>'
+                + extra;
         }
         function restockPinStyle(code) {
             const r = (window._restockScheduleByCode || {})[code];
