@@ -1905,7 +1905,7 @@ function renderTableRows(locs) {
     const tr = document.createElement('tr');
     tr.className = cfg.rowClass;
     tr.innerHTML = `
-      <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}">${loc.shortName}</td>
+      <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}"><span style="display:none">${loc.siteCode || ''}</span>${loc.shortName}${loc.siteCode ? '<div style="font-size:11px;color:var(--muted);font-family:monospace;">' + loc.siteCode + '</div>' : ''}</td>
       <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
       <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
       <td style="font-weight:600;">${lastRestockCell(loc)}</td>
@@ -2135,7 +2135,7 @@ function renderSharedDates(locs) {
       const tr = document.createElement('tr');
       tr.className = cfg.rowClass;
       tr.innerHTML = `
-        <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}">${loc.shortName}</td>
+        <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}"><span style="display:none">${loc.siteCode || ''}</span>${loc.shortName}${loc.siteCode ? '<div style="font-size:11px;color:var(--muted);font-family:monospace;">' + loc.siteCode + '</div>' : ''}</td>
         <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
         <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
         <td style="font-weight:600;">${lastRestockCell(loc)}</td>
