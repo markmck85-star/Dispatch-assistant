@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory received</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background:#f4f6f8; color:#1a1a1a; margin:0; padding:14px; }
+  h1 { font-size:20px; margin:0 0 6px; color:#12325a; }
+  .sub { color:#5b6570; font-size:13px; margin-bottom:12px; }
+  label { font-size:12px; color:#5b6570; }
+  input, button, select { font-size:16px; padding:8px; border-radius:6px; border:1px solid #c5ced6; }
+  button { background:#1d4e89; color:#fff; border:none; cursor:pointer; }
+  .card { background:#fff; border:1px solid #d5dde3; border-radius:8px; padding:12px; margin:10px 0; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+  .ok { color:#1b6b3a; }
+  .miss { color:#8a2f2f; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid #e6ebef; }
+  .muted { color:#6b7580; font-size:12px; }
+  .counts { font-size:16px; font-weight:700; color:#12325a; margin:8px 0; }
+</style>
+</head>
+<body>
+  <h1>Inventory received</h1>
+  <div class="sub">Who has mailed <b>inventory@mcrtechservice.com</b> since the date below. Does not open the spreadsheet. v0.1</div>
+  <div class="card row">
+    <label>Count since<br><input type="date" id="since"></label>
+    <button type="button" onclick="loadList()">Refresh</button>
+  </div>
+  <div class="counts" id="counts"></div>
+  <div class="card">
+    <h2 class="miss" style="font-size:16px;margin:0 0 8px;">Missing</h2>
+    <div id="missing" class="muted">Load to see names.</div>
+  </div>
+  <div class="card">
+    <h2 class="ok" style="font-size:16px;margin:0 0 8px;">Received</h2>
+    <div id="received" class="muted"></div>
+  </div>
+  <div class="card">
+    <h2 style="font-size:16px;margin:0 0 8px;">Unmatched mail</h2>
+    <p class="muted">Arrived as inventory but did not match an active technician card. Add the person under Technicians or ignore.</p>
+    <div id="unmatched" class="muted"></div>
+  </div>
+<script>
+function lastMonday() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().slice(0, 10);
+}
+document.getElementById('since').value = lastMonday();
+
+function fmt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+async function loadList() {
+  const since = document.getElementById('since').value;
+  const res = await fetch('/.netlify/functions/get-inventory-receipts?since=' + encodeURIComponent(since));
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    document.getElementById('counts').textContent = data.error || 'Load failed';
+    return;
+  }
+  document.getElementById('counts').textContent =
+    (data.received || []).length + ' received · ' +
+    (data.missing || []).length + ' missing · ' +
+    (data.techCount || 0) + ' active techs';
+
+  const miss = data.missing || [];
+  document.getElementById('missing').innerHTML = miss.length
+    ? '<table><tr><th>Name</th><th>State</th></tr>' +
+      miss.map(function (t) {
+        return '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.state || '') + '</td></tr>';
+      }).join('') + '</table>'
+    : 'None missing for this window.';
+
+  const rec = data.received || [];
+  document.getElementById('received').innerHTML = rec.length
+    ? '<table><tr><th>Name</th><th>State</th><th>Subject</th><th>When</th></tr>' +
+      rec.map(function (t) {
+        return '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.state || '') + '</td><td>' +
+          esc(t.subject || '') + '</td><td>' + esc(fmt(t.receivedAt)) + '</td></tr>';
+      }).join('') + '</table>'
+    : 'No matched inventory mail yet.';
+
+  const um = data.unmatched || [];
+  document.getElementById('unmatched').innerHTML = um.length
+    ? '<table><tr><th>Subject</th><th>From</th><th>When</th></tr>' +
+      um.map(function (t) {
+        return '<tr><td>' + esc(t.subject || '') + '</td><td>' + esc(t.sender || '') +
+          '</td><td>' + esc(fmt(t.receivedAt)) + '</td></tr>';
+      }).join('') + '</table>'
+    : 'None.';
+}
+function esc(s) {
+  return String(s || '').replace(/[&<>"]/g, function (c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+  });
+}
+loadList();
+</script>
+</body>
+</html>
