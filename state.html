@@ -739,7 +739,14 @@ async function loadConsole(state, isRetry) {
         return (a.siteCode || '').localeCompare(b.siteCode || '');
       });
 
-      ticketList.innerHTML = sortedTickets.map(t => {
+      const meetTickets = visibleTickets.filter(t =>
+        ((t.issueCategory || '').toLowerCase() === 'armored truck meet' || t.pinnedMeet)
+        && t.status !== 'closed' && t.status !== 'cancelled' && t.status !== 'resolved_local'
+      );
+      const meetBanner = meetTickets.length
+        ? '<div class="empty-state" style="text-align:left;color:#c4b5fd;font-weight:700;margin:0 0 8px;">Open armored truck meets (' + meetTickets.length + ') — not on the 4-hour SLA clock</div>'
+        : '';
+      ticketList.innerHTML = meetBanner + sortedTickets.map(t => {
         // 2026-08-25: bulk-list entries (source: 'bulk_dispatch_list') have
         // no Salesforce closed-ticket-report confirmation to speak of --
         // their status comes straight from the dispatch board's own
@@ -763,7 +770,10 @@ async function loadConsole(state, isRetry) {
           : `<span style="color:#e0a030;font-weight:600;">● Open${isBulk ? ' (on board)' : ' (per last import)'}</span>`
             + (t.woNumber ? ` <button onclick="resolveTicket('${t.woNumber}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '')
             + (isBulk && t.assignmentId ? ` <button onclick="resolveAssignment('${t.assignmentId}')" style="background:none;border:none;padding:0 0 0 6px;color:#4a9eda;text-decoration:underline;cursor:pointer;font-size:12px;">mark resolved</button>` : '');
-        const kindTag = t.ticketKind === 'maintenance'
+        const isMeet = (t.issueCategory || '').toLowerCase() === 'armored truck meet' || t.pinnedMeet;
+        const kindTag = isMeet
+          ? '<span style="color:#9b6bff;font-weight:700;">🚚 MEET</span> · '
+          : t.ticketKind === 'maintenance'
           ? '<span style="color:#4a9eda;font-weight:700;">📦 RESTOCK</span> · '
           : '<span style="color:#dc3545;font-weight:700;">🔧 TROUBLE</span> · ';
         // Open-shipment flag (2026-08-23) -- distinguishes an actual
