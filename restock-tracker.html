@@ -565,6 +565,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   // falls through to the cached-file / manual-upload path below if this
   // fetch fails outright (platform unreachable, sync down, etc.) -- that
   // path stays available specifically for that case.
+
+function applySiteQueryFromUrl() {
+  const q = new URLSearchParams(window.location.search).get('q');
+  if (!q) return;
+  const box = document.getElementById('locationSearch');
+  if (!box) return;
+  box.value = q;
+  if (typeof filterTable === 'function') filterTable(q);
+}
+
   const requestedRegion = new URLSearchParams(window.location.search).get('state');
   const region = (requestedRegion || localStorage.getItem('mcr_restock_last_region') || '').trim().toUpperCase();
   if (/^[A-Z]{2}$/.test(region)) {
@@ -577,6 +587,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       localStorage.setItem('mcr_restock_last_region', region);
       msg.style.display = 'none';
       renderDashboard(dashboard);
+      applySiteQueryFromUrl();
       return;
     } catch (e) {
       msg.style.display = 'none';
@@ -607,6 +618,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const match = rawData.some(r => String(r[stateCol] || '').trim().toUpperCase() === wanted);
         if (match) {
           buildDashboard(wanted, stateCol);
+          applySiteQueryFromUrl();
           return;
         }
       }
@@ -1216,8 +1228,44 @@ function viewClosingNoteInline(appt, note, siteCode) {
   body.innerHTML = `
       <div style="font-weight:600;font-size:16px;margin-bottom:12px;padding-right:24px;color:#1a1a1a;">Closing Note — ${escapeHtml(appt)}</div>
       <div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;color:#1a1a1a;">${escapeHtml(note)}</div>
-      ${canConfirm ? `<button onclick="confirmRestockedFromNote('${siteCode}')" style="margin-top:16px;background:#1e7e34;color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;font-size:13px;cursor:pointer;">✓ Confirm ${escapeHtml(siteCode)} restocked</button>` : ''}
+      ${canConfirm ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;">
+        <button onclick="confirmRestockedFromNote('${siteCode}')" style="background:#1e7e34;color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;font-size:13px;cursor:pointer;">✓ Confirm ${escapeHtml(siteCode)} restocked</button>
+        <button onclick="confirmNotRestockedFromNote('${siteCode}','${String(appt||'').replace(/'/g,"")}')" style="background:#5a3d1a;color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;font-size:13px;cursor:pointer;">Not a restock</button>
+      </div>
+      <div style="font-size:12px;color:#666;margin-top:8px;">Not a restock keeps the last restock date and drops the amber “visited” flag for this SA.</div>` : ''}
   `;
+}
+
+
+async function confirmNotRestockedFromNote(siteCode, appt) {
+  try {
+    const res = await fetch('/.netlify/functions/mark-site-restocked', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site_code: siteCode,
+        not_restock: true,
+        appointment_number: appt || '',
+        note: 'Closing notes were not a restock'
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    closeSourceEmail();
+    applyLocalNotRestock(siteCode);
+    refreshLiveDashboardQuiet();
+  } catch (err) {
+    alert('Failed to save: ' + err.message);
+  }
+}
+
+function applyLocalNotRestock(siteCode) {
+  const d = currentDashboardData;
+  if (!d || !d.locs) return;
+  const loc = d.locs.find(l => l.siteCode === siteCode);
+  if (!loc) return;
+  loc.visitedSinceRestock = false;
+  renderDashboard(d);
 }
 
 async function confirmRestockedFromNote(siteCode) {
