@@ -1,60 +1,64 @@
-// resolve-restock-review.js
-//
-// A dispatcher's confirm/reject action from restock-tracker.html's review
-// toast (see get-restock-review-queue.js). Confirming sets
-// included_restock=true (same effect as a high-confidence auto-match);
-// rejecting just clears the pending flag and leaves included_restock
-// alone. Either way restock_review_pending is cleared so the item drops
-// off the toast, and the decision/timestamp are kept for a basic audit
-// trail rather than silently disappearing.
-//
-// POST body: { id: <site_visits.id>, decision: 'confirmed' | 'rejected' }
-
-const { createClient } = require('@supabase/supabase-js');
+/**
+ * POST /.netlify/functions/resolve-restock-review
+ * body: { id, decision: "confirmed" | "rejected" }
+ * Resolves an ambiguous closing-note restock review on site_visits.
+ */
+const { createClient } = require("@supabase/supabase-js");
 
 function json(statusCode, obj) {
   return {
     statusCode,
     headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
     },
     body: JSON.stringify(obj),
   };
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return json(200, {});
-  if (event.httpMethod !== 'POST') return json(405, { ok: false, error: 'POST required' });
+  if (event.httpMethod === "OPTIONS") return json(200, {});
+  if (event.httpMethod !== "POST") return json(405, { ok: false, error: "Method Not Allowed" });
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return json(500, { ok: false, error: "Supabase env vars not configured" });
+  }
 
   let body;
   try {
-    body = JSON.parse(event.body || '{}');
+    body = JSON.parse(event.body || "{}");
+  } catch (e) {
+    return json(400, { ok: false, error: "Invalid JSON body" });
+  }
+
+  const id = body.id;
+  const raw = String(body.decision || "").toLowerCase();
+  const confirmed = raw === "confirmed" || raw === "confirm" || raw === "yes";
+  const rejected = raw === "rejected" || raw === "reject" || raw === "no" || raw === "not_restock";
+  if (!id) return json(400, { ok: false, error: "id is required" });
+  if (!confirmed && !rejected) return json(400, { ok: false, error: "decision must be confirmed or rejected" });
+
+  try {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    // is_restock is a generated column — only included_restock is writable.
+    const patch = {
+      restock_review_pending: false,
+      restock_review_decision: confirmed ? "confirmed" : "rejected",
+      restock_review_resolved_at: new Date().toISOString(),
+      included_restock: confirmed,
+      included_restock_source: "manual",
+    };
+    const { data, error } = await supabase
+      .from("site_visits")
+      .update(patch)
+      .eq("id", id)
+      .select("id, appointment_number")
+      .maybeSingle();
+    if (error) return json(500, { ok: false, error: error.message });
+    if (!data) return json(404, { ok: false, error: "Visit not found" });
+    return json(200, { ok: true, id: data.id, appointmentNumber: data.appointment_number, decision: patch.restock_review_decision });
   } catch (err) {
-    return json(400, { ok: false, error: 'Malformed JSON body' });
+    return json(500, { ok: false, error: err.message || String(err) });
   }
-
-  const { id, decision } = body;
-  if (!id || !['confirmed', 'rejected'].includes(decision)) {
-    return json(400, { ok: false, error: "id and decision ('confirmed' or 'rejected') are required" });
-  }
-
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-  const update = {
-    restock_review_pending: false,
-    restock_review_decision: decision,
-    restock_review_resolved_at: new Date().toISOString(),
-  };
-  if (decision === 'confirmed') {
-    update.included_restock = true;
-    update.included_restock_source = 'closing_note_confirmed';
-  }
-
-  const { error } = await supabase.from('site_visits').update(update).eq('id', id);
-  if (error) return json(500, { ok: false, error: 'Update failed: ' + error.message });
-
-  return json(200, { ok: true, id, decision });
 };
