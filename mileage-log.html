@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.26</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.27</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -77,7 +77,7 @@
     <div class="stop-row">
       <div class="grow">
         <label>From</label>
-        <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" autocomplete="off">
+        <input id="fromQ" placeholder="Type a city or store" oninput="searchStops('from')" onfocus="focusStops('from')" autocomplete="off">
       </div>
       <div class="odo">
         <label>Odo</label>
@@ -89,7 +89,7 @@
     <div class="stop-row">
       <div class="grow">
         <label>To</label>
-        <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" autocomplete="off">
+        <input id="toQ" placeholder="Type a city or store" oninput="searchStops('to')" onfocus="focusStops('to')" autocomplete="off">
       </div>
       <div class="odo">
         <label>Odo</label>
@@ -115,11 +115,11 @@
     <p class="muted">Forgot to write down a reading? Enter where you are now and the odometer. If you give the trip meter (reset at the missed stop) the reading is exact. Without it, the app splits the trip using the distance matrix and marks it estimated.</p>
     <div id="missLast" class="muted"></div>
     <label>Missed stop</label>
-    <input id="missQ" placeholder="Type a city or store" oninput="searchStops('miss')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <input id="missQ" placeholder="Type a city or store" oninput="searchStops('miss')" onfocus="focusStops('miss')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="missSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="missPicked"></div>
     <label>Where you are now</label>
-    <input id="hereQ" placeholder="Type a city or store" oninput="searchStops('here')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <input id="hereQ" placeholder="Type a city or store" oninput="searchStops('here')" onfocus="focusStops('here')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="hereSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="herePicked"></div>
     <div class="row">
@@ -135,6 +135,7 @@
     <button type="button" onclick="saveLog('draft')">Save draft</button>
     <button type="button" onclick="printLog()">Print / PDF</button>
     <button type="button" onclick="exportExcel()">Export Excel</button>
+    <button type="button" class="secondary" id="clearBtn" style="display:none;" onclick="clearPeriod()">Clear this period (testing)</button>
     <button type="button" class="secondary" id="demoBtn" style="display:none;" onclick="loadSampleTwoWeeks()">Load demo days</button>
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
@@ -214,7 +215,9 @@ function showApp() {
   document.getElementById('loginBox').style.display = 'none';
   document.getElementById('appBox').style.display = 'block';
   const u = currentUser();
-  document.getElementById('demoBtn').style.display = (u && u.role === 'admin') ? '' : 'none';
+  const staff = !!(u && u.role && u.role !== 'tech');
+  document.getElementById('demoBtn').style.display = staff ? '' : 'none';
+  document.getElementById('clearBtn').style.display = staff ? '' : 'none';
 }
 
 function sundayOf(d) {
@@ -375,7 +378,17 @@ function labelForQuery(s, q) {
 function searchStops(side) {
   const q = document.getElementById(side + 'Q').value.toLowerCase().trim();
   const box = document.getElementById(side + 'Suggest');
-  if (!q) { box.style.display = 'none'; return; }
+  if (!q) {
+    // box was emptied: forget the old pick and offer the quick list
+    if (picked[side]) {
+      picked[side] = null;
+      const pk = document.getElementById(side + 'Picked');
+      if (pk) pk.textContent = '';
+      if (side === 'from' || side === 'to') { expectedMi = null; showOdoNote(''); previewFlag(); }
+    }
+    showQuick(side);
+    return;
+  }
   const hits = allStops().filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1).slice(0, 20);
   hits.sort((a,b) => (b.kind === 'home') - (a.kind === 'home') || (b.recent?1:0) - (a.recent?1:0) || (b.usual?1:0) - (a.usual?1:0));
   // any typed name can be used as-is (hotel, UPS store, anything not in the list)
@@ -383,10 +396,30 @@ function searchStops(side) {
   if (rawTyped.length >= 3 && !hits.some(h => h.kind !== 'home' && String(h.print || h.picker).toLowerCase() === q)) {
     hits.push({ kind: 'other', custom: true, id: null, picker: rawTyped, print: rawTyped, search: q });
   }
-  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + (s.custom ? 'Use “' + s.print + '” (not in list)' : labelForQuery(s, q) + (s.recent ? ' <span class="muted">(used before)</span>' : '')) + '</div>').join('') || '<div>No match</div>';
+  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + (s.custom ? 'Use “' + s.print + '” (not in list)' : (q ? labelForQuery(s, q) : s.picker) + (s.recent ? ' <span class="muted">(used before)</span>' : '')) + '</div>').join('') || '<div>No match</div>';
   box._hits = hits;
   box.style.display = 'block';
 }
+
+function showQuick(side) {
+  const box = document.getElementById(side + 'Suggest');
+  const all = allStops();
+  const hits = [all[0]].concat(all.filter(x => x.recent), all.filter(x => x.kind === 'site' && x.usual).slice(0, 8));
+  box.innerHTML = hits.map((x, i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + x.picker + (x.recent ? ' <span class="muted">(used before)</span>' : '') + '</div>').join('');
+  box._hits = hits;
+  box.style.display = 'block';
+}
+
+function focusStops(side) {
+  const el = document.getElementById(side + 'Q');
+  if (el.value) { try { el.select(); } catch (e) {} }
+  showQuick(side);
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest && (e.target.closest('.suggest') || e.target.closest('.stop-row') || e.target.closest('#missBox'))) return;
+  document.querySelectorAll('.suggest').forEach(b => { b.style.display = 'none'; });
+});
 
 function chooseStop(side, i) {
   const box = document.getElementById(side + 'Suggest');
@@ -844,6 +877,23 @@ async function saveLog(status) {
     setSaveState('failed');
     scheduleRetry();
   }
+}
+
+async function clearPeriod() {
+  if (!ctx) return;
+  const n = legs.length;
+  if (!confirm('Delete all ' + n + ' stops in this pay period, on the server and on this phone? This cannot be undone.')) return;
+  legs = [];
+  try { localStorage.removeItem(localKey()); } catch (e) {}
+  picked.to = null;
+  document.getElementById('toQ').value = '';
+  document.getElementById('toPicked').textContent = '';
+  document.getElementById('odoEnd').value = '';
+  document.getElementById('odoStart').value = '';
+  expectedMi = null; autoPrefix = ''; showOdoNote(''); previewFlag();
+  await saveLog('draft');
+  await loadContext();
+  document.getElementById('status').textContent = 'Cleared ' + n + ' stops for this period.';
 }
 
 function loadSampleTwoWeeks() {
