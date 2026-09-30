@@ -1,52 +1,44 @@
 /**
- * pull-shipments-mailbox.js
- * Read-only IMAP for the consumable-shipments mailbox
- * (shipments@mcrtechservice.com or whatever TJ created).
+ * pull-shipments-mailbox.js  (2026-09-30)
+ * SAVE AS: netlify/functions/pull-shipments-mailbox.js   (ONE file)
  *
- * Same pattern as pull-state-closings.js. Secrets stay in Netlify env.
+ * Read-only IMAP poll of the MCR shipments mailbox into inbound_emails, so
+ * the inventory board's shipments section has mail to read until TJ sets up
+ * a forward to the app. Runs every 20 minutes (schedule in netlify.toml).
  *
- * Accepted env names (first match wins):
- *   user: MAIL_SHIPPING_USER | MAIL_SHIPMENTS_USER
- *   pass: SHIPMENTS_MAIL_PASSWORD | MAIL_SHIPPING_PASS | MAIL_SHIPMENTS_PASS
- *   host: MAIL_MAIN_HOST (default securemail.aplus.net)
- *   port: MAIL_MAIN_PORT (default 993)
+ * Stateless on purpose: each run looks at the last LOOKBACK_DAYS days of the
+ * mailbox and inserts what it has not stored yet. inbound_emails already
+ * rejects a repeated Message-ID, so re-reading is harmless. Nothing is
+ * deleted, moved or marked read on the mail server (BODY.PEEK only).
  *
- * GET /.netlify/functions/pull-shipments-mailbox?dryRun=1
- * GET /.netlify/functions/pull-shipments-mailbox?since=2026-09-01
+ * If TJ later forwards the mailbox to the app, the forwarded copies and
+ * these copies collapse into one shipment (same tech + request date + state),
+ * so this can simply be unscheduled then.
+ *
+ * Env (Netlify):
+ *   MAIL_SHIPPING_USER
+ *   SHIPMENTS_MAIL_PASSWORD
+ *   MAIL_SHIPMENTS_HOST    optional, default outlook.office365.com
+ *   MAIL_SHIPMENTS_PORT    optional, default 993
+ *   MAIL_SHIPMENTS_FOLDER  optional, default INBOX
+ *
+ * Manual run / check:  GET /.netlify/functions/pull-shipments-mailbox?days=14
  */
 
 const tls = require("tls");
 const { createClient } = require("@supabase/supabase-js");
-const { getStore, connectLambda } = require("@netlify/blobs");
 
-const MAILBOX_TAG = "imap-shipments";
-const CURSOR_KEY = "imap-shipments-cursor";
+const LOOKBACK_DAYS = 3;
+const MAX_MESSAGES = 60;
 const STOP_MS = 20000;
 
 function json(status, obj) {
   return { statusCode: status, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
 }
 
-function envUser() {
-  return process.env.MAIL_SHIPPING_USER || process.env.MAIL_SHIPMENTS_USER || "";
-}
-
-function envPass() {
-  return process.env.SHIPMENTS_MAIL_PASSWORD || process.env.MAIL_SHIPPING_PASS || process.env.MAIL_SHIPMENTS_PASS || "";
-}
-
-function classify(subject, text) {
-  const s = `${subject || ""} ${text || ""}`;
-  if (/RESTOCK\s+MCR/i.test(s)) return "consumable_shipment";
-  if (/\b1Z[0-9A-Z]{16}\b/.test(s) && /box(?:es)?\s+shipped/i.test(s)) return "consumable_shipment";
-  if (/RMA|shipping label|Neumo Shipping Details/i.test(s)) return "rma_shipping";
-  if (/inventory/i.test(subject || "")) return "inventory_sheet";
-  if (/^Re:/i.test(subject || "")) return "reply";
-  return "unknown";
-}
-
 function parseImapDate(d) {
-  const dt = d ? new Date(d) : new Date(Date.now() - 45 * 86400000);
+  // 01-Mar-2026
+  const dt = d ? new Date(d) : new Date(Date.now() - 180 * 86400000);
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return `${String(dt.getUTCDate()).padStart(2,"0")}-${months[dt.getUTCMonth()]}-${dt.getUTCFullYear()}`;
 }
@@ -76,7 +68,10 @@ class ImapSession {
     const tag = "A" + String(this.tag).padStart(4, "0");
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("IMAP timeout: " + command.slice(0, 80))), 20000);
-      this.pending = { tag, resolve: (v) => { clearTimeout(t); resolve(v); } };
+      this.pending = {
+        tag,
+        resolve: (v) => { clearTimeout(t); resolve(v); },
+      };
       this.socket.write(tag + " " + command + "\r\n");
     });
   }
@@ -95,26 +90,9 @@ function quote(s) {
   return `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function unfold(s) {
-  return String(s || "").replace(/\r?\n[ \t]+/g, " ").trim();
-}
-
-function stripHtml(html) {
-  return String(html || "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-}
-
 function parseFetchBatch(raw) {
+  // Bigfoot: "* <seq> FETCH (UID <uid> BODY[...] ...)"
+  // Sequence number is not the UID. Always read UID from the body.
   const parts = raw.split(/\r\n\* /);
   const out = [];
   for (const part of parts) {
@@ -132,8 +110,13 @@ function parseFetchBatch(raw) {
     const textMatch = part.match(/BODY\[TEXT\]\s*\{(\d+)\}\r\n/);
     if (textMatch) {
       const n = Number(textMatch[1]);
-      text = part.slice(textMatch.index + textMatch[0].length, textMatch.index + textMatch[0].length + n);
+      const start = textMatch.index + textMatch[0].length;
+      text = part.slice(start, start + n);
+    } else {
+      const alt = part.match(/BODY\[TEXT\]\s+"([\s\S]*?)"\n/);
+      if (alt) text = alt[1];
     }
+    // HTML part is often in BODY[2] — keep a short peek from text
     out.push({
       uid,
       messageId: msgid.trim(),
@@ -148,120 +131,80 @@ function parseFetchBatch(raw) {
   return out;
 }
 
+function unfold(s) {
+  return String(s || "").replace(/\r?\n[ \t]+/g, " ").trim();
+}
+
+function stripHtml(html) {
+  return String(html || "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+
 exports.handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
-  if (event.httpMethod !== "POST" && event.httpMethod !== "GET") return json(405, { error: "POST or GET" });
+  const user = process.env.MAIL_SHIPPING_USER;
+  const pass = process.env.SHIPMENTS_MAIL_PASSWORD;
+  const host = process.env.MAIL_SHIPMENTS_HOST || "outlook.office365.com";
+  const port = process.env.MAIL_SHIPMENTS_PORT || "993";
+  const folder = process.env.MAIL_SHIPMENTS_FOLDER || "INBOX";
 
-  const user = envUser();
-  const pass = envPass();
-  const host = process.env.MAIL_MAIN_HOST || "securemail.aplus.net";
-  const port = process.env.MAIL_MAIN_PORT || "993";
-  const folder = process.env.MAIL_SHIPPING_FOLDER || process.env.MAIL_MAIN_FOLDER || "INBOX";
-
-  if (!user || !pass) {
-    return json(500, {
-      error: "Shipping mailbox env not set",
-      lookedFor: {
-        user: ["MAIL_SHIPPING_USER", "MAIL_SHIPMENTS_USER"],
-        pass: ["SHIPMENTS_MAIL_PASSWORD", "MAIL_SHIPPING_PASS", "MAIL_SHIPMENTS_PASS"],
-      },
-    });
+  if (!user || !pass) return json(500, { error: "MAIL_SHIPPING_USER / SHIPMENTS_MAIL_PASSWORD not set" });
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return json(500, { error: "Supabase env vars not configured" });
   }
 
-  let body = {};
-  try { body = event.body ? JSON.parse(event.body) : {}; } catch { body = {}; }
-  const qs = event.queryStringParameters || {};
-
-  try { connectLambda(event); } catch {}
-  const store = getStore("dispatch");
-  let saved = {};
-  try { saved = (await store.get(CURSOR_KEY, { type: "json" })) || {}; } catch { saved = {}; }
-
-  const since = body.since || qs.since || saved.since || "2026-09-01";
-  const limit = Math.min(40, Number(body.limit || qs.limit || 25));
-  const dryRun = !!(body.dryRun || qs.dryRun);
-  const loop = !dryRun && (body.loop === 0 || qs.loop === "0" ? false : true);
-  let afterUid = Number(body.afterUid || qs.afterUid || saved.afterUid || 0);
+  const qs = (event && event.queryStringParameters) || {};
+  const days = Math.min(60, Math.max(1, Number(qs.days) || LOOKBACK_DAYS));
+  const since = new Date(Date.now() - days * 86400000).toISOString();
 
   let session;
   try {
     session = await connectImap(host, port);
-    const login = await session.cmd("LOGIN " + quote(user) + " " + quote(pass));
-    if (!login.ok) {
-      session.socket.end();
-      return json(401, { error: "IMAP login failed", detail: login.text, user, host });
-    }
+    const login = await session.cmd(`LOGIN ${quote(user)} ${quote(pass)}`);
+    if (!login.ok) return json(401, { error: "IMAP login failed", detail: login.text });
 
-    const sel = await session.cmd("SELECT " + quote(folder));
-    if (!sel.ok) {
-      session.socket.end();
-      return json(500, { error: "SELECT failed", detail: sel.text, folder });
-    }
+    const sel = await session.cmd(`SELECT ${quote(folder)}`);
+    if (!sel.ok) return json(500, { error: "SELECT failed", detail: sel.text });
 
-    const search = await session.cmd("UID SEARCH SINCE " + parseImapDate(since));
-    if (!search.ok) {
-      session.socket.end();
-      return json(500, { error: "SEARCH failed", detail: search.text });
-    }
+    const search = await session.cmd(`UID SEARCH SINCE ${parseImapDate(since)}`);
+    if (!search.ok) return json(500, { error: "SEARCH failed", detail: search.text });
     const uids = (search.raw.match(/\* SEARCH[^\r\n]*/i) || [""])[0]
-      .replace(/^\* SEARCH/i, "")
-      .trim()
-      .split(/\s+/)
-      .map(Number)
-      .filter(Boolean);
+      .replace(/^\* SEARCH/i, "").trim().split(/\s+/).map(Number).filter(Boolean)
+      .slice(-MAX_MESSAGES);
 
-    const fetchItems = dryRun
-      ? "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])"
-      : "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] BODY.PEEK[TEXT])";
-
-    const supabase = dryRun ? null : createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const fetchItems = "(UID BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] BODY.PEEK[TEXT])";
     const started = Date.now();
-    let inserted = 0, skipped = 0, examined = 0, batches = 0;
+    let inserted = 0, skipped = 0, examined = 0;
     const errors = [];
-    let lastUid = afterUid;
-    let remaining = afterUid ? uids.filter((u) => u > afterUid) : uids.slice();
 
-    if (dryRun) {
-      const batch = remaining.slice(0, limit);
-      if (!batch.length) {
-        session.socket.end();
-        return json(200, { ok: true, dryRun: true, mailbox: MAILBOX_TAG, user, host, found: uids.length, batch: [] });
-      }
-      const fetch = await session.cmd("UID FETCH " + batch[0] + ":" + batch[batch.length - 1] + " " + fetchItems);
-      session.socket.end();
-      const msgs = parseFetchBatch(fetch.raw);
-      return json(200, {
-        ok: true,
-        dryRun: true,
-        mailbox: MAILBOX_TAG,
-        user,
-        host,
-        found: uids.length,
-        batch: msgs.map((m) => ({ uid: m.uid, subject: m.subject, from: m.from, date: m.date })),
-      });
-    }
-
-    while (remaining.length && Date.now() - started < STOP_MS) {
-      const batch = remaining.slice(0, limit);
-      const fetch = await session.cmd("UID FETCH " + batch[0] + ":" + batch[batch.length - 1] + " " + fetchItems);
-      if (!fetch.ok) {
-        errors.push({ error: "FETCH failed", detail: fetch.text });
-        break;
-      }
+    for (let i = 0; i < uids.length && Date.now() - started < STOP_MS; i += 10) {
+      const batch = uids.slice(i, i + 10);
+      const fetch = await session.cmd(`UID FETCH ${batch.join(",")} ${fetchItems}`);
+      if (!fetch.ok) { errors.push({ error: "FETCH failed", detail: fetch.text }); break; }
       const msgs = parseFetchBatch(fetch.raw).filter((m) => batch.includes(m.uid));
       examined += msgs.length;
-      batches += 1;
       for (const m of msgs) {
-        const mid = m.messageId ? (m.messageId.startsWith("<") ? m.messageId : "<" + m.messageId + ">") : ("imap-ship-" + m.uid);
+        const mid = m.messageId ? (m.messageId.startsWith("<") ? m.messageId : `<${m.messageId}>`) : `imap-shipments-uid-${m.uid}`;
         const received = m.date ? new Date(m.date) : new Date();
         const row = {
-          mailbox: MAILBOX_TAG,
+          mailbox: "imap-shipments",
           sender: m.from || user,
           subject: m.subject || "(no subject)",
           body_text: m.text || "",
           body_html: m.html,
           received_at: isNaN(received.getTime()) ? new Date().toISOString() : received.toISOString(),
-          classified_as: classify(m.subject, m.text),
+          classified_as: "unknown",
           parse_status: "pending",
           mailgun_message_id: mid,
           to_address: m.to || null,
@@ -270,37 +213,14 @@ exports.handler = async (event) => {
         if (error) {
           if (/duplicate|unique/i.test(error.message || "")) skipped += 1;
           else errors.push({ uid: m.uid, error: error.message });
-        } else {
-          inserted += 1;
-        }
+        } else inserted += 1;
       }
-      lastUid = batch[batch.length - 1];
-      remaining = remaining.filter((u) => u > lastUid);
-      if (!loop) break;
     }
 
     session.socket.end();
-    const done = remaining.length === 0;
-    await store.setJSON(CURSOR_KEY, { since, afterUid: lastUid, done, updatedAt: new Date().toISOString() });
-
-    return json(200, {
-      ok: true,
-      mailbox: MAILBOX_TAG,
-      found: uids.length,
-      examined,
-      inserted,
-      skipped,
-      batches,
-      errors: errors.slice(0, 8),
-      lastUid,
-      remaining: remaining.length,
-      done,
-      nextHint: done
-        ? "Shipments mailbox caught up for this since window."
-        : ("Call again with afterUid=" + lastUid + "&since=" + since),
-    });
+    return json(200, { ok: true, days, found: uids.length, examined, inserted, skipped, errors: errors.slice(0, 8) });
   } catch (err) {
-    try { if (session && session.socket) session.socket.end(); } catch (e) {}
+    try { if (session && session.socket) session.socket.end(); } catch {}
     return json(500, { error: err.message });
   }
 };
