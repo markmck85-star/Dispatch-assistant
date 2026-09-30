@@ -138,6 +138,19 @@
     .recvform input[type=number] { width: 80px; }
     .recvform input[type=text] { width: 100%; }
     .adjnote { color: var(--warn); font-size: 12px; margin-top: 4px; }
+    details.grp { border-top: 1px solid var(--line); }
+    details.grp:first-of-type { border-top: 0; }
+    details.grp > summary {
+      list-style: none; cursor: pointer; padding: 12px 18px; font-weight: 600; font-size: 14px;
+      display: flex; gap: 10px; align-items: center; background: #fdfbf6;
+    }
+    details.grp > summary::-webkit-details-marker { display: none; }
+    details.grp > summary::before { content: "\25B8"; color: var(--muted); font-size: 12px; }
+    details.grp[open] > summary::before { content: "\25BE"; }
+    details.grp .count { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eee7db; }
+    details.grp .count.bad { background: #fde8ee; color: var(--bad); }
+    details.grp .count.good { background: #e4f0e6; color: var(--ok); }
+    details.grp .count.warn { background: #f5e8d0; color: var(--warn); }
     @media (max-width: 980px) {
       .stats, .grid2, .rules { grid-template-columns: 1fr; }
       .wrap, header, footer { padding-left: 16px; padding-right: 16px; }
@@ -180,21 +193,24 @@
 
     <section class="panel">
       <h2>Submissions</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Tech</th>
-            <th>WHSE</th>
-            <th>Inv date</th>
-            <th>Mailbox</th>
-            <th>Status</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody id="subBody">
-          <tr><td colspan="6" class="note">Loading…</td></tr>
-                </tbody>
-      </table>
+      <details class="grp" id="grpMissing" open>
+        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span></summary>
+        <table>
+          <thead><tr><th>Tech</th><th>State</th><th>Mailbox</th></tr></thead>
+          <tbody id="missBody"><tr><td colspan="3" class="note">Loading&hellip;</td></tr></tbody>
+        </table>
+      </details>
+      <details class="grp" id="grpReceived">
+        <summary>Received <span class="count good" id="cntReceived">&ndash;</span></summary>
+        <table>
+          <thead><tr><th>Tech</th><th>State</th><th>Date</th><th>Email</th></tr></thead>
+          <tbody id="recBody"><tr><td colspan="4" class="note">Loading&hellip;</td></tr></tbody>
+        </table>
+      </details>
+      <details class="grp" id="grpUnmatched">
+        <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span></summary>
+        <div id="unmBody"><div class="note">Loading&hellip;</div></div>
+      </details>
     </section>
 
     <section class="panel">
@@ -403,6 +419,41 @@ function lastMonday() {
 function esc(s) {
   return String(s || "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
 }
+// Remember which groups are open, so a Refresh does not snap them shut.
+const GRP_KEY = "inventory-board-open-groups";
+const GRP_IDS = ["grpMissing", "grpReceived", "grpUnmatched"];
+function restoreGroups() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(GRP_KEY) || "null"); } catch (e) {}
+  GRP_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (saved && typeof saved[id] === "boolean") el.open = saved[id];
+    el.addEventListener("toggle", () => {
+      const now = {};
+      GRP_IDS.forEach((g) => { const e2 = document.getElementById(g); if (e2) now[g] = e2.open; });
+      try { localStorage.setItem(GRP_KEY, JSON.stringify(now)); } catch (e) {}
+    });
+  });
+}
+function missingRowsHtml(miss) {
+  if (!miss.length) return '<tr><td colspan="3" class="note">Nobody missing.</td></tr>';
+  return miss.map((t) => "<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
+    "</td><td>" + esc(t.email || "") + "</td></tr>").join("");
+}
+function receivedRowsHtml(rec) {
+  if (!rec.length) return '<tr><td colspan="4" class="note">Nothing received yet in this period.</td></tr>';
+  return rec.map((t) => {
+    const day = t.receivedAt ? new Date(t.receivedAt).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
+    return "<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") + "</td><td class=\"mono\">" + esc(day) +
+      "</td><td>" + esc(t.subject || "") + "</td></tr>";
+  }).join("");
+}
+function unmatchedHtml(list) {
+  if (!list.length) return '<div class="note">No unmatched mail.</div>';
+  return list.map((t) => '<div class="note" style="border-top:1px solid var(--line);">' + esc(t.subject || "(no subject)") + " &middot; " + esc(t.sender || "") +
+    (t.reason ? '<div class="hint">' + esc(t.reason) + "</div>" : "") + "</div>").join("");
+}
 async function loadBoard() {
   const since = document.getElementById("since").value;
   const state = document.getElementById("stateFilter").value;
@@ -412,25 +463,16 @@ async function loadBoard() {
   const data = await res.json();
   const rec = data.received || [];
   const miss = data.missing || [];
+  const unm = data.unmatched || [];
   document.getElementById("statIn").textContent = rec.length;
   document.getElementById("statOut").textContent = miss.length;
   document.getElementById("statAll").textContent = data.techCount || (rec.length + miss.length);
-  const rows = [];
-  miss.forEach((t) => {
-    rows.push("<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
-      "</td><td class=\"mono\">—</td><td>" + esc(t.email || "") +
-      "</td><td><span class=\"tag out\">Missing</span></td><td></td></tr>");
-  });
-  rec.forEach((t) => {
-    const day = t.receivedAt ? new Date(t.receivedAt).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
-    rows.push("<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
-      "</td><td class=\"mono\">" + esc(day) + "</td><td>" + esc(t.email || "") +
-      "</td><td><span class=\"tag in\">Received</span></td><td>" + esc(t.subject || "") + "</td></tr>");
-  });
-  (data.unmatched || []).forEach((t) => {
-    rows.push("<tr><td colspan=\"6\" class=\"note\">Unmatched: " + esc(t.subject) + " · " + esc(t.sender) + "</td></tr>");
-  });
-  document.getElementById("subBody").innerHTML = rows.join("") || "<tr><td colspan=\"6\" class=\"note\">No rows.</td></tr>";
+  document.getElementById("cntMissing").textContent = miss.length;
+  document.getElementById("cntReceived").textContent = rec.length;
+  document.getElementById("cntUnmatched").textContent = unm.length;
+  document.getElementById("missBody").innerHTML = missingRowsHtml(miss);
+  document.getElementById("recBody").innerHTML = receivedRowsHtml(rec);
+  document.getElementById("unmBody").innerHTML = unmatchedHtml(unm);
 }
 
 // ---- Consumable shipments (Neumo -> technicians) --------------------------
@@ -454,7 +496,8 @@ function phaseCell(s) {
 function actionBtn(s) {
   if (!s.id) return "";
   const id = esc(s.id);
-  if (s.phase === "delivered") return '<div><button class="mini" type="button" onclick="markDelivered(\'' + id + '\', false)">Undo</button></div>';
+  if (s.phase === "delivered") return '<div><button class="mini" type="button" onclick="toggleReceiveForm(\'' + id + '\')">Edit received</button> ' +
+    '<button class="mini" type="button" onclick="markDelivered(\'' + id + '\', false)">Undo</button></div>';
   if (s.phase === "cancelled") return "";
   return '<div><button class="mini" type="button" onclick="markDelivered(\'' + id + '\', true)">Mark delivered</button> ' +
     '<button class="mini" type="button" onclick="toggleReceiveForm(\'' + id + '\')">Received differently</button></div>';
@@ -473,13 +516,13 @@ function receiveFormHtml(s) {
   if (!s.id) return "";
   const lines = (s.items || []).map((it) =>
     '<div class="line"><span class="what">' + itemLine(it) + '</span>' +
-    '<label style="margin:0;font-weight:500;">Received <input type="number" min="0" max="9999" data-sku="' + esc(it.sku) + '" data-shipped="' + Number(it.units) + '" value="' + Number(it.units) + '" /></label>' +
+    '<label style="margin:0;font-weight:500;">Received <input type="number" min="0" max="9999" data-sku="' + esc(it.sku) + '" data-shipped="' + Number(it.units) + '" value="' + Number(it.receivedUnits != null ? it.receivedUnits : it.units) + '" /></label>' +
     '<span class="hint">of ' + Number(it.units) + ' ' + esc(String(it.unit || "").toLowerCase()) + '</span></div>'
   ).join("");
   return '<tr id="recv-' + esc(s.id) + '" style="display:none;"><td colspan="7" class="recvform">' +
-    '<div style="font-weight:600;font-size:13px;">Received differently &mdash; change only what did not match</div>' + lines +
-    '<div class="line"><input type="text" id="recvnote-' + esc(s.id) + '" placeholder="Note (optional), e.g. box was short, lost in transit" maxlength="500" /></div>' +
-    '<div class="line"><button class="mini" type="button" onclick="saveReceived(\'' + esc(s.id) + '\')">Save as delivered</button> ' +
+    '<div style="font-weight:600;font-size:13px;">' + (s.phase === "delivered" ? "Edit received &mdash; correct what actually arrived" : "Received differently &mdash; change only what did not match") + '</div>' + lines +
+    '<div class="line"><input type="text" id="recvnote-' + esc(s.id) + '" placeholder="Note (optional), e.g. box was short, lost in transit" maxlength="500" value="' + esc(s.deliveredNote || "") + '" /></div>' +
+    '<div class="line"><button class="mini" type="button" onclick="saveReceived(\'' + esc(s.id) + '\')">' + (s.phase === "delivered" ? "Save changes" : "Save as delivered") + '</button> ' +
     '<button class="mini" type="button" onclick="toggleReceiveForm(\'' + esc(s.id) + '\')">Cancel</button></div>' +
     '</td></tr>';
 }
@@ -501,7 +544,7 @@ function shipmentRowsHtml(list, showDelivered) {
     const main = "<tr" + dim + "><td>" + name + "</td><td class=\"mono\">" + esc(s.state || "") + "</td><td class=\"mono\">" + esc(shortDate(s.requestDate)) +
       "</td><td class=\"mono\">" + esc(shortDate(s.shippedAt)) + "</td><td>" + (s.items.map(itemLine).join("<br>") || "\u2014") + warn + adjustmentsHtml(s) +
       "</td><td>" + tracking + "</td><td>" + phaseCell(s) + actionBtn(s) + "</td></tr>";
-    return main + ((s.phase === "delivered" || s.phase === "cancelled") ? "" : receiveFormHtml(s));
+    return main + (s.phase === "cancelled" ? "" : receiveFormHtml(s));
   }).join("");
 }
 function renderShipments() {
@@ -572,6 +615,7 @@ async function markDelivered(id, delivered) {
 }
 
 document.getElementById("since").value = lastMonday();
+restoreGroups();
 loadBoard();
 loadShipments();
 
