@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.29</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.31</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -170,6 +170,7 @@
 let ctx = null;
 let picked = { from: null, to: null, miss: null, here: null, ins: null };
 let closings = [];        // visits Salesforce shows for this tech in the period
+let pendingClosing = null; // closing being added through the normal Add stop form
 let insertCtx = null;     // { visit } when the insert card was opened from a closing
 let legs = [];
 let expectedMi = null;   // matrix distance for the current From/To pair
@@ -530,6 +531,15 @@ async function loadContext() {
   }
 }
 
+function todayLocal() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function arrivalFor(dateStr) {
+  return dateStr === todayLocal() ? { arrived_at: new Date().toISOString() } : {};
+}
+
 function showOdoNote(t) {
   const el = document.getElementById('odoNote');
   if (!el) return;
@@ -638,7 +648,7 @@ async function addMissedStop() {
   const extra1 = estimated ? { estimated: true, est_field: 'end' } : { via_trip_meter: true };
   const extra2 = estimated ? { estimated: true, est_field: 'start' } : { via_trip_meter: true };
   legs.push(newLeg(date, picked.from, picked.miss, a, b, extra1));
-  legs.push(newLeg(date, picked.miss, picked.here, b, c, Object.assign({ arrived_at: new Date().toISOString() }, extra2)));
+  legs.push(newLeg(date, picked.miss, picked.here, b, c, Object.assign(arrivalFor(date), extra2)));
   picked.from = picked.here;
   document.getElementById('fromQ').value = picked.from.picker;
   document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
@@ -783,9 +793,19 @@ function addLeg() {
     odo_start: odoStart === '' ? null : Number(odoStart),
     odo_end: odoEnd === '' ? null : Number(odoEnd),
     miles,
-    flag,
-    arrived_at: new Date().toISOString()
+    flag
   });
+  {
+    const last = legs[legs.length - 1];
+    if (pendingClosing && picked.to.kind === 'site' && picked.to.id === pendingClosing.site_id) {
+      last.arrived_at = pendingClosing.ended_at;
+      last.closing_visit_id = pendingClosing.id;
+      last.closing_at = pendingClosing.ended_at;
+    } else {
+      Object.assign(last, arrivalFor(date));
+    }
+    pendingClosing = null;
+  }
   picked.from = picked.to;
   document.getElementById('fromQ').value = picked.from.picker;
   document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
@@ -955,6 +975,8 @@ function unmatchedClosings() {
   return closings.filter(v => {
     if (!v.site_id || !v.ended_at || dismissed.indexOf(v.id) !== -1) return false;
     const d = localDateOf(v.ended_at);
+    // only visits inside the pay period on screen (the server sends a day of slack each side)
+    if (d < document.getElementById('periodStart').value || d > document.getElementById('periodEnd').value) return false;
     if (legs.some(l => l.date === d && l.to_site_id === v.site_id)) return false;
     const k = v.site_id + '|' + d;
     if (seen[k]) return false;
@@ -1017,6 +1039,7 @@ function addFromClosing(id) {
     openInsert(where.idx, v);
   } else {
     // after the last stop logged that day: use the normal Add stop form
+    pendingClosing = v;
     const st = stopForVisit(v);
     document.getElementById('legDate').value = localDateOf(v.ended_at);
     updateDow();
