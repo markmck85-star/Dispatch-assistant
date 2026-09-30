@@ -435,6 +435,27 @@ function functionDeclarations() {
       },
     },
     {
+      name: 'get_last_visit',
+      description:
+        'Who was last at a site (and the last few visits). Uses the same visit history as clicking the location name on the board. ' +
+        'Works for any site in the state, even if it is not on today\'s board. Read-only. Use for "who was last at Cobb South", ' +
+        '"last tech at GA1008", "when was Glenwood last restocked".',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          siteCode: {
+            type: 'STRING',
+            description: 'Site code or location name (e.g. GA1008 or Cobb South).',
+          },
+          limit: {
+            type: 'INTEGER',
+            description: 'How many recent visits to return. Default 3, max 8.',
+          },
+        },
+        required: ['siteCode'],
+      },
+    },
+    {
       name: 'get_stop_addition_cost',
       description:
         'Read-only advisory: estimates the mileage/time a technician\'s route would gain by adding one more stop (a site not ' +
@@ -555,7 +576,7 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
       'number is grammatically expected there; the same applies to any other misheard number word or name.',
     '- Match technicians by first name, last name, nickname, OR the map color shown next to them above (e.g. "move red 2 to Mark" ' +
       'means the technician whose line says "map color: red"). A color reference always means the technician, never a stop or site.',
-    '- If the dispatcher names a site code or site name instead of a stop number, find that stop in the roster and use its number.',
+    '- If the dispatcher names a site code or site name instead of a stop number for a MOVE, find that stop in the roster and use its number.',
     '- If an instruction implies several changes, emit one tool call per change, in the order they should be applied.',
     '- The advisory tools (get_leg_distance, get_stop_addition_cost, get_overtime_risk, propose_route_rebalance) never change ' +
       'the board -- use them freely to answer a question, even speculative ones ("what if"), without asking for confirmation first.',
@@ -563,9 +584,13 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
       'ONCE with fromTechIndexes / toTechIndexes. Do not call get_stop_addition_cost for sites already on the board -- that tool is ' +
       'only for a site that is not currently assigned.',
     '- reassign_stop and sort_route DO change the board. Only call one of those when you are confident which technician ' +
-      'and stop are meant. If the instruction is ambiguous, unrelated to the board, or refers to someone or something not ' +
-      'in the roster, do not call a tool: reply with one short sentence saying what you need clarified.',
-    '- Never invent technicians, stops, or site codes that are not in the roster above.'
+      'and stop are meant. If a MOVE is ambiguous, reply with one short sentence asking what you need.',
+    '- Distance questions ("how far is X to Y", "miles from Randy\'s house to Cobb South") MUST call get_leg_distance even when ' +
+      'those sites are NOT on today\'s roster. Pass site codes if you know them, otherwise pass the names the dispatcher used ' +
+      'in fromSiteCode / toSiteCode — the server resolves names against the full state site list. Do not ask the dispatcher ' +
+      'for codes and do not say a site is missing just because it is not on the board.',
+    '- "Who was last at X" / last visit / last restock MUST call get_last_visit with the name or code. Same rule: the site does not have to be on today\'s board.',
+    '- Never invent technicians or stops for a MOVE that are not in the roster above. Distance lookups may use any site in the state.'
   );
   return lines.join('\n');
 }
@@ -601,6 +626,23 @@ function legText(leg) {
 /** First name only, which is how the dispatcher-facing diff line reads. */
 function shortName(techName) {
   return String(techName || '').trim().split(/\s+/)[0] || techName;
+}
+
+function resolveSiteToken(token, ctx) {
+  const raw = String(token || '').trim();
+  if (!raw) return null;
+  const up = raw.toUpperCase().replace(/\s+/g, '');
+  if (ctx.sites[raw.toUpperCase()]) return raw.toUpperCase();
+  if (ctx.sites[up]) return up;
+  const needle = raw.toLowerCase().replace(/\s+/g, ' ');
+  const hits = Object.entries(ctx.siteNames || {}).filter(([, name]) => {
+    const n = String(name || '').toLowerCase();
+    return n === needle || n.includes(needle) || needle.includes(n);
+  });
+  if (!hits.length) return null;
+  if (hits.length === 1) return hits[0][0];
+  const exact = hits.find(([, n]) => String(n).toLowerCase() === needle);
+  return exact ? exact[0] : hits[0][0];
 }
 
 function techSetFromIndexes(indexes, routes) {
@@ -651,22 +693,37 @@ async function loadContext(supabase, state, techNames, siteCodes) {
   const sites = {};
   const siteIdByCode = {};
   const siteNames = {};
-  if (siteCodes.length) {
+  const regionStates = state === 'GA' ? ['GA', 'NC', 'SC'] : [state];
+  {
     const { data, error } = await supabase
       .from('sites')
-      .select('id, site_code, name, lat, lng')
-      .in('site_code', siteCodes);
+      .select('id, site_code, name, lat, lng, state')
+      .in('state', regionStates);
     if (error) throw new Error('Site lookup failed: ' + error.message);
     for (const s of data || []) {
+      if (!s.site_code) continue;
       sites[s.site_code] = { lat: s.lat, lng: s.lng };
       siteIdByCode[s.site_code] = s.id;
       siteNames[s.site_code] = s.name;
     }
   }
+  if (siteCodes.length) {
+    const missing = siteCodes.filter((c) => !sites[c]);
+    if (missing.length) {
+      const { data } = await supabase.from('sites').select('id, site_code, name, lat, lng').in('site_code', missing);
+      for (const s of data || []) {
+        sites[s.site_code] = { lat: s.lat, lng: s.lng };
+        siteIdByCode[s.site_code] = s.id;
+        siteNames[s.site_code] = s.name;
+      }
+    }
+  }
 
   const matrix = {};
   const techIds = Object.values(techIdByName);
-  const siteIds = Object.values(siteIdByCode);
+  const siteIds = (siteCodes.length ? siteCodes : Object.keys(sites))
+    .map((c) => siteIdByCode[c])
+    .filter(Boolean);
 
   const [{ data: techToSite, error: t2sErr }, { data: siteToSite, error: s2sErr }] = await Promise.all([
     techIds.length
@@ -1046,17 +1103,17 @@ export default async (req) => {
       }
 
       if (call.name === 'get_leg_distance') {
-        const toCode = String(args.toSiteCode || '').toUpperCase();
-        if (!ctx.sites[toCode]) {
-          actions.push({ type: 'error', summary: `Don't have a location on file for ${toCode || '(blank)'}.` });
+        const toCode = resolveSiteToken(args.toSiteCode, ctx);
+        if (!toCode || !ctx.sites[toCode]) {
+          actions.push({ type: 'error', summary: `Don't have a location on file for ${args.toSiteCode || '(blank)'}.` });
           continue;
         }
         let fromLabel;
         let leg;
         if (args.fromSiteCode) {
-          const fromCode = String(args.fromSiteCode).toUpperCase();
-          if (!ctx.sites[fromCode]) {
-            actions.push({ type: 'error', summary: `Don't have a location on file for ${fromCode}.` });
+          const fromCode = resolveSiteToken(args.fromSiteCode, ctx);
+          if (!fromCode || !ctx.sites[fromCode]) {
+            actions.push({ type: 'error', summary: `Don't have a location on file for ${args.fromSiteCode}.` });
             continue;
           }
           fromLabel = ctx.siteNames[fromCode] || fromCode;
@@ -1078,6 +1135,53 @@ export default async (req) => {
           durationMin: leg.durationMin,
           isReal: leg.isReal,
         });
+        continue;
+      }
+
+      if (call.name === 'get_last_visit') {
+        const code = resolveSiteToken(args.siteCode, ctx);
+        if (!code || !ctx.sites[code]) {
+          actions.push({ type: 'error', summary: `Don't have a location on file for ${args.siteCode || '(blank)'}.` });
+          continue;
+        }
+        const limit = Math.min(8, Math.max(1, Number(args.limit) || 3));
+        const siteId = ctx.siteIdByCode && ctx.siteIdByCode[code];
+        let siteIdUse = siteId;
+        if (!siteIdUse) {
+          const { data: siteRow } = await supabase.from('sites').select('id').eq('site_code', code).maybeSingle();
+          siteIdUse = siteRow && siteRow.id;
+        }
+        if (!siteIdUse) {
+          actions.push({ type: 'error', summary: `Don't have a location on file for ${code}.` });
+          continue;
+        }
+        const { data: visits, error: vErr } = await supabase
+          .from('site_visits')
+          .select('started_at, tech_name_raw, remediation, wo_number, is_restock, closing_note')
+          .eq('site_id', siteIdUse)
+          .order('started_at', { ascending: false, nullsFirst: false })
+          .limit(limit);
+        if (vErr) {
+          actions.push({ type: 'error', summary: 'Could not load visit history: ' + vErr.message });
+          continue;
+        }
+        const label = (ctx.siteNames[code] || code) + ' (' + code + ')';
+        if (!visits || !visits.length) {
+          actions.push({ type: 'get_last_visit', summary: `No closed-ticket visits on file for ${label}.` });
+          continue;
+        }
+        const fmt = (v) => {
+          const when = v.started_at ? new Date(v.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '?';
+          const who = v.tech_name_raw || 'unknown tech';
+          const kind = v.is_restock ? 'restock' : (v.remediation || 'visit');
+          const wo = v.wo_number ? ' SA ' + v.wo_number : '';
+          return `${when}: ${who} — ${kind}${wo}`;
+        };
+        const last = visits[0];
+        const more = visits.slice(1).map(fmt);
+        let summary = `Last at ${label}: ${fmt(last)}`;
+        if (more.length) summary += '. Before that: ' + more.join('; ');
+        actions.push({ type: 'get_last_visit', summary, siteCode: code, visits });
         continue;
       }
 
