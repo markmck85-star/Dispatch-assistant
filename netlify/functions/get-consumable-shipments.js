@@ -1,13 +1,24 @@
 /**
- * get-consumable-shipments.js  (v1, 2026-09-30)
+ * get-consumable-shipments.js  (v2, 2026-09-30)
  * SAVE AS: netlify/functions/get-consumable-shipments.js   (ONE file, no lib/ folder needed)
  *
  * Reads Neumo's consumable restock shipments out of inbound_emails and
  * returns them as structured shipments: who, when, what (SKU + quantity),
  * and the UPS tracking number once the warehouse has replied.
  *
- * Read-only. Does not write to any table, does not touch the inventory
- * board, and forwards nothing to Neumo.
+ * v2: SAVES what it parses to public.consumable_shipments (created
+ * 2026-09-30) and returns the saved rows. Each call re-reads the stored
+ * emails, inserts shipments it has not seen, and refreshes the PARSED
+ * fields (items, tracking, ship date, box counts) of ones it has. It never
+ * overwrites what a person set by hand: a shipment marked delivered or
+ * cancelled keeps that status. It still forwards nothing to Neumo and
+ * changes nothing on the inventory or dispatch tables.
+ *
+ * Because the write happens on read, the table stays current whenever the
+ * inventory board (or this URL) is opened. If the table is missing or the
+ * write fails, the parsed shipments are still returned, with syncError set.
+ *
+ * Query: ?since=YYYY-MM-DD (default 45 days)  &state=GA (tech's state)
  *
  * GET /.netlify/functions/get-consumable-shipments?since=2026-09-01
  *
@@ -226,6 +237,129 @@ function buildShipments(parsed, roster) {
   return out;
 }
 
+// A UPS Ground box is nearly always there within 5 business days. Past this
+// many calendar days without anyone confirming it, the board shows the
+// shipment as "likely arrived" rather than "in transit".
+const LIKELY_ARRIVED_DAYS = 7;
+
+function shipmentKey(s) {
+  return [String(s.techNameRaw || "").toLowerCase().replace(/\s+/g, " ").trim(), s.requestDate, s.state || ""].join("|");
+}
+
+function statusFromParsed(s) {
+  return s.tracking.length ? "shipped" : "requested";
+}
+
+function sameJson(a, b) {
+  return JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
+}
+
+function todayEt() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function daysBetween(dateStr, refStr) {
+  if (!dateStr) return null;
+  const a = Date.parse(dateStr + "T12:00:00Z");
+  const b = Date.parse(refStr + "T12:00:00Z");
+  return Number.isNaN(a) || Number.isNaN(b) ? null : Math.round((b - a) / 86400000);
+}
+
+/**
+ * Writes parsed shipments to the table without clobbering manual changes.
+ * `db` is a supabase client. Returns { inserted, updated, error }.
+ */
+async function syncShipments(db, shipments) {
+  if (!shipments.length) return { inserted: 0, updated: 0, error: null };
+  const keys = shipments.map(shipmentKey);
+  const { data: existing, error: exErr } = await db
+    .from("consumable_shipments").select("*").in("shipment_key", keys);
+  if (exErr) return { inserted: 0, updated: 0, error: exErr.message };
+  const byKey = new Map((existing || []).map((r) => [r.shipment_key, r]));
+
+  const toInsert = [];
+  let updated = 0;
+  for (const s of shipments) {
+    const key = shipmentKey(s);
+    const parsedCols = {
+      technician_id: s.technician ? s.technician.id : null,
+      state: s.state || null,
+      shipped_at: s.shippedAt || null,
+      ship_method: s.shipMethod || null,
+      boxes_requested: s.boxesRequested || null,
+      boxes_shipped: s.boxesShipped,
+      items: s.items,
+      tracking: s.tracking.map((t) => t.number),
+      source_email_ids: s.emailIds,
+      warnings: s.warnings,
+    };
+    const row = byKey.get(key);
+    if (!row) {
+      toInsert.push({
+        shipment_key: key,
+        tech_name_raw: s.techNameRaw,
+        request_date: s.requestDate,
+        status: statusFromParsed(s),
+        ...parsedCols,
+      });
+      continue;
+    }
+    const patch = {};
+    for (const [col, val] of Object.entries(parsedCols)) {
+      if (!sameJson(row[col], val)) patch[col] = val;
+    }
+    // Manual states stick. Otherwise follow the parsed evidence.
+    if (row.status !== "delivered" && row.status !== "cancelled") {
+      const want = statusFromParsed(s);
+      if (row.status !== want) patch.status = want;
+    }
+    if (Object.keys(patch).length) {
+      patch.updated_at = new Date().toISOString();
+      const { error: upErr } = await db.from("consumable_shipments").update(patch).eq("id", row.id);
+      if (upErr) return { inserted: 0, updated, error: upErr.message };
+      updated++;
+    }
+  }
+  if (toInsert.length) {
+    const { error: insErr } = await db.from("consumable_shipments").insert(toInsert);
+    if (insErr) return { inserted: 0, updated, error: insErr.message };
+  }
+  return { inserted: toInsert.length, updated, error: null };
+}
+
+/** DB row -> the shape the board reads. */
+function shape(row, techById, today) {
+  const tech = row.technician_id ? techById.get(row.technician_id) : null;
+  const tracking = (Array.isArray(row.tracking) ? row.tracking : []).map((n) => ({
+    number: n, url: "https://www.ups.com/track?tracknum=" + n,
+  }));
+  const daysSinceShipped = daysBetween(row.shipped_at, today);
+  let phase;
+  if (row.status === "delivered") phase = "delivered";
+  else if (row.status === "cancelled") phase = "cancelled";
+  else if (row.status === "requested") phase = "requested";
+  else phase = daysSinceShipped != null && daysSinceShipped > LIKELY_ARRIVED_DAYS ? "likely_arrived" : "in_transit";
+  return {
+    id: row.id,
+    technician: tech ? { id: tech.id, name: tech.name, state: tech.home_state } : null,
+    techNameRaw: row.tech_name_raw,
+    state: row.state,
+    requestDate: row.request_date,
+    shippedAt: row.shipped_at,
+    shipMethod: row.ship_method,
+    boxesRequested: row.boxes_requested,
+    boxesShipped: row.boxes_shipped,
+    items: Array.isArray(row.items) ? row.items : [],
+    tracking,
+    status: row.status,
+    phase,
+    daysSinceShipped,
+    deliveredAt: row.delivered_at,
+    deliveredNote: row.delivered_note,
+    warnings: Array.isArray(row.warnings) ? row.warnings : [],
+  };
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return json(200, {});
   if (event.httpMethod !== "GET") return json(405, { error: "Method Not Allowed" });
@@ -237,15 +371,17 @@ exports.handler = async (event) => {
   let since = String(params.since || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
+    d.setDate(d.getDate() - 45);
     since = d.toISOString().slice(0, 10);
   }
+  const stateFilter = String(params.state || "").trim().toUpperCase();
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   const { data: techs, error: tErr } = await supabase
     .from("technicians").select("id, name, home_state").eq("active", true);
   if (tErr) return json(500, { error: tErr.message });
   const roster = (techs || []).filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
+  const techById = new Map((techs || []).map((t) => [t.id, t]));
 
   const { data: mails, error: mErr } = await supabase
     .from("inbound_emails")
@@ -263,17 +399,48 @@ exports.handler = async (event) => {
     if (p) parsed.push(p);
     else skipped.push({ emailId: e.id, subject: e.subject });
   }
+  const fresh = buildShipments(parsed, roster);
 
-  const shipments = buildShipments(parsed, roster);
+  const sync = await syncShipments(supabase, fresh);
+  const today = todayEt();
+
+  let shipments;
+  if (sync.error) {
+    // Table missing or write failed: fall back to the in-memory parse so the
+    // board still shows something. These rows have no id, so no buttons.
+    shipments = fresh.map((s) => shape({
+      id: null, technician_id: s.technician ? s.technician.id : null, tech_name_raw: s.techNameRaw, state: s.state,
+      request_date: s.requestDate, shipped_at: s.shippedAt, ship_method: s.shipMethod,
+      boxes_requested: s.boxesRequested, boxes_shipped: s.boxesShipped, items: s.items,
+      tracking: s.tracking.map((t) => t.number), status: statusFromParsed(s), warnings: s.warnings,
+    }, techById, today));
+  } else {
+    const { data: rows, error: rErr } = await supabase
+      .from("consumable_shipments").select("*")
+      .gte("request_date", since)
+      .order("request_date", { ascending: false });
+    if (rErr) return json(500, { error: rErr.message });
+    shipments = (rows || []).map((r) => shape(r, techById, today));
+  }
+
+  if (/^[A-Z]{2}$/.test(stateFilter)) {
+    shipments = shipments.filter((s) => String((s.technician && s.technician.state) || s.state || "").toUpperCase() === stateFilter);
+  }
+
   return json(200, {
     ok: true,
     since,
+    today,
+    likelyArrivedAfterDays: LIKELY_ARRIVED_DAYS,
     shipmentCount: shipments.length,
     shipments,
     skipped,
+    sync: { inserted: sync.inserted, updated: sync.updated, error: sync.error },
   });
 };
 
 // Exposed for tests only.
 exports._parseShipEmail = parseShipEmail;
 exports._buildShipments = buildShipments;
+exports._syncShipments = syncShipments;
+exports._shape = shape;
