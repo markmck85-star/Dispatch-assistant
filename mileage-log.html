@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.28</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.29</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -110,6 +110,30 @@
     <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a stop. Use Next day or Off. Add stop only when there are miles. Tap Add stop when you arrive at a store: dispatch can see your most recent stop and the time it was logged. Nothing is recorded between stops.</p>
   </div>
 
+  <div id="closingBox" class="card" style="display:none;border-left:5px solid #d19a12;">
+    <div style="font-weight:600;color:#12325a;">Closings came in with no stop logged</div>
+    <div class="muted">Salesforce shows these visits, but your log has no stop for them. Add them so your mileage stays complete. Not a problem if one does not belong.</div>
+    <div id="closingList"></div>
+  </div>
+
+  <div id="insertBox" class="card" style="display:none;">
+    <div style="font-weight:600;color:#12325a;">Add a missed stop into a trip</div>
+    <label>Stop</label>
+    <input id="insQ" placeholder="Type a city or store" oninput="searchStops('ins')" onfocus="focusStops('ins')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <div id="insSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="insPicked"></div>
+    <label>Which trip was it during?</label>
+    <select id="insertLeg" style="width:100%;box-sizing:border-box;"></select>
+    <label>Odometer at that stop (optional)</label>
+    <input id="insertOdo" type="text" inputmode="numeric" pattern="[0-9]*" style="width:140px;">
+    <div class="muted">If you did not write it down, leave it blank. The app estimates it from the distance matrix and marks it estimated.</div>
+    <div class="row" style="margin-top:10px;">
+      <button type="button" onclick="doInsert()">Add stop</button>
+      <button type="button" class="secondary" onclick="closeInsert()">Cancel</button>
+    </div>
+    <div id="insertMsg" class="flag" style="margin-top:8px;"></div>
+  </div>
+
   <details class="card" id="missBox">
     <summary style="font-size:16px;font-weight:600;color:#12325a;">I missed a stop</summary>
     <p class="muted">Forgot to write down a reading? Enter where you are now and the odometer. If you give the trip meter (reset at the missed stop) the reading is exact. Without it, the app splits the trip using the distance matrix and marks it estimated.</p>
@@ -144,7 +168,9 @@
 
 <script>
 let ctx = null;
-let picked = { from: null, to: null, miss: null, here: null };
+let picked = { from: null, to: null, miss: null, here: null, ins: null };
+let closings = [];        // visits Salesforce shows for this tech in the period
+let insertCtx = null;     // { visit } when the insert card was opened from a closing
 let legs = [];
 let expectedMi = null;   // matrix distance for the current From/To pair
 let autoPrefix = '';     // leading odometer digits the app filled in
@@ -417,7 +443,7 @@ function focusStops(side) {
 }
 
 document.addEventListener('click', (e) => {
-  if (e.target.closest && (e.target.closest('.suggest') || e.target.closest('.stop-row') || e.target.closest('#missBox'))) return;
+  if (e.target.closest && (e.target.closest('.suggest') || e.target.closest('.stop-row') || e.target.closest('#missBox') || e.target.closest('#insertBox'))) return;
   document.querySelectorAll('.suggest').forEach(b => { b.style.display = 'none'; });
 });
 
@@ -498,6 +524,7 @@ async function loadContext() {
     status.textContent = legs.length + ' stops in this period (draft).';
     if (usedLocal) { dirty = true; saveLog('draft'); }
     updateMissLast();
+    loadClosings();
   } catch (e) {
     status.textContent = e.message;
   }
@@ -812,7 +839,8 @@ function renderLegs() {
         '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + (l.estimated && l.est_field === 'start' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
         '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong>' + (l.estimated && l.est_field === 'end' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
         '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.arrived_at ? ' <span class="muted" style="font-weight:400;">logged ' + new Date(l.arrived_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</span>' : '') +
-        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button></div>' +
+        ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button>' +
+        ' <button type="button" class="warn" style="color:#1d4e89;border-color:#9db4cf;" onclick="openInsert(' + i + ')">add a stop in this trip</button></div>' +
         flag +
         (l.estimated ? '<div class="flag">Middle reading estimated from the matrix. Remove both stops and re-add them if you have the real number.</div>' : '') +
         (l.via_trip_meter ? '<div class="muted">Middle reading from trip meter.</div>' : '') + '</div>';
@@ -822,6 +850,7 @@ function renderLegs() {
   const total = legs.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
   html += '<div class="card"><strong>TOTAL MILEAGE</strong> ' + total + '</div>';
   document.getElementById('legs').innerHTML = html;
+  renderClosings();
 }
 
 function setSaveState(kind) {
@@ -896,6 +925,189 @@ async function clearPeriod() {
   await loadContext();
   document.getElementById('status').textContent = 'Cleared ' + n + ' stops for this period.';
 }
+
+
+// ---------- Closings that have no stop logged ----------
+function localDateOf(iso) {
+  const d = new Date(iso);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function dismissedKey() { return 'mileageDismissed:' + ((ctx && ctx.technician && ctx.technician.id) || 'unknown'); }
+function readDismissed() { try { return JSON.parse(localStorage.getItem(dismissedKey()) || '[]'); } catch (e) { return []; } }
+
+async function loadClosings() {
+  if (!ctx) return;
+  try {
+    const url = '/.netlify/functions/get-my-closings?technician_id=' + encodeURIComponent(ctx.technician.id) +
+      '&from=' + document.getElementById('periodStart').value + '&to=' + document.getElementById('periodEnd').value;
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await res.json();
+    closings = (data && data.ok && Array.isArray(data.visits)) ? data.visits : [];
+  } catch (e) { closings = []; }
+  renderClosings();
+}
+
+// visits with no logged stop at that site on that day (one row per site and day)
+function unmatchedClosings() {
+  const dismissed = readDismissed();
+  const seen = {};
+  return closings.filter(v => {
+    if (!v.site_id || !v.ended_at || dismissed.indexOf(v.id) !== -1) return false;
+    const d = localDateOf(v.ended_at);
+    if (legs.some(l => l.date === d && l.to_site_id === v.site_id)) return false;
+    const k = v.site_id + '|' + d;
+    if (seen[k]) return false;
+    seen[k] = 1;
+    return true;
+  });
+}
+
+function renderClosings() {
+  const box = document.getElementById('closingBox');
+  if (!box) return;
+  const list = unmatchedClosings();
+  if (!list.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  document.getElementById('closingList').innerHTML = list.map(v => {
+    const d = new Date(v.ended_at);
+    const when = weekdayLabel(localDateOf(v.ended_at)) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const name = (v.site_name || v.site_code || 'Site').replace(/[&<>"']/g, '');
+    return '<div style="padding:8px 0;border-bottom:1px solid #e6ebef;">' +
+      '<div><strong>' + name + '</strong> <span class="muted">' + (v.site_code || '') + '</span></div>' +
+      '<div class="muted">Closed ' + when + '</div>' +
+      '<div class="row" style="margin-top:6px;"><button type="button" onclick="addFromClosing(\'' + v.id + '\')">Add this stop</button>' +
+      '<button type="button" class="secondary" onclick="dismissClosing(\'' + v.id + '\')">Not needed</button></div></div>';
+  }).join('');
+}
+
+function dismissClosing(id) {
+  const d = readDismissed();
+  if (d.indexOf(id) === -1) d.push(id);
+  try { localStorage.setItem(dismissedKey(), JSON.stringify(d)); } catch (e) {}
+  renderClosings();
+}
+
+function stopForVisit(v) {
+  const found = allStops().find(x => x.kind === 'site' && x.id === v.site_id);
+  if (found) return found;
+  const nm = v.site_name || v.site_code || 'Site';
+  return { kind: 'site', id: v.site_id, picker: nm, print: nm, site_code: v.site_code };
+}
+
+// Which of that day's trips was the visit during?
+function pickLegForVisit(v) {
+  const d = localDateOf(v.ended_at);
+  const t = Date.parse(v.ended_at);
+  const idxs = [];
+  legs.forEach((l, i) => { if (l.date === d) idxs.push(i); });
+  const tOf = (l) => l.arrived_at || l.closing_at;
+  const after = idxs.filter(i => tOf(legs[i]) && Date.parse(tOf(legs[i])) > t);
+  if (after.length) return { mode: 'insert', idx: after[0], day: idxs };
+  const untimed = idxs.filter(i => !tOf(legs[i]));
+  if (untimed.length) return { mode: 'insert', idx: untimed[0], day: idxs };
+  return { mode: 'append', day: idxs };
+}
+
+function addFromClosing(id) {
+  const v = closings.find(x => x.id === id);
+  if (!v) return;
+  const where = pickLegForVisit(v);
+  if (where.mode === 'insert') {
+    openInsert(where.idx, v);
+  } else {
+    // after the last stop logged that day: use the normal Add stop form
+    const st = stopForVisit(v);
+    document.getElementById('legDate').value = localDateOf(v.ended_at);
+    updateDow();
+    picked.to = st.kind === 'site' ? Object.assign({}, st) : st;
+    document.getElementById('toQ').value = st.print || st.picker;
+    document.getElementById('toPicked').textContent = 'Using: ' + st.picker;
+    refreshExpected(false);
+    showOdoNote('Closing was at ' + new Date(v.ended_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '. Type the odometer you had at this stop.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+function legLabel(l, i) {
+  const t = l.arrived_at ? new Date(l.arrived_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '  ' : '';
+  return t + (l.from_print || l.from_picker || '?') + ' → ' + (l.to_print || l.to_picker || '?') + '  (' + (l.odo_start || '?') + '–' + (l.odo_end || '?') + ')';
+}
+
+function openInsert(idx, visit) {
+  insertCtx = visit ? { visit } : null;
+  const box = document.getElementById('insertBox');
+  const sel = document.getElementById('insertLeg');
+  const date = legs[idx] ? legs[idx].date : (visit ? localDateOf(visit.ended_at) : null);
+  const opts = [];
+  legs.forEach((l, i) => { if (l.date === date) opts.push('<option value="' + i + '"' + (i === idx ? ' selected' : '') + '>' + legLabel(l, i).replace(/[<>&]/g, '') + '</option>'); });
+  sel.innerHTML = opts.join('');
+  picked.ins = visit ? stopForVisit(visit) : null;
+  document.getElementById('insQ').value = picked.ins ? (picked.ins.print || picked.ins.picker) : '';
+  document.getElementById('insPicked').textContent = picked.ins ? 'Using: ' + picked.ins.picker : '';
+  document.getElementById('insertOdo').value = '';
+  const msg = document.getElementById('insertMsg');
+  msg.className = 'muted';
+  msg.textContent = visit ? 'Closing at ' + new Date(visit.ended_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '. Pick the trip it fell inside if the suggestion is wrong.' : '';
+  box.style.display = 'block';
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function closeInsert() {
+  document.getElementById('insertBox').style.display = 'none';
+  insertCtx = null;
+  picked.ins = null;
+}
+
+function legStop(l, side) {
+  const kind = l[side + '_kind'];
+  if (kind === 'home') return homeStop();
+  if (kind === 'site') return { kind: 'site', id: l[side + '_site_id'], picker: l[side + '_picker'] || l[side + '_print'], print: l[side + '_print'] || l[side + '_picker'] };
+  const n = l[side + '_print'] || l[side + '_picker'] || 'Other';
+  return { kind: 'other', id: null, picker: n, print: n };
+}
+
+async function doInsert() {
+  const msg = document.getElementById('insertMsg');
+  function say(t) { msg.className = 'flag neg'; msg.textContent = t; }
+  const idx = Number(document.getElementById('insertLeg').value);
+  const L = legs[idx];
+  if (!picked.ins) { say('Pick the stop first.'); return; }
+  if (!L) { say('Pick the trip it was during.'); return; }
+  const a = L.odo_start, c = L.odo_end;
+  if (a == null || c == null) { say('That trip is missing a reading, so it cannot be split.'); return; }
+  const typed = digitsOnly(document.getElementById('insertOdo').value);
+  let b, estimated = false;
+  if (typed !== '') {
+    b = Number(typed);
+    if (b < a || b > c) { say('That reading (' + b + ') is outside this trip (' + a + ' to ' + c + ').'); return; }
+  } else {
+    if (L.estimated) { say('This trip already has an estimated reading. Enter the odometer you noted for this stop.'); return; }
+    msg.className = 'muted'; msg.textContent = 'Estimating from the matrix…';
+    const fromS = legStop(L, 'from'), toS = legStop(L, 'to');
+    const dAB = await getMatrixMiles(fromS, picked.ins);
+    const dBC = await getMatrixMiles(picked.ins, toS);
+    if (dAB == null || dBC == null || dAB + dBC <= 0) { say('The matrix does not have those distances. Enter the odometer you noted for this stop.'); return; }
+    b = a + Math.round((c - a) * dAB / (dAB + dBC));
+    estimated = true;
+  }
+  const ins = picked.ins;
+  const e1 = {}, e2 = {};
+  if (insertCtx && insertCtx.visit) { e1.closing_visit_id = insertCtx.visit.id; e1.closing_at = insertCtx.visit.ended_at; }
+  if (estimated) { e1.estimated = true; e1.est_field = 'end'; e2.estimated = true; e2.est_field = 'start'; }
+  if (L.estimated && L.est_field === 'start') { e1.estimated = true; e1.est_field = 'start'; }
+  if (L.estimated && L.est_field === 'end') { e2.estimated = true; e2.est_field = 'end'; }
+  if (L.arrived_at) e2.arrived_at = L.arrived_at;
+  const L1 = newLeg(L.date, legStop(L, 'from'), ins, a, b, e1);
+  const L2 = newLeg(L.date, ins, legStop(L, 'to'), b, c, e2);
+  legs.splice(idx, 1, L1, L2);
+  closeInsert();
+  persistLocal();
+  renderLegs();
+  saveLog('draft');
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx) loadClosings(); });
 
 function loadSampleTwoWeeks() {
   if (!ctx) return;
