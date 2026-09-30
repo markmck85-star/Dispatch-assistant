@@ -1,5 +1,5 @@
 /**
- * mark-consumable-delivered.js  (v1, 2026-09-30)
+ * mark-consumable-delivered.js  (v2, 2026-09-30)
  * SAVE AS: netlify/functions/mark-consumable-delivered.js
  *
  * Confirms (or un-confirms) that a consumable shipment actually arrived.
@@ -8,12 +8,19 @@
  * lookup exists it can set the same fields automatically.
  *
  * POST /.netlify/functions/mark-consumable-delivered
- *   body: { id: "<shipment uuid>", delivered: true|false, note?: "text" }
+ *   body: { id: "<shipment uuid>", delivered: true|false, note?: "text",
+ *           adjustments?: [ { sku: "10300072", received: 18 } ] }
  *
  * delivered:true  -> status 'delivered', delivered_at = now
- * delivered:false -> back to 'shipped' (or 'requested' if no tracking yet)
+ * delivered:false -> back to 'shipped' (or 'requested' if no tracking yet),
+ *                    and any recorded adjustments are cleared
  *
- * -> { ok: true, status, deliveredAt }
+ * adjustments (v2): when a box did not hold what was shipped. `received` is
+ * in the same units as the item's "units" (rolls). Only differences are
+ * stored; an entry equal to the shipped number is dropped. SKUs that are not
+ * on the shipment are rejected, so a typo cannot invent stock.
+ *
+ * -> { ok: true, status, deliveredAt, receivedAdjustments }
  */
 const { createClient } = require("@supabase/supabase-js");
 
@@ -48,17 +55,33 @@ exports.handler = async (event) => {
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const { data: row, error: getErr } = await supabase
-      .from("consumable_shipments").select("id, tracking, status").eq("id", body.id).maybeSingle();
+      .from("consumable_shipments").select("id, tracking, status, items").eq("id", body.id).maybeSingle();
     if (getErr) return json(500, { error: "Lookup failed: " + getErr.message });
     if (!row) return json(404, { error: "Shipment not found" });
 
     const now = new Date().toISOString();
     let patch;
+    let adjustments = [];
     if (body.delivered) {
+      if (body.adjustments !== undefined && !Array.isArray(body.adjustments)) {
+        return json(400, { error: "adjustments must be a list" });
+      }
+      const items = Array.isArray(row.items) ? row.items : [];
+      for (const a of body.adjustments || []) {
+        const sku = String(a && a.sku || "").trim();
+        const item = items.find((i) => i.sku === sku);
+        if (!item) return json(400, { error: "SKU " + sku + " is not on this shipment" });
+        const received = Number(a.received);
+        if (!Number.isInteger(received) || received < 0 || received > 9999) {
+          return json(400, { error: "received must be a whole number from 0 to 9999 (SKU " + sku + ")" });
+        }
+        if (received !== item.units) adjustments.push({ sku, shippedUnits: item.units, receivedUnits: received });
+      }
       patch = {
         status: "delivered",
         delivered_at: now,
         delivered_note: body.note ? String(body.note).slice(0, 500) : null,
+        received_adjustments: adjustments,
         updated_at: now,
       };
     } else {
@@ -67,13 +90,14 @@ exports.handler = async (event) => {
         status: hasTracking ? "shipped" : "requested",
         delivered_at: null,
         delivered_note: null,
+        received_adjustments: [],
         updated_at: now,
       };
     }
 
     const { error } = await supabase.from("consumable_shipments").update(patch).eq("id", body.id);
     if (error) return json(500, { error: "Update failed: " + error.message });
-    return json(200, { ok: true, status: patch.status, deliveredAt: patch.delivered_at });
+    return json(200, { ok: true, status: patch.status, deliveredAt: patch.delivered_at, receivedAdjustments: adjustments });
   } catch (err) {
     return json(500, { error: "Unexpected error: " + err.message });
   }

@@ -1,5 +1,5 @@
 /**
- * get-consumable-shipments.js  (v2, 2026-09-30)
+ * get-consumable-shipments.js  (v3, 2026-09-30)
  * SAVE AS: netlify/functions/get-consumable-shipments.js   (ONE file, no lib/ folder needed)
  *
  * Reads Neumo's consumable restock shipments out of inbound_emails and
@@ -17,6 +17,12 @@
  * Because the write happens on read, the table stays current whenever the
  * inventory board (or this URL) is opened. If the table is missing or the
  * write fails, the parsed shipments are still returned, with syncError set.
+ *
+ * v3: each shipment now carries receivedAdjustments (what a person recorded
+ * when a delivery did not match what was shipped, e.g. a ribbon box that
+ * held 18 instead of 24) and each item gets receivedUnits: the adjusted
+ * number if there is one, otherwise the shipped units. Anything doing stock
+ * math should use receivedUnits, never units.
  *
  * Query: ?since=YYYY-MM-DD (default 45 days)  &state=GA (tech's state)
  *
@@ -349,7 +355,11 @@ function shape(row, techById, today) {
     shipMethod: row.ship_method,
     boxesRequested: row.boxes_requested,
     boxesShipped: row.boxes_shipped,
-    items: Array.isArray(row.items) ? row.items : [],
+    items: (Array.isArray(row.items) ? row.items : []).map((it) => {
+      const adj = (Array.isArray(row.received_adjustments) ? row.received_adjustments : []).find((a) => a.sku === it.sku);
+      return { ...it, receivedUnits: adj ? adj.receivedUnits : it.units };
+    }),
+    receivedAdjustments: Array.isArray(row.received_adjustments) ? row.received_adjustments : [],
     tracking,
     status: row.status,
     phase,
