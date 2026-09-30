@@ -628,21 +628,55 @@ function shortName(techName) {
   return String(techName || '').trim().split(/\s+/)[0] || techName;
 }
 
+function normalizePlace(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/^[a-z]{2}\s*[-–]\s*/, '')
+    .replace(/\b(kroger|publix|walmart|target|safeway|teeter|harris|tag|office|county|the|store|kiosk)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function resolveSiteToken(token, ctx) {
   const raw = String(token || '').trim();
   if (!raw) return null;
-  const up = raw.toUpperCase().replace(/\s+/g, '');
+  const codeGuess = raw.toUpperCase().replace(/\s+/g, '');
   if (ctx.sites[raw.toUpperCase()]) return raw.toUpperCase();
-  if (ctx.sites[up]) return up;
+  if (ctx.sites[codeGuess]) return codeGuess;
+
   const needle = raw.toLowerCase().replace(/\s+/g, ' ');
-  const hits = Object.entries(ctx.siteNames || {}).filter(([, name]) => {
+  const normNeedle = normalizePlace(raw);
+  const aliases = ctx.aliasToCode || {};
+  if (aliases[needle]) return aliases[needle];
+  if (normNeedle && aliases[normNeedle]) return aliases[normNeedle];
+
+  const scored = [];
+  for (const [code, name] of Object.entries(ctx.siteNames || {})) {
     const n = String(name || '').toLowerCase();
-    return n === needle || n.includes(needle) || needle.includes(n);
-  });
-  if (!hits.length) return null;
-  if (hits.length === 1) return hits[0][0];
-  const exact = hits.find(([, n]) => String(n).toLowerCase() === needle);
-  return exact ? exact[0] : hits[0][0];
+    const nn = normalizePlace(name);
+    let score = 0;
+    if (n === needle || nn === normNeedle) score = 100;
+    else if (n.includes(needle) || needle.includes(n)) score = 80;
+    else if (nn && normNeedle && (nn.includes(normNeedle) || normNeedle.includes(nn))) score = 70;
+    else if (nn && normNeedle) {
+      const nt = normNeedle.split(' ').filter((t) => t.length > 2);
+      const ht = nn.split(' ').filter((t) => t.length > 2);
+      if (nt.length && nt.every((t) => ht.includes(t))) score = 60;
+      else if (nt.length && ht.some((t) => nt.includes(t))) {
+        const overlap = nt.filter((t) => ht.includes(t)).length;
+        if (overlap >= 1 && nt.length === 1) score = 50;
+        else if (overlap >= 2) score = 55;
+      }
+    }
+    if (score) scored.push({ code, score, name });
+  }
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.score - a.score);
+  if (scored.length > 1 && scored[0].score === scored[1].score && scored[0].score < 80) {
+    return scored[0].code;
+  }
+  return scored[0].code;
 }
 
 function techSetFromIndexes(indexes, routes) {
@@ -716,6 +750,26 @@ async function loadContext(supabase, state, techNames, siteCodes) {
         siteIdByCode[s.site_code] = s.id;
         siteNames[s.site_code] = s.name;
       }
+    }
+  }
+
+  const aliasToCode = {};
+  const codeByIdAll = Object.fromEntries(Object.entries(siteIdByCode).map(([code, id]) => [id, code]));
+  {
+    const { data: aliasRows } = await supabase.from('site_aliases').select('alias, site_id');
+    for (const row of aliasRows || []) {
+      const code = codeByIdAll[row.site_id];
+      if (!code || !row.alias) continue;
+      const a = String(row.alias).toLowerCase().replace(/\s+/g, ' ').trim();
+      aliasToCode[a] = code;
+      const na = normalizePlace(row.alias);
+      if (na) aliasToCode[na] = code;
+    }
+    for (const [code, name] of Object.entries(siteNames)) {
+      const a = String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      if (a) aliasToCode[a] = code;
+      const na = normalizePlace(name);
+      if (na) aliasToCode[na] = code;
     }
   }
 
@@ -795,7 +849,7 @@ async function loadContext(supabase, state, techNames, siteCodes) {
     }
   }
 
-  return { matrix, techs, techIdByName, sites, siteIdByCode, siteNames };
+  return { matrix, techs, techIdByName, sites, siteIdByCode, siteNames, aliasToCode };
 }
 
 /**
