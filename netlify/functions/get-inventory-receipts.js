@@ -1,5 +1,5 @@
 /**
- * get-inventory-receipts.js  (v2, 2026-09-29)
+ * get-inventory-receipts.js  (v2.1, 2026-09-30)
  * SAVE AS: netlify/functions/get-inventory-receipts.js
  *
  * Received vs missing inventory mail for the period.
@@ -30,6 +30,10 @@
  *   An ambiguous match (two techs share a last name) is never guessed --
  *   it falls to the next tier, and ends up unmatched if nothing settles it.
  *   One email credits at most one tech; a tech's most recent email wins.
+ *
+ *   v2.1: when a tech has both an original email and a forwarded copy
+ *   ("Fwd: ..." or sent by TJ), the ORIGINAL is the one shown, even if the
+ *   forward is newer. Found when a test forward hid a real Monday submission.
  *
  *   Response shape is unchanged (received / missing / unmatched / techCount),
  *   with two additions: received[].matchedBy and unmatched[].reason. The
@@ -118,7 +122,7 @@ function resolveEmail(email, roster) {
     const { first, last } = nameParts(t.name);
     return first && last && hasWords(subjectWords, [first]) && hasWords(subjectWords, [last]);
   });
-  if (full.length === 1) return { tech: full[0], matchedBy: "subject" };
+  if (full.length === 1) return { tech: full[0], matchedBy: "subject", forwarded };
 
   // Tier 1b: a last name held by exactly one roster tech.
   const lastHits = realTechs.filter((t) => {
@@ -126,13 +130,13 @@ function resolveEmail(email, roster) {
     return last.length >= 3 && hasWords(subjectWords, [last]);
   });
   let ambiguous = full.length > 1;
-  if (lastHits.length === 1) return { tech: lastHits[0], matchedBy: "subject" };
+  if (lastHits.length === 1) return { tech: lastHits[0], matchedBy: "subject", forwarded };
   if (lastHits.length > 1) ambiguous = true;
 
   // Tier 2: From address on a tech's card (never for forwards).
   if (!forwarded && senderAddr) {
     const byFrom = realTechs.filter((t) => techEmails(t).includes(senderAddr));
-    if (byFrom.length === 1) return { tech: byFrom[0], matchedBy: "from" };
+    if (byFrom.length === 1) return { tech: byFrom[0], matchedBy: "from", forwarded };
     if (byFrom.length > 1) ambiguous = true;
   }
 
@@ -143,15 +147,15 @@ function resolveEmail(email, roster) {
       const { first, last } = nameParts(t.name);
       return first && last && hasWords(top, [first]) && hasWords(top, [last]);
     });
-    if (bySig.length === 1) return { tech: bySig[0], matchedBy: "body" };
+    if (bySig.length === 1) return { tech: bySig[0], matchedBy: "body", forwarded };
     if (bySig.length > 1) ambiguous = true;
   }
 
   // Office staff without a technician card: standalone "mike" in the subject,
   // or their own address if one is configured.
   for (const x of roster.filter((t) => t.extra)) {
-    if (!forwarded && senderAddr && techEmails(x).includes(senderAddr)) return { tech: x, matchedBy: "from" };
-    if (hasWords(subjectWords, words(x.name))) return { tech: x, matchedBy: "subject" };
+    if (!forwarded && senderAddr && techEmails(x).includes(senderAddr)) return { tech: x, matchedBy: "from", forwarded };
+    if (hasWords(subjectWords, words(x.name))) return { tech: x, matchedBy: "subject", forwarded };
   }
 
   if (ambiguous) return { tech: null, reason: "More than one technician fits (shared name). Put the full name in the subject." };
@@ -173,8 +177,10 @@ function matchInventory(roster, inventoryMail) {
       unmatched.push({ subject: e.subject, sender: e.sender, receivedAt: e.received_at, to: e.to_address, reason: r.reason });
       continue;
     }
-    if (byTech.has(r.tech.id)) continue; // older duplicate for the same tech
-    byTech.set(r.tech.id, { e, matchedBy: r.matchedBy });
+    const cur = byTech.get(r.tech.id);
+    // Newest wins, except an original always beats a forwarded copy.
+    if (cur && (!cur.forwarded || r.forwarded)) continue;
+    byTech.set(r.tech.id, { e, matchedBy: r.matchedBy, forwarded: !!r.forwarded });
   }
 
   const missing = [];
