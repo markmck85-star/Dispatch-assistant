@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.22</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.23</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -663,12 +663,20 @@ function exportExcel() {
     extra = extra || {};
     const cell = { s: Object.assign({ font: extra.font || font, alignment: extra.alignment || { vertical: 'center' } }, extra.border === false ? {} : { border: extra.border || thin }) };
     if (extra.fill) cell.s.fill = { patternType: 'solid', fgColor: extra.fill.fgColor };
+    if (extra.z) cell.z = extra.z;
     if (typeof v === 'number' && Number.isFinite(v)) { cell.t = 'n'; cell.v = v; }
     else { cell.t = 's'; cell.v = v == null ? '' : String(v); }
     ws[XLSX.utils.encode_cell({ r: r, c: c })] = cell;
   }
   put(0, 0, 'MCR TECHNICAL SERVICE, LLC', { font: { name: 'Arial', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
   put(1, 0, '(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)', { font: fontB, alignment: { horizontal: 'center', vertical: 'center' }, border: false });
+  // v0.23: the date under each weekday must be a REAL Excel date, not the
+  // text "2026-09-28". The mileage check (mileage-check.js) only recognizes
+  // real date cells, so a text date made it read this file as zero legs.
+  function dateSerial(iso) {
+    const p = iso.split('-');
+    return Math.round((Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) - Date.UTC(1899, 11, 30)) / 86400000);
+  }
   function shortDate(iso) {
     if (!iso) return '';
     const p = iso.split('-');
@@ -705,13 +713,14 @@ function exportExcel() {
     for (let i = 0; i < block; i++) {
       const l = dayLegs[i];
       let dateCell = '';
+      let dateFmt = null;
       if (i === 0) dateCell = dow;
-      else if (i === 1) dateCell = d;
+      else if (i === 1) { dateCell = dateSerial(d); dateFmt = 'm/d/yyyy'; }
       const edge = i === block - 1 ? dayEnd : thin;
       if (l) {
         const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
         const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
-        put(row, 0, dateCell, { border: edge });
+        put(row, 0, dateCell, { border: edge, z: dateFmt, alignment: { horizontal: 'left', vertical: 'center' } });
         put(row, 1, from, { border: edge });
         put(row, 2, l.odo_start != null ? l.odo_start : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
         put(row, 3, to, { border: edge });
@@ -719,7 +728,7 @@ function exportExcel() {
         put(row, 5, typeof l.miles === 'number' ? l.miles : '', { alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
         put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
       } else {
-        put(row, 0, dateCell, { border: edge });
+        put(row, 0, dateCell, { border: edge, z: dateFmt, alignment: { horizontal: 'left', vertical: 'center' } });
         for (let c = 1; c < 6; c++) put(row, c, '', { border: edge });
         put(row, 6, i === block - 1 ? sub : '', { font: i === block - 1 ? fontB : font, alignment: { horizontal: 'center', vertical: 'center' }, border: edge });
       }
