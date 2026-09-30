@@ -37,6 +37,9 @@
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--bg); }
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sortable:hover { color: var(--text); }
+  th.sorted { color: var(--accent); }
   tr:hover td { background: #1c1d2a; }
   .muted { color: var(--muted); }
   .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #2e3d2e; color: var(--accent); margin-left: 6px; }
@@ -50,7 +53,7 @@
   <a class="back" href="/admin.html">Admin</a>
   <h1>Service responses</h1>
   <span class="count" id="count"></span>
-  <div class="hint">Times and miles from ITI close-outs. Default filter is Michigan testing stations — that is what TJ bills. CSV is for him to mark what actually goes on an invoice.</div>
+  <div class="hint">Times and miles from ITI close-outs. Default filter is Michigan testing stations — that is what TJ bills. Click a column header to sort. Arrival defaults to newest first.</div>
 </header>
 <div class="toolbar">
   <select id="state">
@@ -69,17 +72,27 @@
 <div class="wrap">
   <table>
     <thead>
-      <tr>
-        <th>WO</th><th>Location</th><th>Tech</th>
-        <th>Arrival</th><th>End</th><th>On site</th>
-        <th>Travel</th><th>Miles</th><th>Notes</th>
-      </tr>
+      <tr id="headRow"></tr>
     </thead>
     <tbody id="body"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
   </table>
 </div>
 <script>
 let ROWS = [];
+let SORT_KEY = "arrivalTime";
+let SORT_DIR = "desc";
+
+const COLS = [
+  { key: "wo", label: "WO", type: "text" },
+  { key: "location", label: "Location", type: "text" },
+  { key: "technician", label: "Tech", type: "text" },
+  { key: "arrivalTime", label: "Arrival", type: "date" },
+  { key: "endTime", label: "End", type: "date" },
+  { key: "onsiteMin", label: "On site", type: "num" },
+  { key: "travelTime", label: "Travel", type: "num" },
+  { key: "mileage", label: "Miles", type: "num" },
+  { key: "notes", label: "Notes", type: "text" },
+];
 
 function fmtMin(m) {
   if (m == null || m === "") return "";
@@ -88,6 +101,68 @@ function fmtMin(m) {
   if (n < 60) return n + " min";
   const h = Math.floor(n / 60), r = n % 60;
   return r ? h + " hr " + r + " min" : h + " hr";
+}
+
+function parseWhen(v) {
+  if (v == null || v === "") return 0;
+  const d = new Date(v);
+  if (!isNaN(d.getTime())) return d.getTime();
+  const s = String(v);
+  const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) {
+    const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    const t = s.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    let hh = t ? Number(t[1]) : 0;
+    const mm = t ? Number(t[2]) : 0;
+    if (t && t[3]) {
+      const ap = t[3].toUpperCase();
+      if (ap === "PM" && hh < 12) hh += 12;
+      if (ap === "AM" && hh === 12) hh = 0;
+    }
+    return new Date(yr, Number(m[1]) - 1, Number(m[2]), hh, mm).getTime();
+  }
+  return 0;
+}
+
+function sortVal(r, col) {
+  const v = r[col.key];
+  if (col.type === "date") return parseWhen(v) || parseWhen(r.closedAt);
+  if (col.type === "num") {
+    const n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.-]/g, ""));
+    return isNaN(n) ? -Infinity : n;
+  }
+  return String(v == null ? "" : v).toLowerCase();
+}
+
+function sortedRows(list) {
+  const col = COLS.find((c) => c.key === SORT_KEY) || COLS[3];
+  const dir = SORT_DIR === "asc" ? 1 : -1;
+  return list.slice().sort((a, b) => {
+    const av = sortVal(a, col);
+    const bv = sortVal(b, col);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return (parseWhen(b.closedAt) - parseWhen(a.closedAt));
+  });
+}
+
+function setSort(key) {
+  if (SORT_KEY === key) SORT_DIR = SORT_DIR === "desc" ? "asc" : "desc";
+  else {
+    SORT_KEY = key;
+    const col = COLS.find((c) => c.key === key);
+    SORT_DIR = col && (col.type === "date" || col.type === "num") ? "desc" : "asc";
+  }
+  render();
+}
+
+function renderHead() {
+  document.getElementById("headRow").innerHTML = COLS.map((c) => {
+    const on = SORT_KEY === c.key;
+    const arrow = on ? (SORT_DIR === "desc" ? " ▼" : " ▲") : "";
+    return '<th class="sortable' + (on ? " sorted" : "") + '" onclick="setSort(\'' + c.key + '\')">' +
+      c.label + arrow + "</th>";
+  }).join("");
 }
 
 async function load() {
@@ -107,7 +182,8 @@ function filtered() {
 }
 
 function render() {
-  const rows = filtered();
+  renderHead();
+  const rows = sortedRows(filtered());
   document.getElementById("count").textContent = rows.length + " row" + (rows.length === 1 ? "" : "s");
   const body = document.getElementById("body");
   if (!rows.length) {
@@ -134,7 +210,7 @@ function esc(s) {
 }
 
 function downloadCsv() {
-  const rows = filtered();
+  const rows = sortedRows(filtered());
   const cols = ["wo","location","technician","arrivalTime","endTime","onsiteMin","travelTime","mileage","callType","notes"];
   const header = ["WO","Location","Tech","Arrival","End","On site min","Travel min","Miles","Call type","Notes"];
   const lines = [header.join(",")];
