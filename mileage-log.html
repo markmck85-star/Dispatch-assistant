@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.31</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.32</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -72,7 +72,7 @@
   <div class="card">
     <div id="legDow" class="dow"></div>
     <label>Date
-      <input type="date" id="legDate" style="width:100%;box-sizing:border-box;" onchange="updateDow()">
+      <input type="date" id="legDate" style="width:100%;box-sizing:border-box;" onchange="onLegDateChange()">
     </label>
     <div class="stop-row">
       <div class="grow">
@@ -86,6 +86,7 @@
     </div>
     <div id="fromSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="fromPicked"></div>
+    <div class="muted" id="dayNote" style="display:none;margin-top:4px;"></div>
     <div class="stop-row">
       <div class="grow">
         <label>To</label>
@@ -170,6 +171,7 @@
 let ctx = null;
 let picked = { from: null, to: null, miss: null, here: null, ins: null };
 let closings = [];        // visits Salesforce shows for this tech in the period
+let homeAddedNote = '';   // shown under From after a drive home was filled in
 let pendingClosing = null; // closing being added through the normal Add stop form
 let insertCtx = null;     // { visit } when the insert card was opened from a closing
 let legs = [];
@@ -305,6 +307,7 @@ function shiftLegDate(n) {
   }
   document.getElementById('legDate').value = next;
   updateDow();
+  applyStartFor(next);
 }
 
 function skipEmptyDay() {
@@ -501,11 +504,7 @@ async function loadContext() {
     }
     persistLocal();
     document.getElementById('who').textContent = ctx.technician.name + ' · home prints as “' + ctx.technician.home_label_print + '”';
-    const lastLeg = legs.length ? legs[legs.length - 1] : null;
-    picked.from = stopFromLegEnd(lastLeg);
-    document.getElementById('fromQ').value = picked.from.picker;
-    document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker + (lastLeg && picked.from.kind !== 'home' ? ' (where your last stop ended)' : '');
-    if (lastLeg && lastLeg.odo_end) document.getElementById('odoStart').value = lastLeg.odo_end;
+    applyStartFor(document.getElementById('legDate').value, true);
     // a stop that was being typed when the page closed comes back
     picked.to = null;
     document.getElementById('toQ').value = '';
@@ -645,6 +644,7 @@ async function addMissedStop() {
     estimated = true;
   }
   const date = document.getElementById('legDate').value;
+  await ensureDriveHome(date, picked.from);
   const extra1 = estimated ? { estimated: true, est_field: 'end' } : { via_trip_meter: true };
   const extra2 = estimated ? { estimated: true, est_field: 'start' } : { via_trip_meter: true };
   legs.push(newLeg(date, picked.from, picked.miss, a, b, extra1));
@@ -664,6 +664,7 @@ async function addMissedStop() {
   picked.miss = null; picked.here = null;
   msg.className = 'muted';
   msg.textContent = estimated ? 'Added. The middle reading (' + b + ') is an estimate.' : 'Added using your trip meter.';
+  flushHomeNote();
   persistLocal();
   renderLegs();
   saveLog('draft');
@@ -772,10 +773,11 @@ function flagMiles(miles) {
   return null;
 }
 
-function addLeg() {
+async function addLeg() {
   if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
   resolveRollover();
   const date = document.getElementById('legDate').value;
+  await ensureDriveHome(date, picked.from);
   const odoStart = document.getElementById('odoStart').value;
   const odoEnd = document.getElementById('odoEnd').value;
   const miles = (odoEnd !== '' && odoStart !== '') ? Number(odoEnd) - Number(odoStart) : null;
@@ -817,6 +819,8 @@ function addLeg() {
   expectedMi = null;
   autoPrefix = '';
   showOdoNote('');
+  setDayNote('', false);
+  flushHomeNote();
   previewFlag();
   persistLocal();
   renderLegs();
@@ -946,6 +950,108 @@ async function clearPeriod() {
   document.getElementById('status').textContent = 'Cleared ' + n + ' stops for this period.';
 }
 
+
+
+// ---------- Where a day starts ----------
+// last leg of the latest logged day (or the previous pay period's last stop when this one is empty)
+function chainEnd() {
+  let best = null, bi = -1;
+  legs.forEach((l, i) => { if (!best || l.date >= best.date) { best = l; bi = i; } });
+  if (best) return { leg: best, idx: bi, carried: false };
+  if (ctx && ctx.prev_last) return { leg: ctx.prev_last, idx: -1, carried: true };
+  return null;
+}
+
+function setDayNote(text, withHomeButton) {
+  const el = document.getElementById('dayNote');
+  if (!el) return;
+  el.textContent = '';
+  if (!text) { el.style.display = 'none'; return; }
+  el.appendChild(document.createTextNode(text + ' '));
+  if (withHomeButton) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'secondary'; b.style.padding = '4px 10px'; b.style.fontSize = '13px';
+    b.textContent = 'I went home instead';
+    b.onclick = startAtHome;
+    el.appendChild(b);
+  }
+  el.style.display = 'block';
+}
+
+function startAtHome() {
+  picked.from = homeStop();
+  document.getElementById('fromQ').value = picked.from.picker;
+  document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
+  document.getElementById('odoStart').value = '';
+  setDayNote('Starting at home. Type your odometer.', false);
+  updateMissLast();
+  previewFlag();
+}
+
+function applyStartFor(dateStr, force) {
+  if (!ctx) return;
+  // never overwrite something the tech is in the middle of typing
+  if (!force && (picked.to || document.getElementById('odoEnd').value !== '')) return;
+  const ce = chainEnd();
+  const fromQ = document.getElementById('fromQ'), fromPicked = document.getElementById('fromPicked'), odo = document.getElementById('odoStart');
+  let note = '', homeBtn = false;
+  if (!ce) {
+    picked.from = homeStop();
+    odo.value = '';
+  } else {
+    const L = ce.leg;
+    if (!dateStr || dateStr <= L.date) {
+      // same day as the last stop (or looking back): carry on from where that stop ended
+      picked.from = stopFromLegEnd(L);
+      odo.value = L.odo_end != null ? L.odo_end : '';
+    } else if (L.to_kind === 'home') {
+      picked.from = homeStop();
+      odo.value = L.odo_end != null ? L.odo_end : '';
+    } else if (L.to_kind === 'site') {
+      // nobody sleeps at a service location: a new day starts at home
+      picked.from = homeStop();
+      odo.value = '';
+      note = 'New day, starting at home. Type your odometer reading.';
+    } else {
+      // a hotel or other place: assume an overnight stay, offer the way out
+      picked.from = stopFromLegEnd(L);
+      odo.value = L.odo_end != null ? L.odo_end : '';
+      note = 'Your last stop was ' + (L.to_print || L.to_picker || 'that place') + ', so this day starts there.';
+      homeBtn = true;
+    }
+  }
+  fromQ.value = picked.from.picker;
+  fromPicked.textContent = 'Using: ' + picked.from.picker;
+  setDayNote(note, homeBtn);
+  updateMissLast();
+  previewFlag();
+}
+
+function flushHomeNote() {
+  if (homeAddedNote) { setDayNote(homeAddedNote, false); homeAddedNote = ''; }
+}
+
+function onLegDateChange() {
+  updateDow();
+  applyStartFor(document.getElementById('legDate').value);
+}
+
+// A day that started at home after ending at a service site is missing the drive home.
+// Add it (estimated from the matrix) to the earlier day so the chain is complete.
+async function ensureDriveHome(dateStr, fromStop) {
+  if (!fromStop || fromStop.kind !== 'home') return;
+  if (legs.some(l => l.date === dateStr)) return;
+  let bi = -1;
+  legs.forEach((l, i) => { if (l.date < dateStr && (bi < 0 || l.date >= legs[bi].date)) bi = i; });
+  if (bi < 0) return;
+  const P = legs[bi];
+  if (P.to_kind !== 'site' || P.odo_end == null) return;
+  const mi = await getMatrixMiles(legStop(P, 'to'), homeStop());
+  if (mi == null) return;
+  const homeLeg = newLeg(P.date, legStop(P, 'to'), homeStop(), P.odo_end, P.odo_end + mi, { estimated: true, est_field: 'end', auto_home: true });
+  legs.splice(bi + 1, 0, homeLeg);
+  homeAddedNote = 'Added your drive home after ' + (P.to_print || P.to_picker) + ' on ' + weekdayLabel(P.date) + ' (about ' + mi + ' mi, estimated from the matrix). Remove it if it is wrong.';
+}
 
 // ---------- Closings that have no stop logged ----------
 function localDateOf(iso) {
