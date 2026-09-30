@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.33</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.34</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -574,6 +574,11 @@ async function refreshExpected(focusAfter) {
   expectedMi = null;
   showOdoNote('');
   if (!ctx || !picked.from || !picked.to) return;
+  if (picked.from.kind === 'site' && picked.to.kind === 'site' && picked.from.id && picked.from.id === picked.to.id) {
+    showOdoNote('From and To are the same place. Check the stop.');
+    previewFlag();
+    return;
+  }
   const mine = ++distReq;
   const mi = await getMatrixMiles(picked.from, picked.to);
   if (mine !== distReq) return; // a newer pick superseded this one
@@ -902,7 +907,7 @@ function renderLegs() {
   const sel = (document.getElementById('legDate') || {}).value || '';
   let pad = '';
   if (byDay[sel]) pad = padCard(sel, byDay[sel]);
-  else { const ce = (typeof chainEnd === 'function') ? chainEnd() : null; if (ce) pad = lastRecordedCard(ce.leg); }
+  else { const rl = (typeof refLegFor === 'function') ? refLegFor(sel) : null; if (rl) pad = lastRecordedCard(rl); }
   const padEl = document.getElementById('dayPad');
   if (padEl) padEl.innerHTML = pad;
 
@@ -1014,6 +1019,14 @@ function chainEnd() {
   return null;
 }
 
+function refLegFor(dateStr) {
+  let best = null;
+  legs.forEach((l) => { if (l.date <= dateStr && (!best || l.date >= best.date)) best = l; });
+  if (best) return best;
+  if (ctx && ctx.prev_last && ctx.prev_last.date <= dateStr) return ctx.prev_last;
+  return null;
+}
+
 function setDayNote(text, withHomeButton) {
   const el = document.getElementById('dayNote');
   if (!el) return;
@@ -1044,16 +1057,16 @@ function applyStartFor(dateStr, force) {
   if (!ctx) return;
   // never overwrite something the tech is in the middle of typing
   if (!force && (picked.to || document.getElementById('odoEnd').value !== '')) return;
-  const ce = chainEnd();
+  const L = dateStr ? refLegFor(dateStr) : (chainEnd() || {}).leg;
   const fromQ = document.getElementById('fromQ'), fromPicked = document.getElementById('fromPicked'), odo = document.getElementById('odoStart');
   let note = '', homeBtn = false;
-  if (!ce) {
+  if (!L) {
+    // nothing recorded before this date: start at home and type the reading
     picked.from = homeStop();
     odo.value = '';
   } else {
-    const L = ce.leg;
-    if (!dateStr || dateStr <= L.date) {
-      // same day as the last stop (or looking back): carry on from where that stop ended
+    if (!dateStr || dateStr === L.date) {
+      // same day as that stop: carry on from where it ended
       picked.from = stopFromLegEnd(L);
       odo.value = L.odo_end != null ? L.odo_end : '';
     } else if (L.to_kind === 'home') {
@@ -1158,7 +1171,14 @@ function renderClosings() {
       '<div class="muted">Closed ' + when + '</div>' +
       '<div class="row" style="margin-top:6px;"><button type="button" onclick="addFromClosing(\'' + v.id + '\')">Add this stop</button>' +
       '<button type="button" class="secondary" onclick="dismissClosing(\'' + v.id + '\')">Not needed</button></div></div>';
-  }).join('');
+  }).join('') + (list.length > 1 ? '<div class="row" style="margin-top:8px;"><button type="button" class="secondary" onclick="dismissAllClosings()">Not needed for any of these</button></div>' : '');
+}
+
+function dismissAllClosings() {
+  const d = readDismissed();
+  unmatchedClosings().forEach(v => { if (d.indexOf(v.id) === -1) d.push(v.id); });
+  try { localStorage.setItem(dismissedKey(), JSON.stringify(d)); } catch (e) {}
+  renderClosings();
 }
 
 function dismissClosing(id) {
@@ -1201,6 +1221,10 @@ function addFromClosing(id) {
     const st = stopForVisit(v);
     document.getElementById('legDate').value = localDateOf(v.ended_at);
     updateDow();
+    picked.to = null;
+    document.getElementById('toQ').value = '';
+    document.getElementById('odoEnd').value = '';
+    applyStartFor(localDateOf(v.ended_at), true);
     picked.to = st.kind === 'site' ? Object.assign({}, st) : st;
     document.getElementById('toQ').value = st.print || st.picker;
     document.getElementById('toPicked').textContent = 'Using: ' + st.picker;
