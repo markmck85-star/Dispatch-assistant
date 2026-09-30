@@ -1145,9 +1145,26 @@ function parseEmailBody(text, receivedAt, subject) {
     // best-guess placement beats silently losing it).
     const dueDate = parseMaintenanceDueDate(description, receivedAt);
 
+    // 2026-09-29: a single Neumo email can carry several line items, e.g.
+    // WO 00150499 (NC1002): line 1 = "TV Topper / Black Screen", line 2 =
+    // "Maintenance / Consumable Restock". The bare /Maintenance/ test above
+    // routes the whole email here as a restock, and getField() only reads
+    // the FIRST line item -- so the real (non-restock) issue rode along
+    // silently: no watchdog entry, hidden by the state console's
+    // "Trouble tickets only" filter. We deliberately do NOT upgrade it to
+    // 'trouble' (that would fire an SMS + 4-hour SLA on what Neumo marked
+    // Low priority / not out of service); instead flag it for review, the
+    // same flag-only approach used for Add-Line-Item follow-ups, so it
+    // shows on the watchdog and state console and the dispatcher decides.
+    const allCategories = [...text.matchAll(/Line Item Issue Category:\s*([^\n\r]*?)\s*(?=Line Item Issue Detail|\n|\r|$)/gi)]
+      .map(m => (m[1] || '').trim())
+      .filter(Boolean);
+    const hasNonRestockLineItem = allCategories.some(c => !/^maintenance$/i.test(c));
+
     return {
       type: 'maintenance',
       ticketKind: 'maintenance',
+      hasNonRestockLineItem,
       alertBody: null, // board-only, no SMS
       woNum, site: siteStr, siteCode, address,
       issueCategory, issueDetail,
@@ -2240,7 +2257,7 @@ exports.handler = async (event) => {
           wo_number: parsed.woNum,
           site_id: siteId,
           site_text: parsed.site || null,
-          needs_review: !siteId,
+          needs_review: !siteId || !!parsed.hasNonRestockLineItem,
           ticket_kind: parsed.ticketKind || 'trouble',
           template: 'standard',
           status: 'open',
