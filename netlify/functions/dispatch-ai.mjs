@@ -437,19 +437,22 @@ function functionDeclarations() {
     {
       name: 'get_last_visit',
       description:
-        'Who was last at a site (and the last few visits). Uses the same visit history as clicking the location name on the board. ' +
-        'Works for any site in the state, even if it is not on today\'s board. Read-only. Use for "who was last at Cobb South", ' +
-        '"last tech at GA1008", "when was Glenwood last restocked".',
+        'Who was last at a site, or when it was last restocked. Same history as clicking the location name. ' +
+        'Works off the board. Use for "who was last at Cobb South", "when was State Bridge last restocked".',
       parameters: {
         type: 'OBJECT',
         properties: {
           siteCode: {
             type: 'STRING',
-            description: 'Site code or location name (e.g. GA1008 or Cobb South).',
+            description: 'Site code or location name (e.g. GA1008 or State Bridge).',
+          },
+          kind: {
+            type: 'STRING',
+            description: 'all (default) = last visit of any type. restock = last restock only, ignore trouble calls.',
           },
           limit: {
             type: 'INTEGER',
-            description: 'How many recent visits to return. Default 3, max 8.',
+            description: 'How many recent matching visits to return. Default 3, max 8.',
           },
         },
         required: ['siteCode'],
@@ -589,7 +592,7 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
       'those sites are NOT on today\'s roster. Pass site codes if you know them, otherwise pass the names the dispatcher used ' +
       'in fromSiteCode / toSiteCode — the server resolves names against the full state site list. Do not ask the dispatcher ' +
       'for codes and do not say a site is missing just because it is not on the board.',
-    '- "Who was last at X" / last visit / last restock MUST call get_last_visit with the name or code. Same rule: the site does not have to be on today\'s board.',
+    '- "Who was last at X" / last visit MUST call get_last_visit. "When was X last restocked" MUST call get_last_visit with kind=restock. The site does not have to be on today\'s board.',
     '- Never invent technicians or stops for a MOVE that are not in the roster above. Distance lookups may use any site in the state.'
   );
   return lines.join('\n');
@@ -1199,6 +1202,7 @@ export default async (req) => {
           continue;
         }
         const limit = Math.min(8, Math.max(1, Number(args.limit) || 3));
+        const restockOnly = String(args.kind || '').toLowerCase() === 'restock';
         const siteId = ctx.siteIdByCode && ctx.siteIdByCode[code];
         let siteIdUse = siteId;
         if (!siteIdUse) {
@@ -1209,19 +1213,26 @@ export default async (req) => {
           actions.push({ type: 'error', summary: `Don't have a location on file for ${code}.` });
           continue;
         }
-        const { data: visits, error: vErr } = await supabase
+        let q = supabase
           .from('site_visits')
           .select('started_at, tech_name_raw, remediation, wo_number, is_restock, closing_note')
           .eq('site_id', siteIdUse)
           .order('started_at', { ascending: false, nullsFirst: false })
           .limit(limit);
+        if (restockOnly) q = q.eq('is_restock', true);
+        const { data: visits, error: vErr } = await q;
         if (vErr) {
           actions.push({ type: 'error', summary: 'Could not load visit history: ' + vErr.message });
           continue;
         }
         const label = (ctx.siteNames[code] || code) + ' (' + code + ')';
         if (!visits || !visits.length) {
-          actions.push({ type: 'get_last_visit', summary: `No closed-ticket visits on file for ${label}.` });
+          actions.push({
+            type: 'get_last_visit',
+            summary: restockOnly
+              ? `No restock visits on file for ${label}.`
+              : `No closed-ticket visits on file for ${label}.`,
+          });
           continue;
         }
         const fmt = (v) => {
