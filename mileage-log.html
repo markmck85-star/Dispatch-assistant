@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.34</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.35</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -783,6 +783,10 @@ function flagMiles(miles) {
 
 async function addLeg() {
   if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
+  if (picked.from.kind === 'home' && picked.to.kind === 'home') {
+    alert('That is home to home, so there is nothing to add. Your next trip starts from home with the odometer reading you type as its start. If you drove the car for anything else since you got home, just change the starting reading.');
+    return;
+  }
   resolveRollover();
   const date = document.getElementById('legDate').value;
   await ensureDriveHome(date, picked.from);
@@ -828,7 +832,8 @@ async function addLeg() {
   autoPrefix = '';
   showOdoNote('');
   setDayNote('', false);
-  flushHomeNote();
+  { const hadNote = !!homeAddedNote; flushHomeNote();
+    if (!hadNote && picked.from && picked.from.kind === 'home') setDayNote(backHomeText(document.getElementById('odoStart').value), false); }
   previewFlag();
   persistLocal();
   renderLegs();
@@ -1027,6 +1032,10 @@ function refLegFor(dateStr) {
   return null;
 }
 
+function backHomeText(odo) {
+  return 'Back home' + (odo ? ' at ' + odo : '') + '. If you drove the car for anything else since, change the starting odometer before your next stop.';
+}
+
 function setDayNote(text, withHomeButton) {
   const el = document.getElementById('dayNote');
   if (!el) return;
@@ -1069,6 +1078,7 @@ function applyStartFor(dateStr, force) {
       // same day as that stop: carry on from where it ended
       picked.from = stopFromLegEnd(L);
       odo.value = L.odo_end != null ? L.odo_end : '';
+      if (L.to_kind === 'home') note = backHomeText(L.odo_end);
     } else if (L.to_kind === 'home') {
       picked.from = homeStop();
       odo.value = L.odo_end != null ? L.odo_end : '';
