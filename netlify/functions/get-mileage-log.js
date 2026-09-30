@@ -119,6 +119,36 @@ exports.handler = async (event) => {
       .eq('period_start', periodStart)
       .maybeSingle();
 
+    // last stop of the most recent earlier pay period, so a new period can start where the last one ended
+    let prevLast = null;
+    try {
+      const { data: prevLogs } = await supabase
+        .from('technician_mileage_logs')
+        .select('period_start, legs')
+        .eq('technician_id', tech.id)
+        .lt('period_start', periodStart)
+        .order('period_start', { ascending: false })
+        .limit(3);
+      for (const pl of prevLogs || []) {
+        const ls = Array.isArray(pl.legs) ? pl.legs : [];
+        let best = null;
+        for (const l of ls) {
+          if (l && l.date && l.odo_end != null && (!best || l.date >= best.date)) best = l;
+        }
+        if (best) {
+          prevLast = {
+            date: best.date,
+            to_kind: best.to_kind || null,
+            to_site_id: best.to_site_id || null,
+            to_print: best.to_print || null,
+            to_picker: best.to_picker || null,
+            odo_end: best.odo_end,
+          };
+          break;
+        }
+      }
+    } catch (e) { /* carry-over is a convenience; never block the page */ }
+
     return json(200, {
       ok: true,
       technician: {
@@ -136,6 +166,7 @@ exports.handler = async (event) => {
       sites_usual: usual,
       sites_other: rest,
       log: log || { status: 'draft', legs: [], notes: null },
+      prev_last: prevLast,
     });
   } catch (e) {
     return json(500, { ok: false, error: e.message });
