@@ -125,6 +125,13 @@
       cursor: pointer;
     }
     .hint { font-size: 12px; color: var(--muted); }
+    .tag.ship { background: #e3ecf8; color: #1d4e89; }
+    tr.dim td { opacity: 0.6; }
+    button.mini {
+      background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+      padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; margin-top: 4px;
+    }
+    .warnline { color: var(--warn); font-size: 12px; margin-top: 4px; }
     @media (max-width: 980px) {
       .stats, .grid2, .rules { grid-template-columns: 1fr; }
       .wrap, header, footer { padding-left: 16px; padding-right: 16px; }
@@ -161,7 +168,7 @@
             <option>OH</option><option>OR</option><option>SC</option><option>WV</option>
           </select>
         </div>
-        <button class="save" type="button" onclick="loadBoard()">Refresh</button>
+        <button class="save" type="button" onclick="loadBoard(); loadShipments();">Refresh</button>
       </div>
     </section>
 
@@ -182,6 +189,36 @@
           <tr><td colspan="6" class="note">Loading…</td></tr>
                 </tbody>
       </table>
+    </section>
+
+    <section class="panel">
+      <h2>Shipments on the way &mdash; Neumo to technicians</h2>
+      <div style="padding:10px 18px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+        <label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:500;">
+          <input type="checkbox" id="showDelivered" style="width:auto;" onchange="renderShipments()" /> Show delivered
+        </label>
+        <span class="hint" id="shipMsg"></span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Tech</th>
+            <th>State</th>
+            <th>Requested</th>
+            <th>Shipped</th>
+            <th>What</th>
+            <th>UPS tracking</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="shipBody">
+          <tr><td colspan="7" class="note">Loading&hellip;</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        From Melinda&rsquo;s restock requests and the warehouse&rsquo;s tracking reply. Nothing here is confirmed delivered until someone
+        taps Mark delivered. Shipments older than a week with no confirmation show as &ldquo;Likely arrived&rdquo;.
+      </div>
     </section>
 
     <section class="grid2">
@@ -389,8 +426,92 @@ async function loadBoard() {
   });
   document.getElementById("subBody").innerHTML = rows.join("") || "<tr><td colspan=\"6\" class=\"note\">No rows.</td></tr>";
 }
+
+// ---- Consumable shipments (Neumo -> technicians) --------------------------
+let SHIPMENTS = [];
+function shortDate(d) {
+  if (!d) return "\u2014";
+  const p = String(d).slice(0, 10).split("-");
+  return p.length === 3 ? Number(p[1]) + "/" + Number(p[2]) : "\u2014";
+}
+function itemLine(i) {
+  return esc(i.boxes + " box \u00b7 " + i.units + " " + String(i.unit || "").toLowerCase() + " \u00b7 " + i.sku + (i.description ? " " + i.description : ""));
+}
+function phaseCell(s) {
+  const days = s.daysSinceShipped;
+  if (s.phase === "in_transit") return '<span class="tag ship">In transit</span>' + (days != null ? '<div class="hint">shipped ' + days + 'd ago</div>' : "");
+  if (s.phase === "requested") return '<span class="tag wait">Requested</span><div class="hint">no tracking yet</div>';
+  if (s.phase === "likely_arrived") return '<span class="tag wait">Likely arrived</span><div class="hint">shipped ' + days + 'd ago, not confirmed</div>';
+  if (s.phase === "delivered") return '<span class="tag in">Delivered</span>' + (s.deliveredAt ? '<div class="hint">' + esc(shortDate(s.deliveredAt)) + '</div>' : "");
+  return '<span class="tag">' + esc(s.phase) + '</span>';
+}
+function actionBtn(s) {
+  if (!s.id) return "";
+  if (s.phase === "delivered") return '<div><button class="mini" type="button" onclick="markDelivered(\'' + esc(s.id) + '\', false)">Undo</button></div>';
+  if (s.phase === "cancelled") return "";
+  return '<div><button class="mini" type="button" onclick="markDelivered(\'' + esc(s.id) + '\', true)">Mark delivered</button></div>';
+}
+function shipmentRowsHtml(list, showDelivered) {
+  const order = { in_transit: 0, requested: 1, likely_arrived: 2, delivered: 3, cancelled: 4 };
+  const rows = list
+    .filter((s) => showDelivered || (s.phase !== "delivered" && s.phase !== "cancelled"))
+    .sort((a, b) => ((order[a.phase] ?? 9) - (order[b.phase] ?? 9)) || String(b.requestDate).localeCompare(String(a.requestDate)));
+  if (!rows.length) {
+    return '<tr><td colspan="7" class="note">No open shipments. Restock emails from Melinda (subject like &ldquo;9/21 - RESTOCK MCR NAME - GA SST&rdquo;) show up here.</td></tr>';
+  }
+  return rows.map((s) => {
+    const name = s.technician ? esc(s.technician.name) : esc(s.techNameRaw) + ' <span class="tag out">unmatched</span>';
+    const dim = (s.phase === "delivered" || s.phase === "likely_arrived") ? ' class="dim"' : "";
+    const tracking = s.tracking.length
+      ? s.tracking.map((t) => '<a href="' + esc(t.url) + '" target="_blank" rel="noopener" class="mono">' + esc(t.number) + '</a>').join("<br>")
+      : "\u2014";
+    const warn = (s.warnings || []).length ? '<div class="warnline">\u26a0 ' + esc(s.warnings.join(" ")) + '</div>' : "";
+    return "<tr" + dim + "><td>" + name + "</td><td class=\"mono\">" + esc(s.state || "") + "</td><td class=\"mono\">" + esc(shortDate(s.requestDate)) +
+      "</td><td class=\"mono\">" + esc(shortDate(s.shippedAt)) + "</td><td>" + (s.items.map(itemLine).join("<br>") || "\u2014") + warn +
+      "</td><td>" + tracking + "</td><td>" + phaseCell(s) + actionBtn(s) + "</td></tr>";
+  }).join("");
+}
+function renderShipments() {
+  const box = document.getElementById("showDelivered");
+  document.getElementById("shipBody").innerHTML = shipmentRowsHtml(SHIPMENTS, !!(box && box.checked));
+}
+async function loadShipments() {
+  const state = document.getElementById("stateFilter").value;
+  const msg = document.getElementById("shipMsg");
+  let url = "/.netlify/functions/get-consumable-shipments";
+  if (state) url += "?state=" + encodeURIComponent(state);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    SHIPMENTS = data.shipments || [];
+    msg.textContent = data.sync && data.sync.error ? "Could not save shipments (" + data.sync.error + "). Showing what was read from mail; buttons are off." : "";
+    renderShipments();
+  } catch (err) {
+    msg.textContent = "Shipments unavailable: " + err.message;
+    document.getElementById("shipBody").innerHTML = '<tr><td colspan="7" class="note">Could not load shipments.</td></tr>';
+  }
+}
+async function markDelivered(id, delivered) {
+  const msg = document.getElementById("shipMsg");
+  msg.textContent = "Saving\u2026";
+  try {
+    const res = await fetch("/.netlify/functions/mark-consumable-delivered", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id, delivered: delivered })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    await loadShipments();
+  } catch (err) {
+    msg.textContent = "Could not save: " + err.message;
+  }
+}
+
 document.getElementById("since").value = lastMonday();
 loadBoard();
+loadShipments();
 
 </script>
 </body>
