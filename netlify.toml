@@ -16,6 +16,10 @@
   
 [functions."pull-mailbox"]
   timeout = 26
+
+[functions."pull-shipments-mailbox"]
+  timeout = 26
+  schedule = "*/20 * * * *"
   
 [functions."closings-sync"]
   timeout = 26
