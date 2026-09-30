@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.32</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.33</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -110,6 +110,8 @@
     </div>
     <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a stop. Use Next day or Off. Add stop only when there are miles. Tap Add stop when you arrive at a store: dispatch can see your most recent stop and the time it was logged. Nothing is recorded between stops.</p>
   </div>
+
+  <div id="dayPad"></div>
 
   <div id="closingBox" class="card" style="display:none;border-left:5px solid #d19a12;">
     <div style="font-weight:600;color:#12325a;">Closings came in with no stop logged</div>
@@ -276,6 +278,7 @@ function updateDow() {
   const el = document.getElementById('legDow');
   const d = document.getElementById('legDate').value;
   if (el) el.textContent = weekdayLabel(d);
+  if (typeof renderLegs === 'function') renderLegs();
 }
 
 function initPeriod() {
@@ -842,32 +845,81 @@ function removeLeg(i) {
   saveLog('draft');
 }
 
+function escHtml(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// warnings and notes that belong under a stop
+function legNotesHtml(l) {
+  let out = '';
+  if (l.flag === 'negative') out += '<div class="flag neg">Odometer went down — check the reading.</div>';
+  else if (l.flag === 'over') out += '<div class="flag neg">That stop is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
+  else if (l.flag === 'check') out += '<div class="flag">About ' + (l.expected_mi != null ? l.expected_mi + ' mi expected' : 'a shorter hop') + '; you entered ' + l.miles + '. Detour is fine — worth a glance.</div>';
+  if (l.estimated) out += '<div class="flag">' + (l.auto_home ? 'Drive home estimated from the matrix.' : 'Middle reading estimated from the matrix.') + ' Remove it and re-add if you have the real number.</div>';
+  if (l.via_trip_meter) out += '<div class="muted">Middle reading from trip meter.</div>';
+  return out;
+}
+
+function legName(l, side) {
+  return escHtml(l[side + '_print'] || l[side + '_picker'] || '?');
+}
+
+// the day being entered, laid out like a page in a notebook: place, then the reading
+function padCard(dateStr, items) {
+  let html = '<div class="card" style="border-left:5px solid #1d4e89;"><div class="muted">Log for</div><span class="dayhead">' + weekdayLabel(dateStr) + '</span>';
+  let sub = 0, prev = null;
+  items.forEach(({ l, i }) => {
+    if (typeof l.miles === 'number') sub += l.miles;
+    // start line for the first stop, or wherever the chain of readings breaks
+    if (!prev || prev.to_kind !== l.from_kind || (prev.to_print || prev.to_picker) !== (l.from_print || l.from_picker) || prev.odo_end !== l.odo_start) {
+      html += '<div class="stop-row" style="margin-top:6px;"><div class="grow muted">' + legName(l, 'from') + '</div><div class="odo muted">' + (l.odo_start != null ? l.odo_start : '?') + (l.estimated && l.est_field === 'start' ? ' est.' : '') + '</div></div>';
+    }
+    html += '<div class="stop-row"><div class="grow"><strong>' + legName(l, 'to') + '</strong></div><div class="odo"><strong>' + (l.odo_end != null ? l.odo_end : '?') + '</strong>' + (l.estimated && l.est_field === 'end' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
+      '<div class="muted" style="margin-bottom:6px;">+' + (l.miles == null ? '?' : l.miles) + ' mi' +
+      (l.arrived_at ? ' · logged ' + new Date(l.arrived_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '') +
+      ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button>' +
+      ' <button type="button" class="warn" style="color:#1d4e89;border-color:#9db4cf;" onclick="openInsert(' + i + ')">add a stop in this trip</button></div>' +
+      legNotesHtml(l);
+    prev = l;
+  });
+  html += '<div class="day-total">Day total ' + sub + '</div></div>';
+  return html;
+}
+
+// a day with nothing yet still shows where the last entry left off, even if that was home
+function lastRecordedCard(L) {
+  const name = L.to_kind === 'home' ? (L.to_picker || L.to_print || 'Home') : (L.to_print || L.to_picker || '?');
+  return '<div class="card" style="border-left:5px solid #9aa5b1;"><div class="muted">Last recorded · ' + weekdayLabel(L.date) + '</div>' +
+    '<div class="stop-row"><div class="grow"><strong>' + escHtml(name) + '</strong></div><div class="odo"><strong>' + (L.odo_end != null ? L.odo_end : '?') + '</strong></div></div></div>';
+}
+
 function renderLegs() {
   const byDay = {};
   legs.forEach((l, i) => {
     if (!byDay[l.date]) byDay[l.date] = [];
     byDay[l.date].push({ l, i });
   });
-  const days = Object.keys(byDay).sort();
-  let html = '';
+  const sel = (document.getElementById('legDate') || {}).value || '';
+  let pad = '';
+  if (byDay[sel]) pad = padCard(sel, byDay[sel]);
+  else { const ce = (typeof chainEnd === 'function') ? chainEnd() : null; if (ce) pad = lastRecordedCard(ce.leg); }
+  const padEl = document.getElementById('dayPad');
+  if (padEl) padEl.innerHTML = pad;
+
+  const days = Object.keys(byDay).filter(d => d !== sel).sort();
+  let html = days.length ? '<div class="muted" style="margin:10px 0 0;">Other days this pay period</div>' : '';
   days.forEach(d => {
     let sub = 0;
     html += '<div class="card"><span class="dayhead">' + weekdayLabel(d) + '</span>';
     byDay[d].forEach(({ l, i }) => {
       if (typeof l.miles === 'number') sub += l.miles;
-      let flag = '';
-      if (l.flag === 'negative') flag = '<div class="flag neg">Odometer went down — check the reading.</div>';
-      else if (l.flag === 'over') flag = '<div class="flag neg">That stop is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
-      else if (l.flag === 'check') flag = '<div class="flag">About ' + (l.expected_mi != null ? l.expected_mi + ' mi expected' : 'a shorter hop') + '; you entered ' + l.miles + '. Detour is fine — worth a glance.</div>';
       html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
-        '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + (l.estimated && l.est_field === 'start' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
-        '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong>' + (l.estimated && l.est_field === 'end' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
+        '<div class="stop-row"><div class="grow">' + legName(l, 'from') + '</div><div class="odo">' + (l.odo_start != null ? l.odo_start : '?') + (l.estimated && l.est_field === 'start' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
+        '<div class="stop-row"><div class="grow">' + legName(l, 'to') + '</div><div class="odo"><strong>' + (l.odo_end != null ? l.odo_end : '?') + '</strong>' + (l.estimated && l.est_field === 'end' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
         '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.arrived_at ? ' <span class="muted" style="font-weight:400;">logged ' + new Date(l.arrived_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</span>' : '') +
         ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button>' +
         ' <button type="button" class="warn" style="color:#1d4e89;border-color:#9db4cf;" onclick="openInsert(' + i + ')">add a stop in this trip</button></div>' +
-        flag +
-        (l.estimated ? '<div class="flag">Middle reading estimated from the matrix. Remove both stops and re-add them if you have the real number.</div>' : '') +
-        (l.via_trip_meter ? '<div class="muted">Middle reading from trip meter.</div>' : '') + '</div>';
+        legNotesHtml(l) + '</div>';
     });
     html += '<div class="day-total">Day total ' + sub + '</div></div>';
   });
