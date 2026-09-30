@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.24</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.26</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -67,6 +67,7 @@
     <button type="button" class="secondary" onclick="shiftPeriod(14)">Next</button>
   </div>
   <div class="status" id="status"></div>
+  <div class="muted" id="saveState"></div>
 
   <div class="card">
     <div id="legDow" class="dow"></div>
@@ -80,7 +81,7 @@
       </div>
       <div class="odo">
         <label>Odo</label>
-        <input type="number" id="odoStart" inputmode="numeric" oninput="previewFlag()">
+        <input type="number" id="odoStart" inputmode="numeric" oninput="onOdoStartInput()">
       </div>
     </div>
     <div id="fromSuggest" class="suggest" style="display:none;"></div>
@@ -92,28 +93,49 @@
       </div>
       <div class="odo">
         <label>Odo</label>
-        <input type="number" id="odoEnd" inputmode="numeric" oninput="previewFlag()">
+        <input type="text" id="odoEnd" inputmode="numeric" pattern="[0-9]*" autocomplete="off" oninput="onOdoEndInput()">
       </div>
     </div>
     <div id="toSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="toPicked"></div>
+    <div class="muted" id="odoNote" style="display:none;margin-top:6px;"></div>
     <div id="liveFlag" class="flag" style="display:none;margin-top:8px;"></div>
     <div class="row" style="margin-top:10px;">
-      <button type="button" onclick="addLeg()">Add leg</button>
+      <button type="button" onclick="addLeg()">Add stop</button>
       <button type="button" class="secondary" onclick="endDay()">End day at home</button>
       <button type="button" class="secondary" onclick="shiftLegDate(-1)">← Prev day</button>
       <button type="button" class="secondary" onclick="shiftLegDate(1)">Next day →</button>
       <button type="button" class="secondary" onclick="skipEmptyDay()">Off / no miles — next day</button>
     </div>
-    <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a leg. Use Next day or Off. Add leg only when there are miles.</p>
+    <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a stop. Use Next day or Off. Add stop only when there are miles.</p>
   </div>
+
+  <details class="card" id="missBox">
+    <summary style="font-size:16px;font-weight:600;color:#12325a;">I missed a stop</summary>
+    <p class="muted">Forgot to write down a reading? Enter where you are now and the odometer. If you give the trip meter (reset at the missed stop) the reading is exact. Without it, the app splits the trip using the distance matrix and marks it estimated.</p>
+    <div id="missLast" class="muted"></div>
+    <label>Missed stop</label>
+    <input id="missQ" placeholder="Type a city or store" oninput="searchStops('miss')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <div id="missSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="missPicked"></div>
+    <label>Where you are now</label>
+    <input id="hereQ" placeholder="Type a city or store" oninput="searchStops('here')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <div id="hereSuggest" class="suggest" style="display:none;"></div>
+    <div class="muted" id="herePicked"></div>
+    <div class="row">
+      <label>Odometer now <input id="hereOdo" type="text" inputmode="numeric" pattern="[0-9]*" style="width:120px;"></label>
+      <label>Trip meter (optional) <input id="tripMeter" type="text" inputmode="decimal" style="width:100px;"></label>
+    </div>
+    <div class="row" style="margin-top:10px;"><button type="button" onclick="addMissedStop()">Add both stops</button></div>
+    <div id="missMsg" class="flag" style="margin-top:8px;"></div>
+  </details>
 
   <div id="legs"></div>
   <div class="row">
     <button type="button" onclick="saveLog('draft')">Save draft</button>
     <button type="button" onclick="printLog()">Print / PDF</button>
     <button type="button" onclick="exportExcel()">Export Excel</button>
-    <button type="button" class="secondary" onclick="loadSampleTwoWeeks()">Load demo days</button>
+    <button type="button" class="secondary" id="demoBtn" style="display:none;" onclick="loadSampleTwoWeeks()">Load demo days</button>
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
   <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
@@ -121,8 +143,14 @@
 
 <script>
 let ctx = null;
-let picked = { from: null, to: null };
+let picked = { from: null, to: null, miss: null, here: null };
 let legs = [];
+let expectedMi = null;   // matrix distance for the current From/To pair
+let autoPrefix = '';     // leading odometer digits the app filled in
+let distReq = 0;
+let dirty = false;       // server copy is behind what is on screen
+let saveTimer = null;
+let lastSavedAt = null;
 
 function currentUser() {
   try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
@@ -140,6 +168,7 @@ function persistLocal() {
       legs: legs,
       odoStart: document.getElementById('odoStart').value,
       odoEnd: document.getElementById('odoEnd').value,
+      pickedTo: picked.to ? { kind: picked.to.kind, id: picked.to.id, picker: picked.to.picker, print: picked.to.print } : null,
       savedAt: Date.now()
     }));
   } catch (e) {}
@@ -184,6 +213,8 @@ function doLogout() {
 function showApp() {
   document.getElementById('loginBox').style.display = 'none';
   document.getElementById('appBox').style.display = 'block';
+  const u = currentUser();
+  document.getElementById('demoBtn').style.display = (u && u.role === 'admin') ? '' : 'none';
 }
 
 function sundayOf(d) {
@@ -314,6 +345,17 @@ function allStops() {
   };
   (ctx.sites_usual || []).forEach(push);
   (ctx.sites_other || []).forEach(push);
+  const seenOther = {};
+  legs.forEach(l => ['from', 'to'].forEach(side => {
+    if (l[side + '_kind'] === 'other') {
+      const n = String(l[side + '_print'] || l[side + '_picker'] || '').trim();
+      const k = n.toLowerCase();
+      if (n && !seenOther[k]) {
+        seenOther[k] = 1;
+        out.push({ kind: 'other', recent: true, id: null, picker: n, print: n, search: k });
+      }
+    }
+  }));
   out.push({ kind: 'other', id: 'other', picker: 'Other / UPS / not in list', print: '', search: 'other ups store tag' });
   return out;
 }
@@ -335,8 +377,13 @@ function searchStops(side) {
   const box = document.getElementById(side + 'Suggest');
   if (!q) { box.style.display = 'none'; return; }
   const hits = allStops().filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1).slice(0, 20);
-  hits.sort((a,b) => (b.kind === 'home') - (a.kind === 'home') || (b.usual?1:0) - (a.usual?1:0));
-  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + labelForQuery(s, q) + '</div>').join('') || '<div>No match — pick Other</div>';
+  hits.sort((a,b) => (b.kind === 'home') - (a.kind === 'home') || (b.recent?1:0) - (a.recent?1:0) || (b.usual?1:0) - (a.usual?1:0));
+  // any typed name can be used as-is (hotel, UPS store, anything not in the list)
+  const rawTyped = document.getElementById(side + 'Q').value.trim();
+  if (rawTyped.length >= 3 && !hits.some(h => h.kind !== 'home' && String(h.print || h.picker).toLowerCase() === q)) {
+    hits.push({ kind: 'other', custom: true, id: null, picker: rawTyped, print: rawTyped, search: q });
+  }
+  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + (s.custom ? 'Use “' + s.print + '” (not in list)' : labelForQuery(s, q) + (s.recent ? ' <span class="muted">(used before)</span>' : '')) + '</div>').join('') || '<div>No match</div>';
   box._hits = hits;
   box.style.display = 'block';
 }
@@ -345,7 +392,9 @@ function chooseStop(side, i) {
   const box = document.getElementById(side + 'Suggest');
   const s = box._hits[i];
   if (!s) return;
-  if (s.kind === 'other') {
+  if (s.recent || s.custom) {
+    picked[side] = { kind: 'other', id: null, picker: s.picker, print: s.print };
+  } else if (s.kind === 'other') {
     const typed = document.getElementById(side + 'Q').value.trim();
     picked[side] = { kind: 'other', id: null, picker: typed || 'Other', print: typed || 'Other' };
   } else {
@@ -356,6 +405,7 @@ function chooseStop(side, i) {
   document.getElementById(side + 'Q').value = picked[side].print || picked[side].picker;
   document.getElementById(side + 'Picked').textContent = picked[side].picker !== picked[side].print ? picked[side].picker : '';
   box.style.display = 'none';
+  if (side === 'from' || side === 'to') { refreshExpected(side === 'to'); persistLocal(); }
 }
 
 async function loadContext() {
@@ -381,25 +431,229 @@ async function loadContext() {
     ctx = data;
     legs = (data.log && data.log.legs) || [];
     const local = readLocal();
+    let usedLocal = false;
     if (local && Array.isArray(local.legs) && local.legs.length > legs.length) {
       legs = local.legs;
+      usedLocal = true;
     } else if ((!legs || !legs.length) && local && local.legs && local.legs.length) {
       legs = local.legs;
+      usedLocal = true;
     }
     persistLocal();
     document.getElementById('who').textContent = ctx.technician.name + ' · home prints as “' + ctx.technician.home_label_print + '”';
-    document.getElementById('fromQ').value = ctx.technician.home_label_picker;
-    picked.from = homeStop();
-    document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
-    if (legs.length) {
-      const last = legs[legs.length - 1];
-      if (last.odo_end) document.getElementById('odoStart').value = last.odo_end;
+    const lastLeg = legs.length ? legs[legs.length - 1] : null;
+    picked.from = stopFromLegEnd(lastLeg);
+    document.getElementById('fromQ').value = picked.from.picker;
+    document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker + (lastLeg && picked.from.kind !== 'home' ? ' (where your last stop ended)' : '');
+    if (lastLeg && lastLeg.odo_end) document.getElementById('odoStart').value = lastLeg.odo_end;
+    // a stop that was being typed when the page closed comes back
+    picked.to = null;
+    document.getElementById('toQ').value = '';
+    document.getElementById('toPicked').textContent = '';
+    document.getElementById('odoEnd').value = '';
+    autoPrefix = '';
+    expectedMi = null;
+    showOdoNote('');
+    if (local && local.pickedTo && Array.isArray(local.legs) && local.legs.length === legs.length) {
+      picked.to = local.pickedTo;
+      document.getElementById('toQ').value = picked.to.print || picked.to.picker || '';
+      document.getElementById('toPicked').textContent = 'Using: ' + (picked.to.picker || '');
+      document.getElementById('odoEnd').value = digitsOnly(local.odoEnd);
+      refreshExpected(false);
     }
     renderLegs();
-    status.textContent = legs.length + ' legs in this period (draft).';
+    status.textContent = legs.length + ' stops in this period (draft).';
+    if (usedLocal) { dirty = true; saveLog('draft'); }
+    updateMissLast();
   } catch (e) {
     status.textContent = e.message;
   }
+}
+
+function showOdoNote(t) {
+  const el = document.getElementById('odoNote');
+  if (!el) return;
+  el.textContent = t || '';
+  el.style.display = t ? 'block' : 'none';
+}
+
+function digitsOnly(v) { return String(v == null ? '' : v).replace(/[^0-9]/g, ''); }
+
+// Ask the server for the matrix distance between two stops (null if unknown).
+async function getMatrixMiles(f, t) {
+  if (!ctx || !f || !t) return null;
+  const fromSite = f.kind === 'site' ? f.id : '';
+  const toSite = t.kind === 'site' ? t.id : '';
+  const ok = (f.kind === 'home' && (t.kind === 'home' || toSite)) ||
+             (t.kind === 'home' && fromSite) || (fromSite && toSite);
+  if (!ok) return null;
+  try {
+    const url = '/.netlify/functions/get-leg-distance?technician_id=' + encodeURIComponent(ctx.technician.id) +
+      '&from_kind=' + encodeURIComponent(f.kind) + '&from_site_id=' + encodeURIComponent(fromSite) +
+      '&to_kind=' + encodeURIComponent(t.kind) + '&to_site_id=' + encodeURIComponent(toSite);
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await res.json();
+    if (data && data.ok && data.distance_mi != null) return Math.round(Number(data.distance_mi));
+  } catch (e) { /* no matrix answer */ }
+  return null;
+}
+
+async function refreshExpected(focusAfter) {
+  expectedMi = null;
+  showOdoNote('');
+  if (!ctx || !picked.from || !picked.to) return;
+  const mine = ++distReq;
+  const mi = await getMatrixMiles(picked.from, picked.to);
+  if (mine !== distReq) return; // a newer pick superseded this one
+  expectedMi = mi;
+  maybePrefill(focusAfter);
+  previewFlag();
+}
+
+// Where the last stop ended is where the next one starts.
+function stopFromLegEnd(l) {
+  if (!l || l.to_kind === 'home') return homeStop();
+  if (l.to_kind === 'site') {
+    return { kind: 'site', id: l.to_site_id, picker: l.to_picker || l.to_print, print: l.to_print || l.to_picker };
+  }
+  const n = l.to_print || l.to_picker || 'Other';
+  return { kind: 'other', id: null, picker: n, print: n };
+}
+
+function updateMissLast() {
+  const el = document.getElementById('missLast');
+  if (!el) return;
+  const o = document.getElementById('odoStart').value;
+  el.textContent = (picked.from && o) ? 'Last recorded: ' + picked.from.picker + ' at ' + o : 'Enter your last recorded stop and odometer above first.';
+}
+
+function newLeg(date, f, t, o1, o2, extra) {
+  return Object.assign({
+    date,
+    from_kind: f.kind,
+    from_site_id: f.kind === 'site' ? f.id : null,
+    from_print: f.print,
+    from_picker: f.picker,
+    to_kind: t.kind,
+    to_site_id: t.kind === 'site' ? t.id : null,
+    to_print: t.print,
+    to_picker: t.picker,
+    odo_start: o1,
+    odo_end: o2,
+    miles: o2 - o1,
+    flag: null
+  }, extra || {});
+}
+
+async function addMissedStop() {
+  const msg = document.getElementById('missMsg');
+  function say(t) { msg.className = 'flag neg'; msg.textContent = t; }
+  msg.textContent = '';
+  const startVal = document.getElementById('odoStart').value;
+  const a = Number(startVal);
+  if (!picked.from || startVal === '' || !Number.isFinite(a)) { say('Fill in the From stop and Odo above first (your last recorded reading).'); return; }
+  if (!picked.miss || !picked.here) { say('Pick both the missed stop and where you are now.'); return; }
+  const c = Number(digitsOnly(document.getElementById('hereOdo').value));
+  if (!document.getElementById('hereOdo').value || !Number.isFinite(c) || c < a) { say('Odometer now must be at least ' + a + '.'); return; }
+  const tRaw = document.getElementById('tripMeter').value.trim();
+  let b, estimated = false;
+  if (tRaw !== '') {
+    const t = Math.round(Number(tRaw));
+    if (!Number.isFinite(t) || t < 0) { say('Check the trip meter number.'); return; }
+    b = c - t;
+    if (b < a) { say('The trip meter is longer than the whole trip (' + (c - a) + ' mi). Check it.'); return; }
+  } else {
+    msg.className = 'muted';
+    msg.textContent = 'Estimating from the matrix…';
+    const dAB = await getMatrixMiles(picked.from, picked.miss);
+    const dBC = await getMatrixMiles(picked.miss, picked.here);
+    if (dAB == null || dBC == null || dAB + dBC <= 0) {
+      say('The matrix does not have those distances. Enter the trip meter reading, or type the missed stop in on its own.');
+      return;
+    }
+    b = a + Math.round((c - a) * dAB / (dAB + dBC));
+    estimated = true;
+  }
+  const date = document.getElementById('legDate').value;
+  const extra1 = estimated ? { estimated: true, est_field: 'end' } : { via_trip_meter: true };
+  const extra2 = estimated ? { estimated: true, est_field: 'start' } : { via_trip_meter: true };
+  legs.push(newLeg(date, picked.from, picked.miss, a, b, extra1));
+  legs.push(newLeg(date, picked.miss, picked.here, b, c, extra2));
+  picked.from = picked.here;
+  document.getElementById('fromQ').value = picked.from.picker;
+  document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
+  picked.to = null;
+  document.getElementById('toQ').value = '';
+  document.getElementById('toPicked').textContent = '';
+  document.getElementById('odoStart').value = c;
+  document.getElementById('odoEnd').value = '';
+  expectedMi = null; autoPrefix = ''; showOdoNote(''); previewFlag();
+  ['missQ', 'hereQ', 'hereOdo', 'tripMeter'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('missPicked').textContent = '';
+  document.getElementById('herePicked').textContent = '';
+  picked.miss = null; picked.here = null;
+  msg.className = 'muted';
+  msg.textContent = estimated ? 'Added. The middle reading (' + b + ') is an estimate.' : 'Added using your trip meter.';
+  persistLocal();
+  renderLegs();
+  saveLog('draft');
+  updateMissLast();
+}
+
+// Fill everything but the last three digits of the ending odometer.
+function maybePrefill(focusAfter) {
+  const startEl = document.getElementById('odoStart');
+  const endEl = document.getElementById('odoEnd');
+  const start = Number(startEl.value);
+  if (expectedMi == null || startEl.value === '' || !Number.isFinite(start)) return;
+  const cur = digitsOnly(endEl.value);
+  if (cur !== '' && cur !== autoPrefix) return; // tech already typed something: leave it
+  const prefix = Math.floor((start + expectedMi) / 1000);
+  if (prefix < 1) { autoPrefix = ''; return; }
+  autoPrefix = String(prefix);
+  endEl.value = autoPrefix;
+  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.');
+  if (focusAfter) {
+    setTimeout(() => {
+      endEl.focus();
+      try { endEl.setSelectionRange(endEl.value.length, endEl.value.length); } catch (e) {}
+    }, 50);
+  }
+}
+
+// Odometer rolled past a thousand between the matrix guess and reality?
+// Only fixes the off-by-1000 case, and only when the tech kept our prefix.
+function resolveRollover() {
+  const startEl = document.getElementById('odoStart');
+  const endEl = document.getElementById('odoEnd');
+  const start = Number(startEl.value);
+  const d = digitsOnly(endEl.value);
+  if (!autoPrefix || startEl.value === '' || !Number.isFinite(start)) return;
+  if (d.length !== autoPrefix.length + 3 || d.indexOf(autoPrefix) !== 0) return;
+  const typed = Number(d);
+  const last3 = typed % 1000;
+  let cand = start - (start % 1000) + last3;
+  if (cand < start) cand += 1000;
+  if (cand !== typed && Math.abs(cand - typed) === 1000) {
+    endEl.value = String(cand);
+    showOdoNote('Adjusted to ' + cand + ' (odometer crossed a thousand).');
+  }
+}
+
+function onOdoEndInput() {
+  const endEl = document.getElementById('odoEnd');
+  const clean = digitsOnly(endEl.value);
+  if (clean !== endEl.value) endEl.value = clean;
+  resolveRollover();
+  previewFlag();
+  persistLocal();
+}
+
+function onOdoStartInput() {
+  updateMissLast();
+  // start changed (or first entry of the period): recompute the prefill if the tech hasn't typed an ending yet
+  maybePrefill(false);
+  previewFlag();
 }
 
 function previewFlag() {
@@ -407,6 +661,11 @@ function previewFlag() {
   const b = Number(document.getElementById('odoEnd').value);
   const box = document.getElementById('liveFlag');
   if (!Number.isFinite(a) || !Number.isFinite(b) || document.getElementById('odoEnd').value === '') {
+    box.style.display = 'none';
+    return;
+  }
+  // still typing the last 3 digits after the auto-filled prefix: say nothing yet
+  if (autoPrefix && digitsOnly(document.getElementById('odoEnd').value).length < autoPrefix.length + 3) {
     box.style.display = 'none';
     return;
   }
@@ -419,7 +678,15 @@ function previewFlag() {
     box.className = 'flag neg';
     box.textContent = 'That would be ' + miles + ' miles. Extra digit? Check before adding.';
     box.style.display = 'block';
-  } else if (miles > 150) {
+  } else if (expectedMi != null && miles > expectedMi + 100) {
+    box.className = 'flag neg';
+    box.textContent = 'That is ' + miles + ' mi but the matrix says about ' + expectedMi + '. Check the last 3 digits.';
+    box.style.display = 'block';
+  } else if (expectedMi != null && miles > expectedMi + 50) {
+    box.className = 'flag';
+    box.textContent = miles + ' mi vs about ' + expectedMi + ' expected. A detour is fine, just glance at it.';
+    box.style.display = 'block';
+  } else if (expectedMi == null && miles > 150) {
     box.className = 'flag';
     box.textContent = 'That would be ' + miles + ' miles. Fine for a long run — glance at the odometer.';
     box.style.display = 'block';
@@ -437,6 +704,7 @@ function flagMiles(miles) {
 
 function addLeg() {
   if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
+  resolveRollover();
   const date = document.getElementById('legDate').value;
   const odoStart = document.getElementById('odoStart').value;
   const odoEnd = document.getElementById('odoEnd').value;
@@ -465,6 +733,10 @@ function addLeg() {
   document.getElementById('toPicked').textContent = '';
   document.getElementById('odoStart').value = odoEnd;
   document.getElementById('odoEnd').value = '';
+  expectedMi = null;
+  autoPrefix = '';
+  showOdoNote('');
+  previewFlag();
   persistLocal();
   renderLegs();
   saveLog('draft');
@@ -474,6 +746,8 @@ function endDay() {
   picked.to = homeStop();
   document.getElementById('toQ').value = picked.to.picker;
   document.getElementById('toPicked').textContent = 'Using: ' + picked.to.picker;
+  refreshExpected(true);
+  persistLocal();
 }
 
 function removeLeg(i) {
@@ -498,14 +772,16 @@ function renderLegs() {
       if (typeof l.miles === 'number') sub += l.miles;
       let flag = '';
       if (l.flag === 'negative') flag = '<div class="flag neg">Odometer went down — check the reading.</div>';
-      else if (l.flag === 'over') flag = '<div class="flag neg">That leg is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
+      else if (l.flag === 'over') flag = '<div class="flag neg">That stop is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
       else if (l.flag === 'check') flag = '<div class="flag">About ' + (l.expected_mi != null ? l.expected_mi + ' mi expected' : 'a shorter hop') + '; you entered ' + l.miles + '. Detour is fine — worth a glance.</div>';
       html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
-        '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + '</div></div>' +
-        '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong></div></div>' +
+        '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + (l.estimated && l.est_field === 'start' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
+        '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong>' + (l.estimated && l.est_field === 'end' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
         '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' +
         ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button></div>' +
-        flag + '</div>';
+        flag +
+        (l.estimated ? '<div class="flag">Middle reading estimated from the matrix. Remove both stops and re-add them if you have the real number.</div>' : '') +
+        (l.via_trip_meter ? '<div class="muted">Middle reading from trip meter.</div>' : '') + '</div>';
     });
     html += '<div class="day-total">Day total ' + sub + '</div></div>';
   });
@@ -514,24 +790,60 @@ function renderLegs() {
   document.getElementById('legs').innerHTML = html;
 }
 
+function setSaveState(kind) {
+  const el = document.getElementById('saveState');
+  if (!el) return;
+  if (kind === 'saving') el.textContent = 'Saving…';
+  else if (kind === 'saved') {
+    const t = lastSavedAt ? lastSavedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    el.textContent = 'Saved to the server ✓ ' + t;
+  } else el.textContent = 'Not saved to the server yet. It is kept on this phone and will retry.';
+}
+
+function scheduleRetry() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => { saveTimer = null; if (dirty) saveLog('draft'); }, 20000);
+}
+
+window.addEventListener('online', () => { if (dirty) saveLog('draft'); });
+
 async function saveLog(status) {
   if (!ctx) return;
-  const res = await fetch('/.netlify/functions/save-mileage-log', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      technician_id: ctx.technician.id,
-      period_start: document.getElementById('periodStart').value,
-      period_end: document.getElementById('periodEnd').value,
-      status,
-      legs
-    })
-  });
-  const data = await res.json();
-  if (!data.ok) { document.getElementById('status').textContent = data.error; return; }
-  legs = data.log.legs || legs;
-  renderLegs();
-  document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
+  persistLocal();
+  const sentCount = legs.length;
+  setSaveState('saving');
+  try {
+    const res = await fetch('/.netlify/functions/save-mileage-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        technician_id: ctx.technician.id,
+        period_start: document.getElementById('periodStart').value,
+        period_end: document.getElementById('periodEnd').value,
+        status,
+        legs
+      })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Save failed');
+    lastSavedAt = new Date();
+    if (legs.length === sentCount) {
+      legs = data.log.legs || legs;
+      dirty = false;
+      persistLocal();
+      renderLegs();
+      setSaveState('saved');
+    } else {
+      // more was added while this save was in flight: save again
+      dirty = true;
+      setTimeout(() => saveLog('draft'), 300);
+    }
+    document.getElementById('status').textContent = 'Saved' + (data.flagged && data.flagged.length ? ' · ' + data.flagged.length + ' flagged row(s)' : '');
+  } catch (e) {
+    dirty = true;
+    setSaveState('failed');
+    scheduleRetry();
+  }
 }
 
 function loadSampleTwoWeeks() {
@@ -775,7 +1087,7 @@ function printLog() {
       if (typeof mi === 'number') { sub += mi; total += mi; }
       const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || '');
       const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || '');
-      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
+      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + (l.estimated && l.est_field === 'start' ? ' (est.)' : '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + (l.estimated && l.est_field === 'end' ? ' (est.)' : '') + '</td><td>' + mi + '</td><td></td></tr>';
     });
     rows += '<tr><td colspan="6"></td><td><strong>' + sub + '</strong></td></tr>';
   });
