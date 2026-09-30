@@ -701,7 +701,12 @@ async function loadConsole(state, isRetry) {
       // resolved items wants both kinds of "nothing left to do here" out
       // of the way together.
       const visibleTickets = data.recentTickets
-        .filter(t => !showTroubleOnly || t.ticketKind === 'trouble')
+        // 2026-09-29: needsReview tickets stay visible under "Trouble
+        // tickets only" too -- a restock email that also carries a real
+        // non-restock line item (or an Add-Line-Item follow-up with
+        // possible SLA impact) is flagged needs_review and is exactly what
+        // this toggle shouldn't hide. Found via NC1002 / WO 00150499.
+        .filter(t => !showTroubleOnly || t.ticketKind === 'trouble' || t.needsReview)
         .filter(t => !hideClosed || (t.status !== 'closed' && t.status !== 'cancelled' && t.status !== 'resolved_local'));
       const filterLabel = [showTroubleOnly ? 'trouble' : null, hideClosed ? 'open' : null].filter(Boolean).join(', ');
       ticketStatus.textContent = filterLabel
