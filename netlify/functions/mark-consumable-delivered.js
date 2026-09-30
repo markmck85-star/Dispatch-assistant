@@ -1,5 +1,5 @@
 /**
- * mark-consumable-delivered.js  (v2, 2026-09-30)
+ * mark-consumable-delivered.js  (v2.1, 2026-09-30)
  * SAVE AS: netlify/functions/mark-consumable-delivered.js
  *
  * Confirms (or un-confirms) that a consumable shipment actually arrived.
@@ -14,6 +14,10 @@
  * delivered:true  -> status 'delivered', delivered_at = now
  * delivered:false -> back to 'shipped' (or 'requested' if no tracking yet),
  *                    and any recorded adjustments are cleared
+ *
+ * v2.1: sending delivered:true for a shipment that is ALREADY delivered is an
+ * edit ("Edit received" on the board). It updates the adjustments and note
+ * but keeps the original delivered_at, so the delivery date is not reset.
  *
  * adjustments (v2): when a box did not hold what was shipped. `received` is
  * in the same units as the item's "units" (rolls). Only differences are
@@ -55,7 +59,7 @@ exports.handler = async (event) => {
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const { data: row, error: getErr } = await supabase
-      .from("consumable_shipments").select("id, tracking, status, items").eq("id", body.id).maybeSingle();
+      .from("consumable_shipments").select("id, tracking, status, items, delivered_at").eq("id", body.id).maybeSingle();
     if (getErr) return json(500, { error: "Lookup failed: " + getErr.message });
     if (!row) return json(404, { error: "Shipment not found" });
 
@@ -79,7 +83,7 @@ exports.handler = async (event) => {
       }
       patch = {
         status: "delivered",
-        delivered_at: now,
+        delivered_at: (row.status === "delivered" && row.delivered_at) ? row.delivered_at : now,
         delivered_note: body.note ? String(body.note).slice(0, 500) : null,
         received_adjustments: adjustments,
         updated_at: now,
