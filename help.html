@@ -79,12 +79,13 @@
 </head>
 <body>
 <header>
-  <h1>⚡ MCR Dispatch Tool — Help</h1>
-  <span>v9.88 &nbsp;·&nbsp; 27 Sep 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <h1>MCR Dispatch — Help</h1>
+  <span>30 Sep 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
 <nav>
+  <a href="#start">First day</a>
   <a href="#whats-new">What's New</a>
   <a href="#quickref">Quick Reference</a>
   <a href="#login">Login</a>
@@ -106,6 +107,18 @@
 </nav>
 <main>
 
+  <section id="start">
+    <h2>First day on the app</h2>
+    <p>Blue Folder is closed. It was only the <strong>calendar</strong> and the log for <strong>OTC / testing-station</strong> tickets. Those two now live in this app. Everyday kiosk dispatch was never in Blue Folder — that was still Salesforce after you decided who goes where. The board is that decision step, not a Salesforce replacement.</p>
+    <div class="step"><strong>1. Open</strong> <a href="https://mcrdispatch.net">mcrdispatch.net</a>. Use the username and PIN TJ or an admin gave you. Same login works on the board and Admin. If the page asks for a login and you do not have a PIN, call TJ or Mark — the public site will not guess it.</div>
+    <div class="step"><strong>2. Confirm Region and Dispatch Date.</strong> The board opens on your home state. Next to the date is a <strong>Tomorrow</strong> button (it says <strong>Monday</strong> on Saturday or Sunday). Tap it once to jump to the next workday; the button then shows that weekday (Wed, Thu…).</div>
+    <div class="step"><strong>3. Generate Dispatches</strong> if a list is already pasted, or paste today’s Salesforce / Neumo list and generate. Review the cards. Reassign if the map looks wrong.</div>
+    <div class="step"><strong>4. Send the day</strong> with <strong>✅ Messages</strong> then <strong>Send</strong> on each tech, or <strong>📱 Text this stop</strong> on a trouble WO. If a carrier sheet pops up, pick Verizon / T-Mobile / AT&amp;T / Sprint. That saves on their card so the next text just goes.</div>
+    <div class="step"><strong>5. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter because that is what gets billed. Click a column header to sort — Arrival starts newest first.</div>
+    <p>Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
+    <div class="note"><strong>This is not Salesforce and it was not Blue Folder for kiosk calls.</strong> The app helps you decide who goes where and texts the tech. Official kiosk assignments still get dragged onto the Salesforce console.</div>
+  </section>
+
   <!-- QUICK REFERENCE -->
   <section id="quickref">
     <h2>⚡ Quick Reference</h2>
@@ -116,7 +129,9 @@
       <tr><td>Handle a trouble ticket right now</td><td>Set Paste Mode to <strong>⚡ URGENT</strong>, paste the ticket email, generate. SLA deadline is calculated automatically. See <a href="#urgent">Urgent Dispatch</a>.</td></tr>
       <tr><td>Text one trouble stop to the assigned tech</td><td>On that stop card tap <strong>📱 Text this stop</strong>. Edit the draft, Confirm Send. See <a href="#text-stop">Text this stop</a>.</td></tr>
       <tr><td>See a second ticket at a site already on the board</td><td>Amber chip <strong>⚠ Another ticket today — tap for WO / notes</strong>. Red SLA line sits under the restock. Do not assign a second tech.</td></tr>
-      <tr><td>Collect a technician's cell carrier</td><td>Admin → Technicians → Carrier dropdown (builds number@vtext.com). Watchdog and Text this stop both use that field.</td></tr>
+      <tr><td>Collect a technician's cell carrier</td><td>Admin → Technicians → Carrier dropdown, or pick the carrier on the Text this stop sheet. Both save number@vtext.com on their card.</td></tr>
+      <tr><td>Jump the board to tomorrow</td><td>Tap <strong>Tomorrow</strong> next to Dispatch Date (says <strong>Monday</strong> on the weekend). The button then shows the weekday you landed on.</td></tr>
+      <tr><td>See testing-station close-outs (old Blue Folder)</td><td>Sidebar <strong>⏱ Service responses</strong>. Click headers to sort. CSV / Excel for billing.</td></tr>
       <tr><td>See where everyone is today, at a glance</td><td><strong>🗺️ Map View</strong> on the dispatch board (today's board only), or the <strong>📍 State Console</strong> for any saved date, any state. See <a href="#state-console">State Console</a>.</td></tr>
       <tr><td>Check if today's routes are efficient</td><td><strong>🧭 Analyze Routes</strong> (dispatch board or State Console) -- suggests specific stop swaps with the mileage each one saves. See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
       <tr><td>Move a stop with a typed/spoken command</td><td>Type or dictate into the AI command bar, e.g. "move stop 2 from Robert to Sean." See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
@@ -134,12 +149,21 @@
   <section id="whats-new">
     <h2>🆕 What's New</h2>
 
-    <p style="color:var(--muted);font-size:13px;">Updated 27 September 2026. Print this page (button top right) if you want a paper copy.</p>
+    <p style="color:var(--muted);font-size:13px;">Updated 30 September 2026. Print this page (button top right) if you want a paper copy.</p>
+
+    <h3>Blue Folder is closed</h3>
+    <p>OTC / testing-station close-outs and those calendar entries now live in the app. Use <strong>⏱ Service responses</strong> for ITI times and miles (default filter: Michigan testing). Click any column header to sort; Arrival defaults to newest first. Ordinary kiosk restocks and trouble tickets were never Blue Folder — still planned here, still dropped in Salesforce.</p>
+
+    <h3>Tomorrow / Monday date button</h3>
+    <p>Next to Dispatch Date. Weekdays it is <strong>Tomorrow</strong>. Saturday or Sunday it is <strong>Monday</strong>. After you tap it, the label becomes the weekday of the date now on the board (Wed, Thu…). Set the date back to today and it returns to Tomorrow / Monday.</p>
+
+    <h3>Carrier sheet on Text this stop</h3>
+    <p>If a tech has no carrier, the sheet asks for their cell and a dropdown: Verizon, T-Mobile, AT&amp;T, Sprint, or type the full gateway. Picking a listed carrier builds <code>number@vtext.com</code> (etc.) and always saves it on their technician card. Email only is still there if you only need this one message.</p>
 
     <h3>Text this stop (trouble tickets)</h3>
     <p>Each assigned trouble WO on the board has <strong>📱 Text this stop</strong> under Done / Cancel. Restocks stay on the big Messages list. The draft names the site, WO, issue, and SLA. If the site was already a restock, the wording is that a trouble ticket was added to that restock — same truck, now timed. There is no “please acknowledge”; replies to the carrier gateway do not come back into the app.</p>
     <p>The text includes a short link <code>mcrdispatch.net/ack?t=…</code>. When the technician taps it they see a one-line confirmation page. The stop card gets a green <strong>✓ confirmed receipt</strong> line. The first tap can ping the on-call dispatcher; a second tap does not.</p>
-    <p>If that technician has no carrier on file, a centered sheet asks for <code>number@vtext.com</code> / AT&amp;T / T-Mobile, with an option to save on their technician record or send email only. Fill Carrier once on Admin → Technicians and both Text this stop and Watchdog use it.</p>
+    <p>If that technician has no carrier on file, the sheet above appears. Fill Carrier once and both Text this stop and Watchdog use it.</p>
 
     <h3>Same site, restock plus trouble</h3>
     <p>The board still shows <em>one stop per site</em>. If a morning restock was completed and an afternoon trouble WO lands, the board now prefers the open ticket over the completed restock so the WO does not vanish. The restock details stay on the card; the red <strong>SLA / Due</strong> line is added underneath. A second unrelated WO the same day is the amber <strong>⚠ Another ticket today — tap for WO / notes</strong> chip (opens site history). Do not assign a second technician — they are already going.</p>
@@ -215,9 +239,10 @@
   </section>
   <section id="login">
     <h2>Logging In</h2>
-    <p>The dispatch board itself now requires a username and PIN (same credentials as Admin). After sign-in, the board opens on your home state. The session lasts for that browser tab; use <strong>Switch user</strong> when handing off a shared tablet.</p>
-    <p>Admin Panel uses the same login. Forgot PIN: an admin can Show or Change PIN on the Users tab. If you remember the current PIN, <strong>Change my PIN</strong> on the Admin login screen is enough -- no email reset.</p>
-    <p>Credentials are not published on this page.</p>
+    <p>The dispatch board requires a username and PIN (same credentials as Admin). After sign-in, the board opens on your home state. The session lasts for that browser tab; use <strong>Switch user</strong> when handing off a shared tablet.</p>
+    <p>Admin Panel uses the same login. Forgot PIN: an admin can Show or Change PIN on the Users tab. If you remember the current PIN, <strong>Change my PIN</strong> on the Admin login screen is enough — no email reset.</p>
+    <p>Technicians with a mileage-only login skip the board and land on the mileage page. Dispatchers should not use those accounts.</p>
+    <p>Credentials are not published on this page. Ask TJ or an admin if you were pointed at the site without a PIN.</p>
   </section>
 
   <!-- DAILY DISPATCH -->
@@ -225,7 +250,8 @@
     <h2>Daily Dispatch — Standard (Next Day)</h2>
     <div class="step"><strong>Step 1 — Check date and region.</strong><br>
       Confirm the Region and Dispatch Date are correct at the top of the screen.<br>
-      The date defaults to the next business day automatically. Friday defaults to Monday. Saturday defaults to today (urgent mode).
+      The date defaults to the next business day automatically. Friday defaults to Monday. Saturday defaults to today (urgent mode).<br>
+      Use <strong>Tomorrow</strong> (or <strong>Monday</strong> on the weekend) to jump forward without opening the date picker.
     </div>
     <div class="step"><strong>Step 2 — Review technician availability.</strong><br>
       The board auto-marks comp days from the on-call schedule.<br>
@@ -262,11 +288,12 @@
       <tr><td>→ <strong>Tomorrow</strong></td><td>Pushes a same-day stop to the next day. Only appears on TODAY-flagged stops.</td></tr>
       <tr><td>✓ <strong>Done</strong></td><td>Marks a stop completed and moves it to the Session Actions list below.</td></tr>
       <tr><td>✗ <strong>Cancel</strong></td><td>Marks a stop canceled and moves it to the Session Actions list below.</td></tr>
+      <tr><td>📱 <strong>Text this stop</strong></td><td>On a trouble WO: draft a short text for that one site. See <a href="#text-stop">Text this stop</a>.</td></tr>
     </table>
     <h3>Stop Badges</h3>
     <table>
       <tr><th>Badge</th><th>Meaning</th></tr>
-      <tr><td><span class="badge badge-red">TODAY</span></td><td>Must be completed today — SLA or same-day restock.</td></tr>
+      <tr><td><span class="badge badge-red">TROUBLE</span> / SLA</td><td>Timed ticket. That is the one that needs a same-day response. Ordinary restocks on today's list are already due today — they no longer all wear a SAME DAY badge.</td></tr>
       <tr><td><span class="badge badge-green">Right Forms</span></td><td>Right-side (previous year) registration forms requested. Confirm tech is carrying them. GA SK/BK only.</td></tr>
       <tr><td><span class="badge badge-blue">Reassigned</span></td><td>Stop was moved from its default tech this session.</td></tr>
     </table>
@@ -278,9 +305,11 @@
   <section id="map-view">
     <h2>Map View</h2>
     <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to plot every tech's stops geographically. Each tech gets a distinct color, matching the dot next to their name on their card. Tap any pin for that stop's site name, address, and distance from the previous stop.</p>
+    <p><strong>Show all service locations</strong> (off by default) adds the rest of the state's sites as dots: green on track, amber due soon, red overdue for forms. Testing / OTC (T-codes) stay gray — they are not form-restock sites. Zoom and pan survive a refresh and survive toggling that checkbox. The AI command bar stays available in the expanded map.</p>
+    <p>On a gray/red/amber site popup you can jump to Restock Tracker notes for the last visit, and see driving distance to the nearest stop already on today's board (not the straight line on the map).</p>
     <p>The legend below the map lists each tech with their stop count and lets you toggle their route on/off. Stops without saved coordinates are listed separately under the map ("Not plotted") rather than silently dropped.</p>
     <p>Distance figures use the real site-to-site driving-distance matrix where it's been built for that state; elsewhere, or for specific pairs the matrix build didn't resolve, distances fall back to straight-line and are marked <strong>(est.)</strong>.</p>
-    <div class="note"><strong>Note:</strong> whether the map is shown or hidden persists across a page refresh.</div>
+    <div class="note"><strong>Note:</strong> whether the map is shown or hidden, and the zoom you left it on, persist across a page refresh.</div>
   </section>
 
   <!-- STATE CONSOLE -->
@@ -327,7 +356,7 @@
     <h2>📱 Text this stop</h2>
     <div class="step"><strong>1.</strong> Assign the trouble ticket on the board (Reassign if needed).</div>
     <div class="step"><strong>2.</strong> On that card tap <strong>📱 Text this stop</strong>. Only real trouble WOs show the button.</div>
-    <div class="step"><strong>3.</strong> If the carrier sheet appears, enter their gateway or choose Email only. Check Save so it sticks on their technician record.</div>
+    <div class="step"><strong>3.</strong> If the carrier sheet appears, pick Verizon / T-Mobile / AT&amp;T / Sprint (or type the full address). That choice is saved on their technician card. Email only sends this message without saving a carrier.</div>
     <div class="step"><strong>4.</strong> Edit the draft if you want. Confirm Send. They get SMS (short ping + ack link) and email with the full text.</div>
     <div class="note"><strong>Do not</strong> use this to assign Salesforce. Drop the ticket on the Gantt yourself. This only tells the technician.</div>
   </section>
@@ -343,7 +372,7 @@ Cobb County Kroger Whitlock #455 just came in:
 
 1. Printer Jam (SLA ends Sat 1:27 PM)
 
-Please acknowledge receipt.</div>
+Tap the link in the text to confirm you got this.</div>
   </section>
 
   <!-- ARMORED TRUCK MEETS -->
@@ -486,6 +515,19 @@ Please acknowledge receipt.</div>
     <ul>
       <li>View and manage the on-call / Saturday coverage schedule.</li>
     </ul>
+    <h3>Service responses</h3>
+    <ul>
+      <li>Also linked from the dispatch sidebar between Mileage log and Admin.</li>
+      <li>Times and miles parsed from ITI “Technician Service Response” emails — the testing-station / OTC close-outs that used to be typed into Blue Folder.</li>
+      <li>Default filter is Michigan testing stations (what gets billed). Change state or uncheck Testing to see more.</li>
+      <li>Click a column header to sort. Arrival starts newest first. CSV and Excel are for marking what actually goes on an invoice.</li>
+    </ul>
+    <h3>Inventory</h3>
+    <ul>
+      <li>Who has mailed <strong>inventory@mcrtechservice.com</strong> this period. Placeholder “Unassigned (New Site)” cards are hidden.</li>
+      <li>One email credits one technician. The tech’s name needs to be in the subject (or they send from their own address). A forward from the office with only “GA, inventory” will not land on the right person.</li>
+      <li>Spreadsheet counts and shipment emails are the next step — not live as a stock check yet. Nothing is forwarded to Neumo from this page.</li>
+    </ul>
   </section>
 
   <!-- FEATURES -->
@@ -509,6 +551,8 @@ Please acknowledge receipt.</div>
           <li>Map View with real driving-distance labels</li>
           <li>Direct email + SMS send to technicians</li>
           <li>Print dispatch summary</li>
+          <li>Tomorrow / Monday date jump</li>
+          <li>Map: all sites + restock colors, zoom kept on refresh</li>
           <li>Board auto-rebuilds from saved state on page load/refresh</li>
           <li>Per-person login; board opens on that dispatcher's home state</li>
         </ul>
@@ -538,8 +582,10 @@ Please acknowledge receipt.</div>
           <li>Repeat Issues and Issue Trends (site repeats vs. category over time; print PDF on both)</li>
           <li>Unmatched-site detection tools</li>
           <li>Backup and restore per state</li>
-          <li>Users tab -- add/deactivate logins, reset PINs, set territories</li>
+          <li>Users tab — add/deactivate logins, reset PINs, set territories</li>
           <li>Mark a technician as a dispatcher from the employee form</li>
+          <li>Service responses (testing-station close-outs)</li>
+          <li>Inventory received / missing from the inventory mailbox</li>
         </ul>
       </div>
       <div class="feature-card">
@@ -593,14 +639,14 @@ Please acknowledge receipt.</div>
     </ul>
     <h3>Medium Term</h3>
     <ul>
-      <li>Closing-note visibility in the closed-ticket report -- exploring a couple of approaches to get there.</li>
+      <li>Parse inventory spreadsheets and Melinda shipment emails so Monday counts can be checked before they go to Neumo.</li>
+      <li>Days-of-supply warning from that tech’s own restock pace, not a company-wide “under 10 rolls” line.</li>
       <li>Automated UPS delivery/return confirmation, replacing manual "Mark Returned" tracking.</li>
-      <li>Day-of-week restock volume reference, especially useful for someone covering an unfamiliar state.</li>
     </ul>
     <h3>Longer Term</h3>
     <ul>
       <li>Full site-to-site and tech-to-site distance matrix coverage for the remaining smaller states.</li>
-      <li>Bundled/opportunistic restock suggestions when a tech is already near a site approaching its threshold.</li>
+      <li>Who nearby can spare a roll or a card reader when someone is short.</li>
     </ul>
   </section>
 
@@ -613,9 +659,10 @@ Please acknowledge receipt.</div>
       <li>Undo is session-only — refreshing the page clears session action history (though the board itself now reloads correctly on refresh).</li>
       <li>Map View / route-sorting shows real driving distance only where the site-to-site matrix has been built for that state -- a handful of smaller states are still pending; elsewhere, and for any specific pairs a build didn't resolve, distances fall back to straight-line, marked "(est.)".</li>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
-      <li>Closing notes aren't currently available in the closed-ticket report, so full ticket history for a site still requires manually checking Salesforce.</li>
+      <li>Closing notes exist for visits after we started capturing them. Older visits still need Salesforce if the notes box says none are on file (the SA number is copied for that search).</li>
+      <li>Mail to @mcrtechservice.com from the app is accepted by the host; if someone does not see it, check Junk before assuming it never sent.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 24, 2026 &nbsp;·&nbsp; v9.86</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 30, 2026</p>
   </section>
 
 </main>
