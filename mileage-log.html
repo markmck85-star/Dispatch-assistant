@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.23</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.24</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -187,9 +187,12 @@ function showApp() {
 }
 
 function sundayOf(d) {
+  // v0.24: build the date from LOCAL parts. The old version used
+  // toISOString() (UTC), so after about 8 PM Eastern it returned the NEXT
+  // day and the whole pay period slid a day (Mon 9/28 instead of Sun 9/27).
   const x = new Date(d);
   x.setDate(x.getDate() - x.getDay());
-  return x.toISOString().slice(0,10);
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
 }
 
 function addDays(iso, n) {
