@@ -495,6 +495,35 @@ async function autoAddTicketToBoard({
                 if (insertErr) console.error('[mailgun-inbound] auto-add to board failed:', insertErr.message);
                 else console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: added`);
               } else if (
+                (existingAssignment.status === 'planned' || existingAssignment.status === 'notified')
+                && newTicketId
+                && !existingAssignment.ticket_id
+              ) {
+                // 2026-09-29 fix: a site's board row already existed for
+                // this date but with NO ticket attached -- i.e. it came
+                // from the bulk Location-Codes / Generate Dispatches
+                // paste, which never carries a WO number. Neumo's
+                // individual restock emails routinely arrive AFTER that
+                // paste (Sep 29: paste ~11:03 AM ET, tickets ~11:40 AM
+                // ET), and this case matched none of the branches here,
+                // so it fell into the final "skipped" log line: the
+                // ticket saved fine but was never linked to the row. The
+                // state console then showed the same restock twice --
+                // once as the ticket (WO, "per last import") and once as
+                // the unlinked bulk stop ("on board"). Fix: attach the
+                // ticket to the existing row. Technician, status and
+                // assigned_by are deliberately left untouched -- that row
+                // is an active dispatcher decision. Linking also lets
+                // perform-import auto-complete the stop when the WO
+                // closes in Salesforce.
+                const { error: linkErr } = await supabase
+                  .from('assignments')
+                  .update({ ticket_id: newTicketId, updated_at: new Date().toISOString() })
+                  .eq('id', existingAssignment.id)
+                  .is('ticket_id', null);
+                if (linkErr) console.error('[mailgun-inbound] link-ticket-to-existing-bulk-row failed:', linkErr.message);
+                else console.log(`[mailgun-inbound] Linked ticket ${woNum} to the existing ${existingAssignment.status} ${dispatchDateStr} board entry (was a ticketless bulk-list row) instead of leaving a duplicate`);
+              } else if (
                 (existingAssignment.status === 'completed' || existingAssignment.status === 'removed')
                 && newTicketId
                 && existingAssignment.ticket_id !== newTicketId
