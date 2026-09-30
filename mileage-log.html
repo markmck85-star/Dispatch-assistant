@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.27</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.28</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -107,7 +107,7 @@
       <button type="button" class="secondary" onclick="shiftLegDate(1)">Next day →</button>
       <button type="button" class="secondary" onclick="skipEmptyDay()">Off / no miles — next day</button>
     </div>
-    <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a stop. Use Next day or Off. Add stop only when there are miles.</p>
+    <p class="muted" style="margin:8px 0 0;">Empty days (typical Sunday) do not need a stop. Use Next day or Off. Add stop only when there are miles. Tap Add stop when you arrive at a store: dispatch can see your most recent stop and the time it was logged. Nothing is recorded between stops.</p>
   </div>
 
   <details class="card" id="missBox">
@@ -611,7 +611,7 @@ async function addMissedStop() {
   const extra1 = estimated ? { estimated: true, est_field: 'end' } : { via_trip_meter: true };
   const extra2 = estimated ? { estimated: true, est_field: 'start' } : { via_trip_meter: true };
   legs.push(newLeg(date, picked.from, picked.miss, a, b, extra1));
-  legs.push(newLeg(date, picked.miss, picked.here, b, c, extra2));
+  legs.push(newLeg(date, picked.miss, picked.here, b, c, Object.assign({ arrived_at: new Date().toISOString() }, extra2)));
   picked.from = picked.here;
   document.getElementById('fromQ').value = picked.from.picker;
   document.getElementById('fromPicked').textContent = 'Using: ' + picked.from.picker;
@@ -756,7 +756,8 @@ function addLeg() {
     odo_start: odoStart === '' ? null : Number(odoStart),
     odo_end: odoEnd === '' ? null : Number(odoEnd),
     miles,
-    flag
+    flag,
+    arrived_at: new Date().toISOString()
   });
   picked.from = picked.to;
   document.getElementById('fromQ').value = picked.from.picker;
@@ -810,7 +811,7 @@ function renderLegs() {
       html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
         '<div class="stop-row"><div class="grow">' + (l.from_print || l.from_picker) + '</div><div class="odo">' + (l.odo_start || '?') + (l.estimated && l.est_field === 'start' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
         '<div class="stop-row"><div class="grow">' + (l.to_print || l.to_picker) + '</div><div class="odo"><strong>' + (l.odo_end || '?') + '</strong>' + (l.estimated && l.est_field === 'end' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
-        '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' +
+        '<div class="leg-mi">' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.arrived_at ? ' <span class="muted" style="font-weight:400;">logged ' + new Date(l.arrived_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '</span>' : '') +
         ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button></div>' +
         flag +
         (l.estimated ? '<div class="flag">Middle reading estimated from the matrix. Remove both stops and re-add them if you have the real number.</div>' : '') +

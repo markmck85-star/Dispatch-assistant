@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Last Known Stops</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background:#f4f6f8; color:#1a1a1a; margin:0; padding:12px; }
+  h1 { font-size:18px; margin:0 0 4px; color:#12325a; }
+  .sub { color:#5b6570; font-size:13px; margin-bottom:12px; }
+  input, select, button { font-size:16px; padding:8px; border-radius:6px; border:1px solid #c5ced6; background:#fff; color:#1a1a1a; }
+  button { background:#1d4e89; border:none; color:#fff; cursor:pointer; }
+  label { display:block; font-size:12px; color:#5b6570; margin:8px 0 4px; }
+  .card { background:#fff; border:1px solid #d5dde3; border-radius:8px; padding:10px 12px; margin:8px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); border-left:5px solid #9aa5b1; }
+  .card.fresh { border-left-color:#2e7d4f; }
+  .card.warm { border-left-color:#d19a12; }
+  .card.stale { border-left-color:#9aa5b1; opacity:.8; }
+  .card.home { border-left-color:#1d4e89; }
+  .top { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .name { font-weight:700; font-size:16px; }
+  .age { font-weight:700; white-space:nowrap; }
+  .fresh .age { color:#2e7d4f; } .warm .age { color:#8a6d12; } .stale .age { color:#6b7580; } .home .age { color:#1d4e89; }
+  .stop { margin-top:4px; font-size:15px; }
+  .muted { color:#6b7580; font-size:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
+  .none { color:#6b7580; font-size:14px; padding:2px 0; }
+  .status { font-size:13px; color:#5b6570; min-height:18px; margin:6px 0; }
+  .err { color:#8a2f2f; }
+  a.back { display:inline-block; margin-bottom:10px; color:#1d4e89; text-decoration:none; font-size:14px; }
+</style>
+</head>
+<body>
+  <a class="back" href="/">← Back to Dispatch Tool</a>
+  <h1>Last known stops</h1>
+  <div class="sub">Each technician's most recent stop from the mileage log, and when it was logged. Only what techs tap in. Nothing between stops, and a tech who has not logged a stop shows as "no recent stop", not unavailable.</div>
+
+  <div id="loginBox" class="card" style="border-left-color:#1d4e89;">
+    <label>Username <input id="u" autocomplete="username"></label>
+    <label>PIN <input id="p" type="password" inputmode="numeric" autocomplete="current-password"></label>
+    <button type="button" onclick="doLogin()">View</button>
+    <div class="status err" id="loginErr"></div>
+  </div>
+
+  <div id="appBox" style="display:none;">
+    <div class="row">
+      <label>State <select id="stateSel" onchange="render()"><option value="">All</option></select></label>
+      <button type="button" onclick="load()">Refresh</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div id="list"></div>
+  </div>
+
+<script>
+let creds = null;      // kept in memory only, so a page reload asks again
+let techs = [];
+let generatedAt = null;
+let timer = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function doLogin() {
+  creds = { username: document.getElementById('u').value.trim(), pin: document.getElementById('p').value.trim() };
+  document.getElementById('loginErr').textContent = '';
+  const ok = await load();
+  if (ok) {
+    document.getElementById('loginBox').style.display = 'none';
+    document.getElementById('appBox').style.display = 'block';
+    timer = setInterval(load, 60000);
+    setInterval(render, 30000);
+  } else {
+    creds = null;
+  }
+}
+
+async function load() {
+  if (!creds) return false;
+  const status = document.getElementById('status');
+  try {
+    const res = await fetch('/.netlify/functions/get-last-stops', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(creds)
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Load failed');
+    techs = data.techs || [];
+    generatedAt = Date.now();
+    fillStates();
+    render();
+    return true;
+  } catch (e) {
+    const el = document.getElementById('loginErr');
+    if (document.getElementById('appBox').style.display === 'none') el.textContent = e.message;
+    else status.textContent = 'Could not refresh: ' + e.message + ' (showing the last good data)';
+    return false;
+  }
+}
+
+function fillStates() {
+  const sel = document.getElementById('stateSel');
+  const cur = sel.value;
+  const states = [...new Set(techs.map(t => t.state).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All</option>' + states.map(s => '<option>' + esc(s) + '</option>').join('');
+  sel.value = states.includes(cur) ? cur : '';
+}
+
+function ageText(mins) {
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h < 24) return h + ' h' + (m ? ' ' + m + ' min' : '') + ' ago';
+  return Math.floor(h / 24) + ' d ago';
+}
+
+function render() {
+  const st = document.getElementById('stateSel').value;
+  const now = Date.now();
+  const rows = techs.filter(t => !st || t.state === st);
+  const withStop = rows.filter(t => t.arrived_at).sort((a, b) => Date.parse(b.arrived_at) - Date.parse(a.arrived_at));
+  const without = rows.filter(t => !t.arrived_at).sort((a, b) => a.name.localeCompare(b.name));
+  let html = '';
+  withStop.forEach(t => {
+    const mins = Math.max(0, Math.round((now - Date.parse(t.arrived_at)) / 60000));
+    const atHome = t.kind === 'home';
+    const cls = atHome ? 'home' : mins < 30 ? 'fresh' : mins < 120 ? 'warm' : 'stale';
+    const clock = new Date(t.arrived_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const where = atHome ? 'Ended the day at home' : esc(t.site_code ? (t.site_name || t.stop) + ' (' + t.site_code + ')' : t.stop);
+    const note = atHome ? '' : (mins >= 120 ? '<div class="muted">Older than 2 hours. They may have moved on.</div>' : '');
+    html += '<div class="card ' + cls + '"><div class="top"><span class="name">' + esc(t.name) + ' <span class="muted">' + esc(t.state || '') + '</span></span>' +
+      '<span class="age">' + ageText(mins) + '</span></div>' +
+      '<div class="stop">' + where + '</div>' +
+      '<div class="muted">logged ' + clock + (t.estimated ? ' · reading estimated' : '') + '</div>' + note + '</div>';
+  });
+  if (without.length) {
+    html += '<div class="sub" style="margin-top:14px;">No recent stop (nothing logged in the last 36 hours)</div>';
+    html += '<div class="card" style="border-left-color:#c5ced6;">' + without.map(t => '<div class="none">' + esc(t.name) + ' <span class="muted">' + esc(t.state || '') + '</span></div>').join('') + '</div>';
+  }
+  if (!rows.length) html = '<div class="none">No technicians to show.</div>';
+  document.getElementById('list').innerHTML = html;
+  document.getElementById('status').textContent = generatedAt ? 'Updated ' + new Date(generatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '. Refreshes every minute.' : '';
+}
+</script>
+</body>
+</html>
