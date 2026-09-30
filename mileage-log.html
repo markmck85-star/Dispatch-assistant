@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.35</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.36</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -870,6 +870,15 @@ function legNotesHtml(l) {
   return out;
 }
 
+// a finished day that ended at a store with no trip home logged
+function driveHomeHtml(dateStr, items) {
+  if (!items.length || dateStr >= todayLocal()) return '';
+  const last = items[items.length - 1].l;
+  if (last.to_kind !== 'site' || last.odo_end == null) return '';
+  return '<div class="flag" style="margin-top:6px;">Did not log getting home from ' + escHtml(last.to_print || last.to_picker) + '? ' +
+    '<button type="button" class="secondary" style="padding:4px 10px;font-size:13px;" onclick="addDriveHome(\'' + dateStr + '\')">Add drive home</button></div>';
+}
+
 function legName(l, side) {
   return escHtml(l[side + '_print'] || l[side + '_picker'] || '?');
 }
@@ -892,7 +901,7 @@ function padCard(dateStr, items) {
       legNotesHtml(l);
     prev = l;
   });
-  html += '<div class="day-total">Day total ' + sub + '</div></div>';
+  html += '<div class="day-total">Day total ' + sub + '</div>' + driveHomeHtml(dateStr, items) + '</div>';
   return html;
 }
 
@@ -931,7 +940,7 @@ function renderLegs() {
         ' <button type="button" class="warn" style="color:#1d4e89;border-color:#9db4cf;" onclick="openInsert(' + i + ')">add a stop in this trip</button></div>' +
         legNotesHtml(l) + '</div>';
     });
-    html += '<div class="day-total">Day total ' + sub + '</div></div>';
+    html += '<div class="day-total">Day total ' + sub + '</div>' + driveHomeHtml(d, byDay[d]) + '</div>';
   });
   const total = legs.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
   html += '<div class="card"><strong>TOTAL MILEAGE</strong> ' + total + '</div>';
@@ -1109,6 +1118,27 @@ function flushHomeNote() {
 function onLegDateChange() {
   updateDow();
   applyStartFor(document.getElementById('legDate').value);
+}
+
+async function addDriveHome(dateStr) {
+  let bi = -1;
+  legs.forEach((l, i) => { if (l.date === dateStr) bi = i; });
+  if (bi < 0) return;
+  const P = legs[bi];
+  if (P.to_kind === 'home' || P.odo_end == null) return;
+  const stop = legStop(P, 'to');
+  let mi = await getMatrixMiles(stop, homeStop());
+  if (mi == null) {
+    const ans = prompt('How many miles from ' + (P.to_print || P.to_picker) + ' to home? (Google Maps is fine)');
+    if (ans == null) return;
+    mi = Math.round(Number(String(ans).replace(/[^0-9.]/g, '')));
+    if (!Number.isFinite(mi) || mi <= 0 || mi > 400) { alert('Enter a number of miles between 1 and 400.'); return; }
+  }
+  const homeLeg = newLeg(P.date, stop, homeStop(), P.odo_end, P.odo_end + mi, { estimated: true, est_field: 'end', auto_home: true });
+  legs.splice(bi + 1, 0, homeLeg);
+  persistLocal();
+  renderLegs();
+  saveLog('draft');
 }
 
 // A day that started at home after ending at a service site is missing the drive home.
