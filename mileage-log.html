@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.19</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.22</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
@@ -45,6 +45,17 @@
   </div>
   <div id="appBox" style="display:none;">
   <div id="who" class="muted"></div>
+  <div class="row">
+    <label>Suggest sites in
+      <select id="siteState" onchange="loadContext()">
+        <option value="">Home state</option>
+        <option>AL</option><option>CA</option><option>CO</option><option>FL</option>
+        <option>GA</option><option>ID</option><option>IL</option><option>IN</option>
+        <option>MI</option><option>MN</option><option>NC</option><option>NV</option>
+        <option>OH</option><option>OR</option><option>SC</option><option>WV</option>
+      </select>
+    </label>
+  </div>
   <div class="row">
     <label>Period start (Sunday)
       <input type="date" id="periodStart" onchange="loadContext()">
@@ -255,24 +266,43 @@ function homeStop() {
 }
 
 function shortName(s) {
-  const aliases = (s.aliases || []).filter(a => a && a.length >= 4).sort((a,b) => a.length - b.length);
-  let n = (aliases[0] && aliases[0].length <= 28) ? aliases[0] : (s.name || '');
-  n = n.replace(/\s+County\s+/gi, ' ').replace(/\s+County$/i, '');
-  n = n.replace(/\s+Tag Office/gi, ' Tag');
-  n = n.replace(/\s+/g, ' ').trim();
-  return n || s.name;
+  const raw = [s.name].concat(s.aliases || []).filter(a => a && String(a).trim().length >= 3);
+  function tidy(n) {
+    return String(n)
+      .replace(/\s+County\s+/gi, ' ')
+      .replace(/\s+County$/i, '')
+      .replace(/\s+Tag Office/gi, ' Tag')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function score(n) {
+    const t = tidy(n);
+    const stripped = t.toLowerCase()
+      .replace(/\b(kroger|publix|safeway|meijer|walmart|target|albertsons|vons|king soopers|tag|dmv|sos)\b/g, ' ')
+      .replace(/\b(gwinnett|fulton|cobb|dekalb|hall|henry|newton|walton|douglas|clayton|cherokee|coweta|rockdale|bibb|carroll|forsyth|chatham)\b/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    if (!stripped) return -30; // "Gwinnett Kroger" — county + chain only
+    let sc = stripped.length + stripped.split(' ').length * 8;
+    if (t.length > 36) sc -= 8;
+    if (t.length < 8) sc -= 4;
+    return sc;
+  }
+  raw.sort((a,b) => score(b) - score(a));
+  return tidy(raw[0] || s.name || s.site_code);
 }
 
 function allStops() {
   if (!ctx) return [];
   const out = [homeStop()];
   const push = (s) => {
-    const aliases = (s.aliases || []).join(' ');
+    const aliasList = s.aliases || [];
+    const aliases = aliasList.join(' ');
     const brief = shortName(s);
     out.push({
       kind: 'site',
       id: s.id,
       site_code: s.site_code,
+      name: s.name || '',
+      aliases: aliasList,
       picker: brief,
       print: brief,
       search: (s.site_code + ' ' + s.name + ' ' + aliases + ' ' + brief + ' ' + (s.sst_name || '')).toLowerCase(),
@@ -285,14 +315,25 @@ function allStops() {
   return out;
 }
 
+function labelForQuery(s, q) {
+  if (!s || s.kind !== 'site') return (s && (s.picker || s.print)) || '';
+  const ql = (q || '').toLowerCase();
+  const aliases = s.aliases || [];
+  const hit = aliases.find(a => a.toLowerCase().indexOf(ql) !== -1);
+  if (hit) return hit;
+  if ((s.name || '').toLowerCase().indexOf(ql) !== -1) {
+    return (s.name || '').replace(/\s+County\s+/gi, ' ').replace(/\s+County$/i, '');
+  }
+  return s.picker;
+}
+
 function searchStops(side) {
   const q = document.getElementById(side + 'Q').value.toLowerCase().trim();
   const box = document.getElementById(side + 'Suggest');
   if (!q) { box.style.display = 'none'; return; }
   const hits = allStops().filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1).slice(0, 20);
-  // Prefer usual + home first
   hits.sort((a,b) => (b.kind === 'home') - (a.kind === 'home') || (b.usual?1:0) - (a.usual?1:0));
-  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + s.picker + '</div>').join('') || '<div>No match — pick Other</div>';
+  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + labelForQuery(s, q) + '</div>').join('') || '<div>No match — pick Other</div>';
   box._hits = hits;
   box.style.display = 'block';
 }
@@ -305,7 +346,9 @@ function chooseStop(side, i) {
     const typed = document.getElementById(side + 'Q').value.trim();
     picked[side] = { kind: 'other', id: null, picker: typed || 'Other', print: typed || 'Other' };
   } else {
-    picked[side] = s;
+    const q = document.getElementById(side + 'Q').value.toLowerCase().trim();
+    const label = labelForQuery(s, q);
+    picked[side] = Object.assign({}, s, { picker: label, print: label });
   }
   document.getElementById(side + 'Q').value = picked[side].print || picked[side].picker;
   document.getElementById(side + 'Picked').textContent = picked[side].picker !== picked[side].print ? picked[side].picker : '';
@@ -318,10 +361,13 @@ async function loadContext() {
   const start = document.getElementById('periodStart').value;
   const end = document.getElementById('periodEnd').value;
   let url = '/.netlify/functions/get-mileage-log?period_start=' + start + '&period_end=' + end;
+  const st = (document.getElementById('siteState') || {}).value;
+  if (st) url += '&state=' + encodeURIComponent(st);
   if (user && user.technician_id) url += '&technician_id=' + encodeURIComponent(user.technician_id);
+  else if (user && user.username) url += '&username=' + encodeURIComponent(user.username);
   else if (user && (user.displayName || user.name)) url += '&name=' + encodeURIComponent(user.displayName || user.name);
   else {
-    status.textContent = 'Log in on the dispatch app first, then open this page.';
+    status.textContent = 'Log in on this page or the dispatch app first.';
     return;
   }
   status.textContent = 'Loading…';
