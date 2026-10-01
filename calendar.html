@@ -7,8 +7,10 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f5f8; color: #1f2933; padding: 15px; line-height: 1.5; font-size: 16px; }
+  :root { --cell-pad: 4px; --cell-bd: 2px; }
   .container { max-width: 1000px; margin: 0 auto; }
   @media (min-width: 1100px) {
+    :root { --cell-pad: 6px; }
     .container { max-width: 1320px; }
     body { padding: 20px 28px 40px; }
     .month-grid { min-width: 0; grid-template-columns: repeat(7, minmax(120px, 1fr)); }
@@ -17,7 +19,7 @@
     .day-block {
       font-size: 13px; font-weight: 600; line-height: 1.35;
       padding: 4px 7px; margin-bottom: 4px;
-      white-space: normal;
+      white-space: nowrap;
     }
     .day-block .block-note { font-size: 12px; opacity: 1; }
     .day-block .synced { font-size: 11px; }
@@ -79,7 +81,7 @@
      glance. Horizontally scrollable below ~680px so it stays usable on a
      phone without cramming 7 columns down to nothing. */
   .grid-scroll { overflow-x: auto; }
-  .month-grid { display: grid; grid-template-columns: repeat(7, minmax(88px, 1fr)); min-width: 620px; border: 1px solid #d5dbe3; border-radius: 6px; overflow: hidden; }
+  .month-grid { display: grid; grid-template-columns: repeat(7, minmax(88px, 1fr)); min-width: 620px; border: 2px solid #8d99a8; border-radius: 6px; overflow: hidden; }
   .dow-header {
     background: #2b3644; color: #ffffff; font-size: 11px; font-weight: 700; text-align: center;
     padding: 7px 2px; text-transform: uppercase; letter-spacing: 0.03em;
@@ -87,7 +89,7 @@
   }
   .dow-header:last-child { border-right: none; }
   .day-cell {
-    min-height: 76px; border-right: 1px solid #e3e8ee; border-bottom: 1px solid #e3e8ee;
+    min-height: 76px; border-right: 2px solid #b4bfcc; border-bottom: 2px solid #b4bfcc;
     padding: 4px; background: #ffffff; cursor: pointer;
   }
   .day-cell:hover { background: #f8fafc; }
@@ -102,12 +104,29 @@
     display: block; border-radius: 4px; padding: 2px 5px; margin-bottom: 2px;
     font-size: 10.5px; line-height: 1.3; color: #ffffff; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; cursor: default;
-    border-left: 3px solid rgba(0,0,0,0.25); background: #5f6b7a;
+    border-left: 4px solid rgba(0,0,0,0.4); background: #5f6b7a;
   }
   .day-block .synced { opacity: 0.85; font-size: 9px; margin-left: 2px; }
+  /* Notes stay on one line (ellipsis) so every block is the same height --
+     that is what lets one person's entries line up across a whole week.
+     The full note is in the hover title and the day detail popup. */
   .day-block .block-note {
     display: block; font-size: 9px; font-weight: 400; opacity: 0.9;
-    white-space: normal; word-break: break-word; margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+  }
+  /* Invisible placeholder that holds a person's row open on days they are
+     not out, so their blocks stay in the same row all week. */
+  .day-block.lane-spacer { visibility: hidden; }
+  /* Consecutive days for the same person (same type and note) are drawn as
+     one continuous bar: the block reaches across the cell padding and grid
+     line to meet the next day's block, which drops its left stripe. */
+  .day-block.join-next {
+    position: relative; z-index: 1;
+    margin-right: calc(-2 * var(--cell-pad) - var(--cell-bd));
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+  }
+  .day-block.join-prev {
+    border-left: none; border-top-left-radius: 0; border-bottom-left-radius: 0;
   }
   .day-block.reason-vacation { background: #9b3b3b; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
   .day-block.reason-personal { background: #a86f1a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
@@ -498,9 +517,8 @@ function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
   const daysInPrevMonth = new Date(year, month, 0).getDate();
   const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
 
-  let html = '<div class="grid-scroll"><div class="month-grid">';
-  for (const label of DOW_LABELS) html += `<div class="dow-header">${label}</div>`;
-
+  // Work out every cell's date first, so each week row can be laid out as a unit.
+  const cells = [];
   for (let i = 0; i < totalCells; i++) {
     let cellDate, otherMonth = false, dayNum;
     if (i < startOffset) {
@@ -515,9 +533,45 @@ function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
       cellDate = new Date(year, month + 1, dayNum);
       otherMonth = true;
     }
-    const dayStr = isoLocal(cellDate);
+    cells.push({ dayStr: isoLocal(cellDate), dayNum, otherMonth });
+  }
+
+  // Each technician gets one fixed row ("lane") per week, so their entries
+  // line up across the days instead of jumping up and down with whoever else
+  // is out that day. Lanes are ordered by the day each person's first entry
+  // that week lands on, then by name.
+  const weekCount = totalCells / 7;
+  const weekLanes = [];    // per week: ordered technician ids
+  const weekRowMaps = [];  // per week: 7 Maps of technician id -> that day's entry
+  for (let w = 0; w < weekCount; w++) {
+    const maps = [];
+    const firstCol = new Map();
+    const names = new Map();
+    for (let c = 0; c < 7; c++) {
+      const rows = byDay.get(cells[w * 7 + c].dayStr) || [];
+      const m = new Map();
+      for (const r of rows) {
+        const k = String(r.technician_id);
+        m.set(k, r);
+        if (!firstCol.has(k)) { firstCol.set(k, c); names.set(k, (r.technicians && r.technicians.name) || ''); }
+      }
+      maps.push(m);
+    }
+    weekRowMaps.push(maps);
+    weekLanes.push([...firstCol.keys()].sort((x, y) => firstCol.get(x) - firstCol.get(y) || names.get(x).localeCompare(names.get(y))));
+  }
+
+  // Two consecutive days join into one bar only if it is the same person,
+  // the same type and the same note.
+  const sameRun = (x, y) => !!x && !!y && (x.reason || 'other') === (y.reason || 'other') && (x.note || '') === (y.note || '');
+
+  let html = '<div class="grid-scroll"><div class="month-grid">';
+  for (const label of DOW_LABELS) html += `<div class="dow-header">${label}</div>`;
+
+  for (let i = 0; i < totalCells; i++) {
+    const { dayStr, dayNum, otherMonth } = cells[i];
+    const w = Math.floor(i / 7), col = i % 7;
     const isToday = dayStr === todayStr;
-    const rows = byDay.get(dayStr) || [];
 
     let cellClass = 'day-cell' + (otherMonth ? ' other-month' : '') + (isToday ? ' is-today' : '');
     html += `<div class="${cellClass}" data-day="${dayStr}"><div class="cell-date">${dayNum}</div>`;
@@ -526,14 +580,34 @@ function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
       const titleAttr = `${row.label}${row.note ? ': ' + row.note : ''}`;
       html += `<span class="company-banner" title="${escapeHtml(titleAttr)}">&#9733; ${escapeHtml(row.label)}</span>`;
     }
-    for (const row of rows) {
+
+    const lanes = weekLanes[w];
+    const maps = weekRowMaps[w];
+    let lastLane = -1;
+    lanes.forEach((k, idx) => { if (maps[col].has(k)) lastLane = idx; });
+    for (let idx = 0; idx <= lastLane; idx++) {
+      const k = lanes[idx];
+      const row = maps[col].get(k);
+      if (!row) {
+        html += `<span class="day-block lane-spacer" aria-hidden="true">&nbsp;<span class="block-note">&nbsp;</span></span>`;
+        continue;
+      }
       const reason = row.reason || 'other';
       const label = REASON_LABEL[reason] || REASON_LABEL.other;
+      const joinPrev = col > 0 && sameRun(maps[col - 1].get(k), row);
+      const joinNext = col < 6 && sameRun(row, maps[col + 1].get(k));
       const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
       const titleAttr = `${row.technicians.name} — ${label}${row.note ? ': ' + row.note : ''}`;
-      const noteHtml = row.note ? `<span class="block-note">${escapeHtml(row.note)}</span>` : '';
-      html += `<span class="day-block reason-${reason}" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}${synced}${noteHtml}</span>`;
+      const cls = `day-block reason-${reason}${joinPrev ? ' join-prev' : ''}${joinNext ? ' join-next' : ''}`;
+      if (joinPrev) {
+        // Continuation of the bar from the previous day: no repeated text.
+        html += `<span class="${cls}" title="${escapeHtml(titleAttr)}">&nbsp;<span class="block-note">&nbsp;</span></span>`;
+      } else {
+        const noteHtml = `<span class="block-note">${row.note ? escapeHtml(row.note) : '&nbsp;'}</span>`;
+        html += `<span class="${cls}" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}${synced}${noteHtml}</span>`;
+      }
     }
+
     const onCallRows = onCallByDay.get(dayStr) || [];
     for (const row of onCallRows) {
       const titleAttr = `${row.technicians.name} — On-Call (${row.state})`;
