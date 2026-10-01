@@ -36,8 +36,30 @@ function decodeQp(s) {
     .replace(/=([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
 }
 
+// Some response emails arrive with the whole body base64-encoded HTML
+// (a table of label/value cells). Decode those to plain "Label : value"
+// text before parsing; ordinary text bodies are returned untouched.
+function decodeBody(s) {
+  const t = String(s || "");
+  const compact = t.replace(/\s+/g, "");
+  if (compact.length >= 80 && /^[A-Za-z0-9+/]+=*$/.test(compact) && !/[:#]/.test(t)) {
+    try {
+      const d = Buffer.from(compact, "base64").toString("utf8");
+      if (/service call date|ticket number|location/i.test(d)) {
+        return d
+          .replace(/<img[^>]*>/gi, " ")
+          .replace(/<\/(td|th|tr|p|div|table)>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ")
+          .replace(/&amp;/g, "&");
+      }
+    } catch (e) { /* fall through to the raw text */ }
+  }
+  return t;
+}
+
 function unfoldBody(s) {
-  return decodeQp(s)
+  return decodeQp(decodeBody(s))
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
@@ -57,7 +79,9 @@ function field(text, label) {
 }
 
 function parseResponse(subject, body) {
-  const text = unfoldBody((subject || "") + " " + (body || ""));
+  // Decode the body on its own first: once the subject (which has a "#")
+  // is glued on, a base64 body no longer looks like pure base64.
+  const text = unfoldBody((subject || "") + " " + decodeBody(body));
   const ticketFromSubject = (subject || "").match(/Ticket\s*#\s*([A-Za-z0-9-]+)/i);
   return {
     ticketNumber: field(text, "Ticket Number") || (ticketFromSubject && ticketFromSubject[1]) || null,
@@ -384,4 +408,4 @@ exports.handler = async (event) => {
 };
 
 // Exposed only so the parsing and matching can be unit-tested offline.
-exports._internals = { parseResponse, isReplyLike, normTicket, nameKey, tokenKey, buildIndex, matchSite, wantedType, inferState, codeType };
+exports._internals = { decodeBody, parseResponse, isReplyLike, normTicket, nameKey, tokenKey, buildIndex, matchSite, wantedType, inferState, codeType };
