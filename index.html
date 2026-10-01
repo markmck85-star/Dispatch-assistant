@@ -6822,9 +6822,29 @@ function distanceMatrixStatus(state) {
                 </div>`;
             }
 
+            // FIX (2026-10-01): which stops go under "Today -- Complete Now" must be
+            // judged against the REAL calendar day, not just the Dispatch Date being
+            // viewed. isSameDay means "its Restock By equals the viewed board's date",
+            // which is true for nearly every routine stop on any board by construction,
+            // so when TOMORROW's board was viewed every routine stop (due tomorrow)
+            // was labelled "Today -- Complete Now", while the one stop genuinely due
+            // today (Restock By = real today, earlier than the board date) fell under
+            // "Tomorrow" -- the labels were inverted. A stop is "complete now" when its
+            // Restock By is today or earlier (restockUrgent, driven by the real date) or
+            // it is a ticket due today. On a board dated today (or earlier) a stop that
+            // belongs to that board's own date still counts too, as before.
+            const realTodayMidnight = new Date();
+            realTodayMidnight.setHours(0, 0, 0, 0);
+            const boardMidnight = dateStr ? new Date(dateStr + 'T00:00:00') : new Date(realTodayMidnight);
+            boardMidnight.setHours(0, 0, 0, 0);
+            const boardIsFuture = boardMidnight.getTime() > realTodayMidnight.getTime();
+            const isNowStop = (s) => !!s.restockUrgent
+                || (s.urgent && s.ticketDueToday !== false)
+                || (!boardIsFuture && !!s.isSameDay);
+
             const techNames = Object.keys(assignments).sort().filter(t => assignments[t].length > 0);
-            const techsSameDay = techNames.filter(t => assignments[t].some(i => i.isSameDay));
-            const techsTomorrow = techNames.filter(t => !assignments[t].some(i => i.isSameDay));
+            const techsSameDay = techNames.filter(t => assignments[t].some(isNowStop));
+            const techsTomorrow = techNames.filter(t => !assignments[t].some(isNowStop));
 
             function renderPrintTech(techName) {
                 const stops = assignments[techName];
@@ -6836,9 +6856,8 @@ function distanceMatrixStatus(state) {
                 // now correctly says "DUE TUE" -- a direct contradiction on
                 // the same line. Non-ticket urgent items (no ticketDueToday
                 // set at all) keep the old behavior.
-                const isUrgentToday = (s) => s.urgent && s.ticketDueToday !== false;
-                const todayStops = stops.filter(s => s.isSameDay || isUrgentToday(s));
-                const tomorrowStops = stops.filter(s => !s.isSameDay && !isUrgentToday(s));
+                const todayStops = stops.filter(isNowStop);
+                const tomorrowStops = stops.filter(s => !isNowStop(s));
                 const hasMixed = todayStops.length > 0 && tomorrowStops.length > 0;
 
                 let block = `<div class="print-tech-section">
