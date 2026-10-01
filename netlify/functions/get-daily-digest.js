@@ -1,4 +1,4 @@
-// get-daily-digest.js — v2 — 2026-10-01
+// get-daily-digest.js — v3 — 2026-10-01
 //
 // Netlify Function -- shared backend for the morning brief and the
 // "State of the State" end-of-day digest. Returns structured data only
@@ -43,8 +43,21 @@
 //   - Open tickets are read with status = 'open' first (the table is small),
 //     then the same resolved / closing-visit exclusions as v1.
 //
-// Not covered yet (nothing in the data to read): ribbon cuttings as their own
-// record type, and a true "pushed" marker on restock assignments (v2 infers
+// v3 changes (from v2):
+//   - Reads dispatcher-maintained special projects (public.special_projects, see
+//     special-projects.js): ribbon cuttings and anything arranged outside the
+//     ticket flow, plus status/hold tracking for installs and surveys that are
+//     delayed for reasons the app cannot see. Returned as specialProjects.projects
+//     (needs eyes) and specialProjects.onHold (quiet until their hold date).
+//     A project linked to a ticket replaces that ticket in specialProjects.installs;
+//     if the linked ticket closes, the project drops off on its own.
+//   - Installs/surveys that are past their date are NEVER treated as closed
+//     (stores remodel, delay or cancel for reasons outside our control). They get
+//     daysLate so the viewer can show them in their own quiet group.
+//   - Attention list gains: special projects due today, projects waiting on a
+//     store/carrier with no update for a couple of days, and ended holds.
+//
+// Not covered yet: a true "pushed" marker on restock assignments (v2 infers
 // it: not finished the previous business day and on the board again today).
 
 const { createClient } = require('@supabase/supabase-js');
@@ -72,6 +85,11 @@ const DEFAULT_HEAVY_TRIGGER = 1.3;
 const LIGHT_RATIO = 0.8;
 const BASELINE_DAYS = 28;
 const MEET_STALE_DAYS = 2;        // no Loomis movement for this long = worth a nudge
+const PROJECT_STALE_DAYS = 2;     // a waiting project with no update this long = worth a nudge
+const PROJECT_TYPE_LABEL = {
+  ribbon_cutting: 'Ribbon cutting', install: 'Install', site_survey: 'Site survey',
+  armored_truck_meet: 'Armored truck meet', other: 'Project',
+};
 
 // ---------------------------------------------------------------- helpers
 function json(statusCode, obj) {
@@ -114,6 +132,10 @@ function prevBusinessDay(dateStr) {
   let d = addDays(dateStr, -1);
   for (let i = 0; i < 10 && !isBusinessDay(d); i++) d = addDays(d, -1);
   return d;
+}
+
+function daysBetween(fromStr, toStr) {
+  return Math.round((new Date(toStr + 'T12:00:00Z') - new Date(fromStr + 'T12:00:00Z')) / 86400000);
 }
 
 function nextSaturdayOnOrAfter(dateStr) {
@@ -416,8 +438,73 @@ exports.handler = async (event) => {
       if (dateStr === nextBiz) return 'next';
       return dateStr < todayStr ? 'past' : 'later';
     };
+
+    // Dispatcher-maintained projects (open ones only). Non-fatal if the table
+    // cannot be read: the rest of the digest still works.
+    const projectRows = await safe('special projects', async () => {
+      const { data, error } = await supabase.from('special_projects').select('*')
+        .in('state', regionStates).not('status', 'in', '(done,cancelled)');
+      if (error) throw new Error(error.message);
+      return data || [];
+    }, []);
+    const liveById = {};
+    liveTickets.forEach((t) => { liveById[t.id] = t; });
+    const linkedTicketIds = new Set(projectRows.filter((p) => p.ticket_id).map((p) => p.ticket_id));
+
+    const fmtDate = (d) => new Date(d + 'T12:00:00Z')
+      .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const whenRank = { today: 0, next: 1, later: 2, unscheduled: 3, past: 4 };
+
+    const projectItems = [];
+    for (const p of projectRows) {
+      // Linked ticket closed in the meantime: the project is finished with it.
+      if (p.ticket_id && !liveById[p.ticket_id]) continue;
+      const lt = p.ticket_id ? liveById[p.ticket_id] : null;
+      const sd = p.scheduled_date || null;
+      const when = whenFor(sd);
+      const daysLate = sd && sd < todayStr ? daysBetween(sd, todayStr) : 0;
+      const daysSinceUpdate = p.last_update_at
+        ? Math.max(0, Math.floor((now.getTime() - new Date(p.last_update_at).getTime()) / 86400000)) : 0;
+      const holdEnded = p.status === 'on_hold' && !!p.hold_until && p.hold_until <= todayStr;
+      const quiet = p.status === 'on_hold' && !holdEnded;
+      let nudgeReason = null;
+      if (holdEnded) nudgeReason = 'hold ended, check status';
+      else if (!quiet && p.status === 'waiting' && daysSinceUpdate >= PROJECT_STALE_DAYS) nudgeReason = `no update in ${daysSinceUpdate} days`;
+      else if (!quiet && ['planned', 'confirmed', 'rescheduled'].includes(p.status) && daysLate > 0) nudgeReason = `date passed ${daysLate} day${daysLate === 1 ? '' : 's'} ago, still open`;
+      projectItems.push({
+        id: p.id,
+        type: p.project_type,
+        typeLabel: PROJECT_TYPE_LABEL[p.project_type] || 'Project',
+        title: p.title,
+        location: p.location || null,
+        status: p.status,
+        scheduledDate: sd,
+        scheduledTime: p.scheduled_time || null,
+        whenText: sd ? [fmtDate(sd), p.scheduled_time].filter(Boolean).join(' ') : 'No date yet',
+        when,
+        daysLate,
+        holdUntil: p.hold_until || null,
+        holdUntilText: p.hold_until ? fmtDate(p.hold_until) : null,
+        note: p.note || null,
+        ticketId: p.ticket_id || null,
+        woNumber: lt ? lt.wo_number : null,
+        daysSinceUpdate,
+        quiet,
+        needsNudge: !!nudgeReason,
+        nudgeReason,
+      });
+    }
+    const projectSort = (a, b) => (whenRank[a.when] - whenRank[b.when])
+      || String(a.scheduledDate || '9').localeCompare(String(b.scheduledDate || '9'))
+      || String(a.scheduledTime || '').localeCompare(String(b.scheduledTime || ''));
+    const projects = projectItems.filter((p) => !p.quiet).sort(projectSort);
+    const onHoldProjects = projectItems.filter((p) => p.quiet).sort(projectSort);
+
+    // Neumo installs/surveys. Past-date ones are kept (never assumed closed:
+    // stores remodel or delay for reasons outside our control) and flagged with
+    // daysLate. Ones a dispatcher has linked to a project are shown there instead.
     const installs = liveTickets
-      .filter((t) => t.ticket_kind === 'install' || t.ticket_kind === 'site_survey')
+      .filter((t) => (t.ticket_kind === 'install' || t.ticket_kind === 'site_survey') && !linkedTicketIds.has(t.id))
       .map((t) => {
         const startDate = t.earliest_start_at ? localParts(t.earliest_start_at, timezone).date : null;
         return {
@@ -427,7 +514,11 @@ exports.handler = async (event) => {
           ticketKind: t.ticket_kind,
           earliestStartAt: t.earliest_start_at,
           startText: t.earliest_start_at ? formatLocal(t.earliest_start_at, timezone) : null,
+          startDate,
+          startTimeText: t.earliest_start_at
+            ? new Date(t.earliest_start_at).toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' }) : null,
           when: whenFor(startDate),
+          daysLate: startDate && startDate < todayStr ? daysBetween(startDate, todayStr) : 0,
         };
       })
       .sort((a, b) => String(a.earliestStartAt || '9').localeCompare(String(b.earliestStartAt || '9')));
@@ -673,6 +764,7 @@ exports.handler = async (event) => {
           return { siteCode: site ? site.site_code : null, siteName: site ? site.name : '(unknown site)' };
         }),
         installs: installs.filter((i) => i.when === 'next'),
+        projects: projects.filter((p) => p.when === 'next'),
       };
     }
 
@@ -688,6 +780,9 @@ exports.handler = async (event) => {
     armoredTruckMeets.filter((m) => m.needsNudge || m.meetStatus === 'needs_reschedule')
       .forEach((m) => add('high', `Armored truck meet ${m.siteText}: ${m.meetStatus === 'needs_reschedule' ? 'carrier cannot make it, needs a new time' : `no carrier reply for ${m.daysSinceContact} days`}`));
     armoredTruckMeets.filter((m) => m.when === 'today').forEach((m) => add('info', `Armored truck meet today ${m.confirmedWallClock.slice(11)} at ${m.siteText}`));
+    projects.filter((p) => p.needsNudge).forEach((p) => add('high', `${p.typeLabel} ${p.title}: ${p.nudgeReason}`));
+    projects.filter((p) => !p.needsNudge && p.when === 'today' && ['planned', 'confirmed', 'rescheduled'].includes(p.status))
+      .forEach((p) => add('info', `${p.typeLabel} today${p.scheduledTime ? ' at ' + p.scheduledTime : ''}: ${p.title}`));
     techLoad.filter((t) => t.overloaded).forEach((t) => add('high', `${t.technicianName}: ${t.reasons.join(', ')} today`));
     if (availability.outToday.length) add('info', `Out today: ${availability.outToday.map((t) => t.name).join(', ')}`);
     const nextLabel = new Date(nextBiz + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -697,7 +792,7 @@ exports.handler = async (event) => {
 
     return json(200, {
       ok: true,
-      version: 2,
+      version: 3,
       state,
       region: regionStates,
       mode,
@@ -710,7 +805,7 @@ exports.handler = async (event) => {
       availability,
       technicians,
       troubleTickets,
-      specialProjects: { installs, armoredTruckMeets, calendarProjects },
+      specialProjects: { installs, armoredTruckMeets, calendarProjects, projects, onHold: onHoldProjects },
       needsReview,
       restocks,
       techLoad,
