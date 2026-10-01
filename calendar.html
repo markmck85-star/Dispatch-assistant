@@ -351,10 +351,18 @@
           <label class="check-label"><input type="radio" name="onCallRole" value="dispatcher"> Dispatcher</label>
         </div>
       </div>
+      <div class="form-group">
+        <label for="onCallDate">Saturday</label>
+        <input type="date" id="onCallDate" required>
+      </div>
       <div id="onCallTechFields">
         <div class="form-group">
           <label for="onCallState">State</label>
           <select id="onCallState" required></select>
+        </div>
+        <div class="form-group" id="onCallReplacingRow" style="display:none;">
+          <label for="onCallReplacing">Replacing</label>
+          <select id="onCallReplacing"></select>
         </div>
         <div class="form-group">
           <label for="onCallTech">Technician</label>
@@ -366,10 +374,6 @@
           <label for="onCallDispatcher">Dispatcher (covers all Saturday states)</label>
           <select id="onCallDispatcher"></select>
         </div>
-      </div>
-      <div class="form-group">
-        <label for="onCallDate">Saturday</label>
-        <input type="date" id="onCallDate" required>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-cancel" id="closeOnCallBtn">Cancel</button>
@@ -436,6 +440,7 @@ let allTechs = [];            // [{id, name, home_state}]
 let allDispatchers = [];      // [{id, username}]
 let onCallPool = new Map();   // technician_id -> Set of states they are on the Saturday rotation for (today onward)
 let onCallReplaceMode = false;
+let onCallExisting = [];      // technician ids already on call for the form's selected state + Saturday
 
 let viewDate = new Date();
 viewDate.setDate(1);
@@ -880,6 +885,9 @@ function rebuildOnCallTechOptions(opts) {
     if (t) pool.push(t);
   }
   if (exclude) pool = pool.filter((t) => String(t.id) !== exclude);
+  // Someone already on call for this state and Saturday is never offered
+  // again (the one being edited stays selectable).
+  pool = pool.filter((t) => !onCallExisting.includes(String(t.id)) || (keepId != null && String(t.id) === keep));
 
   sel.innerHTML = '';
   if (placeholder) {
@@ -922,10 +930,7 @@ async function openOnCallModal(prefill) {
     onCallModalSubmitBtn.textContent = prefill.replace ? 'Save Replacement' : 'Update On-Call';
     document.getElementById('onCallState').value = prefill.state;
     document.getElementById('onCallDate').value = prefill.day;
-    afterPools = () => rebuildOnCallTechOptions(
-      prefill.replace
-        ? { excludeId: prefill.technician_id, placeholder: true }
-        : { keepId: prefill.technician_id });
+    afterPools = null;
   } else {
     roleRow.style.display = '';
     setOnCallRole('tech');
@@ -942,17 +947,59 @@ async function openOnCallModal(prefill) {
     afterPools(dispatcherIds);
   } else {
     rebuildDispatcherOptions(dispatcherIds, null);
-    if (afterPools) afterPools(); else rebuildOnCallTechOptions({});
+    await refreshOnCallExisting();
   }
   refreshOnCallAvailabilityMarks();
 }
 
-document.getElementById('onCallState').addEventListener('change', () => {
-  rebuildOnCallTechOptions(onCallReplaceMode && editingOnCallKey
-    ? { excludeId: editingOnCallKey.technician_id, placeholder: true }
-    : {});
+// Adding someone to a Saturday that already has a technician on call is
+// always a replacement, so the headcount never grows by accident. When the
+// chosen state + Saturday already has people on call, a "Replacing" dropdown
+// appears (preselected when there is only one) and saving swaps them out.
+// An empty Saturday is simply filled.
+async function refreshOnCallExisting() {
+  const state = document.getElementById('onCallState').value;
+  const day = document.getElementById('onCallDate').value;
+  let ids = [];
+  if (state && day) {
+    try {
+      const { data } = await sb.from('on_call_schedule').select('technician_id').eq('state', state).eq('day', day);
+      ids = (data || []).map((r) => String(r.technician_id));
+    } catch (err) { ids = []; }
+  }
+  onCallExisting = ids;
+
+  const editingPlain = !!editingOnCallKey && !onCallReplaceMode;
+  rebuildOnCallTechOptions(editingPlain ? { keepId: editingOnCallKey.technician_id } : { placeholder: true });
+
+  const row = document.getElementById('onCallReplacingRow');
+  const rsel = document.getElementById('onCallReplacing');
+  if (!editingOnCallKey && ids.length > 0) {
+    rsel.innerHTML = '';
+    if (ids.length > 1) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = 'Who is being replaced?';
+      rsel.appendChild(ph);
+    }
+    for (const id of ids) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = techNameById.get(id) || 'Technician';
+      rsel.appendChild(o);
+    }
+    rsel.value = ids.length === 1 ? ids[0] : '';
+    rsel.required = true;
+    row.style.display = '';
+  } else {
+    rsel.innerHTML = '';
+    rsel.required = false;
+    row.style.display = 'none';
+  }
   refreshOnCallAvailabilityMarks();
-});
+}
+
+document.getElementById('onCallState').addEventListener('change', refreshOnCallExisting);
 
 // Tag technicians who are marked out on the chosen Saturday, right in the
 // dropdown, so nobody picks a replacement who is also away.
@@ -990,7 +1037,7 @@ async function getTimeOffReason(technician_id, day) {
 document.querySelectorAll('input[name="onCallRole"]').forEach((r) => {
   r.addEventListener('change', () => { setOnCallRole(currentOnCallRole()); refreshOnCallAvailabilityMarks(); });
 });
-document.getElementById('onCallDate').addEventListener('change', refreshOnCallAvailabilityMarks);
+document.getElementById('onCallDate').addEventListener('change', refreshOnCallExisting);
 
 document.getElementById('openOnCallModalBtn').addEventListener('click', () => openOnCallModal(null));
 document.getElementById('closeOnCallBtn').addEventListener('click', () => { onCallModal.classList.remove('active'); onCallReplaceMode = false; reshowPendingConflicts(); });
@@ -1711,7 +1758,11 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
   const state = document.getElementById('onCallState').value;
   const technician_id = document.getElementById('onCallTech').value;
   if (!technician_id) { alert('Pick a technician.'); return; }
-  const oldKey = editingOnCallKey;
+  const replacingId = (!editingOnCallKey && document.getElementById('onCallReplacingRow').style.display !== 'none')
+    ? document.getElementById('onCallReplacing').value : '';
+  if (!editingOnCallKey && onCallExisting.length > 0 && !replacingId) { alert('Choose who is being replaced.'); return; }
+  // Editing/replacing an entry, or a plain add onto an occupied Saturday: either way the old person comes off.
+  const oldKey = editingOnCallKey || (replacingId ? { state, day, technician_id: replacingId } : null);
 
   try {
     // On-call has no fields beyond its own identity (state/day/technician),
@@ -1719,10 +1770,10 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
     // nothing to update in place. If nothing actually changed, skip the
     // round-trip entirely rather than needlessly cancelling and re-pushing
     // an already-synced BlueFolder appointment.
-    const keyUnchanged = editingOnCallKey
-      && editingOnCallKey.state === state
-      && editingOnCallKey.day === day
-      && String(editingOnCallKey.technician_id) === String(technician_id);
+    const keyUnchanged = oldKey
+      && oldKey.state === state
+      && oldKey.day === day
+      && String(oldKey.technician_id) === String(technician_id);
 
     // Warn before putting someone on call on a day they are marked out.
     if (!keyUnchanged) {
@@ -1733,11 +1784,11 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
       }
     }
 
-    if (editingOnCallKey && !keyUnchanged) {
+    if (oldKey && !keyUnchanged) {
       const delRes = await fetch('/.netlify/functions/save-on-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: editingOnCallKey.state, day: editingOnCallKey.day, technician_id: editingOnCallKey.technician_id, action: 'delete' })
+        body: JSON.stringify({ state: oldKey.state, day: oldKey.day, technician_id: oldKey.technician_id, action: 'delete' })
       });
       const delData = await delRes.json();
       if (!delRes.ok || !delData.ok) throw new Error('Could not move old on-call entry: ' + (delData.error || ('HTTP ' + delRes.status)));
