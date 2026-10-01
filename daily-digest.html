@@ -3,211 +3,269 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Daily Digest — MCR Dispatch</title>
+<title>Daily Digest – MCR Dispatch</title>
 <style>
-  body { background:#111; color:#eee; font-family: -apple-system, Arial, sans-serif; margin:0; padding:16px; }
-  h1 { font-size:1.3rem; margin:0 0 12px; }
-  h2 { font-size:1rem; margin:20px 0 8px; color:#ffa500; }
-  .collapsible-section { margin:20px 0 8px; }
-  .collapsible-section summary {
-    font-size:1rem; color:#ffa500; cursor:pointer; list-style:revert;
-    margin-bottom:8px;
-  }
-  .collapsible-section summary .section-count { font-weight:normal; }
-  select, button {
-    font-size:1rem; padding:8px 12px; border-radius:6px; border:1px solid #555;
-    background:#222; color:#eee; margin-bottom:14px; margin-right:8px;
-  }
-  button { background:#2563eb; border-color:#2563eb; cursor:pointer; }
-  button.active { background:#ffa500; border-color:#ffa500; color:#000; font-weight:bold; }
-  #status { color:#aaa; margin-bottom:12px; }
-  .card {
-    background:#1c1c1c; border-left:4px solid #888; border-radius:6px;
-    padding:10px 14px; margin-bottom:8px;
-  }
-  .card.trouble { border-left-color:#ef4444; }
-  .card.install, .card.site_survey { border-left-color:#f59e0b; }
-  .card.review { border-left-color:#eab308; }
-  .card.completed { border-left-color:#22c55e; }
-  .card.open { border-left-color:#3b82f6; }
-  .card.removed { border-left-color:#666; }
-  .card .title { font-weight:bold; }
-  .card .meta { color:#aaa; font-size:0.85rem; margin-top:2px; }
-  .kind {
-    display:inline-block; font-size:0.7rem; text-transform:uppercase;
-    letter-spacing:0.03em; padding:2px 6px; border-radius:4px; background:#333; margin-left:6px;
-  }
-  #empty-section { color:#888; padding:6px 0; font-size:0.9rem; }
-  .section-count { color:#888; font-weight:normal; font-size:0.85rem; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f5f8; color: #1f2933; padding: 15px; line-height: 1.5; font-size: 16px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  .back-link { display: inline-block; color: #1a56a8; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .back-link:hover { text-decoration: underline; }
+  .console { background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px; box-shadow: 0 1px 4px rgba(16,24,40,0.08); padding: 18px; }
+  h1 { color: #1f3a5f; font-size: 21px; margin-bottom: 2px; }
+  .subtitle { color: #6b7785; font-size: 12px; margin-bottom: 14px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  select, button { font-size: 14px; padding: 8px 12px; border-radius: 6px; border: 1px solid #c5cdd8; background: #ffffff; color: #1f2933; }
+  button { cursor: pointer; font-weight: 600; color: #1a56a8; border-color: #1a56a8; }
+  button:hover { background: #eef4fc; }
+  button.active { background: #1a56a8; color: #ffffff; }
+  #status { color: #6b7785; font-size: 12.5px; margin-bottom: 12px; }
+  .error-state { color: #c0392b; font-size: 14px; padding: 12px 0; }
+
+  details { border: 1px solid #e3e8ee; border-radius: 8px; margin-bottom: 10px; background: #ffffff; }
+  details > summary { cursor: pointer; padding: 10px 12px; font-weight: 700; color: #1f3a5f; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 8px; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '\25B8'; color: #6b7785; }
+  details[open] > summary::before { content: '\25BE'; }
+  .count { font-weight: 500; color: #6b7785; font-size: 13px; }
+  .body { padding: 2px 12px 12px; }
+  .empty { color: #6b7785; font-size: 13.5px; padding: 4px 0; }
+
+  .item { border-left: 4px solid #8d99a8; background: #f7f9fb; border-radius: 4px; padding: 8px 10px; margin-bottom: 6px; }
+  .item .title { font-weight: 600; font-size: 14.5px; }
+  .item .meta { color: #52606d; font-size: 12.5px; margin-top: 2px; }
+  .item.high, .item.overdue { border-left-color: #b03a3a; }
+  .item.due_today, .item.warn { border-left-color: #b45309; }
+  .item.later, .item.ok { border-left-color: #2f7a68; }
+  .item.stale, .item.muted { border-left-color: #aab4c1; opacity: 0.8; }
+  .item.info { border-left-color: #2f5f8f; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 6px; border-radius: 4px; background: #e6ebf2; color: #3e4c59; margin-left: 6px; vertical-align: middle; }
+  .tag.red { background: #f3dcdc; color: #8a2b2b; }
+  .tag.amber { background: #f6e6cf; color: #8a5210; }
+  .tag.green { background: #d9ece6; color: #1f5f4f; }
+  .sub { color: #52606d; font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
+
+  .weight { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pill { border-radius: 8px; padding: 10px 14px; background: #f3f5f8; border: 1px solid #dfe3e8; flex: 1 1 200px; }
+  .pill .big { font-size: 19px; font-weight: 700; color: #1f3a5f; }
+  .pill .big.heavy { color: #b03a3a; }
+  .pill .big.light { color: #2f7a68; }
+  .pill .small { font-size: 12.5px; color: #52606d; }
 </style>
 </head>
 <body>
+<div class="container">
+  <a href="index.html" class="back-link">&larr; Back to Dispatch</a>
+  <div class="console">
+    <h1>&#128203; Daily Digest</h1>
+    <div class="subtitle">Morning brief and end-of-day summary for a territory</div>
 
-<h1>Daily Digest</h1>
-<div>
-  <select id="stateSelect">
-    <option value="GA">Georgia / NC / SC</option>
-    <option value="CA">California</option>
-    <option value="CO">Colorado</option>
-    <option value="FL">Florida</option>
-    <option value="ID">Idaho</option>
-    <option value="IL">Illinois</option>
-    <option value="IN">Indiana</option>
-    <option value="MI">Michigan</option>
-    <option value="MN">Minnesota</option>
-    <option value="NV">Nevada</option>
-    <option value="OH">Ohio</option>
-    <option value="OR">Oregon</option>
-    <option value="WV">West Virginia</option>
-    <option value="AL">Alabama</option>
-  </select>
-  <button id="morningBtn" class="active">Morning Brief</button>
-  <button id="eveningBtn">State of the State</button>
-  <button id="refreshBtn">Refresh</button>
+    <div class="toolbar">
+      <select id="stateSelect">
+        <option value="GA">Georgia / NC / SC</option>
+        <option value="CA">California</option>
+        <option value="CO">Colorado</option>
+        <option value="FL">Florida</option>
+        <option value="ID">Idaho</option>
+        <option value="IL">Illinois</option>
+        <option value="IN">Indiana</option>
+        <option value="MI">Michigan</option>
+        <option value="MN">Minnesota</option>
+        <option value="NV">Nevada</option>
+        <option value="OH">Ohio</option>
+        <option value="OR">Oregon</option>
+        <option value="WV">West Virginia</option>
+      </select>
+      <button id="morningBtn" class="active">Morning brief</button>
+      <button id="eveningBtn">End of day</button>
+      <button id="refreshBtn">Refresh</button>
+    </div>
+
+    <div id="status">Loading&hellip;</div>
+    <div id="out"></div>
+  </div>
 </div>
-<div id="status"></div>
-<div id="content"></div>
 
 <script>
-const stateSelect = document.getElementById('stateSelect');
-const morningBtn = document.getElementById('morningBtn');
-const eveningBtn = document.getElementById('eveningBtn');
-const refreshBtn = document.getElementById('refreshBtn');
-const statusEl = document.getElementById('status');
-const contentEl = document.getElementById('content');
 let mode = 'morning';
 
-(function preselectFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const urlState = (params.get('state') || '').trim().toUpperCase();
-  if (urlState && [...stateSelect.options].some(o => o.value === urlState)) {
-    stateSelect.value = urlState;
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s == null ? '' : s);
+  return d.innerHTML;
+}
+const REASON = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last day' };
+const MEET = { awaiting_response: 'Waiting on carrier', proposed: 'Time proposed', confirmed: 'Confirmed', needs_reschedule: 'Needs new time' };
+const ORIGIN = { carried_over: 'Carried over', overnight: 'Overnight', today: 'Today' };
+const STATUS_TAG = { overdue: ['Past SLA', 'red'], due_today: ['Due today', 'amber'], later: ['Later', 'green'], stale: ['Likely closed', ''], unknown: ['No deadline', ''] };
+
+function section(title, count, bodyHtml, open) {
+  const c = (count == null) ? '' : ` <span class="count">(${count})</span>`;
+  return `<details${open ? ' open' : ''}><summary>${title}${c}</summary><div class="body">${bodyHtml}</div></details>`;
+}
+const empty = (t) => `<div class="empty">${esc(t)}</div>`;
+const item = (cls, title, meta, tagHtml) =>
+  `<div class="item ${cls}"><div class="title">${title}${tagHtml || ''}</div>${meta ? `<div class="meta">${meta}</div>` : ''}</div>`;
+const tag = (text, color) => `<span class="tag ${color || ''}">${esc(text)}</span>`;
+
+function render(d) {
+  let h = '';
+
+  // ---- Needs attention
+  const att = d.attention || [];
+  h += section('Needs attention', att.length,
+    att.length ? att.map((a) => item(a.level === 'high' ? 'high' : 'info', esc(a.text))).join('') : empty('Nothing flagged right now.'), true);
+
+  // ---- Day weight + weather
+  const w = d.dayWeight || {};
+  const wl = { heavy: 'Heavy', light: 'Light', regular: 'Regular', none_yet: 'No stops yet', unknown: 'Not enough history' }[w.label] || '—';
+  let wSmall = esc(w.note || '');
+  if (w.ratio != null) {
+    wSmall = `${w.callsToday} stops, ${w.availableTechs} techs available (${w.callsPerTech} per tech vs ${w.baselineCallsPerTech} usual, ${w.ratio}x). Heavy at ${w.heavyTrigger}x, light under ${w.lightBelow}x.`;
   }
-  const urlMode = (params.get('mode') || '').trim().toLowerCase();
-  if (urlMode === 'evening') setMode('evening');
-})();
+  const alerts = (d.weather && d.weather.alerts) || [];
+  let wxBig = 'No severe alerts', wxSmall = '';
+  if (d.weather && !d.weather.ok) { wxBig = 'Weather unavailable'; wxSmall = esc(d.weather.error || ''); }
+  else if (alerts.length) { wxBig = `${alerts.length} severe alert${alerts.length === 1 ? '' : 's'}`; wxSmall = alerts.map((a) => esc(a.event)).join(', '); }
+  h += `<div class="weight">
+    <div class="pill"><div class="small">Workload</div><div class="big ${esc(w.label)}">${esc(wl)}</div><div class="small">${wSmall}</div></div>
+    <div class="pill"><div class="small">Weather</div><div class="big">${esc(wxBig)}</div><div class="small">${wxSmall}</div></div>
+  </div>`;
+  if (alerts.length) {
+    h += section('Weather alerts', alerts.length, alerts.map((a) =>
+      item(a.severity === 'Extreme' ? 'high' : 'warn', esc(a.event), esc(a.areas) + (a.ends ? ' &middot; until ' + esc(new Date(a.ends).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })) : ''))).join(''), true);
+  }
 
-function setMode(m) {
-  mode = m;
-  morningBtn.classList.toggle('active', m === 'morning');
-  eveningBtn.classList.toggle('active', m === 'evening');
-}
+  // ---- Availability
+  const av = d.availability || {};
+  const nameList = (arr) => arr.map((t) => `${esc(t.name)}${t.reason ? ' (' + esc(REASON[t.reason] || 'Out') + ')' : ''}`).join(', ');
+  let avHtml = '';
+  const avRows = [['Out today', av.outToday], ['Back today', av.returningToday], ['Out next workday', av.outNext], ['Back next workday', av.returningNext]];
+  for (const [label, arr] of avRows) {
+    if (arr && arr.length) avHtml += item('info', esc(label), nameList(arr));
+  }
+  const avCount = (av.outToday || []).length + (av.outNext || []).length;
+  h += section('Technician availability', avCount, avHtml || empty('Everyone is in today and the next workday.'), avCount > 0);
 
-function fmtDate(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-}
+  // ---- Trouble tickets
+  const tt = d.troubleTickets || [];
+  const live = tt.filter((t) => t.slaStatus !== 'stale');
+  const stale = tt.filter((t) => t.slaStatus === 'stale');
+  const ticketItem = (t) => {
+    const st = STATUS_TAG[t.slaStatus] || STATUS_TAG.unknown;
+    const meta = `${esc(t.issueCategory || '')}${t.issueDetail ? ' &middot; ' + esc(t.issueDetail) : ''}<br>`
+      + `${t.dueText ? 'Due ' + esc(t.dueText) + ' &middot; ' : ''}${esc(ORIGIN[t.origin] || '')}${t.matched ? '' : ' &middot; site not matched'}${t.routedTo ? ' &middot; routed to ' + esc(t.routedTo) : ''}`;
+    return item(t.slaStatus, `${esc(t.siteText)} <span class="meta">WO ${esc(t.woNumber)}</span>`, meta, tag(st[0], st[1]));
+  };
+  h += section('Trouble tickets', live.length, live.length ? live.map(ticketItem).join('') : empty('No open trouble tickets.'), live.length > 0);
+  if (stale.length) h += section('Overdue more than a few days (likely already closed)', stale.length, stale.map(ticketItem).join(''), false);
 
-function section(title, items, renderItem, emptyLabel) {
-  const html = items.length
-    ? items.map(renderItem).join('')
-    : `<div id="empty-section">${emptyLabel}</div>`;
-  return `<h2>${title} <span class="section-count">(${items.length})</span></h2>${html}`;
-}
+  // ---- Special projects
+  const sp = d.specialProjects || {};
+  const meets = sp.armoredTruckMeets || [];
+  let spHtml = '';
+  if (meets.length) {
+    spHtml += '<div class="sub">Armored truck meets</div>';
+    spHtml += meets.map((m) => {
+      const cls = (m.needsNudge || m.meetStatus === 'needs_reschedule') ? 'high' : (m.when === 'today' ? 'warn' : 'info');
+      const when = m.confirmedWallClock ? ` &middot; ${esc(m.confirmedWallClock)}` : '';
+      const last = m.daysSinceContact != null ? ` &middot; last carrier contact ${m.daysSinceContact === 0 ? 'today' : m.daysSinceContact + ' day' + (m.daysSinceContact === 1 ? '' : 's') + ' ago'}` : '';
+      return item(cls, `${esc(m.siteText)} <span class="meta">WO ${esc(m.woNumber)}</span>`, esc(MEET[m.meetStatus] || m.meetStatus) + when + last);
+    }).join('');
+  }
+  const installs = sp.installs || [];
+  const WHEN = { today: 'Today', next: 'Next workday', later: 'Later', past: 'Past date', unscheduled: 'No date yet' };
+  if (installs.length) {
+    spHtml += '<div class="sub">Installs and site surveys</div>';
+    spHtml += installs.map((i) => item(i.when === 'today' ? 'warn' : (i.when === 'past' ? 'muted' : 'info'),
+      `${esc(i.siteText)} <span class="meta">WO ${esc(i.woNumber)}</span>`,
+      `${esc(i.ticketKind === 'install' ? 'Install' : 'Site survey')} &middot; ${i.startText ? esc(i.startText) : esc(WHEN[i.when])}`)).join('');
+  }
+  const cal = sp.calendarProjects || [];
+  if (cal.length) {
+    spHtml += '<div class="sub">From the team calendar</div>';
+    spHtml += cal.map((c) => item(c.when === 'today' ? 'warn' : 'info',
+      esc(c.note || c.type), `${esc(c.type)} &middot; ${esc(c.technicianName || '')} &middot; ${c.when === 'today' ? 'Today' : 'Next workday'}`)).join('');
+  }
+  h += section('Special projects', meets.length + installs.length + cal.length, spHtml || empty('Nothing scheduled.'), (meets.length + cal.length) > 0 || installs.some((i) => i.when === 'today'));
 
-// Collapsible variant -- defaults closed. Used for sections that are
-// useful to have around but not something you need to scan every load
-// (e.g. shipments), per Mark's ask 2026-09-17.
-function collapsibleSection(title, items, renderItem, emptyLabel) {
-  const html = items.length
-    ? items.map(renderItem).join('')
-    : `<div id="empty-section">${emptyLabel}</div>`;
-  return `<details class="collapsible-section"><summary>${title} <span class="section-count">(${items.length})</span></summary>${html}</details>`;
-}
+  // ---- Restocks
+  const r = d.restocks || { completed: [], stillOpen: [], removed: [], pushedFromPrevious: [] };
+  const stop = (cls) => (x) => item(cls, esc(x.siteName), `${esc(x.siteCode || '')}${x.technicianName ? ' &middot; ' + esc(x.technicianName) : ''}`, x.pushedFromPrevious ? tag('Pushed from yesterday', 'amber') : '');
+  let rHtml = '';
+  if (r.stillOpen.length) rHtml += '<div class="sub">Still open</div>' + r.stillOpen.map(stop('info')).join('');
+  if (r.completed.length) rHtml += '<div class="sub">Completed</div>' + r.completed.map(stop('ok')).join('');
+  if (r.removed.length) rHtml += '<div class="sub">Removed</div>' + r.removed.map(stop('muted')).join('');
+  const pushedN = (r.pushedFromPrevious || []).length;
+  h += section(`Restocks${pushedN ? ' &middot; ' + pushedN + ' pushed from yesterday' : ''}`, r.completed.length + r.stillOpen.length, rHtml || empty('No stops on the board for today.'), pushedN > 0);
 
-function ticketCard(t) {
-  const kindClass = (t.ticketKind || 'trouble').toLowerCase();
-  const deadline = t.computedSlaDeadline
-    ? `SLA: ${fmtDate(t.computedSlaDeadline)}`
-    : (t.slaEndsAt ? `SLA: ${fmtDate(t.slaEndsAt)}` : (t.earliestStartAt ? `Scheduled: ${fmtDate(t.earliestStartAt)}` : (t.dueAt ? `Due: ${fmtDate(t.dueAt)}` : '')));
-  return `
-    <div class="card ${kindClass}">
-      <span class="title">WO ${t.woNumber || '—'}</span>
-      <span class="kind">${(t.ticketKind || 'trouble').replace('_',' ')}</span>
-      ${!t.matched ? '<span class="kind" style="background:#7c2d12;">unmatched site</span>' : ''}
-      ${t.routedTo ? `<span class="kind" style="background:#1e3a5f;">routed to ${t.routedTo}</span>` : ''}
-      <div>${t.siteText || '(no site text)'}</div>
-      <div class="meta">${[t.issueCategory, t.issueDetail].filter(Boolean).join(' – ') || 'No issue category'}${deadline ? ' · ' + deadline : ''} · Received ${fmtDate(t.receivedAt)}</div>
-    </div>`;
-}
+  // ---- Technician load
+  const tl = (d.techLoad || []);
+  const over = tl.filter((t) => t.overloaded);
+  h += section('Technician load', over.length ? `${over.length} flagged` : null,
+    tl.length ? tl.map((t) => item(t.overloaded ? 'high' : 'ok', esc(t.technicianName || 'Unassigned'),
+      `${t.stops} stop${t.stops === 1 ? '' : 's'} &middot; about ${esc(t.driveText)} driving${t.incompleteEstimate ? ' (some distances missing)' : ''}${t.reasons.length ? ' &middot; ' + esc(t.reasons.join(', ')) : ''}`)).join('') : empty('No assigned stops yet.'),
+    over.length > 0);
 
-function reviewCard(t) {
-  return `
-    <div class="card review">
-      <span class="title">WO ${t.woNumber || '—'}</span>
-      <span class="kind">needs review</span>
-      <div>${t.siteText || '(no site text)'}</div>
-      <div class="meta">${[t.issueCategory, t.issueDetail].filter(Boolean).join(' – ') || ''} · Received ${fmtDate(t.receivedAt)}</div>
-    </div>`;
-}
+  // ---- Saturday on-call
+  if (d.saturday) {
+    const s = d.saturday;
+    const label = new Date(s.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    const dispName = s.dispatcher ? s.dispatcher.charAt(0).toUpperCase() + s.dispatcher.slice(1) : null;
+    h += section(`On call ${s.isToday ? 'today' : 'this Saturday'} (${esc(label)})`, null,
+      (dispName ? item('info', esc(dispName), 'On-call dispatcher') : '') +
+      (s.technicians || []).map((t) => item('info', esc(t.name || ''), 'On-call technician &middot; ' + esc(t.state))).join(''), s.isToday);
+  }
 
-function restockCard(cls) {
-  return (r) => `
-    <div class="card ${cls}">
-      <span class="title">${r.siteName || r.siteCode || 'Unknown site'}</span>
-      ${r.siteCode ? `<span class="kind">${r.siteCode}</span>` : ''}
-      ${r.technicianName ? `<div class="meta">${r.technicianName}</div>` : ''}
-    </div>`;
-}
+  // ---- Review + shipments
+  const nr = d.needsReview || [];
+  h += section('Flagged for review', nr.length, nr.length ? nr.map((t) => item('warn', `${esc(t.siteText)} <span class="meta">WO ${esc(t.woNumber)}</span>`, esc(t.issueCategory || '') + (t.issueDetail ? ' &middot; ' + esc(t.issueDetail) : ''))).join('') : empty('Nothing flagged.'), false);
+  const sh = d.openShipments || [];
+  h += section('Open return shipments', sh.length, sh.length ? sh.map((s) => item('info', esc(s.siteName), `${esc(s.siteCode || '')}${s.needsReturn ? ' &middot; broken part to return' : ''}${s.warehouseName ? ' &middot; ' + esc(s.warehouseName) : ''}`)).join('') : empty('None outstanding.'), false);
 
-function shipmentCard(s) {
-  return `
-    <div class="card ${s.needsReturn ? 'trouble' : 'open'}">
-      <span class="title">${s.siteName || s.siteCode || 'Unknown site'}</span>
-      ${s.siteCode ? `<span class="kind">${s.siteCode}</span>` : ''}
-      <div class="meta">${s.needsReturn ? 'Part return needed' : 'Outbound only'}${s.warehouseName ? ' · ' + s.warehouseName : ''}</div>
-    </div>`;
+  // ---- Evening preview
+  if (d.preview) {
+    const p = d.preview;
+    const pl = new Date(p.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    let pHtml = '';
+    if (p.restocksQueued.length) pHtml += '<div class="sub">Restocks already queued</div>' + p.restocksQueued.map((x) => item('info', esc(x.siteName), esc(x.siteCode || ''))).join('');
+    if (p.installs.length) pHtml += '<div class="sub">Installs and surveys</div>' + p.installs.map((i) => item('info', esc(i.siteText), esc(i.startText || ''))).join('');
+    const tln = d.techLoadNext || [];
+    if (tln.length) pHtml += '<div class="sub">Load so far</div>' + tln.map((t) => item(t.overloaded ? 'high' : 'ok', esc(t.technicianName || 'Unassigned'), `${t.stops} stops &middot; about ${esc(t.driveText)} driving`)).join('');
+    h += section(`Preview: ${esc(pl)}`, null, pHtml || empty('Nothing queued yet.'), true);
+  }
+
+  document.getElementById('out').innerHTML = h;
 }
 
 async function load() {
-  const state = stateSelect.value;
-  statusEl.textContent = 'Loading…';
-  contentEl.innerHTML = '';
+  const state = document.getElementById('stateSelect').value;
+  const status = document.getElementById('status');
+  const out = document.getElementById('out');
+  status.textContent = 'Loading…';
+  out.innerHTML = '';
   try {
-    const resp = await fetch(`/.netlify/functions/get-daily-digest?state=${state}&mode=${mode}`);
+    const resp = await fetch(`/.netlify/functions/get-daily-digest?state=${encodeURIComponent(state)}&mode=${mode}`);
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || String(resp.status));
-
-    const unavailable = data.technicians.filter(t => !t.available);
-    statusEl.textContent = `${state} · ${data.date} (${data.timezone}) · generated ${fmtDate(data.generatedAt)}`;
-
-    let html = '';
-    html += section('Unavailable Today', unavailable,
-      (t) => `<div class="card removed"><span class="title">${t.name}</span><div class="meta">${t.reason || ''}${t.note ? ' — ' + t.note : ''}</div></div>`,
-      'Everyone available.');
-    html += section('Open Trouble / Install / Site Survey', data.openTickets, ticketCard, 'Nothing outstanding.');
-    html += section('Needs Review', data.needsReview, reviewCard, 'Nothing flagged.');
-    html += section('Restocks — Completed', data.restocks.completed, restockCard('completed'), 'None completed yet.');
-    html += section('Restocks — Still Open', data.restocks.stillOpen, restockCard('open'), 'None outstanding.');
-    html += section('Restocks — Removed / Pushed', data.restocks.removed, restockCard('removed'), 'None removed today.');
-    html += collapsibleSection('Open RMA Shipments', data.openShipments, shipmentCard, 'None outstanding.');
-
-    if (data.preview) {
-      html += `<h2>Tomorrow Preview — ${data.preview.date} <span class="section-count">(${data.preview.installs.length + data.preview.restocksQueued.length})</span></h2>`;
-      html += data.preview.installs.length
-        ? data.preview.installs.map(ticketCard).join('')
-        : '';
-      html += data.preview.restocksQueued.length
-        ? data.preview.restocksQueued.map(restockCard('open')).join('')
-        : '';
-      if (!data.preview.installs.length && !data.preview.restocksQueued.length) {
-        html += '<div id="empty-section">Nothing queued yet.</div>';
-      }
-    }
-
-    contentEl.innerHTML = html;
+    if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    status.textContent = `${data.date} · ${data.timezone.replace('America/', '').replace('_', ' ')} · generated ${new Date(data.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    render(data);
   } catch (err) {
-    statusEl.textContent = 'Error: ' + err.message;
+    status.textContent = '';
+    out.innerHTML = `<div class="error-state">Could not load the digest: ${esc(err.message)}</div>`;
   }
 }
 
-morningBtn.addEventListener('click', () => { setMode('morning'); load(); });
-eveningBtn.addEventListener('click', () => { setMode('evening'); load(); });
-refreshBtn.addEventListener('click', load);
-stateSelect.addEventListener('change', load);
+function setMode(m) {
+  mode = m;
+  document.getElementById('morningBtn').classList.toggle('active', m === 'morning');
+  document.getElementById('eveningBtn').classList.toggle('active', m === 'evening');
+  load();
+}
+document.getElementById('morningBtn').addEventListener('click', () => setMode('morning'));
+document.getElementById('eveningBtn').addEventListener('click', () => setMode('evening'));
+document.getElementById('refreshBtn').addEventListener('click', load);
+document.getElementById('stateSelect').addEventListener('change', load);
 load();
 </script>
-
 </body>
 </html>
