@@ -1144,6 +1144,11 @@ const compDayModal = document.getElementById('compDayModal');
 let compDayCtx = null;
 
 async function promptCompDay(newTechId, oldTechId, satDay, state) {
+  // Georgia's on-call comp days are automatic: the State Console and daily
+  // digest compute them from the on-call schedule (Thursday for Robert Medley,
+  // Monday for everyone else), so adding a separate comp-day entry here would
+  // give the technician two. Other states record comp days as calendar entries.
+  if (String(state).toUpperCase() === 'GA') return false;
   const [y, m, d] = satDay.split('-').map(Number);
   if (new Date(y, m - 1, d).getDay() !== 6) return false;
   const days = [];
