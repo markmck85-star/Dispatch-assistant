@@ -198,6 +198,17 @@
     color: #52606d; margin-bottom: 8px; cursor: pointer;
   }
   .form-group .check-label input { width: auto; margin: 0; }
+  .role-row { display: flex; gap: 18px; }
+  .conflict-toast {
+    display: none; position: fixed; z-index: 2000; left: 50%; transform: translateX(-50%);
+    top: calc(env(safe-area-inset-top, 0px) + 10px); width: min(92vw, 440px);
+    background: #ffffff; color: #1f2933; border: 1px solid #dfe3e8; border-left: 6px solid #b45309;
+    border-radius: 10px; box-shadow: 0 10px 30px rgba(16,24,40,0.3); padding: 12px 14px; font-size: 13.5px;
+  }
+  .conflict-toast .conflict-title { font-weight: 700; color: #b45309; margin-bottom: 8px; }
+  .conflict-toast .conflict-item { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid #e3e8ee; }
+  .conflict-toast .conflict-item .btn-primary { align-self: flex-start; }
+  .conflict-toast .conflict-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
   .range-hint { font-size: 12px; color: #6b7785; margin: -4px 0 10px; min-height: 0; }
   .range-hint:empty { display: none; }
   .range-hint.warn { color: #c0392b; }
@@ -333,13 +344,28 @@
   <div class="modal">
     <h2 id="onCallModalTitle">Set Saturday On-Call</h2>
     <form id="onCallForm">
-      <div class="form-group">
-        <label for="onCallState">State</label>
-        <select id="onCallState" required></select>
+      <div class="form-group" id="onCallRoleRow">
+        <label>Who is it for?</label>
+        <div class="role-row">
+          <label class="check-label"><input type="radio" name="onCallRole" value="tech" checked> Technician</label>
+          <label class="check-label"><input type="radio" name="onCallRole" value="dispatcher"> Dispatcher</label>
+        </div>
       </div>
-      <div class="form-group">
-        <label for="onCallTech">Technician</label>
-        <select id="onCallTech" required></select>
+      <div id="onCallTechFields">
+        <div class="form-group">
+          <label for="onCallState">State</label>
+          <select id="onCallState" required></select>
+        </div>
+        <div class="form-group">
+          <label for="onCallTech">Technician</label>
+          <select id="onCallTech" required></select>
+        </div>
+      </div>
+      <div id="onCallDispatcherFields" style="display:none;">
+        <div class="form-group">
+          <label for="onCallDispatcher">Dispatcher (covers all Saturday states)</label>
+          <select id="onCallDispatcher"></select>
+        </div>
       </div>
       <div class="form-group">
         <label for="onCallDate">Saturday</label>
@@ -377,6 +403,8 @@
   </div>
 </div>
 
+<div class="conflict-toast" id="conflictToast" role="alert"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
@@ -385,13 +413,17 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last Day', info: 'Note', site_survey: 'Site Survey', install: 'Install' };
 const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Entry types that mean the person is actually unavailable (as opposed to
+// Info / Site Survey / Install notes). Only these trigger on-call conflict checks.
+const TIME_OFF_REASONS = new Set(['vacation', 'personal', 'pto', 'comp_day', 'manual', 'other', 'last_day']);
+const techNameById = new Map();
 
 let viewDate = new Date();
 viewDate.setDate(1);
 let currentByDay = new Map();
 let currentOnCallByDay = new Map();
 let currentCompanyByDay = new Map();
-let currentDispatcherByDay = new Map(); // 'YYYY-MM-DD' (Saturday) -> display name
+let currentDispatcherByDay = new Map(); // 'YYYY-MM-DD' (Saturday) -> { id, name }
 let saturdayStates = [];
 
 function dispatcherDisplayName(username) {
@@ -430,6 +462,7 @@ async function loadStatesAndTechs() {
     opt.value = t.id; 
     opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
     selTech.appendChild(opt);
+    techNameById.set(String(t.id), t.name);
   }
 
   // Populate On-Call Tech Dropdown (same list -- any tech can be assigned to any state's rotation)
@@ -439,6 +472,7 @@ async function loadStatesAndTechs() {
     const opt = document.createElement('option');
     opt.value = t.id;
     opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+    opt.dataset.base = opt.textContent;
     selOnCallTech.appendChild(opt);
   }
 
@@ -453,6 +487,20 @@ async function loadStatesAndTechs() {
     opt.textContent = `${s.name} (${s.code})`;
     selOnCallState.appendChild(opt);
   }
+
+  // Dispatchers (same list the Saturday on-call page offers)
+  try {
+    const dRes = await fetch('/.netlify/functions/get-dispatchers');
+    const dData = await dRes.json();
+    const selDisp = document.getElementById('onCallDispatcher');
+    selDisp.innerHTML = '';
+    for (const d of (dData.dispatchers || [])) {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = dispatcherDisplayName(d.username);
+      selDisp.appendChild(opt);
+    }
+  } catch (err) { /* dispatcher choice just stays empty */ }
 }
 
 async function loadMonth() {
@@ -531,7 +579,7 @@ async function loadMonth() {
     if (dRes.ok) {
       const dData = await dRes.json();
       for (const e of (dData.entries || [])) {
-        if (e.day && e.dispatcher) dispatcherByDay.set(e.day, dispatcherDisplayName(e.dispatcher));
+        if (e.day && e.dispatcher) dispatcherByDay.set(e.day, { id: e.dispatcherId, name: dispatcherDisplayName(e.dispatcher) });
       }
     }
   } catch (err) { /* banners are optional */ }
@@ -617,7 +665,8 @@ function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
       html += `<span class="company-banner" title="${escapeHtml(titleAttr)}">&#9733; ${escapeHtml(row.label)}</span>`;
     }
 
-    const dispatcherName = currentDispatcherByDay.get(dayStr);
+    const dispatcherInfo = currentDispatcherByDay.get(dayStr);
+    const dispatcherName = dispatcherInfo ? dispatcherInfo.name : '';
     if (dispatcherName) {
       html += `<span class="dispatcher-banner" title="On-call dispatcher: ${escapeHtml(dispatcherName)}">On-Call Dispatch: ${escapeHtml(dispatcherName)}</span>`;
     }
@@ -721,24 +770,99 @@ function nextSaturdayISO() {
   return isoLocal(d);
 }
 
+let editingDispatcherDay = null; // Saturday being edited when changing a dispatcher, else null
+
+function currentOnCallRole() {
+  const checked = document.querySelector('input[name="onCallRole"]:checked');
+  return checked ? checked.value : 'tech';
+}
+
+// Technician and dispatcher entries live in different tables, so the form
+// switches fields by role. Hidden fields must not stay "required" or the
+// browser blocks the submit.
+function setOnCallRole(role) {
+  const isDisp = role === 'dispatcher';
+  document.getElementById('onCallTechFields').style.display = isDisp ? 'none' : '';
+  document.getElementById('onCallDispatcherFields').style.display = isDisp ? '' : 'none';
+  document.getElementById('onCallState').required = !isDisp;
+  document.getElementById('onCallTech').required = !isDisp;
+  document.getElementById('onCallDispatcher').required = isDisp;
+  const radio = document.querySelector(`input[name="onCallRole"][value="${role}"]`);
+  if (radio) radio.checked = true;
+}
+
 function openOnCallModal(prefill) {
-  if (prefill) {
+  const roleRow = document.getElementById('onCallRoleRow');
+  editingOnCallKey = null;
+  editingDispatcherDay = null;
+  if (prefill && prefill.role === 'dispatcher') {
+    editingDispatcherDay = prefill.day;
+    roleRow.style.display = 'none';
+    setOnCallRole('dispatcher');
+    onCallModalTitle.textContent = 'Change On-Call Dispatcher';
+    onCallModalSubmitBtn.textContent = 'Update Dispatcher';
+    document.getElementById('onCallDispatcher').value = prefill.dispatcher_id;
+    document.getElementById('onCallDate').value = prefill.day;
+  } else if (prefill) {
     editingOnCallKey = { state: prefill.state, day: prefill.day, technician_id: prefill.technician_id };
-    onCallModalTitle.textContent = 'Edit On-Call';
-    onCallModalSubmitBtn.textContent = 'Update On-Call';
+    roleRow.style.display = 'none';
+    setOnCallRole('tech');
+    onCallModalTitle.textContent = prefill.replace ? 'Choose Replacement' : 'Edit On-Call';
+    onCallModalSubmitBtn.textContent = prefill.replace ? 'Save Replacement' : 'Update On-Call';
     document.getElementById('onCallState').value = prefill.state;
     document.getElementById('onCallTech').value = prefill.technician_id;
     document.getElementById('onCallDate').value = prefill.day;
   } else {
-    editingOnCallKey = null;
+    roleRow.style.display = '';
+    setOnCallRole('tech');
     onCallModalTitle.textContent = 'Set Saturday On-Call';
     onCallModalSubmitBtn.textContent = 'Save On-Call';
     document.getElementById('onCallDate').value = nextSaturdayISO();
   }
   onCallModal.classList.add('active');
+  refreshOnCallAvailabilityMarks();
 }
+
+// Tag technicians who are marked out on the chosen Saturday, right in the
+// dropdown, so nobody picks a replacement who is also away.
+async function refreshOnCallAvailabilityMarks() {
+  const sel = document.getElementById('onCallTech');
+  const day = document.getElementById('onCallDate').value;
+  const outById = new Map();
+  if (day) {
+    try {
+      const { data } = await sb.from('technician_availability')
+        .select('technician_id, reason').eq('day', day).eq('available', false);
+      for (const r of (data || [])) {
+        const reason = r.reason || 'other';
+        if (TIME_OFF_REASONS.has(reason)) outById.set(String(r.technician_id), reason);
+      }
+    } catch (err) { /* marks are optional */ }
+  }
+  for (const opt of sel.options) {
+    const base = opt.dataset.base || opt.textContent;
+    const reason = outById.get(String(opt.value));
+    opt.textContent = reason ? `${base} [OUT: ${REASON_LABEL[reason] || 'Out'}]` : base;
+  }
+}
+
+async function getTimeOffReason(technician_id, day) {
+  try {
+    const { data } = await sb.from('technician_availability')
+      .select('reason').eq('technician_id', technician_id).eq('day', day).eq('available', false).limit(1);
+    const r = (data || [])[0];
+    const reason = r ? (r.reason || 'other') : null;
+    return reason && TIME_OFF_REASONS.has(reason) ? reason : null;
+  } catch (err) { return null; }
+}
+
+document.querySelectorAll('input[name="onCallRole"]').forEach((r) => {
+  r.addEventListener('change', () => { setOnCallRole(currentOnCallRole()); refreshOnCallAvailabilityMarks(); });
+});
+document.getElementById('onCallDate').addEventListener('change', refreshOnCallAvailabilityMarks);
+
 document.getElementById('openOnCallModalBtn').addEventListener('click', () => openOnCallModal(null));
-document.getElementById('closeOnCallBtn').addEventListener('click', () => onCallModal.classList.remove('active'));
+document.getElementById('closeOnCallBtn').addEventListener('click', () => { onCallModal.classList.remove('active'); reshowPendingConflicts(); });
 
 // Company Event Modal
 const companyEventModal = document.getElementById('companyEventModal');
@@ -768,6 +892,70 @@ document.getElementById('openCompanyEventModalBtn').addEventListener('click', ()
 document.getElementById('closeCompanyEventModalBtn').addEventListener('click', () => companyEventModal.classList.remove('active'));
 companyEventModal.addEventListener('click', (e) => { if (e.target === companyEventModal) companyEventModal.classList.remove('active'); });
 
+// On-call vs. time-off conflicts. When someone is marked out on a Saturday
+// they are scheduled on call, a toast lists the conflict(s) with a button
+// that opens the On-Call form to pick a replacement for that Saturday and
+// state. Conflicts waiting while the form is open are re-shown afterwards.
+let pendingConflicts = [];
+const conflictToast = document.getElementById('conflictToast');
+
+function fmtShortDay(dayStr) {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function renderConflictToast() {
+  if (!pendingConflicts.length) { conflictToast.style.display = 'none'; conflictToast.innerHTML = ''; return; }
+  const items = pendingConflicts.map((c, i) => `
+    <div class="conflict-item">
+      <div>${escapeHtml(c.name)} is out on ${escapeHtml(fmtShortDay(c.day))} but is on call for ${escapeHtml(c.state)}.</div>
+      <button type="button" class="btn-primary" data-conflict-idx="${i}">Choose replacement</button>
+    </div>`).join('');
+  conflictToast.innerHTML = `<div class="conflict-title">&#9888; On-call conflict</div>${items}
+    <div class="conflict-actions"><button type="button" class="btn-cancel" data-conflict-dismiss>Dismiss</button></div>`;
+  conflictToast.style.display = 'block';
+}
+
+function showConflictToast(conflicts) {
+  pendingConflicts = conflicts.slice();
+  renderConflictToast();
+}
+
+function reshowPendingConflicts() {
+  if (pendingConflicts.length) renderConflictToast();
+}
+
+conflictToast.addEventListener('click', (e) => {
+  if (e.target.closest('[data-conflict-dismiss]')) { pendingConflicts = []; renderConflictToast(); return; }
+  const btn = e.target.closest('[data-conflict-idx]');
+  if (!btn) return;
+  const c = pendingConflicts.splice(Number(btn.dataset.conflictIdx), 1)[0];
+  if (!c) return;
+  conflictToast.style.display = 'none';
+  openOnCallModal({ state: c.state, day: c.day, technician_id: c.technician_id, replace: true });
+});
+
+async function findOnCallConflicts(technician_id, days) {
+  if (!days || !days.length) return [];
+  try {
+    const { data, error } = await sb.from('on_call_schedule')
+      .select('state, day, technician_id').eq('technician_id', technician_id).in('day', days).order('day', { ascending: true });
+    if (error || !data) return [];
+    return data.map((r) => ({
+      technician_id: r.technician_id,
+      name: techNameById.get(String(r.technician_id)) || 'This technician',
+      state: r.state,
+      day: r.day
+    }));
+  } catch (err) { return []; }
+}
+
+async function maybeWarnOnCallConflicts(technician_id, reason, days) {
+  if (!TIME_OFF_REASONS.has(reason || 'other')) return;
+  const conflicts = await findOnCallConflicts(technician_id, days);
+  if (conflicts.length) showConflictToast(conflicts);
+}
+
 // Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
 // themselves) opens a bigger view of just that day, since the inline
 // cards on a busy day don't have room to show every note in full.
@@ -784,7 +972,8 @@ function openDayDetail(dayStr) {
   const rows = currentByDay.get(dayStr) || [];
   const onCallRows = currentOnCallByDay.get(dayStr) || [];
   const companyRows = currentCompanyByDay.get(dayStr) || [];
-  const dispatcherName = currentDispatcherByDay.get(dayStr) || '';
+  const dispatcherInfo = currentDispatcherByDay.get(dayStr) || null;
+  const dispatcherName = dispatcherInfo ? dispatcherInfo.name : '';
   dayDetailTitle.textContent = formatDayHeading(dayStr);
   dayDetailList.dataset.day = dayStr;
 
@@ -870,6 +1059,10 @@ function openDayDetail(dayStr) {
       ? `<div class="day-detail-entry dispatcher-entry">
           <div class="entry-name">${escapeHtml(dispatcherName)}</div>
           <div class="entry-type">On-Call Dispatcher (all Saturday states)</div>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="entry-remove" data-disp-edit data-day="${escapeHtml(dayStr)}">Edit</button>
+            <button type="button" class="entry-remove" data-disp-remove data-day="${escapeHtml(dayStr)}">Remove</button>
+          </div>
         </div>`
       : '';
 
@@ -879,6 +1072,40 @@ function openDayDetail(dayStr) {
 }
 
 dayDetailList.addEventListener('click', async (e) => {
+  const dispEditBtn = e.target.closest('[data-disp-edit]');
+  if (dispEditBtn) {
+    const day = dispEditBtn.dataset.day;
+    const info = currentDispatcherByDay.get(day);
+    if (!info) { alert('Could not find that dispatcher entry.'); return; }
+    dayDetailModal.classList.remove('active');
+    openOnCallModal({ role: 'dispatcher', day, dispatcher_id: info.id });
+    return;
+  }
+
+  const dispRemoveBtn = e.target.closest('[data-disp-remove]');
+  if (dispRemoveBtn) {
+    const day = dispRemoveBtn.dataset.day;
+    if (!confirm('Remove the on-call dispatcher for this Saturday?')) return;
+    dispRemoveBtn.disabled = true;
+    dispRemoveBtn.textContent = 'Removing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-dispatcher-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day, action: 'delete' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error removing dispatcher: ' + err.message);
+      dispRemoveBtn.disabled = false;
+      dispRemoveBtn.textContent = 'Remove';
+    }
+    return;
+  }
+
   const companyEditBtn = e.target.closest('[data-company-edit]');
   if (companyEditBtn) {
     const { id } = companyEditBtn.dataset;
@@ -1128,6 +1355,7 @@ async function saveAvailabilityRange(technician_id, startDay, endDay, reason, no
   const originalLabel = submitBtn.textContent;
   submitBtn.disabled = true;
   const failed = [];
+  const failedDays = new Set();
   for (let i = 0; i < days.length; i++) {
     submitBtn.textContent = `Saving ${i + 1} of ${days.length}…`;
     try {
@@ -1140,22 +1368,26 @@ async function saveAvailabilityRange(technician_id, startDay, endDay, reason, no
       if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
     } catch (err) {
       failed.push(`${days[i]}: ${err.message}`);
+      failedDays.add(days[i]);
     }
   }
   submitBtn.disabled = false;
   submitBtn.textContent = originalLabel;
 
+  const savedDays = days.filter((d) => !failedDays.has(d));
   if (failed.length === 0) {
     modal.classList.remove('active');
     document.getElementById('eventNote').value = '';
     document.getElementById('eventEndDate').value = '';
     document.getElementById('rangeHint').textContent = '';
     loadMonth();
+    maybeWarnOnCallConflicts(technician_id, reason, savedDays);
   } else {
     // Leave the form open so Save can simply be pressed again; days that
     // already saved are just re-saved in place.
     alert(`Saved ${days.length - failed.length} of ${days.length}. These failed:\n` + failed.join('\n'));
     loadMonth();
+    maybeWarnOnCallConflicts(technician_id, reason, savedDays);
   }
 }
 
@@ -1207,25 +1439,61 @@ document.getElementById('addAvailabilityForm').addEventListener('submit', async 
     document.getElementById('eventNote').value = '';
     editingAvailKey = null;
     loadMonth();
+    maybeWarnOnCallConflicts(technician_id, reason, [day]);
   } catch (err) {
     alert('Error saving entry: ' + err.message);
   }
 });
 
-// On-Call form submission -- goes through save-on-call.js (service-role
-// key, server-side), same reasoning as save-tech-availability above:
-// on_call_schedule's write RLS requires an authenticated admin/dispatcher
-// session, and this page only ever has the anon key.
+// On-Call form submission -- technicians go through save-on-call.js,
+// dispatchers through save-dispatcher-on-call.js (both service-role,
+// server-side), same reasoning as save-tech-availability above: the write
+// RLS on those tables requires an authenticated admin/dispatcher session,
+// and this page only ever has the anon key.
 document.getElementById('onCallForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const state = document.getElementById('onCallState').value;
-  const technician_id = document.getElementById('onCallTech').value;
+  const role = currentOnCallRole();
   const day = document.getElementById('onCallDate').value;
 
   const [y, m, d] = day.split('-').map(Number);
   if (new Date(y, m - 1, d).getDay() !== 6) {
     if (!confirm(`${day} is not a Saturday. Save it anyway?`)) return;
   }
+
+  if (role === 'dispatcher') {
+    const dispatcher_id = document.getElementById('onCallDispatcher').value;
+    if (!dispatcher_id) { alert('Pick a dispatcher.'); return; }
+    try {
+      // One dispatcher per day: setting a day replaces whoever was there.
+      const res = await fetch('/.netlify/functions/save-dispatcher-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day, dispatcher_id })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      // Editing and the date changed: clear the old Saturday, only after the new one saved.
+      if (editingDispatcherDay && editingDispatcherDay !== day) {
+        const delRes = await fetch('/.netlify/functions/save-dispatcher-on-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: editingDispatcherDay, action: 'delete' })
+        });
+        const delData = await delRes.json();
+        if (!delRes.ok || !delData.ok) throw new Error('Saved, but could not clear the old Saturday: ' + (delData.error || ('HTTP ' + delRes.status)));
+      }
+      onCallModal.classList.remove('active');
+      editingDispatcherDay = null;
+      loadMonth();
+      reshowPendingConflicts();
+    } catch (err) {
+      alert('Error saving dispatcher: ' + err.message);
+    }
+    return;
+  }
+
+  const state = document.getElementById('onCallState').value;
+  const technician_id = document.getElementById('onCallTech').value;
 
   try {
     // On-call has no fields beyond its own identity (state/day/technician),
@@ -1237,6 +1505,15 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
       && editingOnCallKey.state === state
       && editingOnCallKey.day === day
       && String(editingOnCallKey.technician_id) === String(technician_id);
+
+    // Warn before putting someone on call on a day they are marked out.
+    if (!keyUnchanged) {
+      const outReason = await getTimeOffReason(technician_id, day);
+      if (outReason) {
+        const nm = techNameById.get(String(technician_id)) || 'This technician';
+        if (!confirm(`${nm} is marked out on ${day} (${REASON_LABEL[outReason] || 'Out'}). Set them on call anyway?`)) return;
+      }
+    }
 
     if (editingOnCallKey && !keyUnchanged) {
       const delRes = await fetch('/.netlify/functions/save-on-call', {
@@ -1260,6 +1537,7 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
     onCallModal.classList.remove('active');
     editingOnCallKey = null;
     loadMonth();
+    reshowPendingConflicts();
   } catch (err) {
     alert('Error saving on-call entry: ' + err.message);
   }
