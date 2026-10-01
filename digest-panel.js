@@ -233,7 +233,7 @@
         if (p[1] && p[1].length) avHtml += item('info', esc(p[0]), names(p[1]));
       });
       var avCount = (av.outToday || []).length + (av.outNext || []).length;
-      h += sec('Technician availability', avCount, avHtml || empty('Everyone is in today and the next workday.'), avCount > 0);
+      h += sec('Technicians out', avCount, avHtml || empty('Everyone is in today and the next workday.'), avCount > 0);
 
       // Trouble tickets
       var tt = d.troubleTickets || [];
