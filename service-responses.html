@@ -43,6 +43,8 @@
   tr:hover td { background: #1c1d2a; }
   .muted { color: var(--muted); }
   .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #2e3d2e; color: var(--accent); margin-left: 6px; }
+  .tag.email { background: #3a3320; color: #e6c875; }
+  .sitecode { font-weight: 600; white-space: nowrap; }
   .notes { max-width: 280px; color: #c8c8d4; }
   .count { margin-left: auto; color: var(--muted); font-size: 13px; }
 </style>
@@ -53,7 +55,7 @@
   <a class="back" href="/admin.html">Admin</a>
   <h1>Service responses</h1>
   <span class="count" id="count"></span>
-  <div class="hint">Times and miles from ITI close-outs. Default filter is Michigan testing stations — that is what TJ bills. Click a column header to sort. Arrival defaults to newest first.</div>
+  <div class="hint">Times and miles from ITI close-outs. Default for Michigan is testing stations only, which is what TJ bills; other states show everything. Rows tagged "email only" came straight from the ITI close-out email and are not tied to a ticket in the app. Click a column header to sort. Arrival defaults to newest first.</div>
 </header>
 <div class="toolbar">
   <select id="state">
@@ -74,7 +76,7 @@
     <thead>
       <tr id="headRow"></tr>
     </thead>
-    <tbody id="body"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+    <tbody id="body"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
   </table>
 </div>
 <script>
@@ -85,6 +87,7 @@ let SORT_DIR = "desc";
 const COLS = [
   { key: "wo", label: "WO", type: "text" },
   { key: "location", label: "Location", type: "text" },
+  { key: "siteCode", label: "Site", type: "text" },
   { key: "technician", label: "Tech", type: "text" },
   { key: "arrivalTime", label: "Arrival", type: "date" },
   { key: "endTime", label: "End", type: "date" },
@@ -187,13 +190,14 @@ function render() {
   document.getElementById("count").textContent = rows.length + " row" + (rows.length === 1 ? "" : "s");
   const body = document.getElementById("body");
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="9" class="muted">No matching service responses.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="muted">No matching service responses.</td></tr>';
     return;
   }
   body.innerHTML = rows.map((r) => `
     <tr>
-      <td>${esc(r.wo)}${r.testing ? '<span class="tag">testing</span>' : ""}</td>
+      <td>${esc(r.wo)}${r.testing ? '<span class="tag">testing</span>' : ""}${r.source === "email" ? '<span class="tag email">email only</span>' : ""}</td>
       <td>${esc(r.location || r.site)}</td>
+      <td class="sitecode" title="${esc(r.siteName)}">${esc(r.siteCode)}</td>
       <td>${esc(r.technician)}</td>
       <td>${esc(r.arrivalTime)}</td>
       <td>${esc(r.endTime)}</td>
@@ -211,8 +215,8 @@ function esc(s) {
 
 function downloadCsv() {
   const rows = sortedRows(filtered());
-  const cols = ["wo","location","technician","arrivalTime","endTime","onsiteMin","travelTime","mileage","callType","notes"];
-  const header = ["WO","Location","Tech","Arrival","End","On site min","Travel min","Miles","Call type","Notes"];
+  const cols = ["wo","location","siteCode","siteName","technician","arrivalTime","endTime","onsiteMin","travelTime","mileage","callType","source","notes"];
+  const header = ["WO","Location","Site code","Site","Tech","Arrival","End","On site min","Travel min","Miles","Call type","Source","Notes"];
   const lines = [header.join(",")];
   for (const r of rows) {
     lines.push(cols.map((c) => csv(r[c])).join(","));
@@ -237,7 +241,10 @@ function downloadXlsx() {
 }
 
 document.getElementById("q").addEventListener("input", render);
-document.getElementById("state").addEventListener("change", load);
+document.getElementById("state").addEventListener("change", function () {
+  document.getElementById("testing").checked = this.value === "MI";
+  load();
+});
 document.getElementById("testing").addEventListener("change", load);
 load();
 </script>
