@@ -158,6 +158,60 @@ function oneDayEarlier(dateStr) {
  * @returns {Promise<{inserted:number, skippedExisting:number, siteMatched:number,
  *   techMatched:number, needsReview:number, reviewSamples:Array, rowErrors:Array}>}
  */
+
+async function stampCloserOnAssignments(supabase, assignmentIds) {
+  if (!assignmentIds || !assignmentIds.length) return 0;
+  const { data: assigns, error } = await supabase
+    .from('assignments')
+    .select('id, site_id, ticket_id, dispatch_date, technician_id')
+    .in('id', assignmentIds);
+  if (error || !assigns || !assigns.length) return 0;
+
+  const ticketIds = [...new Set(assigns.map((a) => a.ticket_id).filter(Boolean))];
+  const siteIds = [...new Set(assigns.map((a) => a.site_id).filter(Boolean))];
+  const visits = [];
+  for (let i = 0; i < ticketIds.length; i += 200) {
+    const { data } = await supabase
+      .from('site_visits')
+      .select('ticket_id, site_id, technician_id, started_at')
+      .in('ticket_id', ticketIds.slice(i, i + 200))
+      .not('technician_id', 'is', null);
+    visits.push(...(data || []));
+  }
+  for (let i = 0; i < siteIds.length; i += 200) {
+    const { data } = await supabase
+      .from('site_visits')
+      .select('ticket_id, site_id, technician_id, started_at')
+      .in('site_id', siteIds.slice(i, i + 200))
+      .not('technician_id', 'is', null)
+      .gte('started_at', new Date(Date.now() - 21 * 86400000).toISOString());
+    visits.push(...(data || []));
+  }
+
+  let stamped = 0;
+  for (const a of assigns) {
+    let visit = null;
+    if (a.ticket_id) {
+      visit = visits.find((v) => v.ticket_id === a.ticket_id && v.technician_id) || null;
+    }
+    if (!visit && a.site_id) {
+      const earliest = oneDayEarlier(a.dispatch_date);
+      visit = visits.find((v) => {
+        if (v.site_id !== a.site_id || !v.technician_id) return false;
+        const vd = easternDateOnly(v.started_at);
+        return vd && vd >= earliest && vd <= a.dispatch_date;
+      }) || null;
+    }
+    if (!visit || !visit.technician_id || visit.technician_id === a.technician_id) continue;
+    const { error: uErr } = await supabase
+      .from('assignments')
+      .update({ technician_id: visit.technician_id, updated_at: new Date().toISOString() })
+      .eq('id', a.id);
+    if (!uErr) stamped += 1;
+  }
+  return stamped;
+}
+
 async function performImport(supabase, rows) {
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }, { data: aliases, error: aliasesErr }] = await Promise.all([
     supabase.from('sites').select('id, name, state'),
@@ -471,17 +525,25 @@ async function performImport(supabase, rows) {
       ticketsClosed = ticketCloseCount || 0;
     }
 
-    const { error: assignmentErr, count: assignmentCount } = await supabase
+    const { data: completedByTicket, error: assignmentErr } = await supabase
       .from('assignments')
       .update({ status: 'completed' })
       .in('ticket_id', ticketIdList)
       .eq('status', 'planned')
-      .select('id', { count: 'exact', head: true });
+      .select('id');
     if (assignmentErr) {
       console.error('[perform-import] auto-complete assignments failed:', assignmentErr.message);
     } else {
-      assignmentsCompleted = assignmentCount || 0;
+      assignmentsCompleted = (completedByTicket || []).length;
     }
+    // Report already stored who actually ran the call (site_visits.technician_id).
+    // Do not leave the board pin on whoever Generate auto-assigned.
+    const { data: ticketAssigns } = await supabase
+      .from('assignments')
+      .select('id')
+      .in('ticket_id', ticketIdList)
+      .in('status', ['planned', 'completed']);
+    await stampCloserOnAssignments(supabase, (ticketAssigns || []).map((r) => r.id));
   }
 
   // 2026-08-23, REVISED 2026-08-27: second, independent auto-complete pass
@@ -525,6 +587,27 @@ async function performImport(supabase, rows) {
       .select('id, site_id, dispatch_date')
       .in('site_id', chunk)
       .eq('status', 'planned')
+      // 2026-09-17 fix: this site+date fallback was built for ticketless
+      // bulk-restock stops (see the 2026-08-23 comment on
+      // siteDateCompletions above) -- but with no guard here, it was just
+      // as happy to complete a TICKET-LINKED assignment too, using ANY
+      // real visit at that site within the oneDayEarlier() tolerance,
+      // regardless of whether that visit had anything to do with the
+      // ticket. Real case: GA1037 had a genuine closed visit yesterday
+      // (WO 00152403, an offline/EPC replacement) -- that visit is still
+      // in the report every sync cycle (it's already-imported, so it
+      // re-queues into siteDateCompletions via the existingSet branch
+      // above on every run, not just once), and its date falls within a
+      // day of "today." So the very next time a completely unrelated new
+      // ticket (WO 00152597, a registration printer fault) got its own
+      // fresh board entry today, this fallback swallowed it as if
+      // yesterday's EPC visit had closed it too -- and kept doing so
+      // every 20 minutes, since nothing here remembers a visit was
+      // already "spent" from one sync run to the next. A ticket-linked
+      // assignment should ONLY ever close via the precise WO-number match
+      // above (ticketIdsToClose) -- excluding it here entirely closes the
+      // whole bug class rather than just today's one instance.
+      .is('ticket_id', null)
       .order('dispatch_date', { ascending: true });
     if (plannedErr) {
       console.error('[perform-import] site/date auto-complete: planned-assignment lookup failed:', plannedErr.message);
@@ -553,17 +636,18 @@ async function performImport(supabase, rows) {
       }
     }
     if (idsToComplete.length) {
-      const { error: siteDateErr, count: siteDateCount } = await supabase
+      const { data: completedBySite, error: siteDateErr } = await supabase
         .from('assignments')
         .update({ status: 'completed' })
         .in('id', idsToComplete)
         .eq('status', 'planned')
-        .select('id', { count: 'exact', head: true });
+        .select('id');
       if (siteDateErr) {
         console.error('[perform-import] site/date auto-complete update failed:', siteDateErr.message);
       } else {
-        assignmentsCompletedBySiteDate += siteDateCount || 0;
+        assignmentsCompletedBySiteDate += (completedBySite || []).length;
       }
+      await stampCloserOnAssignments(supabase, idsToComplete);
     }
   }
   assignmentsCompleted += assignmentsCompletedBySiteDate;
