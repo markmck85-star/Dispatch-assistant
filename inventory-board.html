@@ -163,7 +163,8 @@
     <h1>Inventory board</h1>
     <p class="sub">
       Technicians send the Neumo count sheet to <strong>inventory@mcrtechservice.com</strong>.
-      This list is who is in vs missing so TJ can chase people before he forwards the set to Melinda.
+      This list is who has submitted a sheet versus who is still missing.
+      Use the date when a holiday moves inventory off Monday. Filter by state if you only want one territory.
       Use the date when a holiday moves inventory off Monday. Filter by state if you only want one territory.
     </p>
   </header>
@@ -173,7 +174,7 @@
       <div class="stat ok"><b id="statIn">–</b><span>Received</span></div>
       <div class="stat miss"><b id="statOut">–</b><span>Missing</span></div>
       <div class="stat"><b id="statAll">–</b><span>People who should submit</span></div>
-      <div class="stat"><b>Review</b><span>Nothing goes to Melinda until TJ sends it</span></div>
+      <div class="stat"><b>Review</b><span>Sheets stay here until an admin forwards the set</span></div>
     </section>
     <section class="panel" style="padding:12px 18px;">
       <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;">
@@ -238,7 +239,7 @@
         </tbody>
       </table>
       <div class="note">
-        From Melinda&rsquo;s restock requests and the warehouse&rsquo;s tracking reply. Nothing here is confirmed delivered until someone
+        From warehouse restock requests and the tracking reply. Nothing here is confirmed delivered until someone
         taps Mark delivered. Shipments older than a week with no confirmation show as &ldquo;Likely arrived&rdquo;.
       </div>
     </section>
@@ -317,7 +318,7 @@
     </section>
 
     <section class="panel">
-      <h2>Reminder settings — admin / TJ</h2>
+      <h2>Reminder settings — admin</h2>
       <div class="settings-grid">
         <div>
           <label>Weekly reminder weekday</label>
@@ -350,14 +351,14 @@
       </div>
       <div class="save-row">
         <button class="save" type="button" onclick="saveSettings()">Save settings</button>
-        <span class="hint" id="saveMsg">Stored on this device for now. Live app will save for anyone with the admin role (TJ, admin pin).</span>
+        <span class="hint" id="saveMsg">Stored on this device for now. Live app will save for anyone with the admin role.</span>
       </div>
     </section>
 
     <section class="rules">
       <div class="rule">
         <h3>Mailbox path</h3>
-        <p>Tech → inventory mailbox → app copy. Nothing goes to Melinda automatically. When the set looks right, TJ hits Send to Melinda. One file arriving does not fire a forward.</p>
+        <p>Tech → inventory mailbox → app copy. Nothing is forwarded automatically. When the set looks right, an admin sends it on. One file arriving does not fire a forward.</p>
       </div>
       <div class="rule">
         <h3>Reminders</h3>
@@ -532,7 +533,7 @@ function shipmentRowsHtml(list, showDelivered) {
     .filter((s) => showDelivered || (s.phase !== "delivered" && s.phase !== "cancelled"))
     .sort((a, b) => ((order[a.phase] ?? 9) - (order[b.phase] ?? 9)) || String(b.requestDate).localeCompare(String(a.requestDate)));
   if (!rows.length) {
-    return '<tr><td colspan="7" class="note">No open shipments. Restock emails from Melinda (subject like &ldquo;9/21 - RESTOCK MCR NAME - GA SST&rdquo;) show up here.</td></tr>';
+    return '<tr><td colspan="7" class="note">No open shipments. Restock emails (subject like &ldquo;9/21 - RESTOCK MCR NAME - GA SST&rdquo;) show up here.</td></tr>';
   }
   return rows.map((s) => {
     const name = s.technician ? esc(s.technician.name) : esc(s.techNameRaw) + ' <span class="tag out">unmatched</span>';
