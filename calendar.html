@@ -162,6 +162,14 @@
     outline: none; border-color: #1a56a8; box-shadow: 0 0 0 2px rgba(26,86,168,0.15);
   }
   .form-row { display: flex; gap: 10px; }
+  .form-group .check-label {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+    color: #52606d; margin-bottom: 8px; cursor: pointer;
+  }
+  .form-group .check-label input { width: auto; margin: 0; }
+  .range-hint { font-size: 12px; color: #6b7785; margin: -4px 0 10px; min-height: 0; }
+  .range-hint:empty { display: none; }
+  .range-hint.warn { color: #c0392b; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .btn-cancel { background: #ffffff; border: 1px solid #c5cdd8; color: #3e4c59; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
   .btn-cancel:hover { background: #f3f5f8; }
@@ -257,6 +265,16 @@
           </select>
         </div>
       </div>
+      <div class="form-row" id="rangeRow">
+        <div class="form-group" style="flex:1;">
+          <label for="eventEndDate">Through (optional)</label>
+          <input type="date" id="eventEndDate">
+        </div>
+        <div class="form-group" style="flex:1; display:flex; align-items:flex-end;">
+          <label class="check-label"><input type="checkbox" id="skipWeekends" checked> Skip weekends</label>
+        </div>
+      </div>
+      <div class="range-hint" id="rangeHint"></div>
       <div class="form-group">
         <label for="eventNote">Note / Details (Optional)</label>
         <textarea id="eventNote" rows="2" placeholder="e.g. Dental Appt 9:00am - 11:30am"></textarea>
@@ -554,6 +572,10 @@ function openAddModal(prefill) {
     document.getElementById('eventDate').value = prefill.day;
     document.getElementById('eventReason').value = prefill.reason || 'other';
     document.getElementById('eventNote').value = prefill.note || '';
+    // Editing is always a single (technician, day) entry, so no range controls.
+    document.getElementById('rangeRow').style.display = 'none';
+    document.getElementById('eventEndDate').value = '';
+    document.getElementById('rangeHint').textContent = '';
   } else {
     editingAvailKey = null;
     addModalTitle.textContent = 'Schedule Time Off / Exception';
@@ -561,6 +583,10 @@ function openAddModal(prefill) {
     document.getElementById('eventDate').value = new Date().toISOString().slice(0, 10);
     document.getElementById('eventReason').value = 'vacation';
     document.getElementById('eventNote').value = '';
+    document.getElementById('rangeRow').style.display = '';
+    document.getElementById('eventEndDate').value = '';
+    document.getElementById('eventEndDate').min = document.getElementById('eventDate').value;
+    document.getElementById('rangeHint').textContent = '';
   }
   modal.classList.add('active');
 }
@@ -913,6 +939,103 @@ document.getElementById('calendarBody').addEventListener('click', (e) => {
 document.getElementById('closeDayDetailBtn').addEventListener('click', () => dayDetailModal.classList.remove('active'));
 dayDetailModal.addEventListener('click', (e) => { if (e.target === dayDetailModal) dayDetailModal.classList.remove('active'); });
 
+// Date-range entry -- lets a vacation be entered once as "from / through"
+// instead of one day at a time. There is no bulk endpoint, so this simply
+// calls save-tech-availability once per day (the same call a single-day
+// entry makes). (technician_id, day) is the row's identity, so re-saving a
+// day that already exists just updates it, which makes a retry after a
+// partial failure safe.
+const MAX_RANGE_DAYS = 62;
+
+function buildDayList(startStr, endStr, skipWeekends) {
+  const [sy, sm, sd] = startStr.split('-').map(Number);
+  const [ey, em, ed] = endStr.split('-').map(Number);
+  const end = new Date(ey, em - 1, ed);
+  const days = [];
+  for (let d = new Date(sy, sm - 1, sd); d <= end; d.setDate(d.getDate() + 1)) {
+    if (skipWeekends && (d.getDay() === 0 || d.getDay() === 6)) continue;
+    days.push(isoLocal(d));
+  }
+  return days;
+}
+
+function rangeSpanDays(startStr, endStr) {
+  const [sy, sm, sd] = startStr.split('-').map(Number);
+  const [ey, em, ed] = endStr.split('-').map(Number);
+  return Math.round((new Date(ey, em - 1, ed) - new Date(sy, sm - 1, sd)) / 86400000) + 1;
+}
+
+function updateRangeHint() {
+  const hint = document.getElementById('rangeHint');
+  const start = document.getElementById('eventDate').value;
+  const end = document.getElementById('eventEndDate').value;
+  hint.classList.remove('warn');
+  if (editingAvailKey || !start || !end || end === start) { hint.textContent = ''; return; }
+  if (end < start) { hint.textContent = 'The end date is before the start date.'; hint.classList.add('warn'); return; }
+  if (rangeSpanDays(start, end) > MAX_RANGE_DAYS) {
+    hint.textContent = `Range is too long (${MAX_RANGE_DAYS} days max).`; hint.classList.add('warn'); return;
+  }
+  const n = buildDayList(start, end, document.getElementById('skipWeekends').checked).length;
+  hint.textContent = n === 0 ? 'No weekdays in that range.' : `${n} day${n === 1 ? '' : 's'} will be added.`;
+  if (n === 0) hint.classList.add('warn');
+}
+
+document.getElementById('eventDate').addEventListener('change', () => {
+  const start = document.getElementById('eventDate').value;
+  const endEl = document.getElementById('eventEndDate');
+  endEl.min = start;
+  if (endEl.value && endEl.value < start) endEl.value = '';
+  updateRangeHint();
+});
+document.getElementById('eventEndDate').addEventListener('change', updateRangeHint);
+document.getElementById('skipWeekends').addEventListener('change', updateRangeHint);
+
+async function saveAvailabilityRange(technician_id, startDay, endDay, reason, note) {
+  if (endDay < startDay) { alert('The end date is before the start date.'); return; }
+  if (rangeSpanDays(startDay, endDay) > MAX_RANGE_DAYS) {
+    alert(`Please pick a range of ${MAX_RANGE_DAYS} days or less.`); return;
+  }
+  const days = buildDayList(startDay, endDay, document.getElementById('skipWeekends').checked);
+  if (days.length === 0) { alert('There are no weekdays in that range.'); return; }
+
+  const techName = document.getElementById('techSelect').selectedOptions[0]?.textContent || 'this technician';
+  if (!confirm(`Add ${days.length} ${days.length === 1 ? 'entry' : 'entries'} for ${techName} (${startDay} through ${endDay})?`)) return;
+
+  const submitBtn = addModalSubmitBtn;
+  const originalLabel = submitBtn.textContent;
+  submitBtn.disabled = true;
+  const failed = [];
+  for (let i = 0; i < days.length; i++) {
+    submitBtn.textContent = `Saving ${i + 1} of ${days.length}…`;
+    try {
+      const res = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id, day: days[i], reason, note })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    } catch (err) {
+      failed.push(`${days[i]}: ${err.message}`);
+    }
+  }
+  submitBtn.disabled = false;
+  submitBtn.textContent = originalLabel;
+
+  if (failed.length === 0) {
+    modal.classList.remove('active');
+    document.getElementById('eventNote').value = '';
+    document.getElementById('eventEndDate').value = '';
+    document.getElementById('rangeHint').textContent = '';
+    loadMonth();
+  } else {
+    // Leave the form open so Save can simply be pressed again; days that
+    // already saved are just re-saved in place.
+    alert(`Saved ${days.length - failed.length} of ${days.length}. These failed:\n` + failed.join('\n'));
+    loadMonth();
+  }
+}
+
 // Form Submission -- goes through save-tech-availability.js (service-role
 // key, server-side) rather than a direct client-side insert. The direct
 // insert can't work: technician_availability's write RLS policy requires
@@ -927,6 +1050,12 @@ document.getElementById('addAvailabilityForm').addEventListener('submit', async 
   const day = document.getElementById('eventDate').value;
   const reason = document.getElementById('eventReason').value;
   const note = document.getElementById('eventNote').value;
+  const endDay = document.getElementById('eventEndDate').value;
+
+  if (!editingAvailKey && endDay && endDay !== day) {
+    await saveAvailabilityRange(technician_id, day, endDay, reason, note);
+    return;
+  }
 
   try {
     // Editing, and the technician or date changed -- (technician_id, day) is
