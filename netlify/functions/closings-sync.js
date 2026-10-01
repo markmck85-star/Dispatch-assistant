@@ -2,7 +2,7 @@
  * closings-sync.js
  * Scheduled closer: one state per run so we stay under Netlify's
  * 26s cap. Walks MI → OH → NV → CO. Each box gets hit about
- * three times a day with schedule 0 */2 * * * (UTC).
+ * three times a day (the schedule runs every 2 hours, UTC; see netlify.toml).
  *
  * Reuses pull-state-closings + apply-service-responses.
  * No secrets here.
