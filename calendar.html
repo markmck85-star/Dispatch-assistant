@@ -403,6 +403,21 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="compDayModal">
+  <div class="modal">
+    <h2 id="compDayTitle">Comp Day</h2>
+    <div id="compDayBody" style="font-size:13.5px; color:#52606d; margin-bottom:12px;"></div>
+    <div class="form-group">
+      <label for="compDaySelect">Comp day</label>
+      <select id="compDaySelect"></select>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-cancel" id="compDaySkipBtn">Skip</button>
+      <button type="button" class="btn-primary" id="compDaySaveBtn">Add Comp Day</button>
+    </div>
+  </div>
+</div>
+
 <div class="conflict-toast" id="conflictToast" role="alert"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -417,6 +432,10 @@ const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Info / Site Survey / Install notes). Only these trigger on-call conflict checks.
 const TIME_OFF_REASONS = new Set(['vacation', 'personal', 'pto', 'comp_day', 'manual', 'other', 'last_day']);
 const techNameById = new Map();
+let allTechs = [];            // [{id, name, home_state}]
+let allDispatchers = [];      // [{id, username}]
+let onCallPool = new Map();   // technician_id -> Set of states they are on the Saturday rotation for (today onward)
+let onCallReplaceMode = false;
 
 let viewDate = new Date();
 viewDate.setDate(1);
@@ -445,6 +464,7 @@ async function loadStatesAndTechs() {
   if (error || !techData) return;
 
   // Populate States Dropdown
+  allTechs = techData;
   const states = [...new Set(techData.map((r) => r.home_state).filter(Boolean))].sort();
   const selState = document.getElementById('stateFilter');
   selState.innerHTML = '<option value="">All states</option>';
@@ -494,7 +514,8 @@ async function loadStatesAndTechs() {
     const dData = await dRes.json();
     const selDisp = document.getElementById('onCallDispatcher');
     selDisp.innerHTML = '';
-    for (const d of (dData.dispatchers || [])) {
+    allDispatchers = dData.dispatchers || [];
+    for (const d of allDispatchers) {
       const opt = document.createElement('option');
       opt.value = d.id;
       opt.textContent = dispatcherDisplayName(d.username);
@@ -791,37 +812,147 @@ function setOnCallRole(role) {
   if (radio) radio.checked = true;
 }
 
-function openOnCallModal(prefill) {
+// Who can be picked: only people already on the Saturday schedule from
+// today onward (people outside the rotation are not on it for a reason).
+// Technicians are grouped with the covered state's rotation first. If the
+// schedule is empty (nothing loaded yet) the full lists are used so the
+// form never ends up with nobody to pick.
+async function loadOnCallPool() {
+  try {
+    const { data } = await sb.from('on_call_schedule')
+      .select('technician_id, state').gte('day', isoLocal(new Date()));
+    const m = new Map();
+    for (const r of (data || [])) {
+      const k = String(r.technician_id);
+      if (!m.has(k)) m.set(k, new Set());
+      m.get(k).add(r.state);
+    }
+    onCallPool = m;
+  } catch (err) { /* falls back to the full list */ }
+}
+
+async function loadDispatcherPoolIds() {
+  const ids = new Set();
+  try {
+    const until = new Date();
+    until.setDate(until.getDate() + 730);
+    const res = await fetch(`/.netlify/functions/get-dispatcher-on-call?since=${isoLocal(new Date())}&until=${isoLocal(until)}`);
+    if (res.ok) {
+      const data = await res.json();
+      for (const e of (data.entries || [])) if (e.dispatcherId) ids.add(String(e.dispatcherId));
+    }
+  } catch (err) { /* falls back to the full list */ }
+  return ids;
+}
+
+function rebuildDispatcherOptions(poolIds, keepId) {
+  const sel = document.getElementById('onCallDispatcher');
+  const keep = keepId != null ? String(keepId) : sel.value;
+  let list = allDispatchers.filter((d) => poolIds.has(String(d.id)) || String(d.id) === keep);
+  if (list.length === 0) list = allDispatchers.slice();
+  sel.innerHTML = '';
+  for (const d of list) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = dispatcherDisplayName(d.username);
+    sel.appendChild(opt);
+  }
+  if (list.some((d) => String(d.id) === keep)) sel.value = keep;
+}
+
+// Technician choices are scoped to the state being covered: only people on
+// that state's Saturday rotation (from today onward). A fill-in from another
+// state is not offered, since the drive would not meet the SLA. If the state
+// has nobody scheduled yet, fall back to technicians whose home state matches.
+function rebuildOnCallTechOptions(opts) {
+  const { keepId = null, excludeId = null, placeholder = false } = opts || {};
+  const sel = document.getElementById('onCallTech');
+  const state = document.getElementById('onCallState').value;
+  const keep = keepId != null ? String(keepId) : sel.value;
+  const exclude = excludeId != null ? String(excludeId) : null;
+  const label = (t) => `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+
+  let pool = allTechs.filter((t) => { const st = onCallPool.get(String(t.id)); return !!st && st.has(state); });
+  if (pool.length === 0) pool = allTechs.filter((t) => t.home_state === state);
+  // Editing an existing entry: always keep its current technician selectable.
+  if (keepId != null && !pool.some((t) => String(t.id) === keep)) {
+    const t = allTechs.find((x) => String(x.id) === keep);
+    if (t) pool.push(t);
+  }
+  if (exclude) pool = pool.filter((t) => String(t.id) !== exclude);
+
+  sel.innerHTML = '';
+  if (placeholder) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = pool.length ? 'Select a technician…' : 'No other technicians on this state\'s rotation';
+    sel.appendChild(o);
+  }
+  for (const t of pool) {
+    const o = document.createElement('option');
+    o.value = t.id;
+    o.textContent = label(t);
+    o.dataset.base = o.textContent;
+    sel.appendChild(o);
+  }
+  if (placeholder) sel.value = '';
+  else if (pool.some((t) => String(t.id) === keep)) sel.value = keep;
+}
+
+async function openOnCallModal(prefill) {
   const roleRow = document.getElementById('onCallRoleRow');
   editingOnCallKey = null;
   editingDispatcherDay = null;
+  onCallReplaceMode = false;
+  let afterPools = null;
   if (prefill && prefill.role === 'dispatcher') {
     editingDispatcherDay = prefill.day;
     roleRow.style.display = 'none';
     setOnCallRole('dispatcher');
     onCallModalTitle.textContent = 'Change On-Call Dispatcher';
     onCallModalSubmitBtn.textContent = 'Update Dispatcher';
-    document.getElementById('onCallDispatcher').value = prefill.dispatcher_id;
     document.getElementById('onCallDate').value = prefill.day;
+    afterPools = (ids) => rebuildDispatcherOptions(ids, prefill.dispatcher_id);
   } else if (prefill) {
     editingOnCallKey = { state: prefill.state, day: prefill.day, technician_id: prefill.technician_id };
+    onCallReplaceMode = !!prefill.replace;
     roleRow.style.display = 'none';
     setOnCallRole('tech');
     onCallModalTitle.textContent = prefill.replace ? 'Choose Replacement' : 'Edit On-Call';
     onCallModalSubmitBtn.textContent = prefill.replace ? 'Save Replacement' : 'Update On-Call';
     document.getElementById('onCallState').value = prefill.state;
-    document.getElementById('onCallTech').value = prefill.technician_id;
     document.getElementById('onCallDate').value = prefill.day;
+    afterPools = () => rebuildOnCallTechOptions(
+      prefill.replace
+        ? { excludeId: prefill.technician_id, placeholder: true }
+        : { keepId: prefill.technician_id });
   } else {
     roleRow.style.display = '';
     setOnCallRole('tech');
     onCallModalTitle.textContent = 'Set Saturday On-Call';
     onCallModalSubmitBtn.textContent = 'Save On-Call';
     document.getElementById('onCallDate').value = nextSaturdayISO();
+    afterPools = null;
   }
   onCallModal.classList.add('active');
+
+  // Load who is actually on the rotation, then fill the dropdowns.
+  const [, dispatcherIds] = await Promise.all([loadOnCallPool(), loadDispatcherPoolIds()]);
+  if (prefill && prefill.role === 'dispatcher') {
+    afterPools(dispatcherIds);
+  } else {
+    rebuildDispatcherOptions(dispatcherIds, null);
+    if (afterPools) afterPools(); else rebuildOnCallTechOptions({});
+  }
   refreshOnCallAvailabilityMarks();
 }
+
+document.getElementById('onCallState').addEventListener('change', () => {
+  rebuildOnCallTechOptions(onCallReplaceMode && editingOnCallKey
+    ? { excludeId: editingOnCallKey.technician_id, placeholder: true }
+    : {});
+  refreshOnCallAvailabilityMarks();
+});
 
 // Tag technicians who are marked out on the chosen Saturday, right in the
 // dropdown, so nobody picks a replacement who is also away.
@@ -862,7 +993,7 @@ document.querySelectorAll('input[name="onCallRole"]').forEach((r) => {
 document.getElementById('onCallDate').addEventListener('change', refreshOnCallAvailabilityMarks);
 
 document.getElementById('openOnCallModalBtn').addEventListener('click', () => openOnCallModal(null));
-document.getElementById('closeOnCallBtn').addEventListener('click', () => { onCallModal.classList.remove('active'); reshowPendingConflicts(); });
+document.getElementById('closeOnCallBtn').addEventListener('click', () => { onCallModal.classList.remove('active'); onCallReplaceMode = false; reshowPendingConflicts(); });
 
 // Company Event Modal
 const companyEventModal = document.getElementById('companyEventModal');
@@ -955,6 +1086,91 @@ async function maybeWarnOnCallConflicts(technician_id, reason, days) {
   const conflicts = await findOnCallConflicts(technician_id, days);
   if (conflicts.length) showConflictToast(conflicts);
 }
+
+// Comp day for a replacement. Technicians covering a Saturday take a comp
+// day earlier in that same work week (Mon-Fri before it) so the week stays
+// at 40 hours. When a different technician takes over a Saturday, offer them
+// a comp day in that window, defaulting to the one the replaced technician
+// already had. Skipped if the new technician already has a comp day that week.
+// (Kept out of the visible text on purpose -- the reason lives here.)
+const compDayModal = document.getElementById('compDayModal');
+let compDayCtx = null;
+
+async function promptCompDay(newTechId, oldTechId, satDay, state) {
+  const [y, m, d] = satDay.split('-').map(Number);
+  if (new Date(y, m - 1, d).getDay() !== 6) return false;
+  const days = [];
+  for (let i = 5; i >= 1; i--) days.push(isoLocal(new Date(y, m - 1, d - i)));
+
+  let rows = [];
+  try {
+    const { data } = await sb.from('technician_availability')
+      .select('technician_id, day, reason')
+      .in('technician_id', [newTechId, oldTechId])
+      .gte('day', days[0]).lte('day', days[days.length - 1])
+      .eq('available', false);
+    rows = data || [];
+  } catch (err) { rows = []; }
+
+  const newRows = rows.filter((r) => String(r.technician_id) === String(newTechId));
+  if (newRows.some((r) => r.reason === 'comp_day')) return false;
+  const oldComp = rows.find((r) => String(r.technician_id) === String(oldTechId) && r.reason === 'comp_day');
+  const outByDay = new Map();
+  for (const r of newRows) if (TIME_OFF_REASONS.has(r.reason || 'other')) outByDay.set(r.day, r.reason || 'other');
+
+  const sel = document.getElementById('compDaySelect');
+  sel.innerHTML = '<option value="">Choose a day…</option>';
+  for (const day of days) {
+    const opt = document.createElement('option');
+    opt.value = day;
+    const out = outByDay.get(day);
+    opt.textContent = fmtShortDay(day) + (out ? ` [already out: ${REASON_LABEL[out] || 'Out'}]` : '');
+    if (out) opt.disabled = true;
+    sel.appendChild(opt);
+  }
+  const suggested = oldComp && !outByDay.has(oldComp.day) ? oldComp.day : '';
+  sel.value = suggested;
+
+  const name = techNameById.get(String(newTechId)) || 'The new technician';
+  document.getElementById('compDayTitle').textContent = 'Comp Day';
+  document.getElementById('compDayBody').textContent =
+    `${name} is now on call for ${state} on ${fmtShortDay(satDay)}. Pick a comp day that week.` +
+    (suggested ? ` Suggested: ${fmtShortDay(suggested)}, the same day the replaced technician had.` : '');
+  compDayCtx = { technician_id: newTechId };
+  compDayModal.classList.add('active');
+  return true;
+}
+
+document.getElementById('compDaySkipBtn').addEventListener('click', () => {
+  compDayModal.classList.remove('active');
+  compDayCtx = null;
+  reshowPendingConflicts();
+});
+document.getElementById('compDaySaveBtn').addEventListener('click', async () => {
+  const day = document.getElementById('compDaySelect').value;
+  if (!day) { alert('Choose a day, or press Skip.'); return; }
+  const btn = document.getElementById('compDaySaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/.netlify/functions/save-tech-availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ technician_id: compDayCtx.technician_id, day, reason: 'comp_day', note: '' })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    compDayModal.classList.remove('active');
+    compDayCtx = null;
+    loadMonth();
+    reshowPendingConflicts();
+  } catch (err) {
+    alert('Error saving comp day: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Add Comp Day';
+  }
+});
 
 // Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
 // themselves) opens a bigger view of just that day, since the inline
@@ -1494,6 +1710,8 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
 
   const state = document.getElementById('onCallState').value;
   const technician_id = document.getElementById('onCallTech').value;
+  if (!technician_id) { alert('Pick a technician.'); return; }
+  const oldKey = editingOnCallKey;
 
   try {
     // On-call has no fields beyond its own identity (state/day/technician),
@@ -1536,8 +1754,14 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
     }
     onCallModal.classList.remove('active');
     editingOnCallKey = null;
+    onCallReplaceMode = false;
     loadMonth();
-    reshowPendingConflicts();
+    // A different technician took over this Saturday: offer a comp day for them.
+    let prompted = false;
+    if (oldKey && String(oldKey.technician_id) !== String(technician_id)) {
+      prompted = await promptCompDay(technician_id, oldKey.technician_id, day, state);
+    }
+    if (!prompted) reshowPendingConflicts();
   } catch (err) {
     alert('Error saving on-call entry: ' + err.message);
   }
