@@ -26,6 +26,7 @@
     .company-banner {
       font-size: 13px; padding: 5px 7px; white-space: normal;
     }
+    .dispatcher-banner { font-size: 13px; padding: 5px 7px; }
     .dow-header { font-size: 13px; padding: 8px 2px; }
   }
   @media (min-width: 1500px) {
@@ -149,6 +150,17 @@
     background: #8a6a17; border-left: 3px solid rgba(0,0,0,0.25); overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; cursor: default;
   }
+  /* On-call dispatcher for the Saturday -- one slim banner per Saturday,
+     above the technician rows, so it stays visible however crowded the day is. */
+  .dispatcher-banner {
+    display: block; border-radius: 4px; padding: 3px 5px; margin-bottom: 3px;
+    font-size: 10.5px; font-weight: 700; line-height: 1.3; color: #ffffff;
+    background: #3b4a6b; border-left: 4px solid rgba(0,0,0,0.4); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: default;
+  }
+  .day-detail-entry.dispatcher-entry { background: #3b4a6b; border-left: 4px solid rgba(0,0,0,0.4); color: #ffffff; }
+  .day-detail-entry.dispatcher-entry .entry-name,
+  .day-detail-entry.dispatcher-entry .entry-type { color: #ffffff; }
   .day-detail-entry.company-event { background: #8a6a17; border-left: 4px solid rgba(0,0,0,0.25); color: #ffffff; }
   .day-detail-entry.company-event .entry-name,
   .day-detail-entry.company-event .entry-type { color: #ffffff; }
@@ -251,6 +263,7 @@
       <div class="legend-item"><span class="legend-dot" style="background:#8f3560"></span>Site Survey</div>
       <div class="legend-item"><span class="legend-dot" style="background:#3d7a4a"></span>Install</div>
       <div class="legend-item"><span class="legend-dot" style="background:#1f6f78"></span>Saturday On-Call</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#3b4a6b"></span>On-Call Dispatcher</div>
       <div class="legend-item"><span class="legend-dot" style="background:#8a6a17"></span>Company Event</div>
     </div>
   </div>
@@ -378,7 +391,14 @@ viewDate.setDate(1);
 let currentByDay = new Map();
 let currentOnCallByDay = new Map();
 let currentCompanyByDay = new Map();
+let currentDispatcherByDay = new Map(); // 'YYYY-MM-DD' (Saturday) -> display name
 let saturdayStates = [];
+
+function dispatcherDisplayName(username) {
+  const u = String(username || '').trim();
+  if (!u) return '';
+  return u.length <= 2 ? u.toUpperCase() : u.charAt(0).toUpperCase() + u.slice(1);
+}
 
 function monthLabel(d) {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -501,9 +521,25 @@ async function loadMonth() {
     }
   }
 
+  // On-call dispatcher per Saturday (one dispatcher covers every Saturday
+  // state, so it is not filtered by the state dropdown). Read through the
+  // same function the Saturday on-call page uses; if it fails, the calendar
+  // simply shows no dispatcher banners.
+  const dispatcherByDay = new Map();
+  try {
+    const dRes = await fetch(`/.netlify/functions/get-dispatcher-on-call?since=${monthStart}&until=${monthEnd}`);
+    if (dRes.ok) {
+      const dData = await dRes.json();
+      for (const e of (dData.entries || [])) {
+        if (e.day && e.dispatcher) dispatcherByDay.set(e.day, dispatcherDisplayName(e.dispatcher));
+      }
+    }
+  } catch (err) { /* banners are optional */ }
+
   currentByDay = byDay;
   currentOnCallByDay = onCallByDay;
   currentCompanyByDay = companyByDay;
+  currentDispatcherByDay = dispatcherByDay;
   renderMonthGrid(year, month, byDay, onCallByDay, companyByDay);
 }
 
@@ -579,6 +615,11 @@ function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
     for (const row of companyRows) {
       const titleAttr = `${row.label}${row.note ? ': ' + row.note : ''}`;
       html += `<span class="company-banner" title="${escapeHtml(titleAttr)}">&#9733; ${escapeHtml(row.label)}</span>`;
+    }
+
+    const dispatcherName = currentDispatcherByDay.get(dayStr);
+    if (dispatcherName) {
+      html += `<span class="dispatcher-banner" title="On-call dispatcher: ${escapeHtml(dispatcherName)}">On-Call Dispatch: ${escapeHtml(dispatcherName)}</span>`;
     }
 
     const lanes = weekLanes[w];
@@ -743,10 +784,11 @@ function openDayDetail(dayStr) {
   const rows = currentByDay.get(dayStr) || [];
   const onCallRows = currentOnCallByDay.get(dayStr) || [];
   const companyRows = currentCompanyByDay.get(dayStr) || [];
+  const dispatcherName = currentDispatcherByDay.get(dayStr) || '';
   dayDetailTitle.textContent = formatDayHeading(dayStr);
   dayDetailList.dataset.day = dayStr;
 
-  if (rows.length === 0 && onCallRows.length === 0 && companyRows.length === 0) {
+  if (rows.length === 0 && onCallRows.length === 0 && companyRows.length === 0 && !dispatcherName) {
     dayDetailList.innerHTML = '<div class="day-detail-empty">No entries for this day.</div>';
   } else {
     const companyHtml = companyRows.map((row) => {
@@ -824,7 +866,14 @@ function openDayDetail(dayStr) {
       </div>`;
     }).join('');
 
-    dayDetailList.innerHTML = companyHtml + availabilityHtml + onCallHtml;
+    const dispatcherHtml = dispatcherName
+      ? `<div class="day-detail-entry dispatcher-entry">
+          <div class="entry-name">${escapeHtml(dispatcherName)}</div>
+          <div class="entry-type">On-Call Dispatcher (all Saturday states)</div>
+        </div>`
+      : '';
+
+    dayDetailList.innerHTML = companyHtml + dispatcherHtml + availabilityHtml + onCallHtml;
   }
   dayDetailModal.classList.add('active');
 }
