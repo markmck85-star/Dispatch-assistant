@@ -1,4 +1,4 @@
-// get-daily-digest.js — v3 — 2026-10-01
+// get-daily-digest.js — v3.1 — 2026-10-01
 //
 // Netlify Function -- shared backend for the morning brief and the
 // "State of the State" end-of-day digest. Returns structured data only
@@ -57,6 +57,19 @@
 //   - Attention list gains: special projects due today, projects waiting on a
 //     store/carrier with no update for a couple of days, and ended holds.
 //
+// v3.1 changes (2026-10-01, after the first live look):
+//   - The technician roster no longer counts placeholder records such as
+//     "Unassigned (New Site)" (they inflated "techs available").
+//   - GA comp days: Georgia's on-call comp days are not stored as rows; they
+//     are computed from on_call_schedule (Robert Medley takes the Thursday before
+//     his on-call Saturday, every other on-call tech takes the Monday), exactly
+//     as get-state-console.js does. The digest now applies the same rule, so
+//     "Technicians out" and the workload capacity match the State Console.
+//     THURSDAY_COMP_TECHS below must be kept in sync with get-state-console.js.
+//   - On a Saturday with an on-call schedule, only the on-call technicians count
+//     as available (same as the State Console), and the long list of everyone
+//     else is not shown as "out".
+//
 // Not covered yet: a true "pushed" marker on restock assignments (v2 infers
 // it: not finished the previous business day and on the board again today).
 
@@ -75,6 +88,8 @@ const STATE_TIMEZONES = {
   AL: 'America/Chicago',
 };
 
+// GA-only on-call comp-day rule, mirrored from get-state-console.js (keep in sync).
+const THURSDAY_COMP_TECHS = ['Robert Medley'];
 const TIME_OFF_REASONS = new Set(['vacation', 'personal', 'pto', 'comp_day', 'manual', 'other', 'last_day']);
 const PROJECT_REASONS = { site_survey: 'Site Survey', install: 'Install', info: 'Note' };
 
@@ -286,11 +301,13 @@ exports.handler = async (event) => {
 
     // ---- technicians in this territory
     const regionList = `{${regionStates.join(',')}}`;
-    const { data: techs, error: techErr } = await supabase
+    const { data: techsRaw, error: techErr } = await supabase
       .from('technicians').select('id, name')
       .or(`home_state.in.(${regionStates.join(',')}),additional_states.ov.${regionList}`)
       .eq('active', true).order('name');
     if (techErr) return json(500, { error: 'technicians fetch failed: ' + techErr.message });
+    // Placeholder records (e.g. "Unassigned (New Site)") are not people.
+    const techs = (techsRaw || []).filter((t) => !/^unassigned\b/i.test(String(t.name || '').trim()));
     const techIds = (techs || []).map((t) => t.id);
     const techNameById = {};
     (techs || []).forEach((t) => { techNameById[t.id] = t.name; });
@@ -314,7 +331,26 @@ exports.handler = async (event) => {
       if (!TIME_OFF_REASONS.has(reason)) continue;
       (timeOffByDay[r.day] = timeOffByDay[r.day] || new Map()).set(r.technician_id, reason);
     }
+    // On-call rows for the comp-day rule (GA) and the Saturday availability rule.
+    const onCallWindow = await safe('on-call window', async () => {
+      const { data } = await supabase.from('on_call_schedule')
+        .select('state, day, technician_id').in('state', regionStates)
+        .gte('day', baselineFrom).lte('day', addDays(nextBiz, 6));
+      return data || [];
+    }, []);
+    if (state === 'GA') {
+      for (const row of onCallWindow) {
+        const name = techNameById[row.technician_id];
+        if (!name) continue;
+        const compDay = addDays(row.day, THURSDAY_COMP_TECHS.includes(name) ? -2 : -5);
+        const m = (timeOffByDay[compDay] = timeOffByDay[compDay] || new Map());
+        if (!m.has(row.technician_id)) m.set(row.technician_id, 'comp_day');   // a real entry wins
+      }
+    }
     const outOn = (day) => timeOffByDay[day] || new Map();
+    // On a Saturday with an on-call schedule only the on-call techs are working.
+    const onCallTodayIds = dayOfWeek(todayStr) === 6
+      ? [...new Set(onCallWindow.filter((r) => r.day === todayStr).map((r) => r.technician_id))] : [];
     const namesFor = (day, filterFn) => (techs || [])
       .filter((t) => filterFn ? filterFn(t) : outOn(day).has(t.id))
       .map((t) => ({ name: t.name, reason: outOn(day).get(t.id) || null }));
@@ -675,7 +711,9 @@ exports.handler = async (event) => {
 
     // ---- light / regular / heavy
     const callsToday = todaysAssignments.filter((a) => a.status !== 'removed').length;
-    const availToday = Math.max(1, (techs || []).length - outOn(todayStr).size);
+    const availToday = onCallTodayIds.length
+      ? onCallTodayIds.length
+      : Math.max(1, (techs || []).length - outOn(todayStr).size);
     const heavyTrigger = await readHeavyTrigger(event, state);
     let dayWeight = { label: 'unknown', note: 'Not enough history to compare yet.' };
     {
