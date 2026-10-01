@@ -11,6 +11,17 @@
  *
  * Does not invent Salesforce WOs. ITI ticket 152924 is not 00152924
  * in another state. Weak matches stay pending for review.
+ *
+ * 2026-10-01: also handles FORWARDED copies. When a state mailbox is
+ * forwarded into the app (Mailgun), the copy lands in inbound_emails
+ * under the Mailgun recipient (dispatch@mcrdispatch.net), not imap-xx,
+ * already parse_status 'parsed' -- and because Mailgun is instant, it
+ * always beats the IMAP pull to the shared Message-ID, which then skips
+ * its own copy as a duplicate. Those rows were never seen here, so their
+ * tickets stayed open (found live with MI tickets 00153102/00153224).
+ * Forwarded rows are picked up by subject, matched to a state from the
+ * Component line / sender / recipient, and marked done by writing
+ * parse_error (their parse_status is left alone).
  */
 
 const { createClient } = require("@supabase/supabase-js");
@@ -59,6 +70,24 @@ function parseResponse(subject, body) {
     callType: field(text, "Call Type"),
     issue: field(text, "Issue"),
   };
+}
+
+const FORWARDED_LOOKBACK_DAYS = 14;
+
+// Which of the four closing-mailbox states a forwarded service response
+// belongs to. Component line first ("Michigan Examiner"), then sender /
+// recipient / body as a fallback. Returns null when it can't tell.
+function inferState(email, parsed) {
+  const pick = (hay) => {
+    if (/michigan|itimic/i.test(hay)) return "MI";
+    if (/nevada|itinev/i.test(hay)) return "NV";
+    if (/ohio|itioh/i.test(hay)) return "OH";
+    if (/colorado|iticolo/i.test(hay)) return "CO";
+    return null;
+  };
+  return pick(parsed && parsed.component || "")
+    || pick([email.sender, email.to_address].join(" "))
+    || pick(email.body_text || "");
 }
 
 function isClosedStatus(s) {
@@ -113,6 +142,25 @@ exports.handler = async (event) => {
     .limit(limit);
   if (eErr) return json(500, { error: eErr.message });
 
+  // Forwarded copies (see header). Not imap-labeled, still unapplied
+  // (parse_error null), recent, and belonging to this state.
+  const fwdSince = new Date(Date.now() - FORWARDED_LOOKBACK_DAYS * 86400000).toISOString();
+  const { data: fwdRaw, error: fErr } = await supabase
+    .from("inbound_emails")
+    .select("id, subject, body_text, received_at, parse_status, sender, to_address")
+    .or("mailbox.is.null,mailbox.not.like.imap-%")
+    .ilike("subject", "%Technician Service Response%")
+    .is("parse_error", null)
+    .gte("received_at", fwdSince)
+    .order("received_at", { ascending: false })
+    .limit(200);
+  if (fErr) return json(500, { error: fErr.message });
+  const forwardedForState = (fwdRaw || [])
+    .filter((e) => inferState(e, parseResponse(e.subject, e.body_text)) === state)
+    .slice(0, limit)
+    .map((e) => Object.assign({}, e, { _fwd: true }));
+  const allEmails = (emails || []).concat(forwardedForState);
+
   const { data: openTickets, error: tErr } = await supabase
     .from("tickets")
     .select("id, wo_number, status, ticket_kind, site_text, site_id, attributes")
@@ -127,16 +175,19 @@ exports.handler = async (event) => {
     }
   }
 
-  const summary = { state, examined: 0, closed: 0, unmatched: 0, skippedNotClosed: 0, errors: [] };
+  const summary = { state, examined: 0, forwarded: forwardedForState.length, closed: 0, unmatched: 0, skippedNotClosed: 0, errors: [] };
   const details = [];
 
-  for (const email of emails || []) {
+  for (const email of allEmails) {
     summary.examined += 1;
     const parsed = parseResponse(email.subject, email.body_text);
     if (!isClosedStatus(parsed.status) && !/Service Response/i.test(email.subject || "")) {
       summary.skippedNotClosed += 1;
       if (!dryRun) {
-        await supabase.from("inbound_emails").update({ parse_status: "ignored", parse_error: "not a closed service response" }).eq("id", email.id);
+        await supabase.from("inbound_emails").update(
+          email._fwd ? { parse_error: "not a closed service response" }
+                     : { parse_status: "ignored", parse_error: "not a closed service response" }
+        ).eq("id", email.id);
       }
       continue;
     }
@@ -181,12 +232,12 @@ exports.handler = async (event) => {
 
     if (!match) {
       summary.unmatched += 1;
-      details.push({ email: email.subject, ticketNumber: parsed.ticketNumber, location: parsed.location, match: null });
+      details.push({ email: email.subject, forwarded: !!email._fwd, ticketNumber: parsed.ticketNumber, location: parsed.location, match: null });
       if (!dryRun) {
-        await supabase.from("inbound_emails").update({
-          parse_status: "parsed",
-          parse_error: JSON.stringify({ unmatched: true, ...payload }),
-        }).eq("id", email.id);
+        await supabase.from("inbound_emails").update(
+          Object.assign(email._fwd ? {} : { parse_status: "parsed" },
+            { parse_error: JSON.stringify({ unmatched: true, ...payload }) })
+        ).eq("id", email.id);
       }
       continue;
     }
@@ -200,7 +251,7 @@ exports.handler = async (event) => {
       parsed.technician ? "Tech: " + parsed.technician : "",
     ].filter(Boolean).join(" | ");
 
-    details.push({ email: email.subject, ticketNumber: parsed.ticketNumber, matchedWo: match.wo_number, reason, travelTime: parsed.travelTime, mileage: parsed.mileage });
+    details.push({ email: email.subject, forwarded: !!email._fwd, ticketNumber: parsed.ticketNumber, matchedWo: match.wo_number, reason, travelTime: parsed.travelTime, mileage: parsed.mileage });
 
     if (!dryRun) {
       const attrs = Object.assign({}, match.attributes || {}, { service_response: payload });
@@ -215,10 +266,11 @@ exports.handler = async (event) => {
         summary.errors.push(uErr.message);
         continue;
       }
-      await supabase.from("inbound_emails").update({
-        parse_status: "parsed",
-        parse_error: null,
-      }).eq("id", email.id);
+      await supabase.from("inbound_emails").update(
+        email._fwd
+          ? { parse_error: JSON.stringify({ applied: true, ticketId: match.id, wo: match.wo_number, at: new Date().toISOString() }) }
+          : { parse_status: "parsed", parse_error: null }
+      ).eq("id", email.id);
       match.status = "closed";
     }
     summary.closed += 1;
