@@ -232,7 +232,9 @@ async function loadSites() {
             opt.value = st; opt.textContent = st;
             stateFilter.appendChild(opt);
         }
-        output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Search above, then pick a visit with a captured closing note.</div>`;
+        // Show the newest notes right away (all states, both sources,
+        // no other filters) instead of an empty prompt.
+        runSearch();
     } catch (err) {
         output.innerHTML = `<div class="empty-state" style="color:#ff9a9a;">Error loading site list: ${err.message}</div>`;
     }
@@ -248,11 +250,9 @@ function runSearch() {
     if (!q) {
         resultsDropdown.classList.remove('open'); resultsDropdown.innerHTML = '';
         emailCard.innerHTML = '';
-        if (st || noteSearchInput.value.trim()) {
-            loadStateFeed(st, 0);
-        } else {
-            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to browse recent visits, or search above.</div>`;
-        }
+        // No site search text: always show the recent-visits feed, for the
+        // selected state or all states, with whatever filters are set.
+        loadStateFeed(st, 0);
         return;
     }
     filteredResults = allSites.filter(s =>
