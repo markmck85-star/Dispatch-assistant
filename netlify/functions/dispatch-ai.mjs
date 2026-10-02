@@ -782,12 +782,29 @@ async function loadContext(supabase, state, techNames, siteCodes) {
     .map((c) => siteIdByCode[c])
     .filter(Boolean);
 
+  // PostgREST returns 1,000 rows unless asked for more. California has
+  // ~42k site pairs, so an unpaged read made every missing leg look like
+  // zero and the fleet delta came back 0.0 after a real move.
+  async function fetchAllPages(buildQuery) {
+    const all = [];
+    const PAGE = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+      if (error) return { data: null, error };
+      const page = data || [];
+      all.push(...page);
+      if (page.length < PAGE) return { data: all, error: null };
+      from += PAGE;
+      if (from > 200000) return { data: all, error: { message: 'pagination safety cap' } };
+    }
+  }
   const [{ data: techToSite, error: t2sErr }, { data: siteToSite, error: s2sErr }] = await Promise.all([
     techIds.length
-      ? supabase.from('tech_site_distances').select('technician_id, site_id, mode, distance_mi, duration_min').in('technician_id', techIds)
+      ? fetchAllPages(() => supabase.from('tech_site_distances').select('technician_id, site_id, mode, distance_mi, duration_min').in('technician_id', techIds))
       : Promise.resolve({ data: [], error: null }),
     siteIds.length
-      ? supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi, duration_min').or(`site_a.in.(${siteIds.join(',')}),site_b.in.(${siteIds.join(',')})`)
+      ? fetchAllPages(() => supabase.from('site_site_distances').select('site_a, site_b, mode, distance_mi, duration_min').or(`site_a.in.(${siteIds.join(',')}),site_b.in.(${siteIds.join(',')})`))
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (t2sErr) console.error('[dispatch-ai] tech_site_distances lookup failed, continuing with what resolved:', t2sErr.message);

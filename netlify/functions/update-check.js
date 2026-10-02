@@ -28,9 +28,9 @@
   if (window.__appUpdateCheckLoaded) return;
   window.__appUpdateCheckLoaded = true;
 
-  var CHECK_EVERY_MS = 10 * 60 * 1000;   // while the tab is visible
+  var CHECK_EVERY_MS = 90 * 1000;          // while the tab is visible
   var MIN_GAP_MS = 60 * 1000;            // never check more often than this
-  var SNOOZE_MS = 60 * 60 * 1000;        // "Later" hides the bar for an hour
+  var SNOOZE_MS = 15 * 60 * 1000;        // "Later" hides the bar for 15 minutes
 
   var baseline = null;       // fingerprint of what this page is running
   var lastCheck = 0;
@@ -75,15 +75,14 @@
     bar = document.createElement('div');
     bar.setAttribute('role', 'status');
     bar.style.cssText = [
-      'position:fixed', 'left:50%', 'transform:translateX(-50%)',
-      'bottom:calc(env(safe-area-inset-bottom, 0px) + 14px)', 'z-index:30000',
+      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:30000',
       'display:flex', 'align-items:center', 'gap:10px', 'flex-wrap:wrap', 'justify-content:center',
-      'max-width:min(94vw, 460px)', 'padding:10px 14px', 'border-radius:10px',
-      'background:#1f3a5f', 'color:#ffffff', 'font:600 14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
-      'box-shadow:0 6px 22px rgba(0,0,0,0.35)'
+      'padding:12px 16px', 'padding-top:calc(env(safe-area-inset-top, 0px) + 12px)',
+      'background:#1f3a5f', 'color:#ffffff', 'font:600 16px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
+      'box-shadow:0 4px 16px rgba(0,0,0,0.35)'
     ].join(';');
     var msg = document.createElement('span');
-    msg.textContent = 'A new version is available. Finish what you are doing, then refresh.';
+    msg.textContent = 'A new version is deployed. Finish what you are doing, then refresh.';
     var go = document.createElement('button');
     go.type = 'button';
     go.textContent = 'Refresh';
