@@ -1756,7 +1756,7 @@ function renderStateRebalanceCardHtml(action) {
   return '<div style="background:#12241a;border:1px solid #2f6b42;border-radius:6px;padding:6px 8px;">'
     + '<div style="color:#e8f5ec;font-weight:bold;">🧭 ' + escapeHtml(suggestions.length + ' suggested swap' + (suggestions.length === 1 ? '' : 's')) + '</div>'
     + rows
-    + '<div id="stateAiRebalanceTotalMi" style="margin-top:6px;padding-top:6px;border-top:1px solid #234030;font-size:12px;color:#7edb8e;font-weight:bold;">Total mileage saved: 0.0 mi</div>'
+    + '<div id="stateAiRebalanceTotalMi" style="margin-top:6px;padding-top:6px;border-top:1px solid #234030;font-size:12px;color:#7edb8e;font-weight:bold;">Fleet change: 0.0 mi</div>'
     + '</div>';
 }
 
@@ -1821,14 +1821,16 @@ async function applyStateRebalanceSwap(rowId) {
     // through both Applies and Reverts -- a Revert's own fleetDelta is the
     // mirror image of the original Apply's, so it naturally subtracts back
     // out rather than needing special-cased undo logic here.
-    if (data.fleetDelta != null) {
-      window._stateAiRebalanceTotalSavedMi = (window._stateAiRebalanceTotalSavedMi || 0) - parseMiDelta(data.fleetDelta);
-      const totalEl = document.getElementById('stateAiRebalanceTotalMi');
-      if (totalEl) {
-        const t = window._stateAiRebalanceTotalSavedMi;
-        totalEl.textContent = 'Total mileage saved: ' + (t < 0 ? '-' : '') + Math.abs(t).toFixed(1) + ' mi';
-        totalEl.style.color = t > 0 ? '#7edb8e' : (t < 0 ? '#ffb56b' : '#9fb8a8');
-      }
+    const moveDelta = (result && result.fromDelta != null)
+      ? parseMiDelta(result.fromDelta) + parseMiDelta(result.toDelta)
+      : parseMiDelta(data.fleetDelta);
+    window._stateAiRebalanceTotalSavedMi = (window._stateAiRebalanceTotalSavedMi || 0) + moveDelta;
+    const totalEl = document.getElementById('stateAiRebalanceTotalMi');
+    if (totalEl) {
+      const t = window._stateAiRebalanceTotalSavedMi;
+      const sign = t > 0 ? '+' : (t < 0 ? '-' : '');
+      totalEl.textContent = 'Fleet change: ' + sign + Math.abs(t).toFixed(1) + ' mi';
+      totalEl.style.color = t < 0 ? '#7edb8e' : (t > 0 ? '#ffb56b' : '#9fb8a8');
     }
 
     const wasApplied = row.dataset.applied === 'true';
@@ -1838,7 +1840,7 @@ async function applyStateRebalanceSwap(rowId) {
     row.dataset.from = newFrom;
     row.dataset.to = newTo;
     btn.textContent = wasApplied ? 'Apply' : 'Revert';
-    if (statusEl) { statusEl.style.color = '#7edb8e'; statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + result.toDelta + ')'; }
+    if (statusEl) { statusEl.style.color = '#7edb8e'; statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + shortNameJs(result.fromTech) + ' ' + result.fromDelta + ', ' + shortNameJs(result.toTech) + ' ' + result.toDelta + ')'; }
   } catch (err) {
     if (statusEl) { statusEl.style.color = '#ff8a80'; statusEl.textContent = 'Failed: ' + err.message; }
   } finally {
