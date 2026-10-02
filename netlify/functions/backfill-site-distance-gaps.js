@@ -72,6 +72,7 @@
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
 const { getMonthlyElementsUsed, addMonthlyElementsUsed, estimateCost } = require("./distance-matrix-usage.js");
+const QUICKADD_MAX_COST = 5; // dollars -- keep in sync with compute-distance-matrix.js
 const { verifyQuickAddAdmin } = require("./distance-matrix-quickadd-auth.js");
 
 const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
@@ -312,6 +313,17 @@ exports.handler = async (event) => {
       computed = await computeMissingPairs(supabase, state);
     } catch (e) {
       return json(500, { ok: false, error: e.message });
+    }
+    // v4 (2026-10-01): same server-side ceiling as compute-distance-matrix.js for Quick Add runs (the
+    // lighter dispatcher-login auth must never authorize a big spend).
+    if (quickAdd) {
+      const qaEst = estimateCost(computed.missing.length, await getMonthlyElementsUsed(store));
+      if (qaEst.estimatedCost > QUICKADD_MAX_COST) {
+        return json(403, {
+          ok: false,
+          error: `This would cost about $${qaEst.estimatedCost.toFixed(2)}, over the $${QUICKADD_MAX_COST.toFixed(2)} Quick Add limit. Use "Fill Missing Pairs Only" in the advanced tools (password required) for a job this size.`,
+        });
+      }
     }
     planRecord = {
       state,

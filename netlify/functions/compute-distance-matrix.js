@@ -10,6 +10,12 @@
  * same day. Output (the computed matrix itself) is unchanged -- still
  * cached in Blobs, since index.html already reads from there.
  *
+ * v7 (2026-10-01): (1) "already covered" for additive/Quick Add runs and the dry-run preview now comes from
+ * the tech_site_distances table, not the older copy in Netlify storage -- a Quick Add on a fully built state
+ * no longer re-prices pairs the database already has; (2) the preview only counts techs/sites with map
+ * coordinates, like the real build; (3) Quick Add runs are capped server-side at QUICKADD_MAX_COST dollars;
+ * (4) action:"verify-secret" lets admin.html unlock its advanced tools with one password check.
+ *
  * v3 (2026-09-02): added additive mode for driving builds. A full driving
  * rebuild re-queries and re-bills every tech x site pair in the state, even
  * when only one new tech or one new site was added since the last build --
@@ -105,6 +111,11 @@ const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const DEST_BATCH = 10; // destinations per Distance Matrix API call
 const TECH_BATCHES_PER_CALL = 1; // techs (each with their own full destination sweep) processed per invocation -- see v5 comment above
 const R_MI = 3958.8;  // Earth radius in miles
+// v7 (2026-10-01): hard ceiling for a Quick Add run. Quick Add accepts a dispatcher's own admin login
+// instead of the shared password, so the server (not just the admin page) refuses anything that would
+// cost more than this after the monthly free allowance. Bigger jobs go through the password-protected
+// advanced tools.
+const QUICKADD_MAX_COST = 5; // dollars
 
 function json(statusCode, obj) {
   return {
@@ -126,6 +137,32 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// v7 (2026-10-01): reads the driving distances already saved in the tech_site_distances table (the
+// database the app actually uses) for the given technicians. "Already covered" used to be judged from
+// an older copy of the matrix kept in Netlify storage, which could be missing technicians the database
+// already had -- so Quick Add re-priced (and re-billed against the free allowance) pairs it already
+// owned. Ordered by (technician_id, site_id) so paging never skips or repeats a row.
+async function loadDrivingRows(supabase, techIds) {
+  const rows = [];
+  for (let i = 0; i < techIds.length; i += 10) {
+    const ids = techIds.slice(i, i + 10);
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from("tech_site_distances")
+        .select("technician_id, site_id, distance_mi, duration_min")
+        .eq("mode", "driving")
+        .in("technician_id", ids)
+        .order("technician_id", { ascending: true })
+        .order("site_id", { ascending: true })
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      rows.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+  }
+  return rows;
 }
 
 // Queries one tech's full (or missing-only, for additive) destination list
@@ -186,6 +223,41 @@ exports.handler = async (event) => {
     return json(400, { error: "Invalid JSON body" });
   }
 
+  // v7 (2026-10-01): password check only -- no state needed, no Google call, nothing is built or billed.
+  // admin.html uses it to unlock the advanced (full rebuild / re-geocode) controls with ONE password
+  // entry. Same shared lockout counter as every other paid action: five wrong guesses locks it for 24h.
+  if (payload.action === "verify-secret") {
+    const requiredSecretV = process.env.DISTANCE_MATRIX_ADMIN_PASSWORD;
+    if (!requiredSecretV) {
+      return json(500, { ok: false, error: "DISTANCE_MATRIX_ADMIN_PASSWORD is not configured." });
+    }
+    const vStore = getStore("dispatch");
+    const vKey = "distance-matrix-failed-attempts";
+    const V_MAX_FAILED = 5;
+    const V_LOCKOUT_HOURS = 24;
+    const vData = (await vStore.get(vKey, { type: "json" })) || { count: 0, lockedUntil: null };
+    if (vData.lockedUntil && Date.now() < new Date(vData.lockedUntil).getTime()) {
+      const minsLeft = Math.ceil((new Date(vData.lockedUntil).getTime() - Date.now()) / 60000);
+      return json(429, { ok: false, error: `Too many incorrect admin-secret attempts -- locked out for ${minsLeft} more minute(s).` });
+    }
+    if (String(payload.adminSecret || "") !== requiredSecretV) {
+      const newCount = (vData.count || 0) + 1;
+      const update = { count: newCount, lockedUntil: null };
+      let msg;
+      if (newCount >= V_MAX_FAILED) {
+        update.lockedUntil = new Date(Date.now() + V_LOCKOUT_HOURS * 3600 * 1000).toISOString();
+        update.count = 0;
+        msg = `Incorrect admin secret. Too many failed attempts -- locked out for ${V_LOCKOUT_HOURS} hours.`;
+      } else {
+        msg = `Incorrect admin secret. ${V_MAX_FAILED - newCount} attempt(s) remaining before a ${V_LOCKOUT_HOURS}-hour lockout.`;
+      }
+      await vStore.setJSON(vKey, update);
+      return json(401, { ok: false, error: msg });
+    }
+    if (vData.count) await vStore.setJSON(vKey, { count: 0, lockedUntil: null });
+    return json(200, { ok: true });
+  }
+
   const state = String(payload.state || "").trim().toUpperCase();
   if (!state || !/^[A-Z]{2}$/.test(state))
     return json(400, { error: "Valid 2-letter state required" });
@@ -206,38 +278,44 @@ exports.handler = async (event) => {
     return json(500, { error: "GOOGLE_MAPS_API_KEY env var not set (required for driving mode)" });
 
   // Dry-run cost preview -- free, no password needed, no API call to Google.
+  // v7 (2026-10-01): counts only technicians and sites that have map coordinates (the real build skips
+  // the rest, so the preview now matches what a run would actually do), and judges "already covered" from
+  // the tech_site_distances table instead of the older copy in Netlify storage.
   if (payload.dryRun === true && mode === "driving") {
     const dryStore = getStore("dispatch");
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const [{ data: pSites, error: pSitesErr }, { data: pTechs, error: pTechsErr }] = await Promise.all([
-      supabasePreview.from("sites").select("site_code").eq("state", state).eq("active", true),
-      supabasePreview.from("technicians").select("slug").eq("home_state", state).eq("active", true),
+      supabasePreview.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true),
+      supabasePreview.from("technicians").select("id, slug, lat, lng").eq("home_state", state).eq("active", true),
     ]);
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
     if (pTechsErr) return json(500, { ok: false, error: "technicians fetch failed: " + pTechsErr.message });
 
-    const siteCount = (pSites || []).length;
-    const techCount = (pTechs || []).length;
+    const priceSites = (pSites || []).filter((s) => s.lat != null && s.lng != null);
+    const priceTechs = (pTechs || []).filter((t) => t.lat != null && t.lng != null);
 
-    let elementCount;
+    let elementCount = priceTechs.length * priceSites.length;
     if (additive) {
-      const existing = await dryStore.get("distance-matrix/" + state, { type: "json" });
-      const existingMatrix = (existing && existing.matrix) || {};
-      const siteCodes = new Set((pSites || []).map((s) => s.site_code));
-      const techSlugs = new Set((pTechs || []).map((t) => t.slug));
-      let alreadyCovered = 0;
-      for (const [key, val] of Object.entries(existingMatrix)) {
-        const [techKey, locCode] = key.split("|");
-        if (techSlugs.has(techKey) && siteCodes.has(locCode) && val.type === "driving") alreadyCovered++;
+      let coverageRows;
+      try {
+        coverageRows = await loadDrivingRows(supabasePreview, priceTechs.map((t) => t.id));
+      } catch (e) {
+        return json(500, { ok: false, error: "existing distances fetch failed: " + e.message });
       }
-      elementCount = Math.max(0, techCount * siteCount - alreadyCovered);
-    } else {
-      elementCount = techCount * siteCount;
+      const siteIdSet = new Set(priceSites.map((s) => s.id));
+      const covered = new Set();
+      for (const r of coverageRows) if (siteIdSet.has(r.site_id)) covered.add(r.technician_id + "|" + r.site_id);
+      elementCount = Math.max(0, elementCount - covered.size);
     }
 
     const usedThisMonth = await getMonthlyElementsUsed(dryStore);
     const preview = estimateCost(elementCount, usedThisMonth);
-    return json(200, { ok: true, state, mode, additive, elementCount, techCount, siteCount, ...preview });
+    return json(200, {
+      ok: true, state, mode, additive, elementCount,
+      techCount: priceTechs.length, siteCount: priceSites.length,
+      monthlyElementsUsed: usedThisMonth, quickAddMaxCost: QUICKADD_MAX_COST,
+      ...preview,
+    });
   }
 
   // Password gate -- shared lockout with compute-site-distance-matrix.js.
@@ -428,6 +506,48 @@ exports.handler = async (event) => {
       if (additive && val.type === "driving") matrix[key] = val;
       // non-additive (full rebuild): nothing carried over, everything gets re-queried.
       // additive + non-driving existing entry: left out, falls into "missing" below.
+    }
+
+    // v7 (2026-10-01): additive mode also treats every driving distance already saved in the database
+    // as covered (see loadDrivingRows), so nothing the app already owns gets re-priced.
+    if (additive) {
+      let coverageRows;
+      try {
+        coverageRows = await loadDrivingRows(supabase, (techs || []).map((t) => t.id));
+      } catch (e) {
+        return json(500, { error: "existing distances fetch failed: " + e.message });
+      }
+      const slugById = Object.fromEntries((techs || []).map((t) => [t.id, t.slug]));
+      const codeById = Object.fromEntries((sites || []).map((x) => [x.id, x.site_code]));
+      for (const r of coverageRows) {
+        const slug = slugById[r.technician_id];
+        const code = codeById[r.site_id];
+        if (!slug || !code || !techMap.has(slug) || !locMap.has(code)) continue;
+        const key = slug + "|" + code;
+        if (!matrix[key]) {
+          matrix[key] = {
+            distanceMi: r.distance_mi != null ? Number(r.distance_mi) : null,
+            durationMin: r.duration_min != null ? Number(r.duration_min) : null,
+            type: "driving",
+          };
+        }
+      }
+    }
+
+    // Quick Add ceiling: the server itself refuses a run that would cost more than QUICKADD_MAX_COST
+    // after the monthly free allowance, whatever the page claims.
+    if (quickAdd) {
+      let plannedElements = 0;
+      for (const [techKey] of techEntries) {
+        for (const [code] of locEntries) if (!matrix[techKey + "|" + code]) plannedElements++;
+      }
+      const est = estimateCost(plannedElements, await getMonthlyElementsUsed(store));
+      if (est.estimatedCost > QUICKADD_MAX_COST) {
+        return json(403, {
+          ok: false,
+          error: `This would cost about $${est.estimatedCost.toFixed(2)}, over the $${QUICKADD_MAX_COST.toFixed(2)} Quick Add limit. Use the advanced tools (password required) for a job this size.`,
+        });
+      }
     }
   }
 
