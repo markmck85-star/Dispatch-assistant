@@ -1,5 +1,22 @@
 /**
- * dispatch-ai.mjs — v1.3 (2026-09-19b)
+ * dispatch-ai.mjs — v1.4 (2026-10-02)
+ *   - UNDO. Every command that changes the board (reassign_stop,
+ *     sort_route, apply_swap) now returns an `undo` payload: the
+ *     before-state of just the technicians it touched, plus each moved
+ *     stop's original assigned_by. The server itself stays stateless --
+ *     the page keeps the stack and hands the newest entry back through the
+ *     new forceable `restore_routes` tool, which puts those routes back and
+ *     saves them. Refuses (flagging the entry stale) if the stops sitting on
+ *     those technicians are no longer the same set the snapshot covered, so
+ *     an undo can never duplicate or drop a stop after someone edited the
+ *     board by hand in between. Also adds an `undo_last_command` model tool
+ *     so a spoken "put it back" / "actually, never mind" is recognised; the
+ *     page does the actual undo (it owns the stack).
+ *   - persistRoutes now reports each stop's prior assigned_by and accepts a
+ *     restoreProvenance map, so an undone move doesn't stay marked
+ *     'manual'.
+ *
+ * v1.3 (2026-09-19b)
  *   - propose_route_rebalance now refuses any candidate swap that would
  *     push the RECEIVING technician into 'likely' overtime risk (same
  *     dwell-time + drive-time model get_overtime_risk already used, now
@@ -394,6 +411,14 @@ function functionDeclarations() {
       },
     },
     {
+      name: 'undo_last_command',
+      description:
+        'Use when the dispatcher wants to undo, revert, reverse, or take back the most recent change to the board ' +
+        '("undo that", "put it back", "put Robert\'s stop back", "never mind, change it back", "actually go back to how it was"). ' +
+        'Takes no arguments -- the page restores its own saved snapshot. NEVER try to reproduce an undo with ' +
+        'reassign_stop yourself.',
+    },
+    {
       name: 'sort_route',
       description:
         "Re-sequence one technician's existing stops into the shortest sensible driving order from their home base. " +
@@ -586,6 +611,8 @@ function systemInstruction(roster, state, dispatchDate, unavailableTechs) {
     '- If asked which existing stops to move from one tech (or color) onto another to balance load, call propose_route_rebalance ' +
       'ONCE with fromTechIndexes / toTechIndexes. Do not call get_stop_addition_cost for sites already on the board -- that tool is ' +
       'only for a site that is not currently assigned.',
+    '- If the dispatcher asks to undo, revert, put back, or take back the last change, call undo_last_command (no arguments). ' +
+      'Do not call reassign_stop to try to reverse a move yourself.',
     '- reassign_stop and sort_route DO change the board. Only call one of those when you are confident which technician ' +
       'and stop are meant. If a MOVE is ambiguous, reply with one short sentence asking what you need.',
     '- Distance questions ("how far is X to Y", "miles from Randy\'s house to Cobb South") MUST call get_leg_distance even when ' +
@@ -888,7 +915,7 @@ async function loadContext(supabase, state, techNames, siteCodes) {
  * Stops that only got re-sequenced keep whatever provenance they already
  * had.
  */
-async function persistRoutes(supabase, dispatchDate, routes, changedTechs, ctx, movedCodes) {
+async function persistRoutes(supabase, dispatchDate, routes, changedTechs, ctx, movedCodes, restoreProvenance) {
   const affected = routes.filter((r) => changedTechs.has(r.tech));
   const codes = affected.flatMap((r) => r.stops);
   const siteIds = codes.map((c) => ctx.siteIdByCode[c]).filter(Boolean);
@@ -907,6 +934,10 @@ async function persistRoutes(supabase, dispatchDate, routes, changedTechs, ctx, 
   const now = new Date().toISOString();
   const inserts = [];
   const updates = [];
+  // 2026-10-02: each affected stop's assigned_by BEFORE this write (null =
+  // no row existed yet), returned so the caller can build an undo payload
+  // that restores provenance too, not just the ordering.
+  const priorProvenance = {};
 
   for (const route of affected) {
     const techId = ctx.techIdByName[route.tech];
@@ -920,11 +951,17 @@ async function persistRoutes(supabase, dispatchDate, routes, changedTechs, ctx, 
       const sequenceOrder = idx + 1;
       const moved = movedCodes.has(code);
       const existing = existingBySite[siteId];
+      priorProvenance[code] = existing ? existing.assigned_by : null;
       if (existing) {
         const patch = {};
         if (existing.technician_id !== techId) patch.technician_id = techId;
         if (existing.sequence_order !== sequenceOrder) patch.sequence_order = sequenceOrder;
         if (moved && existing.assigned_by !== 'manual') patch.assigned_by = 'manual';
+        // Undo path: put the original provenance back (only ever set by
+        // restore_routes, never by an ordinary command).
+        if (restoreProvenance && restoreProvenance[code] && existing.assigned_by !== restoreProvenance[code]) {
+          patch.assigned_by = restoreProvenance[code];
+        }
         if (Object.keys(patch).length) {
           patch.updated_at = now;
           updates.push({ id: existing.id, patch });
@@ -955,7 +992,7 @@ async function persistRoutes(supabase, dispatchDate, routes, changedTechs, ctx, 
     if (error) throw new Error('Assignment insert failed: ' + error.message);
   }
 
-  return { persisted: true, updated: updates.length, inserted: inserts.length };
+  return { persisted: true, updated: updates.length, inserted: inserts.length, priorProvenance };
 }
 
 export default async (req) => {
@@ -981,7 +1018,7 @@ export default async (req) => {
   // and technician they mean. Resolved by site code rather than roster
   // indices so a click can't go stale if the board shifted slightly
   // between the analysis running and the button being pressed.
-  const FORCEABLE_TOOLS = new Set(['propose_route_rebalance', 'apply_swap']);
+  const FORCEABLE_TOOLS = new Set(['propose_route_rebalance', 'apply_swap', 'restore_routes']);
   const forceTool = FORCEABLE_TOOLS.has(payload.forceTool) ? String(payload.forceTool) : null;
   const forceToolArgs = (forceTool && payload.forceToolArgs && typeof payload.forceToolArgs === 'object') ? payload.forceToolArgs : {};
 
@@ -1081,6 +1118,7 @@ export default async (req) => {
     const actions = [];
     const changedTechs = new Set();
     const movedCodes = new Set();
+    let restoreProvenance = null;
 
     for (const call of calls) {
       const args = call.args || {};
@@ -1373,6 +1411,72 @@ export default async (req) => {
         continue;
       }
 
+      if (call.name === 'undo_last_command') {
+        // The server keeps no history. The page owns the undo stack and
+        // acts on this action type; nothing on the board changes here.
+        actions.push({ type: 'undo_last_command', summary: 'Undo requested' });
+        continue;
+      }
+
+      if (call.name === 'restore_routes') {
+        const snap = (Array.isArray(args.routes) ? args.routes : [])
+          .filter((r) => r && r.tech)
+          .map((r) => ({
+            tech: String(r.tech).trim(),
+            stops: (Array.isArray(r.stops) ? r.stops : []).map((c) => String(c).trim()),
+          }));
+        const label = String(args.label || '').slice(0, 200);
+        const staleMsg = "The board has changed since that command, so it can't be undone automatically. Move the stop back by hand.";
+        if (!snap.length) {
+          actions.push({ type: 'error', stale: true, summary: 'Nothing to undo.' });
+          continue;
+        }
+        const targets = snap.map((sn) => working.find((r) => r.tech === sn.tech));
+        if (targets.some((t) => !t)) {
+          actions.push({ type: 'error', stale: true, summary: staleMsg });
+          continue;
+        }
+        // Safety check: the stops currently on these technicians must be the
+        // very same set the snapshot covered. A command only ever shuffles
+        // stops among the techs it touched, so if the set differs, someone
+        // changed the board by hand afterward and a blind restore could
+        // duplicate or drop a stop.
+        const nowCodes = targets.flatMap((t) => t.stops).sort();
+        const thenCodes = snap.flatMap((sn) => sn.stops).sort();
+        const sameSet = nowCodes.length === thenCodes.length && nowCodes.every((c, i) => c === thenCodes[i]);
+        if (!sameSet) {
+          actions.push({ type: 'error', stale: true, summary: staleMsg });
+          continue;
+        }
+        let anyChange = false;
+        snap.forEach((sn, i) => {
+          const t = targets[i];
+          const same = t.stops.length === sn.stops.length && t.stops.every((c, j) => c === sn.stops[j]);
+          if (!same) {
+            anyChange = true;
+            t.stops = sn.stops.slice();
+            changedTechs.add(t.tech);
+          }
+        });
+        if (!anyChange) {
+          actions.push({ type: 'error', stale: true, summary: 'Nothing to undo -- the board already matches how it was before that change.' });
+          continue;
+        }
+        const prov = {};
+        if (args.provenance && typeof args.provenance === 'object') {
+          for (const [code, val] of Object.entries(args.provenance)) {
+            if (typeof val === 'string' && /^[a-z_]{2,20}$/.test(val)) prov[String(code)] = val;
+          }
+        }
+        restoreProvenance = prov;
+        actions.push({
+          type: 'restore_routes',
+          summary: `Undid: ${label || 'last change'}`,
+          techs: snap.map((sn) => sn.tech),
+        });
+        continue;
+      }
+
       if (call.name === 'propose_route_rebalance') {
         const maxSuggestions = Number.isInteger(args.maxSuggestions) && args.maxSuggestions > 0
           ? Math.min(args.maxSuggestions, 15)
@@ -1444,8 +1548,29 @@ export default async (req) => {
     const fleetDelta = deltaText(fleetBefore, fleetAfter);
 
     let persistResult = { persisted: false, reason: 'nothing changed' };
+    let priorProvenance = {};
     if (changedTechs.size) {
-      persistResult = await persistRoutes(supabase, dispatchDate, working, changedTechs, ctx, movedCodes);
+      const pr = await persistRoutes(supabase, dispatchDate, working, changedTechs, ctx, movedCodes, restoreProvenance);
+      priorProvenance = pr.priorProvenance || {};
+      persistResult = { ...pr };
+      delete persistResult.priorProvenance;
+    }
+
+    // Undo payload (2026-10-02): the pre-command ordering of just the
+    // technicians this command touched, plus each moved stop's original
+    // assigned_by (a stop that had no saved row yet was effectively
+    // auto-generated, so 'auto'). A restore itself never returns one --
+    // there is no redo.
+    let undo = null;
+    const undoable = actions.filter((a) => a.type === 'reassign_stop' || a.type === 'sort_route' || a.type === 'apply_swap');
+    if (changedTechs.size && undoable.length && !calls.some((c) => c.name === 'restore_routes')) {
+      const provenance = {};
+      for (const code of movedCodes) provenance[code] = priorProvenance[code] || 'auto';
+      undo = {
+        label: undoable.map((a) => a.summary).join(' · '),
+        routes: before.filter((r) => changedTechs.has(r.tech)),
+        provenance,
+      };
     }
 
     const applied = actions.filter((a) => a.type !== 'error');
@@ -1464,6 +1589,7 @@ export default async (req) => {
       fleetDelta,
       routes: working,
       changedTechs: [...changedTechs],
+      undo,
       ...persistResult,
     });
   } catch (err) {
