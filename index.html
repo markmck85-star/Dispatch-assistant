@@ -570,12 +570,6 @@
                      with plottable coordinates exists; the collapse state is
                      remembered in localStorage the same way the controls panel
                      does it. -->
-                <div id="resultsPanelLoading">
-                    <video autoplay muted loop playsinline preload="auto" aria-hidden="true">
-                        <source src="logo-loading.mp4" type="video/mp4">
-                    </video>
-                    <div id="resultsPanelLoadingText">Loading dispatch board…</div>
-                </div>
                 <style>@keyframes resultsPanelSpin { to { transform: rotate(360deg); } }</style>
                 <div id="dispatchMapPanel" class="map-panel">
                     <div class="map-panel-head">
@@ -596,7 +590,7 @@
                                 <video autoplay muted loop playsinline preload="auto" aria-hidden="true">
                                     <source src="logo-loading.mp4" type="video/mp4">
                                 </video>
-                                <div class="map-load-label" id="dispatchMapLoaderText">Loading drive times…</div>
+                                <div class="map-load-label" id="dispatchMapLoaderText">Loading map…</div>
                             </div>
                         </div>
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
@@ -612,6 +606,13 @@
                         <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
                     </div>
                 </div>
+                <div id="resultsPanelLoading">
+                    <video autoplay muted loop playsinline preload="auto" aria-hidden="true">
+                        <source src="logo-loading.mp4" type="video/mp4">
+                    </video>
+                    <div id="resultsPanelLoadingText">Loading dispatch board…</div>
+                </div>
+
                 <div id="results" class="results hidden"></div>
             </div>
         </div>
@@ -1924,14 +1925,18 @@ function distanceMatrixStatus(state) {
         function setMapLoader(msg, on) {
             const panel = document.getElementById('dispatchMapPanel');
             const loader = document.getElementById('dispatchMapLoader');
-            const label = document.getElementById('dispatchMapLoaderText');
+            const mapLabel = document.getElementById('dispatchMapLoaderText');
             const boardText = document.getElementById('resultsPanelLoadingText');
-            if (label && msg) label.textContent = msg;
+            if (mapLabel) mapLabel.textContent = 'Loading map…';
             if (boardText && msg) boardText.textContent = msg;
             if (loader) loader.hidden = !on;
             if (on && panel && !panel.classList.contains('collapsed')) panel.classList.add('visible');
-            const vid = loader && loader.querySelector('video');
-            if (vid) { if (on) { try { vid.play(); } catch (e) {} } else { try { vid.pause(); } catch (e) {} } }
+            [loader, document.getElementById('resultsPanelLoading')].forEach(function (box) {
+                const vid = box && box.querySelector('video');
+                if (!vid) return;
+                if (on) { try { vid.play(); } catch (e) {} }
+                else { try { vid.pause(); } catch (e) {} }
+            });
         }
         function setBootStatus(msg) {
             if (!window.__bootLoading) return;
