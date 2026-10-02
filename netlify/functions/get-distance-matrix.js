@@ -8,30 +8,15 @@
  * "{siteCodeA}|{siteCodeB}" for site-to-site entries, each value
  * { distanceMi, durationMin, distanceText, durationText, type }.
  *
- * v2 (2026-09-15): switched the primary data source from the Blobs
- * distance-matrix/{STATE} key to the tech_site_distances / site_site_distances
- * Supabase tables.
+ * v4 (2026-10-01): gzip large responses. California's full matrix is about
+ * 6.0 MB of JSON, right at Netlify's 6 MB response limit. Uncompressed, the
+ * call failed and the board fell back to straight-line "(est.)" distances.
  *
- * v3 (2026-09-19): page every Supabase select. PostgREST's default max-rows
- * is 1000, and a single unpaged read of site_site_distances / tech_site_distances
- * silently truncated GA -- live payload was exactly 1000 site-site pairs and
- * a partial tech-site list that dropped Gina Ownbey and Omari Williams even
- * though both had driving rows and coordinates. fetchAllPages() walks .range
- * until a short page comes back.
- *
- * TRANSITIONAL BLOBS FALLBACK: states get migrated one at a time, so a state
- * with nothing in Supabase yet falls back to the OLD Blobs key.
- *
- * When a pair has rows in more than one mode, 'driving' wins, then
- * 'haversine-fallback', then 'haversine'.
- *
- * v4 (2026-10-01): gzip large responses. California's full matrix (290 sites = 41,905 site-to-site pairs plus
- * 4,350 tech-to-site pairs) is about 6.0 MB of JSON -- right at Netlify's 6 MB limit on a function's response.
- * Over the limit the call fails, the board silently falls back to straight-line "(est.)" distances, and every
- * California leg looks like an estimate even though the database holds complete driving data. Responses over
- * GZIP_OVER_BYTES are now sent gzip-compressed (base64 in the function envelope, Content-Encoding: gzip), which
- * shrinks them roughly tenfold; browsers decompress transparently, so no page changes are needed. Smaller
- * states (GA, FL, ...) are sent exactly as before.
+ * v5 (2026-10-02): the gzipped payload itself was fine (live CA response is
+ * ~660 KB, 46,255 driving pairs), but building it paged Supabase 1,000 rows
+ * at a time, sequentially. That took ~9.5s. Generate Dispatches only waited
+ * 2.5s, painted haversine, and often never refreshed. Pages are now fetched
+ * in parallel batches. Function timeout is 26s in netlify.toml.
  *
  * GET /.netlify/functions/get-distance-matrix?state=GA
  */
@@ -41,7 +26,8 @@ const { getStore, connectLambda } = require('@netlify/blobs');
 const zlib = require('zlib');
 
 const PAGE_SIZE = 1000;
-const GZIP_OVER_BYTES = 1024 * 1024; // compress anything over 1 MB; the hard limit is ~6 MB
+const PAGE_BATCH = 8;
+const GZIP_OVER_BYTES = 1024 * 1024;
 
 function json(statusCode, obj) {
   const text = JSON.stringify(obj);
@@ -75,21 +61,29 @@ function pickBestRow(rows) {
   return rows.slice().sort((a, b) => (MODE_PRIORITY[a.mode] ?? 9) - (MODE_PRIORITY[b.mode] ?? 9))[0];
 }
 
-/**
- * Run a Supabase query builder in 1000-row pages until exhausted.
- * `buildQuery` is called fresh each page so filters stay attached.
- */
 async function fetchAllPages(buildQuery) {
   const all = [];
   let from = 0;
   while (true) {
-    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
-    if (error) return { data: null, error };
-    const page = data || [];
-    all.push(...page);
-    if (page.length < PAGE_SIZE) return { data: all, error: null };
-    from += PAGE_SIZE;
-    if (from > 100000) return { data: all, error: { message: 'pagination safety cap' } };
+    const ranges = [];
+    for (let i = 0; i < PAGE_BATCH; i++) {
+      const start = from + i * PAGE_SIZE;
+      ranges.push(buildQuery().range(start, start + PAGE_SIZE - 1));
+    }
+    const results = await Promise.all(ranges);
+    let short = false;
+    for (const { data, error } of results) {
+      if (error) return { data: null, error };
+      const page = data || [];
+      all.push(...page);
+      if (page.length < PAGE_SIZE) {
+        short = true;
+        break;
+      }
+    }
+    if (short) return { data: all, error: null };
+    from += PAGE_BATCH * PAGE_SIZE;
+    if (from > 200000) return { data: all, error: { message: 'pagination safety cap' } };
   }
 }
 
