@@ -129,7 +129,7 @@
            to fill whatever's left below the header row. */
         .map-panel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
         .map-panel.map-fullscreen .map-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-        .map-panel.map-fullscreen #dispatchMap { flex: 1; height: auto; }
+        .map-panel.map-fullscreen #dispatchMapSlot, .map-panel.map-fullscreen #dispatchMap { flex: 1; height: auto; }
         .map-panel label { font-size: 15px !important; color: #ddd !important; gap: 10px !important; min-height: 44px; }
         .map-panel label input[type="checkbox"] { width: 22px; height: 22px; accent-color: #7edb8e; flex-shrink: 0; }
         .map-panel .leaflet-control-zoom a { width: 40px !important; height: 40px !important; line-height: 40px !important; font-size: 22px !important; }
@@ -180,6 +180,23 @@
             display: flex; align-items: center; justify-content: center;
             height: 100%; color: #888; font-size: 13px;
         }
+
+        .map-load-overlay {
+            position: absolute; inset: 0; z-index: 600;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 12px; background: #161616; border-radius: 6px;
+        }
+        .map-load-overlay[hidden] { display: none !important; }
+        .map-load-overlay video {
+            width: 148px; height: 148px; object-fit: contain; background: transparent;
+        }
+        .map-load-label { color: #d7e6f5; font-size: 17px; font-weight: 650; text-align: center; padding: 0 16px; }
+        #resultsPanelLoading {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 12px; min-height: 280px; color: #d7e6f5; font-size: 17px; font-weight: 650;
+            background: #161616; border: 1px solid #444; border-radius: 8px; margin-bottom: 14px;
+        }
+        #resultsPanelLoading video { width: 148px; height: 148px; object-fit: contain; }
         #dispatchMapLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .map-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: #2a2a2e; border: 1px solid #555; border-radius: 12px; font-size: 11px; color: #ddd; cursor: pointer; user-select: none; }
         .map-legend-chip:hover { border-color: #7ec8e3; }
@@ -553,9 +570,11 @@
                      with plottable coordinates exists; the collapse state is
                      remembered in localStorage the same way the controls panel
                      does it. -->
-                <div id="resultsPanelLoading" style="display:flex; align-items:center; gap:10px; color:#888; font-size:13px; padding:30px 10px;">
-                    <span style="width:14px; height:14px; border:2px solid #444; border-top-color:#7ec8e3; border-radius:50%; display:inline-block; animation:resultsPanelSpin 0.8s linear infinite;"></span>
-                    Loading dispatch board…
+                <div id="resultsPanelLoading">
+                    <video autoplay muted loop playsinline preload="auto" aria-hidden="true">
+                        <source src="logo-loading.mp4" type="video/mp4">
+                    </video>
+                    <div id="resultsPanelLoadingText">Loading dispatch board…</div>
                 </div>
                 <style>@keyframes resultsPanelSpin { to { transform: rotate(360deg); } }</style>
                 <div id="dispatchMapPanel" class="map-panel">
@@ -571,7 +590,15 @@
                         <span id="dispatchMapMeta" class="map-panel-meta"></span>
                     </div>
                     <div id="dispatchMapBody" class="map-panel-body">
-                        <div id="dispatchMap"><div id="dispatchMapBoot">Loading map…</div></div>
+                        <div id="dispatchMapSlot" style="position:relative;">
+                            <div id="dispatchMap"><div id="dispatchMapBoot"></div></div>
+                            <div id="dispatchMapLoader" class="map-load-overlay" hidden>
+                                <video autoplay muted loop playsinline preload="auto" aria-hidden="true">
+                                    <source src="logo-loading.mp4" type="video/mp4">
+                                </video>
+                                <div class="map-load-label" id="dispatchMapLoaderText">Loading drive times…</div>
+                            </div>
+                        </div>
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
                             <input type="checkbox" id="mapShowCompletedToggle" checked onchange="toggleMapShowCompleted(this.checked)">
                             Show completed stops (✓, muted)
@@ -1894,17 +1921,31 @@ function distanceMatrixStatus(state) {
         // visible feedback. Only used during the initial boot; region changes
         // after that stay quiet.
         window.__bootLoading = true;
+        function setMapLoader(msg, on) {
+            const panel = document.getElementById('dispatchMapPanel');
+            const loader = document.getElementById('dispatchMapLoader');
+            const label = document.getElementById('dispatchMapLoaderText');
+            const boardText = document.getElementById('resultsPanelLoadingText');
+            if (label && msg) label.textContent = msg;
+            if (boardText && msg) boardText.textContent = msg;
+            if (loader) loader.hidden = !on;
+            if (on && panel && !panel.classList.contains('collapsed')) panel.classList.add('visible');
+            const vid = loader && loader.querySelector('video');
+            if (vid) { if (on) { try { vid.play(); } catch (e) {} } else { try { vid.pause(); } catch (e) {} } }
+        }
         function setBootStatus(msg) {
             if (!window.__bootLoading) return;
             const el = document.getElementById('bootStatusText');
             if (el && msg) el.textContent = msg;
             const bar = document.getElementById('bootStatus');
             if (bar) bar.hidden = false;
+            setMapLoader(msg || 'Loading drive times…', true);
         }
         function hideBootStatus() {
             window.__bootLoading = false;
             const bar = document.getElementById('bootStatus');
             if (bar) bar.hidden = true;
+            if (typeof setMapLoader === 'function') setMapLoader('', false);
 
             // Mark the splash as shown for the rest of this tab session, so
             // navigating back to this page later (from the state console,
@@ -8276,6 +8317,7 @@ ${content}</body></html>`;
             // Panel must be visible before the map is built or measured: Leaflet
             // reads zero dimensions out of a display:none container.
             panel.classList.add('visible');
+            if (typeof setMapLoader === 'function') setMapLoader('', false);
             const map = ensureDispatchMap();
             if (!map) { panel.classList.remove('visible'); return; }
 
