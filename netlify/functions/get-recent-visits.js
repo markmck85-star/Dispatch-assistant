@@ -34,7 +34,8 @@
 // list-service-responses.js (tickets a response closed plus the response
 // emails themselves), shaped like visits: the email's resolution notes are
 // the closing_note, so note-text search, state, date and tech filters all
-// work on them. Pass email=0 to get kiosk visits only (the old behavior).
+// work on them. Pass email=0 to get kiosk visits only (the old behavior), or
+// kiosk=0 to get the email closings only.
 // The lossy site_visits stubs the TechWeb forward parser wrote for those same
 // five states (one ticket-number key, so every PM with ticket "0" collapsed
 // into one row, and no note text) are left out of the merge, since the email
@@ -144,6 +145,9 @@ exports.handler = async (event) => {
     // Email-derived closings only exist for these states (or when searching
     // across all states). email=0 turns the merge off.
     const wantEmail = params.email !== '0' && (!state || EMAIL_STATES.includes(state));
+    // kiosk=0 leaves kiosk visits out (email closings only). Together with
+    // email=0 this is what the Closing Notes page's two checkboxes send.
+    const wantKiosk = params.kiosk !== '0';
 
     let query = supabase
       .from('site_visits')
@@ -175,7 +179,7 @@ exports.handler = async (event) => {
       query = query.ilike('tech_name_raw', params.tech.trim());
     }
 
-    const { data, error, count } = await query;
+    const { data, error, count } = wantKiosk ? await query : { data: [], error: null, count: 0 };
     if (error) throw new Error(error.message);
 
     let visits = (data || []).map((v) => ({
