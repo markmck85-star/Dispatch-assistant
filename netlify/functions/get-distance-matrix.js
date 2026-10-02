@@ -25,16 +25,35 @@
  * When a pair has rows in more than one mode, 'driving' wins, then
  * 'haversine-fallback', then 'haversine'.
  *
+ * v4 (2026-10-01): gzip large responses. California's full matrix (290 sites = 41,905 site-to-site pairs plus
+ * 4,350 tech-to-site pairs) is about 6.0 MB of JSON -- right at Netlify's 6 MB limit on a function's response.
+ * Over the limit the call fails, the board silently falls back to straight-line "(est.)" distances, and every
+ * California leg looks like an estimate even though the database holds complete driving data. Responses over
+ * GZIP_OVER_BYTES are now sent gzip-compressed (base64 in the function envelope, Content-Encoding: gzip), which
+ * shrinks them roughly tenfold; browsers decompress transparently, so no page changes are needed. Smaller
+ * states (GA, FL, ...) are sent exactly as before.
+ *
  * GET /.netlify/functions/get-distance-matrix?state=GA
  */
 
 const { createClient } = require('@supabase/supabase-js');
 const { getStore, connectLambda } = require('@netlify/blobs');
+const zlib = require('zlib');
 
 const PAGE_SIZE = 1000;
+const GZIP_OVER_BYTES = 1024 * 1024; // compress anything over 1 MB; the hard limit is ~6 MB
 
 function json(statusCode, obj) {
-  return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+  const text = JSON.stringify(obj);
+  if (Buffer.byteLength(text, 'utf8') > GZIP_OVER_BYTES) {
+    return {
+      statusCode,
+      headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+      body: zlib.gzipSync(Buffer.from(text, 'utf8')).toString('base64'),
+      isBase64Encoded: true,
+    };
+  }
+  return { statusCode, headers: { 'Content-Type': 'application/json' }, body: text };
 }
 
 function fmtDistance(mi) {
