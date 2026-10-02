@@ -1798,6 +1798,7 @@ async function applyStateRebalanceSwap(rowId) {
     if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
     const result = (data.actions || [])[0];
     if (result && result.type === 'error') throw new Error(result.summary);
+    if ((data.changedTechs || []).length) pushStateAiUndo(data.undo);
 
     // Redraw from the saved board without a page reload. The suggestion card
     // lives outside the map, so Revert stays. Snapshot it anyway in case a
@@ -1872,12 +1873,99 @@ function renderStateAiDiff(data) {
     if (data.persisted === false && data.changedTechs && data.changedTechs.length) {
       html += '<div style="margin-top:3px;color:#ffb56b;font-size:11px;">⚠ Not saved' + (data.reason ? ' (' + escapeHtml(data.reason) + ')' : '') + '</div>';
     }
+    const undoDepth = (window._stateAiUndoStack || []).length;
+    if (undoDepth) {
+      html += '<div style="margin-top:5px;"><button type="button" onclick="performStateAiUndo()" '
+        + 'style="padding:3px 10px;border-radius:6px;border:1px solid #2a6496;background:#2a6496;color:#fff;font-size:12px;cursor:pointer;">'
+        + '↩ Undo' + (undoDepth > 1 ? ' (' + undoDepth + ' steps available)' : '') + '</button></div>';
+    }
     html += '</div>';
   }
   if (errors.length) {
     html += '<div style="margin-top:4px;color:#ffb56b;font-size:11px;">' + escapeHtml(errors.map(a => a.summary).join(' · ')) + '</div>';
   }
   el.innerHTML = html;
+}
+
+// ─── UNDO (2026-10-02) ──────────────────────────────────────────────
+// Same design as index.html: dispatch-ai.mjs keeps no history, so every
+// board-changing command returns an `undo` payload that this page stacks
+// and hands back through the restore_routes tool. Lasts until the page is
+// refreshed; entries are tied to the state + date they were made on.
+window._stateAiUndoStack = window._stateAiUndoStack || [];
+
+function pushStateAiUndo(undo) {
+  if (!undo || !Array.isArray(undo.routes) || !undo.routes.length) return;
+  window._stateAiUndoStack.push({
+    routes: undo.routes,
+    provenance: undo.provenance || {},
+    label: undo.label || '',
+    state: document.getElementById('stateSel').value,
+    date: window._stateMapDate
+  });
+  if (window._stateAiUndoStack.length > 20) window._stateAiUndoStack.shift();
+}
+
+/** True for a bare "undo" / "put it back" style phrase (typed or dictated). Fancier wording goes to the assistant's own undo_last_command tool. */
+function isStateAiUndoPhrase(text) {
+  const t = String(text || '').toLowerCase().replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
+  return /^(?:(?:please|ok|okay|actually|hey|wait|no) )*(?:undo|revert|put (?:it|that|them|him|her) back|take (?:it|that) back|change (?:it|that) back|go back)(?: (?:that|it|this|the last (?:one|change|move|command|action)|last (?:one|change|move|command|action)|the move|that move|that change))?(?: please)?$/.test(t);
+}
+
+async function performStateAiUndo() {
+  if (_stateAiBusy) return;
+  const stack = window._stateAiUndoStack || [];
+  const state = document.getElementById('stateSel').value;
+  const dispatchDate = window._stateMapDate;
+  const entry = stack[stack.length - 1];
+  if (!entry || entry.state !== state || entry.date !== dispatchDate) {
+    if (entry) stack.length = 0; // belongs to a different state/date; can't apply here
+    setStateAiStatus('Nothing to undo.', '#ffb56b');
+    return;
+  }
+
+  if (_stateAiListening) stopStateAiVoice();
+  _stateAiBusy = true;
+  refreshStateAiBarState();
+  setStateAiStatus('Undoing…', '#7ec8e3');
+  const diffEl = document.getElementById('stateAiCommandDiff');
+  if (diffEl) diffEl.innerHTML = '';
+
+  try {
+    const res = await fetch('/.netlify/functions/dispatch-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'undo last change', state, dispatchDate, routes: window._stateAiRoutes,
+        forceTool: 'restore_routes',
+        forceToolArgs: { routes: entry.routes, provenance: entry.provenance, label: entry.label }
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.ok) {
+      setStateAiStatus((data && data.error) || ('Undo failed (HTTP ' + res.status + ')'), '#ff8a80');
+      return;
+    }
+    const result = (data.actions || [])[0];
+    if (result && result.type === 'error') {
+      // Board no longer matches that snapshot -- drop it rather than leave it stuck on top.
+      if (result.stale) stack.pop();
+      setStateAiStatus(result.summary, '#ffb56b');
+      return;
+    }
+
+    stack.pop();
+    if ((data.changedTechs || []).length) await renderStateMap(state, dispatchDate);
+    renderStateAiDiff(data);
+    setStateAiStatus('', '#888');
+    const input = document.getElementById('stateAiCommandInput');
+    if (input) input.value = '';
+  } catch (err) {
+    setStateAiStatus('Undo failed: ' + err.message, '#ff8a80');
+  } finally {
+    _stateAiBusy = false;
+    refreshStateAiBarState();
+  }
 }
 
 async function submitStateAiCommand(forceTool) {
@@ -1892,6 +1980,12 @@ async function submitStateAiCommand(forceTool) {
   const dispatchDate = window._stateMapDate;
   if (!(window._stateAiRoutes || []).some(r => (r.stops || []).length > 0)) {
     setStateAiStatus('No plottable stops for this date yet.', '#ffb56b');
+    return;
+  }
+
+  // Bare "undo" / "put it back": handled here, no round trip to the model.
+  if (!forceTool && isStateAiUndoPhrase(text)) {
+    performStateAiUndo();
     return;
   }
 
@@ -1923,7 +2017,17 @@ async function submitStateAiCommand(forceTool) {
       return;
     }
 
+    // The assistant recognised "put it back" style wording and asked for an
+    // undo; this page owns the stack, so do it here.
+    if ((data.actions || []).some(a => a.type === 'undo_last_command')) {
+      _stateAiBusy = false;
+      refreshStateAiBarState();
+      await performStateAiUndo();
+      return;
+    }
+
     const changed = data.changedTechs || [];
+    if (changed.length) pushStateAiUndo(data.undo);
     if (changed.length) {
       // Re-fetch rather than reconstruct in-memory -- the map already
       // rebuilds itself from Supabase on every render, so this is simpler
