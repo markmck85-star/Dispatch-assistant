@@ -99,7 +99,8 @@
   #stateMapPanel.collapsed #stateMapBody { display: none; }
   #stateMapPanel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
   #stateMapPanel.map-fullscreen #stateMapBody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  #stateMapPanel.map-fullscreen #stateMap { flex: 1; height: auto; }
+  #stateMapPanel.map-fullscreen #stateMapSlot { flex: 1; height: auto; min-height: 0; display: flex; flex-direction: column; }
+  #stateMapPanel.map-fullscreen #stateMap { flex: 1; height: 100%; min-height: 240px; }
   #stateMapToggleBtn, #stateMapFullscreenBtn, #stateMapFullscreenCloseBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
   #stateMapToggleBtn:hover, #stateMapFullscreenBtn:hover, #stateMapFullscreenCloseBtn:hover { background: #33334a; }
   #stateMapFullscreenCloseBtn { display: none; }

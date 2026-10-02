@@ -129,7 +129,8 @@
            to fill whatever's left below the header row. */
         .map-panel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
         .map-panel.map-fullscreen .map-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-        .map-panel.map-fullscreen #dispatchMapSlot, .map-panel.map-fullscreen #dispatchMap { flex: 1; height: auto; }
+        .map-panel.map-fullscreen #dispatchMapSlot { flex: 1; height: auto; min-height: 0; display: flex; flex-direction: column; }
+        .map-panel.map-fullscreen #dispatchMap { flex: 1; height: 100%; min-height: 240px; }
         .map-panel label { font-size: 15px !important; color: #ddd !important; gap: 10px !important; min-height: 44px; }
         .map-panel label input[type="checkbox"] { width: 22px; height: 22px; accent-color: #7edb8e; flex-shrink: 0; }
         .map-panel .leaflet-control-zoom a { width: 40px !important; height: 40px !important; line-height: 40px !important; font-size: 22px !important; }
