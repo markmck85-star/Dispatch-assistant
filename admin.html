@@ -446,6 +446,23 @@
     <div id="dm-quickadd-status" class="dm-status" style="margin-top:8px;">Ready.</div>
   </div>
 
+  <!-- Advanced tools lock (2026-10-01). Quick Add above is the everyday path and needs no password
+       (it uses the admin login already in use here). Everything below -- re-geocoding, full and
+       drive-time rebuilds, site-to-site builds, gap-fill, usage fixes -- can cost real money, so it
+       stays hidden until the Distance Matrix admin password is entered once. It re-locks by itself
+       after 10 minutes or on the Lock button. -->
+  <div id="dm-adv-lock" style="margin:0 0 12px 0;padding:10px 12px;background:#1c1c28;border:1px solid #33334a;border-radius:6px;">
+    <button class="dm-btn" style="background:#3a3a4d;" onclick="dmUnlockAdvanced()">🔒 Advanced tools (rebuilds, re-geocoding)</button>
+    <p style="color:#888;font-size:11px;margin:6px 0 0 0;">
+      Not needed for adding one technician or one location. These can cost real money, so they stay locked
+      until you enter the Distance Matrix admin password.
+    </p>
+  </div>
+  <div id="dm-adv" style="display:none;">
+  <div style="margin:0 0 10px 0;">
+    <button class="dm-btn" style="background:#3a3a4d;font-size:12px;" onclick="dmLockAdvanced()">🔓 Lock advanced tools again</button>
+  </div>
+
   <!-- Step 1: Geocode addresses (one-time, idempotent) -->
   <p style="color:#aaa;font-size:12px;margin:0 0 6px 0;">
     <strong style="color:#f0f0f0;">Step 1</strong> — Geocode addresses (first-time setup or after adding new locations/techs).
@@ -534,6 +551,8 @@
     <button class="dm-btn orange" style="font-size:12px;margin-top:6px;" onclick="dmClearCooldown()">⏱️ Clear stuck cooldown for this state</button>
   </details>
 
+  </div><!-- /dm-adv -->
+
   <div id="dm-status" class="dm-status">Ready.</div>
 </div>
 
@@ -550,6 +569,49 @@
   function dmSetStatus(msg) {
     document.getElementById('dm-status').textContent = msg;
   }
+
+  // Advanced-tools lock (2026-10-01). The password is checked once, kept in memory only (never saved
+  // anywhere, gone on reload) and reused by the advanced buttons until the unlock expires, so they no
+  // longer ask again for every click. window.dmSecret is shared with the Quick Add script block below.
+  var DM_UNLOCK_MINUTES = 10;
+  var dmUnlock = { secret: '', expires: 0, timer: null };
+  function dmCachedSecret() {
+    return (dmUnlock.secret && Date.now() < dmUnlock.expires) ? dmUnlock.secret : '';
+  }
+  window.dmSecret = function (label) {
+    return dmCachedSecret() || (prompt(label) || '');
+  };
+  function dmApplyLockState() {
+    var open = !!dmCachedSecret();
+    document.getElementById('dm-adv').style.display = open ? '' : 'none';
+    document.getElementById('dm-adv-lock').style.display = open ? 'none' : '';
+  }
+  window.dmLockAdvanced = function () {
+    if (dmUnlock.timer) clearTimeout(dmUnlock.timer);
+    dmUnlock = { secret: '', expires: 0, timer: null };
+    dmApplyLockState();
+    dmSetStatus('Advanced tools locked.');
+  };
+  window.dmUnlockAdvanced = async function () {
+    var pw = prompt('Distance Matrix admin password (unlocks the advanced tools for ' + DM_UNLOCK_MINUTES + ' minutes):') || '';
+    if (!pw) return;
+    dmSetStatus('Checking password…');
+    try {
+      var res = await fetch('/.netlify/functions/compute-distance-matrix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify-secret', adminSecret: pw }),
+      });
+      var data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Incorrect password');
+      if (dmUnlock.timer) clearTimeout(dmUnlock.timer);
+      dmUnlock = { secret: pw, expires: Date.now() + DM_UNLOCK_MINUTES * 60000, timer: setTimeout(window.dmLockAdvanced, DM_UNLOCK_MINUTES * 60000) };
+      dmApplyLockState();
+      dmSetStatus('Advanced tools unlocked for ' + DM_UNLOCK_MINUTES + ' minutes.');
+    } catch (e) {
+      dmSetStatus('❌ ' + e.message);
+    }
+  };
 
   window.dmBuildSiteMatrix = async function () {
     const state = dmState();
@@ -589,7 +651,7 @@
       'Runs in small chunks so it can take a couple minutes for larger states -- keep this tab open while it works.\n\n' +
       'DOUBLE-CHECK THE STATE ABOVE IS CORRECT BEFORE CONTINUING.';
     if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
-    const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+    const adminSecret = window.dmSecret('Distance Matrix admin password (required for any paid build):');
     if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
     let offset = 0;
@@ -752,7 +814,7 @@
       'Runs in small chunks so it can take a couple minutes for a large gap -- keep this tab open while it works.\n\n' +
       'DOUBLE-CHECK THE STATE ABOVE IS CORRECT BEFORE CONTINUING.';
     if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
-    const adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+    const adminSecret = window.dmSecret('Distance Matrix admin password (required for any paid build):');
     if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
     let offset = 0;
@@ -830,7 +892,7 @@
       dmSetStatus('Cancelled.');
       return;
     }
-    const adminSecret = prompt('Distance Matrix admin password:') || '';
+    const adminSecret = window.dmSecret('Distance Matrix admin password:');
     if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
     dmSetStatus('Adjusting monthly usage…');
@@ -858,7 +920,7 @@
       dmSetStatus('Cancelled.');
       return;
     }
-    const adminSecret = prompt('Distance Matrix admin password:') || '';
+    const adminSecret = window.dmSecret('Distance Matrix admin password:');
     if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
 
     dmSetStatus('Clearing cooldown…');
@@ -937,7 +999,28 @@
     document.getElementById('dm-quickadd-status').textContent = msg;
   }
 
-  async function qaRunChunkedBuild(url, baseBody, adminSecret, label, offsetField) {
+  // Quick Add (2026-09-24, reworked 2026-10-01).
+  // Everyday path for adding ONE technician or ONE location. It never asks for the Distance Matrix
+  // password: it authenticates with the admin login already in use on this page (the server checks
+  // the login, rejects anything that is not additive, and refuses any run over the Quick Add cost
+  // ceiling no matter what this page sends). Flow: geocode (free) -> free cost check -> if there is
+  // nothing to look up, say so and stop -> a free run just goes -> a run that uses a lot of the free
+  // allowance, or costs anything, asks for one confirmation -> run.
+  var QA_AUTO_RUN_MAX_LOOKUPS = 500;   // free runs up to this size go ahead without a confirmation
+
+  function qaLoginAuth() {
+    try {
+      if (typeof adminCreds === 'function') {
+        var c = adminCreds();
+        if (c && c.adminUsername && c.adminPin) {
+          return { quickAdd: true, dispatcherAuth: { username: c.adminUsername, pin: c.adminPin } };
+        }
+      }
+    } catch (e) { /* fall through */ }
+    return null;
+  }
+
+  async function qaRunChunkedBuild(url, baseBody, auth, label, offsetField) {
     let offset = 0, done = false, lastResult = null, resumedFromInterrupted = false;
     while (!done) {
       if (offset > 0) await new Promise((r) => setTimeout(r, 1200));
@@ -945,7 +1028,7 @@
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...baseBody, [offsetField]: offset, adminSecret }),
+        body: JSON.stringify({ ...baseBody, [offsetField]: offset, ...auth }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -963,14 +1046,21 @@
     return lastResult;
   }
 
+  function qaMoney(n) { return '$' + (Number(n) || 0).toFixed(2); }
+  function qaCount(n) { return Number(n || 0).toLocaleString('en-US'); }
+
   window.dmQuickAdd = async function (kind) {
     const state = dmState();
     const noun = kind === 'tech' ? 'technician' : 'location';
 
-    // Geocode first -- free, and the cost preview below can't be accurate
-    // for a brand-new item until it actually has coordinates (the
-    // site-to-site cost check only counts already-geocoded sites).
-    qaSetStatus('Geocoding the new ' + noun + '…');
+    const auth = qaLoginAuth();
+    if (!auth) {
+      qaSetStatus('Your admin login is not available on this page. Log out and back in, then try again.');
+      return;
+    }
+
+    // 1. Geocode -- free, and the cost check can't be accurate for a brand-new item until it has coordinates.
+    qaSetStatus('Looking up map positions for the new ' + noun + '…');
     let geoResult;
     try {
       const geoRes = await fetch('/.netlify/functions/geocode-addresses', {
@@ -981,17 +1071,16 @@
       const geoData = await geoRes.json();
       if (!geoData.ok) throw new Error(geoData.error || 'Geocoding failed');
       geoResult = kind === 'tech' ? geoData.results.techs : geoData.results.locations;
-      if (geoResult.geocoded === 0) {
-        qaSetStatus('Nothing new to geocode for ' + state + ' (' + geoResult.skipped + ' already had coordinates). Checking whether drive-time still needs this ' + noun + '…');
-        // Do not return -- first click often geocodes, then a bad password
-        // stops the paid step. Second click must still price missing pairs.
-      }
     } catch (e) {
       qaSetStatus('❌ ' + e.message);
       return;
     }
+    const geoNote = geoResult.geocoded > 0
+      ? 'Map position added for ' + geoResult.geocoded + ' ' + noun + (geoResult.geocoded === 1 ? '' : 's') + ' (free).'
+      : 'Map positions: nothing new (all ' + geoResult.skipped + ' already have one).';
 
-    qaSetStatus('Checking cost…');
+    // 2. Free cost check (no Google call).
+    qaSetStatus('Checking what is missing…');
     let driveEst, siteEst = null;
     try {
       const driveRes = await fetch('/.netlify/functions/compute-distance-matrix', {
@@ -1001,7 +1090,6 @@
       });
       driveEst = await driveRes.json();
       if (!driveEst.ok) throw new Error(driveEst.error || 'Could not check drive-time cost');
-
       if (kind === 'location') {
         const siteRes = await fetch('/.netlify/functions/backfill-site-distance-gaps', {
           method: 'POST',
@@ -1016,54 +1104,77 @@
       return;
     }
 
-    const totalCost = (driveEst.estimatedCost || 0) + (siteEst ? (siteEst.estimatedCost || 0) : 0);
-    const costLines = [
-      'Drive-time: ' + driveEst.elementCount + ' element(s), $' + (driveEst.estimatedCost || 0).toFixed(2),
-    ];
-    if (siteEst) costLines.push('Site-to-site: ' + siteEst.missingPairCount + ' pair(s), $' + (siteEst.estimatedCost || 0).toFixed(2));
+    const lookups = (driveEst.elementCount || 0) + (siteEst ? (siteEst.elementCount || 0) : 0);
+    const cost = (driveEst.estimatedCost || 0) + (siteEst ? (siteEst.estimatedCost || 0) : 0);
+    const freeLeft = driveEst.freeElementsRemainingThisMonth;
+    const ceiling = driveEst.quickAddMaxCost || 5;
 
-    const confirmMsg =
-      'Add the new ' + noun + ' in ' + state + ' to the matrix?\n\n' +
-      '(' + noun.charAt(0).toUpperCase() + noun.slice(1) + ' already geocoded.)\n\n' +
-      costLines.join('\n') + '\n' +
-      'Total estimated cost: $' + totalCost.toFixed(2) + '\n\n' +
-      'This only prices that one new ' + noun + ' against everything already built -- nothing else gets touched or re-billed.';
-    if (!confirm(confirmMsg)) {
-      qaSetStatus('Cancelled -- the new ' + noun + ' is geocoded and saved, just not priced into the matrix yet. Safe to run Quick Add again later.');
+    // 3. Nothing to do: say so plainly and stop.
+    if (lookups === 0) {
+      qaSetStatus('✅ Nothing to add for ' + state + '.\n' + geoNote +
+        '\nEvery drive distance for the ' + state + ' technicians and locations is already on file, so no lookups were needed and nothing was charged.');
       return;
     }
-    const adminSecret = prompt('Distance Matrix admin password (needed for the drive-time step):') || '';
-    if (!adminSecret) { qaSetStatus('Cancelled -- no admin password entered. The new ' + noun + ' is geocoded and saved, just not priced into the matrix yet.'); return; }
 
+    // 4. Over the Quick Add ceiling: stop here (geocoding is already saved).
+    if (cost > ceiling) {
+      qaSetStatus('❌ This would cost about ' + qaMoney(cost) + ', which is over the ' + qaMoney(ceiling) + ' Quick Add limit.\n' + geoNote +
+        '\nUse the advanced tools (password required) for a job this size.');
+      return;
+    }
+
+    // 5. One confirmation unless the run is free and small.
+    const freeAndSmall = cost === 0 && lookups <= QA_AUTO_RUN_MAX_LOOKUPS;
+    if (!freeAndSmall) {
+      const lines = [
+        'Add the new ' + noun + ' to the ' + state + ' matrix?',
+        '',
+        'This run needs ' + qaCount(lookups) + ' distance lookups.',
+      ];
+      if (typeof freeLeft === 'number') {
+        lines.push('Free lookups left this month: ' + qaCount(freeLeft) + (cost === 0 ? ' (this run stays inside them).' : ' (not enough to cover this run).'));
+      }
+      lines.push('Estimated cost: ' + qaMoney(cost));
+      lines.push('', 'Only the new ' + noun + ' is priced. Nothing already on file is touched or re-billed.');
+      if (!confirm(lines.join('\n'))) {
+        qaSetStatus('Cancelled. ' + geoNote + '\nNothing was priced. It is safe to run Quick Add again any time.');
+        return;
+      }
+    }
+
+    // 6. Run it.
     try {
-      qaSetStatus((kind === 'location' ? 'Step 1 of 2' : 'Adding') + ': drive-time for the new ' + noun + '…');
+      qaSetStatus((kind === 'location' ? 'Step 1 of 2: ' : '') + 'adding drive distances for the new ' + noun + '…');
       const driveResult = await qaRunChunkedBuild(
         '/.netlify/functions/compute-distance-matrix',
         { state, mode: 'driving', additive: true },
-        adminSecret,
-        'Adding drive-time',
+        auth,
+        'Adding drive distances',
         'offset'
       );
-
       let siteResult = null;
-      if (kind === 'location') {
-        qaSetStatus('Step 2 of 2: site-to-site distances for the new location…');
+      if (kind === 'location' && siteEst && siteEst.elementCount > 0) {
+        qaSetStatus('Step 2 of 2: adding distances to the other locations…');
         siteResult = await qaRunChunkedBuild(
           '/.netlify/functions/backfill-site-distance-gaps',
           { state },
-          adminSecret,
-          'Adding site-to-site pairs',
+          auth,
+          'Adding location-to-location distances',
           'offset'
         );
       }
-
       const meta = driveResult.meta || {};
-      qaSetStatus(
-        '✅ Done -- new ' + noun + ' added to the ' + state + ' matrix.\n' +
-        'Geocoded: ' + geoResult.geocoded + '\n' +
-        'Drive-time elements billed: ' + (meta.elementsBilledThisRun ?? driveResult.elementsUsed ?? 0) +
-        (siteResult ? '\nSite-to-site pairs added: ' + siteResult.totalPairs + ' (' + siteResult.elementsUsed + ' elements billed)' : '')
-      );
+      const usedDrive = meta.elementsBilledThisRun ?? driveResult.elementsUsed ?? 0;
+      const usedSite = siteResult ? (siteResult.elementsUsed || 0) : 0;
+      const usedTotal = usedDrive + usedSite;
+      const out = ['✅ Done. The new ' + noun + ' is added to the ' + state + ' matrix.', geoNote,
+        'Distance lookups used: ' + qaCount(usedTotal) + '.'];
+      if (typeof freeLeft === 'number' && cost === 0) {
+        out.push('Free lookups left this month: about ' + qaCount(Math.max(0, freeLeft - usedTotal)) + '. Cost: ' + qaMoney(0) + '.');
+      } else {
+        out.push('Estimated cost: ' + qaMoney(cost) + '.');
+      }
+      qaSetStatus(out.join('\n'));
     } catch (e) {
       qaSetStatus('❌ ' + e.message);
     }
@@ -1107,7 +1218,7 @@
           'Estimated cost: ' + costLine + '\n' +
           'Use this only when you want to force-refresh pairs that already exist (e.g. a tech moved, an address was corrected).';
       if (!confirm(confirmMsg)) { dmSetStatus('Cancelled.'); return; }
-      adminSecret = prompt('Distance Matrix admin password (required for any paid build):') || '';
+      adminSecret = window.dmSecret('Distance Matrix admin password (required for any paid build):');
       if (!adminSecret) { dmSetStatus('Cancelled -- no admin password entered.'); return; }
     }
 
