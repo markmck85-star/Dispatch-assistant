@@ -1,7 +1,7 @@
 /**
  * closings-sync.js
  * Scheduled closer: one state per run so we stay under Netlify's
- * 26s cap. Walks MI → OH → NV → CO. Each box gets hit about
+ * 26s cap. Walks MI → OH → NV → CO → OR. Each box gets hit about
  * three times a day (the schedule runs every 2 hours, UTC; see netlify.toml).
  *
  * Reuses pull-state-closings + apply-service-responses.
@@ -11,7 +11,10 @@ const { getStore, connectLambda } = require("@netlify/blobs");
 const pull = require("./pull-state-closings");
 const apply = require("./apply-service-responses");
 
-const STATES = ["MI", "OH", "NV", "CO"];
+const STATES = ["MI", "OH", "NV", "CO", "OR"];
+// Forward-only states: mail arrives via the Mailgun forward, there is no
+// IMAP mailbox to pull, so only the apply step runs for them.
+const FORWARD_ONLY = new Set(["OR"]);
 const KEY = "closings-sync-rotate";
 
 function json(status, obj) {
@@ -45,9 +48,11 @@ exports.handler = async (event) => {
     headers: event.headers || {},
   };
 
-  const pullRes = await pull.handler(pullEvent);
   let pullBody = {};
-  try { pullBody = JSON.parse(pullRes.body || "{}"); } catch { pullBody = { raw: pullRes.body }; }
+  if (!FORWARD_ONLY.has(state)) {
+    const pullRes = await pull.handler(pullEvent);
+    try { pullBody = JSON.parse(pullRes.body || "{}"); } catch { pullBody = { raw: pullRes.body }; }
+  }
 
   const applyRes = await apply.handler(applyEvent);
   let applyBody = {};

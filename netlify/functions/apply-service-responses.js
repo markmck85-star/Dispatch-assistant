@@ -12,6 +12,10 @@
  * Does not invent Salesforce WOs. ITI ticket 152924 is not 00152924
  * in another state. Weak matches stay pending for review.
  *
+ * 2026-10-02: Oregon added. Forward-only (no IMAP pull): its mailbox is
+ * forwarded into the app, so everything arrives through the forwarded-copy
+ * path below.
+ *
  * 2026-10-01: also handles FORWARDED copies. When a state mailbox is
  * forwarded into the app (Mailgun), the copy lands in inbound_emails
  * under the Mailgun recipient (dispatch@mcrdispatch.net), not imap-xx,
@@ -26,7 +30,7 @@
 
 const { createClient } = require("@supabase/supabase-js");
 
-const MAILBOX = { MI: "imap-mi", OH: "imap-oh", NV: "imap-nv", CO: "imap-co" };
+const MAILBOX = { MI: "imap-mi", OH: "imap-oh", NV: "imap-nv", CO: "imap-co", OR: "imap-or" };
 
 function json(status, obj) {
   return { statusCode: status, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
@@ -83,6 +87,7 @@ function inferState(email, parsed) {
     if (/nevada|itinev/i.test(hay)) return "NV";
     if (/ohio|itioh/i.test(hay)) return "OH";
     if (/colorado|iticolo/i.test(hay)) return "CO";
+    if (/oregon|itioreg/i.test(hay)) return "OR";
     return null;
   };
   return pick(parsed && parsed.component || "")
@@ -127,7 +132,7 @@ exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return json(200, { ok: true });
   const qs = event.queryStringParameters || {};
   const state = String(qs.state || "").toUpperCase();
-  if (!MAILBOX[state]) return json(400, { error: "state=MI|OH|NV|CO required" });
+  if (!MAILBOX[state]) return json(400, { error: "state=MI|OH|NV|CO|OR required" });
   const dryRun = !!(qs.dryRun);
   const limit = Math.min(80, Number(qs.limit || 40));
 
@@ -165,7 +170,9 @@ exports.handler = async (event) => {
     .from("tickets")
     .select("id, wo_number, status, ticket_kind, site_text, site_id, attributes")
     .eq("status", "open")
-    .or("site_text.ilike.%" + state + "%,site_text.ilike.%" + stateName(state) + "%");
+    // Oregon: a bare %OR% would match any site with "or" in its name, so
+    // anchor the 2-letter code to the start ("OR - ...") for that state.
+    .or((state === "OR" ? "site_text.ilike.OR -%" : "site_text.ilike.%" + state + "%") + ",site_text.ilike.%" + stateName(state) + "%");
   if (tErr) return json(500, { error: tErr.message });
 
   const byWo = {};
@@ -280,5 +287,5 @@ exports.handler = async (event) => {
 };
 
 function stateName(code) {
-  return ({ MI: "Michigan", OH: "Ohio", NV: "Nevada", CO: "Colorado" })[code] || code;
+  return ({ MI: "Michigan", OH: "Ohio", NV: "Nevada", CO: "Colorado", OR: "Oregon" })[code] || code;
 }

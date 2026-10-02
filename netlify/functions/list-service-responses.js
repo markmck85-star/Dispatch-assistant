@@ -4,6 +4,11 @@
  * Service responses page and its Excel download.
  * GET ?state=MI&testing=1[&format=xlsx]
  *
+ * 2026-10-02: Oregon added (ALL_STATES, mailbox label, state name, and the
+ * Component/sender "Oregon" / itioregon inference). Oregon is forward-only:
+ * its mailbox is forwarded into the app, so its emails arrive under the
+ * Mailgun address, not an imap label.
+ *
  * 2026-10-01 (v2): two additions, nothing removed.
  *   1. Every row now carries a site code (siteCode / siteName / matchedBy).
  *      Ticket rows use the ticket's own site when it has one. Everything
@@ -19,8 +24,8 @@
 const { createClient } = require("@supabase/supabase-js");
 const XLSX = require("xlsx");
 
-const ALL_STATES = ["MI", "OH", "NV", "CO"];
-const MAILBOX_STATE = { "imap-mi": "MI", "imap-oh": "OH", "imap-nv": "NV", "imap-co": "CO" };
+const ALL_STATES = ["MI", "OH", "NV", "CO", "OR"];
+const MAILBOX_STATE = { "imap-mi": "MI", "imap-oh": "OH", "imap-nv": "NV", "imap-co": "CO", "imap-or": "OR" };
 const EMAIL_LOOKBACK_DAYS = 180;
 const EMAIL_LIMIT = 900;
 
@@ -123,7 +128,7 @@ function isTesting(sr, siteText) {
 }
 
 function stateName(code) {
-  return ({ MI: "Michigan", OH: "Ohio", NV: "Nevada", CO: "Colorado", GA: "Georgia" })[code] || code;
+  return ({ MI: "Michigan", OH: "Ohio", NV: "Nevada", CO: "Colorado", OR: "Oregon", GA: "Georgia" })[code] || code;
 }
 
 // Which state an email belongs to: its mailbox label if it came by IMAP,
@@ -135,6 +140,7 @@ function inferState(email, parsed) {
     if (/nevada|itinev/i.test(hay)) return "NV";
     if (/ohio|itioh/i.test(hay)) return "OH";
     if (/colorado|iticolo/i.test(hay)) return "CO";
+    if (/oregon|itioreg/i.test(hay)) return "OR";
     return null;
   };
   return pick((parsed && parsed.component) || "")
@@ -153,7 +159,7 @@ function nameKey(s) {
   return String(s || "")
     .toLowerCase()
     .replace(/&amp;/g, "&")
-    .replace(/^(mi|oh|nv|co)\s*-\s*/, "")
+    .replace(/^(mi|oh|nv|co|or)\s*-\s*/, "")
     .replace(/\s*-\s*\d*\s*$/, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
