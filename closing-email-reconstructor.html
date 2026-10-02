@@ -110,6 +110,8 @@
         <div class="search-wrap" style="min-width:280px;">
             <input type="text" id="noteSearchInput" placeholder="Search closing note text…" autocomplete="off">
         </div>
+        <label style="margin-left:14px;"><input type="checkbox" id="showKiosk" checked> Kiosk visits</label>
+        <label style="margin-left:8px;"><input type="checkbox" id="showEmail" checked> OTC / PM / testing station closings</label>
         <button type="button" id="clearNoteSearchBtn" style="background:#2a2a3e;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;">Clear</button>
     </div>
 
@@ -153,6 +155,8 @@ dateSingle.addEventListener('change', runSearch);
 dateFrom.addEventListener('change', runSearch);
 dateTo.addEventListener('change', runSearch);
 techFilter.addEventListener('change', runSearch);
+document.getElementById('showKiosk').addEventListener('change', runSearch);
+document.getElementById('showEmail').addEventListener('change', runSearch);
 noteSearchInput.addEventListener('input', () => {
     clearTimeout(noteSearchDebounce);
     noteSearchDebounce = setTimeout(runSearch, 350);
@@ -192,6 +196,8 @@ function dateFilterQueryString() {
     if (techFilter.value) parts.push('tech=' + encodeURIComponent(techFilter.value));
     const noteQ = noteSearchInput.value.trim();
     if (noteQ) parts.push('q=' + encodeURIComponent(noteQ));
+    if (!document.getElementById('showKiosk').checked) parts.push('kiosk=0');
+    if (!document.getElementById('showEmail').checked) parts.push('email=0');
     return parts.length ? '&' + parts.join('&') : '';
 }
 
