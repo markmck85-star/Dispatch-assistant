@@ -27,11 +27,94 @@
 //   limit      (optional) - default 50, max 200
 //   offset     (optional) - default 0, for "Load more" pagination
 //
+// 2026-10-02: ALSO returns the email-derived closings (ITI Technician
+// Service Response close-outs for OTC / PM / testing stations in MI, OH, NV,
+// CO and OR), merged into the same newest-first list as source "email" rows,
+// so one search covers kiosk visits and email closings. They come from
+// list-service-responses.js (tickets a response closed plus the response
+// emails themselves), shaped like visits: the email's resolution notes are
+// the closing_note, so note-text search, state, date and tech filters all
+// work on them. Pass email=0 to get kiosk visits only (the old behavior).
+// The lossy site_visits stubs the TechWeb forward parser wrote for those same
+// five states (one ticket-number key, so every PM with ticket "0" collapsed
+// into one row, and no note text) are left out of the merge, since the email
+// rows cover them completely. If the email side fails, kiosk visits still
+// come back and `emailMerged` is false.
+//
 // Joins to `sites` for display name/code, since site_visits only stores
 // site_id plus the raw Salesforce account name (account_name_raw), which
 // doesn't always match the site's real display name.
 
 const { createClient } = require('@supabase/supabase-js');
+const serviceResponses = require('./list-service-responses');
+
+const EMAIL_STATES = ['MI', 'OH', 'NV', 'CO', 'OR'];
+
+function isoOrNull(raw) {
+  if (!raw) return null;
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function ms(v) {
+  const t = v ? new Date(v).getTime() : NaN;
+  return isNaN(t) ? -Infinity : t;
+}
+
+// Email-derived closings as visit-shaped rows, with this request's filters
+// applied here (they are not SQL-backed).
+async function loadEmailVisits(params, state) {
+  const res = await serviceResponses.handler({
+    httpMethod: 'GET',
+    queryStringParameters: state ? { state, limit: '500' } : { limit: '500' },
+  });
+  if (res.statusCode !== 200) throw new Error('service responses failed (' + res.statusCode + ')');
+  const rows = (JSON.parse(res.body).rows) || [];
+
+  const q = (params.q || '').trim().toLowerCase();
+  const tech = (params.tech || '').trim().toLowerCase();
+  const out = [];
+  for (const r of rows) {
+    const startedAt = isoOrNull(r.arrivalTime);
+    const endedAt = isoOrNull(r.endTime);
+    const day = startedAt ? startedAt.slice(0, 10) : null;
+    if (params.date) {
+      if (day !== params.date) continue;
+    } else {
+      if (params.from && (!day || day < params.from)) continue;
+      if (params.to && (!day || day > params.to)) continue;
+    }
+    if (tech && String(r.technician || '').trim().toLowerCase() !== tech) continue;
+    if (q && !String(r.notes || '').toLowerCase().includes(q)) continue;
+
+    const rowState = r.state || (r.siteCode && /^[A-Z]{2}/.test(r.siteCode) ? r.siteCode.slice(0, 2) : '') || state || '';
+    const wo = r.ticketNumber && String(r.ticketNumber).replace(/^0+$/, '') ? r.ticketNumber : (r.wo || '');
+    out.push({
+      id: 'email:' + (r.ticketNumber || r.wo || '') + '|' + (r.arrivalTime || r.closedAt || '') + '|' + (r.technician || ''),
+      site_id: null,
+      account_name_raw: r.location || null,
+      state: rowState,
+      appointment_number: null,
+      wo_number: wo || null,
+      started_at: startedAt,
+      ended_at: endedAt,
+      duration_min: r.onsiteMin == null ? null : r.onsiteMin,
+      tech_name_raw: r.technician || null,
+      remediation: r.callType || 'Service response',
+      remediation_detail: null,
+      is_restock: false,
+      needs_review: !r.siteCode,
+      closing_note: r.notes ? String(r.notes) : null,
+      closing_note_captured_at: r.closedAt || null,
+      site_name: r.siteName || r.location || null,
+      site_code: r.siteCode || null,
+      source: 'email',
+      travel_min: r.travelTime === '' || r.travelTime == null ? null : r.travelTime,
+      mileage: r.mileage === '' || r.mileage == null ? null : r.mileage,
+    });
+  }
+  return out;
+}
 
 exports.handler = async (event) => {
   const headers = {
@@ -58,16 +141,26 @@ exports.handler = async (event) => {
     }
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Email-derived closings only exist for these states (or when searching
+    // across all states). email=0 turns the merge off.
+    const wantEmail = params.email !== '0' && (!state || EMAIL_STATES.includes(state));
+
     let query = supabase
       .from('site_visits')
       .select(
         'id, site_id, account_name_raw, state, appointment_number, wo_number, started_at, ended_at, ' +
         'duration_min, tech_name_raw, remediation, remediation_detail, is_restock, needs_review, ' +
-        'closing_note, closing_note_captured_at, sites(name, site_code)',
+        'closing_note, closing_note_captured_at, source, remediation_detail, sites(name, site_code)',
         { count: 'exact' }
       )
       .order('started_at', { ascending: false, nullsFirst: false })
-      .range(offset, offset + limit - 1);
+      .range(wantEmail ? 0 : offset, offset + limit - 1);
+
+    // The TechWeb forward stubs for the email states are replaced by the
+    // email rows below (see header).
+    if (wantEmail) {
+      query = query.or('source.is.null,source.neq.closing_note_email,state.is.null,state.not.in.(' + EMAIL_STATES.join(',') + ')');
+    }
 
     if (state) query = query.eq('state', state);
     if (noteQuery) query = query.ilike('closing_note', `%${noteQuery}%`);
@@ -85,21 +178,54 @@ exports.handler = async (event) => {
     const { data, error, count } = await query;
     if (error) throw new Error(error.message);
 
-    const visits = (data || []).map((v) => ({
+    let visits = (data || []).map((v) => ({
       ...v,
+      // TechWeb-format rows keep the tech's notes in remediation_detail.
+      closing_note: v.closing_note || (v.source === 'closing_note_email' ? v.remediation_detail : null) || null,
       site_name: v.sites ? v.sites.name : v.account_name_raw,
       site_code: v.sites ? v.sites.site_code : null,
       sites: undefined,
     }));
+
+    if (!wantEmail) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          ok: true,
+          visits,
+          total: count ?? null,
+          hasMore: count != null ? offset + visits.length < count : visits.length === limit,
+        }),
+      };
+    }
+
+    let emailVisits = [];
+    let emailMerged = true;
+    try {
+      emailVisits = await loadEmailVisits(params, state);
+    } catch (err) {
+      console.error('[get-recent-visits] email merge failed, returning kiosk visits only:', err.message);
+      emailMerged = false;
+    }
+
+    // `visits` holds the newest offset+limit kiosk rows, `emailVisits` every
+    // matching email row; the newest offset+limit of the union is correct,
+    // and the requested page is a slice of that.
+    const merged = visits.concat(emailVisits).sort((a, b) => ms(b.started_at || b.ended_at) - ms(a.started_at || a.ended_at));
+    const page = merged.slice(offset, offset + limit);
+    const total = count != null ? count + emailVisits.length : null;
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         ok: true,
-        visits,
-        total: count ?? null,
-        hasMore: count != null ? offset + visits.length < count : visits.length === limit,
+        visits: page,
+        total,
+        hasMore: total != null ? offset + page.length < total : page.length === limit,
+        emailMerged,
+        emailRows: emailVisits.length,
       }),
     };
   } catch (err) {

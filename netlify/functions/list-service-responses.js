@@ -4,6 +4,17 @@
  * Service responses page and its Excel download.
  * GET ?state=MI&testing=1[&format=xlsx]
  *
+ * 2026-10-02 (kiosk): optional kiosk=1 adds Salesforce kiosk visits
+ * (site_visits.source = 'salesforce_report') for the same states, tagged
+ * source "kiosk", so one list covers kiosk visits as well as OTC / PM /
+ * testing-station close-outs. Kiosk rows carry on-site time, tech and notes
+ * but no travel time or miles (Salesforce does not report them), and are
+ * not subject to the testing-only filter. A kiosk visit whose WO already
+ * appears from a service response is skipped so it never shows twice.
+ * Times are shown in Eastern.
+ *
+ * 2026-10-02: forwarded copies ("Fwd:") are no longer skipped (see isReplyLike).
+ *
  * 2026-10-02: Oregon added (ALL_STATES, mailbox label, state name, and the
  * Component/sender "Oregon" / itioregon inference). Oregon is forward-only:
  * its mailbox is forwarded into the app, so its emails arrive under the
@@ -105,7 +116,11 @@ function parseResponse(subject, body) {
 
 function isReplyLike(subject) {
   const s = String(subject || "").replace(/=\?[^?]*\?[qQ]\?/, "").replace(/_/g, " ").trim().toLowerCase();
-  return /^(re|fw|fwd)\s*:/.test(s) || /^automatic reply/.test(s) || /^out of office/.test(s);
+  // 2026-10-02: forwards are NOT skipped. A forwarded state mailbox (Oregon,
+  // Michigan) delivers every response as "Fwd: ...", so skipping them hid
+  // those closings entirely. A forwarded copy of a response that also came by
+  // IMAP is still shown once: rows are de-duplicated on ticket + arrival time.
+  return /^re\s*:/.test(s) || /^automatic reply/.test(s) || /^out of office/.test(s);
 }
 
 function normTicket(n) {
@@ -369,6 +384,61 @@ exports.handler = async (event) => {
     });
   }
 
+  // 4. Kiosk visits from Salesforce (optional).
+  if (qs.kiosk === "1" || qs.kiosk === "true") {
+    const kioskStates = state && ALL_STATES.includes(state) ? [state] : ALL_STATES;
+    const haveWo = new Set(rows.map((r) => normTicket(r.wo || r.ticketNumber)).filter(Boolean));
+    const fmtEt = (iso) => {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleString("en-US", {
+        timeZone: "America/New_York", year: "numeric", month: "numeric", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      }).replace(", ", " ");
+    };
+    const PAGE = 1000;
+    const KIOSK_CAP = 3000;
+    for (let from = 0; from < KIOSK_CAP; from += PAGE) {
+      const { data: part, error: kErr } = await supabase
+        .from("site_visits")
+        .select("wo_number, appointment_number, started_at, ended_at, duration_min, tech_name_raw, remediation, closing_note, account_name_raw, state, sites(name, site_code)")
+        .eq("source", "salesforce_report")
+        .in("state", kioskStates)
+        .gte("started_at", since)
+        .order("started_at", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (kErr) return json(500, { error: "kiosk visits: " + kErr.message });
+      for (const v of part || []) {
+        if (v.wo_number && haveWo.has(normTicket(v.wo_number))) continue;
+        rows.push({
+          source: "kiosk",
+          wo: v.wo_number || "",
+          site: "",
+          siteCode: v.sites ? v.sites.site_code || "" : "",
+          siteName: v.sites ? v.sites.name || "" : "",
+          matchedBy: "visit",
+          status: "",
+          kind: "",
+          closedAt: v.ended_at || v.started_at,
+          ticketNumber: v.appointment_number || "",
+          technician: v.tech_name_raw || "",
+          location: v.account_name_raw || "",
+          arrivalTime: fmtEt(v.started_at),
+          endTime: fmtEt(v.ended_at),
+          onsiteMin: v.duration_min,
+          travelTime: "",
+          mileage: "",
+          notes: v.closing_note || "",
+          callType: v.remediation || "",
+          state: v.state || "",
+          testing: false,
+        });
+      }
+      if ((part || []).length < PAGE) break;
+    }
+  }
+
   if (qs.format === "xlsx") {
     const sheetRows = rows.map((r) => ({
       WO: r.wo,
@@ -386,7 +456,7 @@ exports.handler = async (event) => {
       Miles: r.mileage === "" ? "" : Number(r.mileage) || r.mileage,
       Notes: r.notes,
       Closed: r.closedAt ? String(r.closedAt).slice(0, 10) : "",
-      Source: r.source === "email" ? "Email only" : "Ticket",
+      Source: r.source === "email" ? "Email only" : (r.source === "kiosk" ? "Kiosk (Salesforce)" : "Ticket"),
     }));
     const ws = XLSX.utils.json_to_sheet(sheetRows.length ? sheetRows : [{ WO: "" }]);
     ws["!cols"] = [
