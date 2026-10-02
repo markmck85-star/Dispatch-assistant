@@ -44,6 +44,7 @@
   .muted { color: var(--muted); }
   .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #2e3d2e; color: var(--accent); margin-left: 6px; }
   .tag.email { background: #3a3320; color: #e6c875; }
+  .tag.kiosk { background: #20303a; color: #7ec8e3; }
   .sitecode { font-weight: 600; white-space: nowrap; }
   .notes { max-width: 280px; color: #c8c8d4; }
   .count { margin-left: auto; color: var(--muted); font-size: 13px; }
@@ -55,7 +56,7 @@
   <a class="back" href="/admin.html">Admin</a>
   <h1>Service responses</h1>
   <span class="count" id="count"></span>
-  <div class="hint">Times and miles from ITI close-outs. Michigan defaults to testing stations only; other states show everything. Rows tagged "email only" came straight from the ITI close-out email and are not tied to a ticket in the app. Click a column header to sort. Arrival defaults to newest first.</div>
+  <div class="hint">Times and miles from ITI close-outs. Michigan defaults to testing stations only; other states show everything. Rows tagged "email only" came straight from the ITI close-out email and are not tied to a ticket in the app. "Include kiosk visits" adds Salesforce kiosk visits (times shown in Eastern; Salesforce has no travel time or miles). Click a column header to sort. Arrival defaults to newest first.</div>
 </header>
 <div class="toolbar">
   <select id="state">
@@ -67,6 +68,7 @@
     <option value="">All states</option>
   </select>
   <label class="muted"><input type="checkbox" id="testing" checked> Testing / K2D / examiner only</label>
+  <label class="muted"><input type="checkbox" id="kiosk"> Include kiosk visits</label>
   <input id="q" type="search" placeholder="Search tech, site, WO, notes">
   <button type="button" onclick="load()">Refresh</button>
   <button type="button" onclick="downloadCsv()">Download CSV</button>
@@ -172,7 +174,8 @@ function renderHead() {
 async function load() {
   const state = document.getElementById("state").value;
   const testing = document.getElementById("testing").checked ? "1" : "0";
-  const url = "/.netlify/functions/list-service-responses?state=" + encodeURIComponent(state) + "&testing=" + testing;
+  const kiosk = document.getElementById("kiosk").checked ? "1" : "0";
+  const url = "/.netlify/functions/list-service-responses?state=" + encodeURIComponent(state) + "&testing=" + testing + "&kiosk=" + kiosk;
   const res = await fetch(url, { cache: "no-store" });
   const data = await res.json();
   ROWS = data.rows || [];
@@ -196,7 +199,7 @@ function render() {
   }
   body.innerHTML = rows.map((r) => `
     <tr>
-      <td>${esc(r.wo)}${r.testing ? '<span class="tag">testing</span>' : ""}${r.source === "email" ? '<span class="tag email">email only</span>' : ""}</td>
+      <td>${esc(r.wo)}${r.testing ? '<span class="tag">testing</span>' : ""}${r.source === "email" ? '<span class="tag email">email only</span>' : ""}${r.source === "kiosk" ? '<span class="tag kiosk">kiosk</span>' : ""}</td>
       <td>${esc(r.location || r.site)}</td>
       <td class="sitecode" title="${esc(r.siteName)}">${esc(r.siteCode)}</td>
       <td>${esc(r.technician)}</td>
@@ -237,7 +240,8 @@ function csv(v) {
 function downloadXlsx() {
   const state = document.getElementById("state").value;
   const testing = document.getElementById("testing").checked ? "1" : "0";
-  const url = "/.netlify/functions/list-service-responses?state=" + encodeURIComponent(state) + "&testing=" + testing + "&format=xlsx";
+  const kiosk = document.getElementById("kiosk").checked ? "1" : "0";
+  const url = "/.netlify/functions/list-service-responses?state=" + encodeURIComponent(state) + "&testing=" + testing + "&kiosk=" + kiosk + "&format=xlsx";
   window.location.href = url;
 }
 
@@ -247,6 +251,7 @@ document.getElementById("state").addEventListener("change", function () {
   load();
 });
 document.getElementById("testing").addEventListener("change", load);
+document.getElementById("kiosk").addEventListener("change", load);
 load();
 </script>
 </body>

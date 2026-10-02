@@ -58,6 +58,7 @@
     .note-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
     .note-badge.yes { color: #7edb8e; background: #16321f; }
     .note-badge.no { color: #7a7f87; background: #24272d; }
+    .note-badge.email { color: #e6c875; background: #3a3320; }
     .empty-state, .loading { text-align: center; color: #7a7f87; padding: 20px 0; }
     textarea#emailOutput {
         width: 100%; min-height: 380px; background: #14161a; color: #e8e8e8;
@@ -325,11 +326,12 @@ function renderStateFeed() {
             <strong>${date}</strong> — ${escapeHtml(v.tech_name_raw || 'Unknown tech')} · ${escapeHtml(v.remediation || 'Service')} · <span class="mono">${escapeHtml(v.site_name || 'Unknown site')}</span>
             ${v.wo_number ? `<span class="mono"> WO ${escapeHtml(v.wo_number)}</span>` : ''}
             <span class="note-badge ${hasNote ? 'yes' : 'no'}">${hasNote ? 'Note captured' : 'No note'}</span>
+            ${v.source === 'email' ? '<span class="note-badge email">ITI email closing</span>' : ''}
             </div>
             ${snippet ? `<div class="muted" style="margin-top:4px;font-size:12.5px;">…${snippet}…</div>` : (preview ? `<div class="muted" style="margin-top:6px;font-size:12.5px;white-space:pre-wrap;">${preview}</div>` : '')}
             ${hasNote ? `<div style="margin-top:8px;">
                 <button type="button" class="secondary-btn" style="margin:0 8px 0 0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();viewClosingNoteFromFeed(${i})">View note</button>
-                <button type="button" class="secondary-btn" style="margin:0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();generateEmailFromFeed(${i})">Reconstruct email</button>
+                ${v.source === 'email' ? '' : `<button type="button" class="secondary-btn" style="margin:0;padding:6px 10px;font-size:12px;" onclick="event.stopPropagation();generateEmailFromFeed(${i})">Reconstruct email</button>`}
             </div>` : ''}
         </div>`;
     }).join('');
