@@ -129,9 +129,8 @@ exports.handler = async (event) => {
     const params = event.queryStringParameters || {};
     const state = (params.state || '').trim().toUpperCase();
     const noteQuery = (params.q || '').trim();
-    if (!state && !noteQuery) {
-      return { statusCode: 400, headers, body: JSON.stringify({ ok: false, error: 'state is required (or pass q to search note text across all states)' }) };
-    }
+    // 2026-10-02: state is optional. With no state and no q this returns the
+    // newest visits across all states (the Closing Notes page's default view).
     const limit = Math.min(parseInt(params.limit, 10) || 50, 200);
     const offset = parseInt(params.offset, 10) || 0;
 
