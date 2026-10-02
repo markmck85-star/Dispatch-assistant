@@ -411,7 +411,7 @@
                             <option value="WV">West Virginia</option>
                         </select>
                         <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:6px;padding:4px 10px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;">🐕 Watchdog</a>
-                        <a href="/saturday-oncall.html" style="display:inline-block;margin-left:6px;padding:4px 10px;background:#0a6e5c;color:#f0f0f0;border:1px solid #14a085;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;">📞 Saturday On-Call</a>
+                        <a href='/saturday-oncall' style='display:inline-block;margin-left:6px;padding:4px 10px;background:#0a6e5c;color:#f0f0f0;border:1px solid #14a085;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;'>📞 Saturday On-Call</a>
                     </div>
                     <div>
                         <label>Dispatch Date:</label>
@@ -491,18 +491,18 @@
                     </div>
                 </div>
 
-                <a id="restockLink" href="restock-tracker.html?state=GA" class="restock-tracker-link" style="display:block; background:#2c3e50; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none; margin-top:10px;">📊 Restock Tracker</a>
-                <a href="calendar.html" class="team-calendar-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🗓️ Team Calendar</a>
-                <a href="shipments.html" class="shipments-link" style="display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📦 RMA Shipments</a>
-                <a href="location-lookup.html" class="location-lookup-link" style="display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🔍 Location Lookup</a>
-                <a id="stateConsoleLink" href="state.html" class="state-console-link" style="display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">📍 State Console</a>
-                <a href="closing-email-reconstructor.html" class="closing-email-link" style="display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉️ Closing Notes</a>
+                <a class='restock-tracker-link' href='/restock-tracker?state=GA' id='restockLink' style='display:block; background:#2c3e50; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none; margin-top:10px;'>📊 Restock Tracker</a>
+                <a class='team-calendar-link' href='/calendar' style='display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>🗓️ Team Calendar</a>
+                <a class='shipments-link' href='/shipments' style='display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>📦 RMA Shipments</a>
+                <a class='location-lookup-link' href='/location-lookup' style='display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>🔍 Location Lookup</a>
+                <a class='state-console-link' href='/state' id='stateConsoleLink' style='display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>📍 State Console</a>
+                <a class='closing-email-link' href='/closing-email-reconstructor' style='display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>✉️ Closing Notes</a>
                 <button type="button" onclick="generateFinalMessages()" class="messages-link" style="display:block; width:100%; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; border:none; cursor:pointer;">✅ Messages</button>
-                <a id="inboundMailLink" href="/inbound-mail.html" class="messages-link" style="display:block; width:100%; background:#181818; color:#9ad0ff; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">✉ Inbound Mail</a>
-                <a href="/mileage-log.html" class="mileage-log-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">🚗 Mileage log</a>
-                <a href="/service-responses.html" class="admin-panel-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">⏱ Service responses</a>
-                <a href="/admin.html" class="admin-panel-link" style="display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
-                <a href="help.html" target="_blank" class="help-link" style="display:block; background:#181818; color:#aaa; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;">❓ Help</a>
+                <a class='messages-link' href='/inbound-mail' id='inboundMailLink' style='display:block; width:100%; background:#181818; color:#9ad0ff; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>✉ Inbound Mail</a>
+                <a class='mileage-log-link' href='/mileage-log' style='display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>🚗 Mileage log</a>
+                <a class='admin-panel-link' href='/service-responses' style='display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>⏱ Service responses</a>
+                <a class='admin-panel-link' href='/admin' onclick='localStorage.setItem(\'dispatchReturnState\', document.getElementById(\'stateSelector\')?.value || \'')' style='display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>Admin Panel</a>
+                <a class='help-link' href='/help' style='display:block; background:#181818; color:#aaa; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;' target='_blank'>❓ Help</a>
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
@@ -1682,21 +1682,34 @@ async function loadDistanceMatrix(state) {
         "/.netlify/functions/get-distance-matrix?state=" + key,
         { cache: "no-store" }
       );
-      const data = res.ok ? await res.json() : null;
-      _dmCache[key] = data; // may be null
+      if (!res.ok) throw new Error("matrix " + res.status);
+      const data = await res.json();
+      if (!data || !data.matrix) throw new Error("empty matrix");
+      _dmCache[key] = data;
     } catch {
-      _dmCache[key] = null;
+      // Do not cache the failure. California's matrix can take ~10s to build;
+      // a timeout or a generate that raced ahead of it must be able to retry.
     } finally {
       delete _dmInflight[key];
     }
     // 2026-09-19: cards used to render while this fetch was still in flight,
     // so first-stop / route totals stayed on "~8.5 mi (est.)" (straight-line
     // over Lake Lanier, etc.) even after the real driving matrix landed.
-    // Reassign dropdowns looked correct because they query getTechDistance()
-    // at click time. If a board was already on screen when the cache filled,
-    // rebuild it so "from home" picks up type:"driving" legs.
-    if (hadBoard && _dmCache[key] && typeof renderReviewBoard === "function") {
-      try { renderReviewBoard(true); } catch (err) { /* board not ready */ }
+    // 2026-10-02: check the board at completion, not at fetch start. Generate
+    // waits up to 15s, but a slow CA build can still finish after the board
+    // is painted. Re-sort from the driving matrix, then rebuild so "(est.)"
+    // clears without a manual refresh.
+    const boardNow = !!(window.currentAssignments && Object.keys(window.currentAssignments).length);
+    if ((hadBoard || boardNow) && _dmCache[key]) {
+      try {
+        Object.keys(window.currentAssignments || {}).forEach(function (tech) {
+          if (window._lockedTechOrder && window._lockedTechOrder[tech]) return;
+          if (typeof sortStopsByDistance === "function") sortStopsByDistance(tech);
+        });
+      } catch (err) { /* sort is best-effort */ }
+      if (typeof renderReviewBoard === "function") {
+        try { renderReviewBoard(true); } catch (err) { /* board not ready */ }
+      }
     }
     return _dmCache[key];
   })();
@@ -1708,7 +1721,7 @@ async function loadDistanceMatrix(state) {
             try {
                 await Promise.race([
                     loadDistanceMatrix(state),
-                    new Promise(function(resolve) { setTimeout(resolve, ms || 2500); })
+                    new Promise(function(resolve) { setTimeout(resolve, ms || 15000); })
                 ]);
             } catch (e) {}
         }
@@ -3141,7 +3154,7 @@ function distanceMatrixStatus(state) {
             localStorage.setItem('lastSelectedState', CURRENT_STATE);
             // Await so processDispatch() below does not paint haversine
             // first-stop miles against an empty _dmCache for the new state.
-            await loadDistanceMatrixSoon(CURRENT_STATE, 2500);
+            await loadDistanceMatrixSoon(CURRENT_STATE, 15000);
             // Map state code to location/tech database
             const STATE_MAP = {
                 'GA': { locs: LOCATIONS_GA, techs: TECHS_GA },
@@ -3300,7 +3313,7 @@ function distanceMatrixStatus(state) {
                     await window.__remoteDataPromise;
                     window.__remoteDataPromise = null;
                 }
-                await loadDistanceMatrixSoon(CURRENT_STATE, 2500);
+                await loadDistanceMatrixSoon(CURRENT_STATE, 15000);
                 await _processDispatchCore(true);
                 return;
             }
@@ -3312,7 +3325,7 @@ function distanceMatrixStatus(state) {
             }
             // Same matrix the reassign dropdown already reads -- wait for it
             // so "from home" / "To 1st Stop" is driving miles, not haversine.
-            await loadDistanceMatrixSoon(CURRENT_STATE, 2500);
+            await loadDistanceMatrixSoon(CURRENT_STATE, 15000);
 
             // Parse form counts and ticket metadata (includes automatic SLA from Earliest Start Permitted)
             window._skippedCarryover = [];

@@ -29,3 +29,6 @@
 # restored. Re-add the block below to turn it back on:
 # [functions."send-notification-digests"]
 #   schedule = "*/15 * * * *"
+
+[functions."get-distance-matrix"]
+  timeout = 26

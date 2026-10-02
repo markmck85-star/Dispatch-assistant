@@ -149,8 +149,8 @@
 <body>
 <div class="container">
   <a href="/" id="backToDispatchTop" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
-  <a href="/inbound-mail.html" id="inboundMailLink" class="back-btn" style="margin-top:0;margin-bottom:10px;background:#1e3a2f;color:#7edb8e;">✉ Inbound Mail</a>
-  <a href="/saturday-oncall.html" class="back-btn" style="margin-top:0;margin-bottom:10px;background:#0a2e2a;color:#5bd9c0;">📞 Saturday On-Call</a>
+  <a class='back-btn' href='/inbound-mail' id='inboundMailLink' style='margin-top:0;margin-bottom:10px;background:#1e3a2f;color:#7edb8e;'>✉ Inbound Mail</a>
+  <a class='back-btn' href='/saturday-oncall' style='margin-top:0;margin-bottom:10px;background:#0a2e2a;color:#5bd9c0;'>📞 Saturday On-Call</a>
   <div class="console">
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
@@ -976,9 +976,12 @@ async function loadStateDistanceMatrix(state) {
   if (_stateMapDmCache[key] !== undefined) return _stateMapDmCache[key];
   try {
     const res = await fetch('/.netlify/functions/get-distance-matrix?state=' + encodeURIComponent(key), { cache: 'no-store' });
-    _stateMapDmCache[key] = res.ok ? await res.json() : null;
+    if (!res.ok) throw new Error('matrix ' + res.status);
+    const data = await res.json();
+    if (!data || !data.matrix) throw new Error('empty matrix');
+    _stateMapDmCache[key] = data;
   } catch (e) {
-    _stateMapDmCache[key] = null;
+    /* leave uncached so a timeout can retry */
   }
   return _stateMapDmCache[key];
 }
