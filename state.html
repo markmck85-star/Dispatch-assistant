@@ -1769,8 +1769,21 @@ async function applyStateRebalanceSwap(rowId) {
     const result = (data.actions || [])[0];
     if (result && result.type === 'error') throw new Error(result.summary);
 
-    if ((data.changedTechs || []).length) {
+    // Redraw from the saved board without a page reload. The suggestion card
+    // lives outside the map, so Revert stays. Snapshot it anyway in case a
+    // redraw clears #stateAiCommandDiff, then put it back.
+    const diffEl = document.getElementById('stateAiCommandDiff');
+    const savedDiff = diffEl ? diffEl.innerHTML : '';
+    const savedTotal = window._stateAiRebalanceTotalSavedMi;
+    if ((data.changedTechs || []).length || data.routes) {
       await renderStateMap(state, dispatchDate);
+      try {
+        if (window._stateMap && window._stateMap.invalidateSize) window._stateMap.invalidateSize();
+      } catch (err) { /* map not open */ }
+    }
+    if (diffEl && savedDiff && !diffEl.innerHTML) {
+      diffEl.innerHTML = savedDiff;
+      window._stateAiRebalanceTotalSavedMi = savedTotal;
     }
 
     // Running total: fleetDelta is the real fleet-wide mileage change for

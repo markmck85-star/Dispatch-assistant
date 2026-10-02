@@ -4745,10 +4745,15 @@ function distanceMatrixStatus(state) {
             }
             // Keep printable report in sync with board state
             if (window._lastDateStr) buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
+            // Repaint the route map before traffic lookups. checkTrafficForTech
+            // can throw, and that used to skip the map update entirely -- Apply
+            // then looked like it needed the map Refresh button, which reloads
+            // the board and drops the suggestion card's Revert buttons.
+            if (typeof renderDispatchMap === 'function') renderDispatchMap();
             // Auto-populate distance to first stop for all techs
             Object.keys(window.currentAssignments).forEach(tech => {
                 if ((window.currentAssignments[tech] || []).length > 0) {
-                    checkTrafficForTech(tech);
+                    try { checkTrafficForTech(tech); } catch (err) { /* traffic is optional */ }
                 }
             });
             // Repaint the route map from the board that was just rendered. Every
@@ -7675,9 +7680,17 @@ ${content}</body></html>`;
                 const result = (data.actions || [])[0];
                 if (result && result.type === 'error') throw new Error(result.summary);
 
-                if ((data.changedTechs || []).length) {
-                    applyAiRoutes(data.routes);
+                if (data.routes) applyAiRoutes(data.routes);
+                if ((data.changedTechs || []).length || data.routes) {
                     renderReviewBoard(true);
+                    // Map Refresh reloads the board from the server and wipes this
+                    // suggestion card (and its Revert buttons). Repaint in place
+                    // instead, and force Leaflet to measure the open panel so the
+                    // pins/lines move without that reload.
+                    if (typeof renderDispatchMap === 'function') renderDispatchMap();
+                    try {
+                        if (window._dispatchMap && window._dispatchMap.invalidateSize) window._dispatchMap.invalidateSize();
+                    } catch (err) { /* map not open */ }
                     if (typeof buildPrintableReport === 'function' && window._lastDateStr) {
                         buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
                     }
