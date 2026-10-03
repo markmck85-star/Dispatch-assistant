@@ -277,6 +277,21 @@
   </div>
 </div>
 
+<!-- Quiet-hours prompt -- shown when Send would reach the technician
+     outside 7am-9pm in the technician's own time zone. Lets the dispatcher
+     send now anyway, hold the message until 8:15am local, or back out. -->
+<div class="modal-overlay" id="quietModal" style="z-index:1100;">
+  <div class="modal">
+    <h2>&#9200; Early / late for this technician</h2>
+    <div id="quietModalBody" style="font-size:13.5px;color:#ddd;line-height:1.5;"></div>
+    <div class="modal-actions" style="flex-wrap:wrap;">
+      <button class="btn btn-grey" id="quietModalCancel">Cancel</button>
+      <button class="btn btn-orange" id="quietModalNow">Send now</button>
+      <button class="btn btn-green" id="quietModalLater">Send later</button>
+    </div>
+  </div>
+</div>
+
 <script>
 
 // Saturday AI bar — same dispatch-ai backend as the weekday board / state console.
@@ -623,7 +638,7 @@ function ticketKey(t, siteCode) {
 // real site code (only true when Neumo's raw text happened to embed it;
 // a ticket matched via WO number, PC name, or a site_aliases entry has no
 // such guarantee). Confirmed live via two MI tickets (MIT038, MI1018)
-// whose raw text was just "MI - <name>" with no code at all despite being
+// whose raw text was just "MI - <n>" with no code at all despite being
 // genuinely matched. The old guess-from-siteText is kept as a last-resort
 // fallback only, for the rare case siteCode itself is missing.
 function resolveSiteLoc(t) {
@@ -1716,6 +1731,100 @@ document.getElementById('techModalConfirm').onclick = async () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
+// Time-zone helpers for the Message > Send quiet-hours check. The tech's
+// local clock is judged by the ticket state's timezone (states.timezone,
+// same source the text-alerts toggle uses). Outside 7:00am-9:00pm local,
+// Send asks whether to go now or hold until 8:15am local.
+// ═══════════════════════════════════════════════════════════════════════
+const QUIET_START_MIN = 7 * 60;        // before 7:00am local = too early
+const QUIET_END_MIN = 21 * 60;         // 9:00pm local or later = too late
+const SEND_LATER_HOUR = 8;
+const SEND_LATER_MINUTE = 15;
+
+function stateTimezone(stateCode) {
+  const s = (SAT_STATES || []).find(x => x.code === stateCode);
+  return (s && s.timezone) || 'America/New_York';
+}
+
+function stateDisplayName(stateCode) {
+  const s = (SAT_STATES || []).find(x => x.code === stateCode);
+  return (s && s.name) || stateCode;
+}
+
+function zonedParts(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+  }).formatToParts(date);
+  const get = type => Number((parts.find(p => p.type === type) || {}).value);
+  return { y: get('year'), m: get('month'), d: get('day'), h: get('hour'), mi: get('minute'), s: get('second') };
+}
+
+function tzOffsetMs(utcMs, tz) {
+  const p = zonedParts(new Date(utcMs), tz);
+  const asUtc = Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi, p.s);
+  return asUtc - Math.floor(utcMs / 1000) * 1000;
+}
+
+// Wall-clock time in tz -> the real UTC instant (handles DST shifts).
+function zonedTimeToUtc(y, m, d, h, mi, tz) {
+  const wall = Date.UTC(y, m - 1, d, h, mi);
+  let utc = wall - tzOffsetMs(wall, tz);
+  const off2 = tzOffsetMs(utc, tz);
+  utc = wall - off2;
+  return new Date(utc);
+}
+
+// Returns { quiet, nowLabel, tzLabel, sendAt (Date), sendLabel, mySendLabel, sundayNext }
+function quietHoursInfo(tz) {
+  const now = new Date();
+  const p = zonedParts(now, tz);
+  const mins = p.h * 60 + p.mi;
+  const quiet = mins < QUIET_START_MIN || mins >= QUIET_END_MIN;
+  const dayOffset = mins >= QUIET_END_MIN ? 1 : 0;
+  const base = new Date(Date.UTC(p.y, p.m - 1, p.d + dayOffset));
+  const sendAt = zonedTimeToUtc(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), SEND_LATER_HOUR, SEND_LATER_MINUTE, tz);
+  const nowLabel = now.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const sendLabel = sendAt.toLocaleString('en-US', { timeZone: tz, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const mySendLabel = sendAt.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  return {
+    quiet, nowLabel, sendAt, sendLabel, mySendLabel,
+    sundayNext: base.getUTCDay() === 0,
+  };
+}
+
+// Resolves 'now' | 'later' | null (cancelled).
+function askQuietHours(info, stateName, techName) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('quietModal');
+    const firstName = techName ? techName.split(' ')[0] : 'the technician';
+    const body = document.getElementById('quietModalBody');
+    body.innerHTML =
+      `It is <b>${escapeHtml(info.nowLabel)}</b> in ${escapeHtml(stateName)}. A text now could wake ${escapeHtml(firstName)}.`
+      + (info.sundayNext
+        ? `<div style="margin-top:8px;color:#ffb56b;">The next morning is Sunday and there is no Sunday coverage, so holding the message is not offered. Consider →Mon instead.</div>`
+        : `<div style="margin-top:8px;color:#9ad7c8;">Send later holds both the text and the email until <b>${escapeHtml(info.sendLabel)}</b> (${escapeHtml(info.mySendLabel)} your time).</div>`);
+
+    const laterBtn = document.getElementById('quietModalLater');
+    const nowBtn = document.getElementById('quietModalNow');
+    const cancelBtn = document.getElementById('quietModalCancel');
+    laterBtn.style.display = info.sundayNext ? 'none' : '';
+    laterBtn.textContent = '🕗 Send at 8:15 AM their time';
+
+    function done(choice) {
+      modal.classList.remove('active');
+      laterBtn.onclick = null; nowBtn.onclick = null; cancelBtn.onclick = null;
+      resolve(choice);
+    }
+    laterBtn.onclick = () => done('later');
+    nowBtn.onclick = () => done('now');
+    cancelBtn.onclick = () => done(null);
+    modal.classList.add('active');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Message compose modal -- assign/unassign/push-to-Monday are now inline
 // stop-card actions (see handleStopAction above); this is purely the
 // optional text to whichever tech the card is currently assigned to (or,
@@ -1760,6 +1869,19 @@ document.getElementById('messageModalSend').onclick = async () => {
   // Demo mode still allows a real SMS so you can text yourself or Gina.
   // Assignment / alert writes stay blocked.
 
+  // Quiet-hours check: if it is before 7am or 9pm-or-later where the
+  // technician is, ask whether to send now or hold until 8:15am their time.
+  // The hold is done by Mailgun (o:deliverytime) via send-sms.js, so it
+  // survives closing this page.
+  let deliverAt = null;
+  const tz = stateTimezone(t.state);
+  const quiet = quietHoursInfo(tz);
+  if (quiet.quiet) {
+    const choice = await askQuietHours(quiet, stateDisplayName(t.state), tech.name);
+    if (!choice) return; // backed out, nothing sent
+    if (choice === 'later') deliverAt = quiet.sendAt.toISOString();
+  }
+
   // Attach a one-tap "confirm you got this" link when the ticket is
   // formally assigned (a receipt only makes sense against a real
   // assignment row). Best-effort -- an unmatched site or a failed token
@@ -1789,6 +1911,7 @@ document.getElementById('messageModalSend').onclick = async () => {
       body: JSON.stringify({
         to: tech.smsAddress || null,
         email: tech.email || null,
+        deliverAt: deliverAt,
         body: (() => {
           const site = loc ? (loc.name || loc.code) : (t.siteText || 'a site');
           const wo = t.woNumber ? ` WO ${t.woNumber}` : '';
@@ -1828,7 +1951,11 @@ document.getElementById('messageModalSend').onclick = async () => {
     });
     const d = await r.json();
     if (d.ok) {
-      alert(`Sent to ${tech.name}!${tech.email ? '\n📧 Full details emailed' : ''}${tech.smsAddress ? '\n📱 SMS ping sent' : ''}`);
+      if (deliverAt && d.scheduledFor) {
+        alert(`Scheduled for ${tech.name}: delivers ${quiet.sendLabel} (${quiet.mySendLabel} your time).${tech.email ? '\n📧 Email held until then' : ''}${tech.smsAddress ? '\n📱 Text held until then' : ''}`);
+      } else {
+        alert(`Sent to ${tech.name}!${tech.email ? '\n📧 Full details emailed' : ''}${tech.smsAddress ? '\n📱 SMS ping sent' : ''}`);
+      }
       document.getElementById('messageModal').classList.remove('active');
     }
     else alert('Send failed: ' + (d.error || 'unknown error'));
