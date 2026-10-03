@@ -119,6 +119,7 @@
     <div class="state-chips" id="stateChips"></div>
     <div id="satMapPanel">
       <div class="map-panel-head">
+        <button type="button" onclick="fitSatMap()" title="Zoom to every pin currently on the map">Fit</button>
         <button type="button" id="satMapFullscreenBtn" onclick="toggleSatMapFullscreen()"
           title="Expand the map to fill the screen -- better for pinch-zoom and reading pins on mobile">⛶ Expand</button>
         <button type="button" id="satMapFullscreenCloseBtn" onclick="toggleSatMapFullscreen()">✕ Close</button>
@@ -973,7 +974,8 @@ function renderStateChips() {
 function ensureMap() {
   if (satMap) return;
   satMap = L.map('satMap', { scrollWheelZoom: false });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(satMap);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(satMap);
+  L.control.scale({ imperial: true, metric: false }).addTo(satMap);
   satMap.setView([37, -90], 4);
   satMap.on('click', () => satMap.scrollWheelZoom.enable());
   satMap.on('mouseout', () => satMap.scrollWheelZoom.disable());
@@ -1217,6 +1219,11 @@ function renderMap() {
 let _satMapFullscreenPrevViewport = null;
 let _satMapFullscreenHistoryPushed = false;
 
+function fitSatMap() {
+  window._satMapUserView = null;
+  if (!satMap || !satMapBounds || !satMapBounds.isValid()) return;
+  satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
+}
 function toggleSatMapFullscreen() {
   const panel = document.getElementById('satMapPanel');
   if (!panel) return;

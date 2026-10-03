@@ -579,6 +579,8 @@
                             aria-expanded="true" aria-controls="dispatchMapBody">Hide Map</button>
                         <button type="button" id="mapRefreshBtn" onclick="refreshDispatchMap()"
                             title="Re-pull current status from the database (e.g. tickets the sync auto-completed since this loaded) without re-parsing the pasted dispatch list">&#x1F504; Refresh</button>
+                        <button type="button" id="mapFitBtn" onclick="fitDispatchMap()"
+                            title="Zoom to every stop currently on the map">Fit</button>
                         <button type="button" id="mapFullscreenBtn" onclick="toggleDispatchMapFullscreen()"
                             title="Expand the map to fill the screen -- better for pinch-zoom and reading pins on mobile">&#x26F6; Expand</button>
                         <button type="button" id="mapFullscreenCloseBtn" onclick="toggleDispatchMapFullscreen()">&#x2715; Close</button>
@@ -3191,7 +3193,6 @@ function distanceMatrixStatus(state) {
             const aiInput = document.getElementById('aiCommandInput');
             if (aiInput) aiInput.value = '';
             window._aiRebalanceTotalSavedMi = 0;
-            window._aiUndoStack = [];
             // Clear fallback flags on current assignments
             Object.values(window.currentAssignments || {}).forEach(items => {
                 (items || []).forEach(item => { item.needsFallbackAssignment = false; });
@@ -7728,7 +7729,6 @@ ${content}</body></html>`;
                 const result = (data.actions || [])[0];
                 if (result && result.type === 'error') throw new Error(result.summary);
 
-                if ((data.changedTechs || []).length) pushAiUndo(data.undo);
                 if (data.routes) applyAiRoutes(data.routes);
                 if ((data.changedTechs || []).length || data.routes) {
                     renderReviewBoard(true);
@@ -7824,12 +7824,6 @@ ${content}</body></html>`;
                     html += '<div style="margin-top:3px;color:#ffb56b;font-size:11px;">⚠ Board updated but not saved'
                         + (data.reason ? ' (' + escapeAiHtml(data.reason) + ')' : '') + '</div>';
                 }
-                const undoDepth = (window._aiUndoStack || []).length;
-                if (undoDepth) {
-                    html += '<div style="margin-top:5px;"><button type="button" onclick="performAiUndo()" '
-                        + 'style="padding:3px 10px;border-radius:6px;border:1px solid #2a6496;background:#2a6496;color:#fff;font-size:12px;cursor:pointer;">'
-                        + '↩ Undo' + (undoDepth > 1 ? ' (' + undoDepth + ' steps available)' : '') + '</button></div>';
-                }
                 html += '</div>';
             }
             if (errors.length) {
@@ -7890,105 +7884,6 @@ ${content}</body></html>`;
             window.currentAssignments = next;
         }
 
-        // ─── UNDO (2026-10-02) ────────────────────────────────────────────────
-        // dispatch-ai.mjs keeps no history. Every board-changing command
-        // returns an `undo` payload (pre-command ordering of just the techs
-        // it touched, plus original assigned_by of moved stops); this page
-        // keeps them in a stack and hands the newest one back through the
-        // restore_routes tool. Like the Session Actions Undo, the stack only
-        // lasts until the page refreshes or the state changes.
-        window._aiUndoStack = window._aiUndoStack || [];
-
-        function pushAiUndo(undo) {
-            if (!undo || !Array.isArray(undo.routes) || !undo.routes.length) return;
-            const dateInput = document.getElementById('dispatchDate');
-            window._aiUndoStack.push({
-                routes: undo.routes,
-                provenance: undo.provenance || {},
-                label: undo.label || '',
-                state: CURRENT_STATE,
-                date: dateInput && dateInput.value ? dateInput.value : ''
-            });
-            if (window._aiUndoStack.length > 20) window._aiUndoStack.shift();
-        }
-
-        /** True for a bare "undo" / "put it back" style phrase (typed or dictated). Anything fancier goes to the assistant, which has its own undo_last_command tool. */
-        function isAiUndoPhrase(text) {
-            const t = String(text || '').toLowerCase().replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
-            return /^(?:(?:please|ok|okay|actually|hey|wait|no) )*(?:undo|revert|put (?:it|that|them|him|her) back|take (?:it|that) back|change (?:it|that) back|go back)(?: (?:that|it|this|the last (?:one|change|move|command|action)|last (?:one|change|move|command|action)|the move|that move|that change))?(?: please)?$/.test(t);
-        }
-
-        async function performAiUndo() {
-            if (_aiBusy) return;
-            const stack = window._aiUndoStack || [];
-            const dateInput = document.getElementById('dispatchDate');
-            const dispatchDate = dateInput && dateInput.value ? dateInput.value : '';
-            const entry = stack[stack.length - 1];
-            if (!entry || entry.state !== CURRENT_STATE || entry.date !== dispatchDate) {
-                if (entry) stack.length = 0; // belongs to a different state/date; can't apply here
-                setAiStatus('Nothing to undo.', '#ffb56b');
-                return;
-            }
-
-            if (_aiListening) stopAiVoice();
-            _aiBusy = true;
-            refreshAiBarState();
-            setAiStatus('Undoing…', '#7ec8e3');
-            const diffEl = document.getElementById('aiCommandDiff');
-            if (diffEl) diffEl.innerHTML = '';
-
-            try {
-                const unavailableTechs = [...getUnavailableTechsForDate(dispatchDate)];
-                const res = await fetch('/.netlify/functions/dispatch-ai', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: 'undo last change',
-                        state: CURRENT_STATE,
-                        dispatchDate: dispatchDate,
-                        routes: aiRoutesSnapshot(),
-                        unavailableTechs: unavailableTechs,
-                        forceTool: 'restore_routes',
-                        forceToolArgs: { routes: entry.routes, provenance: entry.provenance, label: entry.label }
-                    })
-                });
-                const data = await res.json().catch(() => null);
-                if (!res.ok || !data || !data.ok) {
-                    setAiStatus((data && data.error) || ('Undo failed (HTTP ' + res.status + ')'), '#ff8a80');
-                    return;
-                }
-                const result = (data.actions || [])[0];
-                if (result && result.type === 'error') {
-                    // The board no longer matches that snapshot -- it can never
-                    // be applied, so drop it rather than leave it stuck on top.
-                    if (result.stale) stack.pop();
-                    setAiStatus(result.summary, '#ffb56b');
-                    return;
-                }
-
-                stack.pop();
-                if (data.routes) applyAiRoutes(data.routes);
-                renderReviewBoard(true);
-                if (typeof buildPrintableReport === 'function' && window._lastDateStr) {
-                    buildPrintableReport(window.currentAssignments, window._lastDateStr, window._lastRegionLabel);
-                }
-                if (window.google && window.google.maps && typeof checkTrafficForTech === 'function') {
-                    (data.changedTechs || []).forEach(tech => {
-                        if ((window.currentAssignments[tech] || []).length > 0) checkTrafficForTech(tech);
-                    });
-                }
-                renderAiDiff(data);
-                setAiStatus('', '#888');
-                const input = document.getElementById('aiCommandInput');
-                if (input) input.value = '';
-            } catch (err) {
-                setAiStatus('Undo failed: ' + err.message, '#ff8a80');
-            } finally {
-                _aiBusy = false;
-                refreshAiBarState();
-            }
-        }
-
         async function submitAiCommand(forceTool) {
             if (_aiBusy) return;
             const input = document.getElementById('aiCommandInput');
@@ -8010,14 +7905,6 @@ ${content}</body></html>`;
             const dispatchDate = dateInput && dateInput.value ? dateInput.value : '';
             if (!dispatchDate) {
                 setAiStatus('Set a dispatch date first.', '#ffb56b');
-                return;
-            }
-
-            // Bare "undo" / "put it back": handled here, no round trip to the
-            // model needed. Fancier phrasings reach the assistant, which
-            // answers with undo_last_command (handled below).
-            if (!forceTool && isAiUndoPhrase(text)) {
-                performAiUndo();
                 return;
             }
 
@@ -8059,18 +7946,8 @@ ${content}</body></html>`;
                     return;
                 }
 
-                // The assistant recognised "put it back" style wording and
-                // asked for an undo; this page owns the stack, so do it here.
-                if ((data.actions || []).some(a => a.type === 'undo_last_command')) {
-                    _aiBusy = false;
-                    refreshAiBarState();
-                    await performAiUndo();
-                    return;
-                }
-
                 const changed = data.changedTechs || [];
                 if (changed.length) {
-                    pushAiUndo(data.undo);
                     applyAiRoutes(data.routes);
                     // Immediate UI refresh so the tech tiles reflect the change
                     // without the dispatcher touching anything. This also
@@ -8282,10 +8159,11 @@ ${content}</body></html>`;
             if (!el || typeof L === 'undefined') return null;
 
             _dispatchMap = L.map(el, { scrollWheelZoom: false });
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19, subdomains: 'abcd',
+                attribution: '&copy; OpenStreetMap &copy; CARTO'
             }).addTo(_dispatchMap);
+            L.control.scale({ imperial: true, metric: false }).addTo(_dispatchMap);
             _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds
 
             // Wheel zoom is off until the map is clicked, so scrolling past a
@@ -8675,7 +8553,26 @@ ${content}</body></html>`;
             }
         }
 
+
+        function fitDispatchMap() {
+            window._dispatchMapUserView = null;
+            if (!_dispatchMap || !_dispatchMapBounds || !_dispatchMapBounds.isValid()) return;
+            _dispatchMap.fitBounds(_dispatchMapBounds, { padding: [28, 28], maxZoom: 14 });
+        }
+        function zoomDispatchMapTech(tech) {
+            const route = (window._dispatchMapRoutes || []).find(r => r.tech === tech);
+            if (!_dispatchMap || !route) return;
+            const pts = [];
+            if (route.home && route.home.lat != null) pts.push([route.home.lat, route.home.lng]);
+            (route.pts || []).forEach(p => { if (p.lat != null) pts.push([p.lat, p.lng]); });
+            if (!pts.length) return;
+            window._dispatchMapUserView = null;
+            const b = L.latLngBounds(pts);
+            if (b.getNorthEast().equals(b.getSouthWest())) _dispatchMap.setView(b.getCenter(), 12);
+            else _dispatchMap.fitBounds(b, { padding: [36, 36], maxZoom: 13 });
+        }
         function renderDispatchMapLegend(routes) {
+            window._dispatchMapRoutes = routes;
             const el = document.getElementById('dispatchMapLegend');
             if (!el) return;
             const chips = routes.map(route => {
@@ -8687,9 +8584,10 @@ ${content}</body></html>`;
                     ? route.pts.length + ' + ' + doneCount + ' done'
                     : String(route.pts.length);
                 return '<span class="map-legend-chip' + (_dispatchMapHiddenTechs.has(route.tech) ? ' off' : '') + '"'
-                    + ' onclick="toggleDispatchMapTech(\'' + arg + '\')" title="Show or hide this route">'
+                    + ' onclick="zoomDispatchMapTech(\'' + arg + '\')" title="Zoom to this route">'
                     + '<span class="map-legend-swatch" style="background:' + route.color + ';"></span>'
-                    + escapeAiHtml(route.tech) + ' (' + countLabel + ')</span>';
+                    + escapeAiHtml(route.tech) + ' (' + countLabel + ')'
+                    + '<button type="button" onclick="event.stopPropagation(); toggleDispatchMapTech(\'' + arg + '\')" title="Hide this route" style="margin-left:4px;border:0;background:transparent;color:#aaa;cursor:pointer;">✕</button></span>';
             });
             if (_dispatchMapHiddenTechs.size) {
                 chips.push('<span class="map-legend-chip" onclick="showAllDispatchMapTechs()"'
