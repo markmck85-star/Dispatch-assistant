@@ -1111,15 +1111,36 @@ function stateCenterFor(state) {
   return STATE_CENTERS[state] || STATE_CENTERS.GA;
 }
 
+function addBasemap(map) {
+  // OSM tiles fail in patches (the black squares). Retry once, then fill
+  // that tile from CARTO so the panel is never left dark.
+  const layer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    subdomains: 'abc',
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  });
+  layer.on('tileerror', function (ev) {
+    const img = ev.tile;
+    const c = ev.coords;
+    if (!img || !c) return;
+    if (!img.dataset.retried) {
+      img.dataset.retried = '1';
+      const src = img.src.split('?')[0];
+      setTimeout(function () { img.src = src + '?r=' + Date.now(); }, 500);
+      return;
+    }
+    img.src = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/' + c.z + '/' + c.x + '/' + c.y + '.png';
+  });
+  layer.addTo(map);
+  return layer;
+}
+
 function ensureStateMap() {
   if (_stateMap) return _stateMap;
   const el = document.getElementById('stateMap');
   if (!el || typeof L === 'undefined') return null;
   _stateMap = L.map(el, { scrollWheelZoom: false });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { subdomains: 'abcd',
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(_stateMap);
+  addBasemap(_stateMap);
   L.control.scale({ imperial: true, metric: false }).addTo(_stateMap);
   const initState = (document.getElementById('stateSel') || {}).value || 'GA';
   _stateMap.setView(stateCenterFor(initState), initState === 'CA' ? 6 : 7);

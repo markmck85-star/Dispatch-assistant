@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.89 (blobs-166, sat-fallback-all)</title>
+    <title>MCR Dispatch Hub v9.89 (blobs-166, sat-fallback-all, tile-retry)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -8181,15 +8181,37 @@ ${content}</body></html>`;
         }
 
         /** One Leaflet instance for the life of the page; created on first use. */
+        function addBasemap(map) {
+          // OSM tiles fail in patches (the black squares). Retry once, then fill
+          // that tile from CARTO so the panel is never left dark.
+          const layer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            subdomains: 'abc',
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap'
+          });
+          layer.on('tileerror', function (ev) {
+            const img = ev.tile;
+            const c = ev.coords;
+            if (!img || !c) return;
+            if (!img.dataset.retried) {
+              img.dataset.retried = '1';
+              const src = img.src.split('?')[0];
+              setTimeout(function () { img.src = src + '?r=' + Date.now(); }, 500);
+              return;
+            }
+            img.src = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/' + c.z + '/' + c.x + '/' + c.y + '.png';
+          });
+          layer.addTo(map);
+          return layer;
+        }
+        
         function ensureDispatchMap() {
             if (_dispatchMap) return _dispatchMap;
             const el = document.getElementById('dispatchMap');
             if (!el || typeof L === 'undefined') return null;
 
             _dispatchMap = L.map(el, { scrollWheelZoom: false });
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19, attribution: '&copy; OpenStreetMap'
-            }).addTo(_dispatchMap);
+            addBasemap(_dispatchMap);
             L.control.scale({ imperial: true, metric: false }).addTo(_dispatchMap);
             _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds
 
