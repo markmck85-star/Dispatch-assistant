@@ -1072,12 +1072,25 @@ function formatRestockPopup(code) {
     + '<div style="margin-top:4px;"><a href="' + href + '" target="_blank" rel="noopener" style="color:#7ec8e3;font-size:12px;">Open in Restock Tracker</a></div>';
 }
 
+function findSatTech(name) {
+  const want = String(name || '').trim().toLowerCase();
+  if (!want) return null;
+  const slug = want.replace(/\s+/g, '-');
+  for (const techs of Object.values(TECHS_BY_STATE || {})) {
+    if (techs[slug]) return techs[slug];
+    for (const tech of Object.values(techs)) {
+      if (tech && String(tech.name || '').trim().toLowerCase() === want) return tech;
+    }
+  }
+  return null;
+}
 function renderMap() {
   setTimeout(refreshSatAiBarState, 0);
   ensureMap();
   mapMarkers.forEach(m => satMap.removeLayer(m));
   mapMarkers = [];
   const bounds = [];
+  const homesDrawn = new Set();
 
   const states = activeStateFilter ? [activeStateFilter] : SAT_STATES.map(s => s.code);
 
@@ -1116,6 +1129,27 @@ function renderMap() {
         const key = ticketKey(ticket, loc.code);
         const asg = key && assignmentsByKey[key] && assignmentsByKey[key].status !== 'removed' ? assignmentsByKey[key] : null;
         const whoPop = asg ? `<br>Assigned: ${escapeHtml(asg.techName)}` : '';
+        const assignedTech = asg ? findSatTech(asg.techName) : null;
+        if (assignedTech && assignedTech.lat != null && assignedTech.lng != null) {
+          const homeKey = assignedTech.name || asg.techName;
+          if (!homesDrawn.has(homeKey)) {
+            homesDrawn.add(homeKey);
+            const hm = L.marker([assignedTech.lat, assignedTech.lng], {
+              icon: L.divIcon({
+                className: '',
+                html: '<div class="map-home-pin" style="background:#0a6e5c;">&#x1F3E0;</div>',
+                iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -11],
+              }),
+              title: assignedTech.name,
+            }).bindPopup('<b>' + escapeHtml(assignedTech.name) + '</b><br>Assigned — ' + escapeHtml(assignedTech.homeAddress || code)).addTo(satMap);
+            mapMarkers.push(hm);
+          }
+          const line = L.polyline([[assignedTech.lat, assignedTech.lng], [loc.lat, loc.lng]], {
+            color: '#0a6e5c', weight: 3, opacity: 0.9
+          }).addTo(satMap);
+          mapMarkers.push(line);
+          bounds.push([assignedTech.lat, assignedTech.lng]);
+        }
         const m = L.marker([loc.lat, loc.lng], {
           icon: L.divIcon({
             className: '',
