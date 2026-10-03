@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>MCR Dispatch Hub v9.88 (blobs-166)</title>
+    <title>MCR Dispatch Hub v9.89 (blobs-166, sat-fallback-all)</title>
 
     <!-- Leaflet 1.9.4 -- engine behind the route map visualizer below the
          command bar. Loaded from unpkg as a plain (non-async) script so `L` is
@@ -5699,10 +5699,11 @@ function distanceMatrixStatus(state) {
                 <div style="font-weight:bold;color:#ffa500;margin-bottom:6px;">&#9888; ${isPrimaryRole ? 'No default technician set' : (fallbackAlsoUnavailable ? 'Fallback also unavailable' : 'No fallback set')}</div>
                 <div style="margin-bottom:4px;"><strong>${code}</strong> — ${locName}</div>
                 <div style="color:#aaa;margin-bottom:12px;font-size:13px;">${isPrimaryRole ? 'This site has no usable saved default technician.' : (primaryTech + ' is unavailable.')} Who should cover this?${remaining.length > 0 ? ` <span style="color:#666;">(${remaining.length} more after this)</span>` : ''}</div>
-                <select id="fap-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:10px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
+                <select id="fap-tech" style="width:100%;box-sizing:border-box;padding:7px 9px;margin-bottom:6px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#f0f0f0;font-size:13px;">
                     <option value="">-- Select technician --</option>
                     ${techOptions}
                 </select>
+                <button type="button" id="fap-show-all" style="width:100%;box-sizing:border-box;padding:6px 9px;margin-bottom:10px;border-radius:5px;border:1px solid #666;background:#2a2a3e;color:#ddd;font-size:12px;cursor:pointer;">Show all technicians</button>
                 <div style="display:flex;gap:8px;margin-bottom:8px;">
                     <button id="fap-assign" style="flex:1;padding:8px;background:#007bff;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Assign (session only)</button>
                     ${saveButtonHtml}
@@ -5807,6 +5808,32 @@ function distanceMatrixStatus(state) {
             document.getElementById('fap-assign').onclick = function() { doAssign(false); };
             if (document.getElementById('fap-save')) {
                 document.getElementById('fap-save').onclick = function() { doAssign(true); };
+            }
+            // Saturday on-call roster is the only list this toast builds by
+            // default. "Show all technicians" refills #fap-tech from every
+            // active non-contractor in TECHS, nearest first, so a dispatcher
+            // can take a stop (Mall of Georgia) that is not on the on-call
+            // pair. Assign (session only) stays the action button — do not
+            // treat Assign & save as primary as the default.
+            var fapShowAll = document.getElementById('fap-show-all');
+            if (fapShowAll) {
+                fapShowAll.onclick = function() {
+                    var sel = document.getElementById('fap-tech');
+                    if (!sel) return;
+                    var keep = sel.value;
+                    var contractors = new Set(['TechSpot', 'Arcitechx']);
+                    var allActive = Object.keys(TECHS).filter(function(t) {
+                        var tech = TECHS[t] || {};
+                        if (tech.active === false) return false;
+                        if (contractors.has(t) || tech.contractor) return false;
+                        return true;
+                    });
+                    sel.innerHTML = '<option value="">-- Select technician --</option>'
+                        + buildTechOptions(allActive, code, CURRENT_STATE, keep);
+                    fapShowAll.textContent = 'Showing all technicians (' + allActive.length + ')';
+                    fapShowAll.disabled = true;
+                    fapShowAll.style.opacity = '0.7';
+                };
             }
             document.getElementById('fap-skip').onclick = function() {
                 div.remove();
@@ -8317,11 +8344,41 @@ ${content}</body></html>`;
             });
 
             if (!routes.length) {
+                // Empty board (Georgia/Florida Saturday with no stops, or a
+                // cleared day). Do not hide the panel — that left a black
+                // #dispatchMap box because Leaflet never got a sized
+                // container. Show the basemap instead.
+                panel.classList.add('visible');
+                if (typeof setMapLoader === 'function') setMapLoader('', false);
+                const map = ensureDispatchMap();
                 Object.keys(_dispatchMapLayers).forEach(t => {
                     if (_dispatchMap) _dispatchMap.removeLayer(_dispatchMapLayers[t]);
                 });
                 _dispatchMapLayers = {};
-                panel.classList.remove('visible');
+                if (_dispatchMapAllSitesLayer && map) {
+                    map.removeLayer(_dispatchMapAllSitesLayer);
+                    _dispatchMapAllSitesLayer = null;
+                }
+                const legend = document.getElementById('dispatchMapLegend');
+                if (legend) legend.innerHTML = '';
+                const meta = document.getElementById('dispatchMapMeta');
+                if (meta) meta.textContent = 'No stops on this board';
+                const note = document.getElementById('dispatchMapNote');
+                if (note) {
+                    const region = CURRENT_STATE === 'FL' ? 'Florida' : (CURRENT_STATE === 'GA' ? 'Georgia / NC / SC' : (CURRENT_STATE || 'this region'));
+                    note.style.display = '';
+                    note.textContent = 'No stops for ' + region + ' — basemap only.';
+                }
+                if (map) {
+                    const stateView = CURRENT_STATE === 'FL'
+                        ? { center: [27.8, -81.7], zoom: 7 }
+                        : { center: [32.8, -83.6], zoom: 7 };
+                    window._dispatchMapBounds = null;
+                    requestAnimationFrame(function() {
+                        map.invalidateSize();
+                        if (!window._dispatchMapUserView) map.setView(stateView.center, stateView.zoom);
+                    });
+                }
                 return;
             }
 
