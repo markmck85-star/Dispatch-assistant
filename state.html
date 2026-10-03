@@ -122,6 +122,7 @@
   .map-legend-chip.off { opacity: 0.45; text-decoration: line-through; }
   .map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
+  .leaflet-tile-pane { filter: grayscale(0.8) brightness(1.08) contrast(0.92); }
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); color: #fff; font-size: 11px; font-weight: bold; }
   .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
   .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
@@ -1115,7 +1116,7 @@ function ensureStateMap() {
   const el = document.getElementById('stateMap');
   if (!el || typeof L === 'undefined') return null;
   _stateMap = L.map(el, { scrollWheelZoom: false });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd',
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { subdomains: 'abcd',
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(_stateMap);

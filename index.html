@@ -206,6 +206,7 @@
         .map-note { font-size: 11px; color: #d9a34a; margin-top: 6px; }
         /* Stop pins are divIcons rather than images, so each tech's route colour
            can be applied inline -- one shared shape instead of a PNG per colour. */
+        .leaflet-tile-pane { filter: grayscale(0.8) brightness(1.08) contrast(0.92); }
         .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .map-stop-pin-done { opacity: 0.55; border-style: dashed; font-size: 12px; }
         .map-stop-pin-future { opacity: 0.7; border-style: dashed; font-size: 12px; }
@@ -8159,9 +8160,8 @@ ${content}</body></html>`;
             if (!el || typeof L === 'undefined') return null;
 
             _dispatchMap = L.map(el, { scrollWheelZoom: false });
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                maxZoom: 19, subdomains: 'abcd',
-                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19, attribution: '&copy; OpenStreetMap'
             }).addTo(_dispatchMap);
             L.control.scale({ imperial: true, metric: false }).addTo(_dispatchMap);
             _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds

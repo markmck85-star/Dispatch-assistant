@@ -49,6 +49,7 @@
   #satMapPanel.map-fullscreen #satAiCommandBar { margin:8px 0 0; flex-shrink:0; }
   #satMapPanel.map-fullscreen #satAiCommandInput { font-size:16px; padding:10px; }
   #satMapPanel.map-fullscreen #satAiSendBtn, #satMapPanel.map-fullscreen #satAiMicBtn { padding:10px 12px; font-size:15px; }
+  .leaflet-tile-pane { filter: grayscale(0.8) brightness(1.08) contrast(0.92); }
   .map-home-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); font-size: 13px; }
   .map-stop-pin { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.55); color: #fff; font-size: 13px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   .map-site-pin { display:flex;align-items:center;justify-content:center;width:10px;height:10px;border-radius:50%;background:#6a7a88;border:1px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.4);opacity:.8; }
@@ -974,7 +975,7 @@ function renderStateChips() {
 function ensureMap() {
   if (satMap) return;
   satMap = L.map('satMap', { scrollWheelZoom: false });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(satMap);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(satMap);
   L.control.scale({ imperial: true, metric: false }).addTo(satMap);
   satMap.setView([37, -90], 4);
   satMap.on('click', () => satMap.scrollWheelZoom.enable());
