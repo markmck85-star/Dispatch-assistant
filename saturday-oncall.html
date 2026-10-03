@@ -585,7 +585,8 @@ async function loadTickets() {
       ticketsByState[s.code] = (data.entries || [])
         .filter(t => t.ticketKind === 'trouble')
         .filter(t => !isTestingStation(t))
-        .filter(isDueTodayOrEarlier);
+        .filter(isDueTodayOrEarlier)
+        .map(t => Object.assign({}, t, { state: t.state || s.code }));
     } catch (e) { ticketsByState[s.code] = []; }
   }));
 }
