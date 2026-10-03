@@ -836,8 +836,10 @@ document.getElementById('dispatcherModalConfirm').onclick = async () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
-// Text alerts toggle -- one notification-recipient row per timezone group
-// among today's covered states, each capped at 5pm in its own zone.
+// Text alerts toggle -- one row for every covered state. The dispatcher
+// is on Eastern time, so Nevada (and any other zone) texts immediately
+// from 8am-5pm Eastern. Technician quiet hours are unchanged; those
+// recipients are not source=saturday-oncall.
 // ═══════════════════════════════════════════════════════════════════════
 document.getElementById('alertsBtn').onclick = () => openDispatcherModal('alerts');
 
@@ -852,14 +854,8 @@ async function enableTextAlerts() {
     dispatcher.smsAddress = smsAddress;
   }
 
-  // Group today's covered states by timezone so each group gets its own
-  // 5pm-local cutoff (states.timezone is the live source, not a hardcoded
-  // Eastern/Pacific split).
-  const byTz = {};
-  for (const s of SAT_STATES) {
-    const tz = s.timezone || 'America/New_York';
-    (byTz[tz] = byTz[tz] || []).push(s.code);
-  }
+  const states = (SAT_STATES || []).map(s => s.code).filter(Boolean);
+  if (!states.length) { alert('No Saturday-coverage states are configured.'); return; }
 
   try {
     const res = await fetch('/.netlify/functions/get-settings?state=NOTIFICATIONS', { cache: 'no-store' });
@@ -868,30 +864,29 @@ async function enableTextAlerts() {
     let recipients = (s.settings && s.settings.recipients) || s.recipients || [];
 
     // Drop any prior Saturday-on-call rows for THIS day before adding
-    // fresh ones -- avoids piling up duplicates if the toggle is used
-    // more than once, or a different dispatcher is picked after the fact.
+    // fresh ones -- including the old per-timezone rows (Pacific 8am hold).
     recipients = recipients.filter(r => !(r.source === 'saturday-oncall' && r.day === TARGET_DAY));
 
-    for (const [tz, states] of Object.entries(byTz)) {
-      recipients.push({
-        name: `On-Call Dispatcher (${TARGET_DAY}, ${tz.split('/')[1] || tz})`,
-        address: dispatcher.smsAddress,
-        enabled: true,
-        states,
-        timezone: tz,
-        hoursStart: '08:00',
-        hoursEnd: '17:00',
-        source: 'saturday-oncall',
-        day: TARGET_DAY,
-      });
-    }
+    recipients.push({
+      name: `On-Call Dispatcher (${TARGET_DAY})`,
+      address: dispatcher.smsAddress,
+      enabled: true,
+      states,
+      timezone: 'America/New_York',
+      hoursStart: '08:00',
+      hoursEnd: '17:00',
+      source: 'saturday-oncall',
+      day: TARGET_DAY,
+    });
 
-    await fetch('/.netlify/functions/save-settings', {
+    const saveRes = await fetch('/.netlify/functions/save-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ state: 'NOTIFICATIONS', settings: { recipients } }),
     });
-    alert(`Text alerts enabled for ${currentDispatcher.dispatcher} through 5pm (local) in each covered state's time zone.`);
+    const saveData = await saveRes.json().catch(() => ({}));
+    if (!saveRes.ok || saveData.error) throw new Error(saveData.error || 'Save failed');
+    alert(`Text alerts enabled for ${currentDispatcher.dispatcher} through 5pm Eastern, for every covered state. Technician texts still wait until 8am local.`);
   } catch (e) {
     alert('Could not enable alerts: ' + e.message);
   }
@@ -987,10 +982,28 @@ function renderStateChips() {
   });
 }
 
+function addBasemap(map) {
+  const layer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    subdomains: 'abc', maxZoom: 19, attribution: '&copy; OpenStreetMap'
+  });
+  layer.on('tileerror', function (ev) {
+    const img = ev.tile;
+    const c = ev.coords;
+    if (!img || !c) return;
+    if (!img.dataset.retried) {
+      img.dataset.retried = '1';
+      const src = img.src.split('?')[0];
+      setTimeout(function () { img.src = src + '?r=' + Date.now(); }, 500);
+      return;
+    }
+    img.src = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/' + c.z + '/' + c.x + '/' + c.y + '.png';
+  });
+  layer.addTo(map);
+}
 function ensureMap() {
   if (satMap) return;
   satMap = L.map('satMap', { scrollWheelZoom: false });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(satMap);
+  addBasemap(satMap);
   L.control.scale({ imperial: true, metric: false }).addTo(satMap);
   satMap.setView([37, -90], 4);
   satMap.on('click', () => satMap.scrollWheelZoom.enable());
