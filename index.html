@@ -49,19 +49,26 @@
         /* Phone: one card across, controls stay inside the card instead of
            painting onto the next column. */
         @media (max-width: 980px) {
-            .tech-cards-grid { columns: 1 !important; }
             .tech-cards-grid .tech-card { font-size: 16px; padding: 12px; }
+            .tech-cards-grid .control-btn { font-size: 14px !important; padding: 8px 10px !important; }
+            /* Two cards across when there is room (controls hidden), one card
+               when the controls panel is open and the column is narrow. */
+            .tech-cards-grid { columns: 380px; column-gap: 14px; }
+            .os-stop-actions .control-btn { white-space: nowrap; }
+        }
+        /* True phone width only: stack the stop's buttons under its info. */
+        @media (max-width: 640px) {
+            .tech-cards-grid { columns: 1 !important; }
             .tech-cards-grid .os-stop { display: block; font-size: 16px; }
             .os-stop-moves { float: left; margin-right: 8px; }
             .os-stop-main { display: block; overflow: hidden; }
             .os-stop-actions {
                 clear: both; float: none; width: 100%; max-width: 100%;
-                margin: 8px 0 0 !important; align-items: stretch !important;
+                margin: 8px 0 0 !important; align-items: flex-start !important;
                 box-sizing: border-box;
             }
             .os-stop-actions select.control-btn { width: 100%; max-width: 100%; box-sizing: border-box; }
             .os-stop-actions > div { display: flex; flex-wrap: wrap; gap: 6px; }
-            .tech-cards-grid .control-btn { font-size: 14px !important; padding: 8px 10px !important; }
         }
         .hidden { display: none; }
         @media print { #printableReport { display: block; } .container { display: none; } }
@@ -4823,7 +4830,7 @@ function distanceMatrixStatus(state) {
                     </div>
                     <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0;"></div>
                     <div class="tech-card-body${cardOpen ? ' open' : ''}" id="tech-body-${techKey}">
-`;
+                    <div style="text-align:right;margin-bottom:4px;"><button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍 Cluster</button></div>`;
                 
                 items.forEach((item, index) => {
                     // 2026-08-29: trouble-only filter -- skip building HTML for a
@@ -4927,12 +4934,6 @@ function distanceMatrixStatus(state) {
                         }).join('<br>') + `</div>`
                         : '';
                     cardHtml += `<div class="os-stop">
-                                <div class="os-stop-controls" style="flex:0 0 100%;display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;">
-                                    <button class="control-btn" onclick="pushToTomorrow('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">${window._isFriday ? '→ Mon' : window._isSaturday ? '→ Mon' : '→ Tomorrow'}</button>
-                                    <button class="control-btn" onclick="openPushToDatePicker('${tech}', ${index})" title="Push to a specific date (e.g. an on-call Saturday)" style="font-size:10px;padding:2px 6px;background:#444;color:#fff;border:none;border-radius:3px;cursor:pointer;">📅</button>
-                                    <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'completed')" style="font-size:10px;padding:2px 6px;background:#1a6b1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Done</button>
-                                    <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'canceled')" style="font-size:10px;padding:2px 6px;background:#6b1a1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✗ Cancel</button>
-                                </div>
                                 <div class="os-stop-moves" style="margin-right:4px; display:flex; flex-direction:column;">
                                     <button class="move-btn" 
     onclick="moveStop('${tech}', ${index}, -1)"
@@ -4960,12 +4961,20 @@ function distanceMatrixStatus(state) {
                                         ${currentTechHomeOption(tech, item.code, CURRENT_STATE)}
                                         ${buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false && !currentUnavailableTechs.has(t)), item.code, CURRENT_STATE, '', new Set([tech]))}
                                     </select>
+                                    <div style="display:flex;gap:3px;">
+                                        <button class="control-btn" onclick="pushToTomorrow('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">${window._isFriday ? '→ Mon' : window._isSaturday ? '→ Mon' : '→ Tomorrow'}</button>
+                                        <button class="control-btn" onclick="openPushToDatePicker('${tech}', ${index})" title="Push to a specific date (e.g. an on-call Saturday)" style="font-size:10px;padding:2px 6px;background:#444;color:#fff;border:none;border-radius:3px;cursor:pointer;">📅</button>
+                                    </div>
                                     ${item.noSavedDefault ? `<button class="control-btn" onclick="setAsDefaultTech('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#5a2d82;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Set Default</button>` : ''}
+                                    <div style="display:flex;gap:3px;margin-top:2px;">
+                                        <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'completed')" style="font-size:10px;padding:2px 6px;background:#1a6b1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Done</button>
+                                        <button class="control-btn" onclick="removeStop('${tech}', ${index}, 'canceled')" style="font-size:10px;padding:2px 6px;background:#6b1a1a;color:#fff;border:none;border-radius:3px;cursor:pointer;">✗ Cancel</button>
+                                    </div>
                                     ${(item.fromTicket && item.urgent) ? `<button class="control-btn" onclick="notifyStop('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#1d4e89;color:#fff;border:none;border-radius:3px;cursor:pointer;">📱 Text this stop</button>` : ''}
                                 </div>
                              </div>`;
                 });
-                cardHtml += `<div style="text-align:right;margin-bottom:4px;"><button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍 Cluster</button></div></div></div>`;
+                cardHtml += `</div></div>`;
                 return cardHtml;
             }
             function toggleTechCard(techKey, btn) {
