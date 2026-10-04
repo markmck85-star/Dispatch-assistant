@@ -454,7 +454,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.93</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-172</div>
+        <h1>MCR Dispatch Hub v9.94</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-173</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -622,9 +622,12 @@
                     <div style="display:flex; gap:6px; align-items:center;">
                         <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
                         <input type="text" id="aiCommandInput" autocomplete="off"
-                            placeholder='e.g. "move stop 2 from Robert to Keontae"'
+                            placeholder="move stop 2…"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();submitAiCommand();}"
-                            style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+                            style="flex:0 1 168px; width:168px; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+                        <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
+                            title="Scan the whole board for stop-to-technician swaps that would reduce total drive time"
+                            style="flex:0 0 auto; padding:7px 8px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer; white-space:nowrap;">Analyze</button>
                         <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
                             style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
                         <button type="button" id="aiSendBtn" onclick="submitAiCommand()"
@@ -632,9 +635,6 @@
                     </div>
                     <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
                     <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
-                    <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
-                        title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
-                        style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
                 </div></div>
 </div>
 
@@ -2263,6 +2263,25 @@ function distanceMatrixStatus(state) {
             } catch { /* silent — in-memory toggle still applied */ }
         }
 
+
+        function toggleAllTechStops(btn) {
+            const bodies = Array.from(document.querySelectorAll('.tech-card-body'));
+            if (!bodies.length) return;
+            const open = bodies.some(b => !b.classList.contains('open'));
+            const keys = [];
+            bodies.forEach(body => {
+                body.classList.toggle('open', open);
+                const card = body.closest('.tech-card');
+                const toggle = card && card.querySelector('.tech-expand-btn');
+                if (toggle) {
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    toggle.textContent = open ? 'Hide stops' : 'Show stops';
+                }
+                if (open && body.id) keys.push(body.id.replace('tech-body-', ''));
+            });
+            try { sessionStorage.setItem('dispatchExpandedTechs', JSON.stringify(keys)); } catch (e) {}
+            if (btn) btn.textContent = open ? 'Hide all stops' : 'Show all stops';
+        }
         function toggleControls() {
             const layout = document.querySelector('.desktop-layout');
             const collapsed = layout.classList.toggle('controls-collapsed');
@@ -4501,7 +4520,7 @@ function distanceMatrixStatus(state) {
                 const wo = meta.woNumber ? ` <span style="color:#aaa;font-size:12px;">WO ${meta.woNumber}</span>` : '';
                 headerHtml = `<div style="margin-bottom:15px;"><span style="font-weight:bold;color:#ff6b35;">⚡ URGENT</span>${wo}<br><span style="font-size:13px;">${issue}${sla}</span></div>`;
             } else {
-                headerHtml = '<div style="margin-bottom:15px; font-weight:bold; color:#007bff;">Generated Dispatches:</div>';
+                headerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:15px;"><span style="font-weight:bold;color:#007bff;">Generated Dispatches:</span><button type="button" onclick="toggleAllTechStops(this)" style="padding:6px 10px;border-radius:6px;border:1px solid #007bff;background:#fff;color:#007bff;font-size:12px;font-weight:700;cursor:pointer;">Show all stops</button></div>';
             }
 
             // Detect same-day items and right form flags across all assignments
