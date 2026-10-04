@@ -458,7 +458,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-180</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-181</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -2250,7 +2250,7 @@ function distanceMatrixStatus(state) {
                     <option value="" disabled selected>Mark someone unavailable…</option>
                     ${markOutOptions}
                 </select>
-                <button onclick="markSelectedTechUnavailable()" style="background:#5c1a1a; color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;">Mark Out</button>
+                <button onclick="markSelectedTechUnavailable()" style="background:#5c1a1a; color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;">Mark technician unavailable</button>
             </div>`;
 
             html += outTechs.length
@@ -2272,7 +2272,7 @@ function distanceMatrixStatus(state) {
                     strip.innerHTML = '';
                 } else {
                     strip.style.display = 'block';
-                    strip.innerHTML = `<strong style="color:#ffb4b4;">${names.length} out</strong> · ${names.join(', ')} <button type="button" onclick="toggleControls()" style="margin-left:8px;background:#2a2a3e;color:#ddd;border:1px solid #555;border-radius:6px;padding:4px 8px;cursor:pointer;">Mark out</button>`;
+                    strip.innerHTML = `<strong style="color:#ffb4b4;">${names.length} out</strong> · ${names.join(', ')} <button type="button" onclick="toggleControls()" style="margin-left:8px;background:#2a2a3e;color:#ddd;border:1px solid #555;border-radius:6px;padding:4px 8px;cursor:pointer;">Mark technician unavailable</button>`;
                 }
             }
         }
