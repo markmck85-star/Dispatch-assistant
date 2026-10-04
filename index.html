@@ -66,15 +66,16 @@
         }
         .panel-toggle:hover { background: #33334a; }
 
-        .tool-rail { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0 10px; }
+        .tool-rail { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+        .results-panel > .tool-rail a, .results-panel > .tool-rail button.rail-btn { flex: 1 1 140px; }
+        .results-panel > .tool-more { margin-bottom: 10px; }
         .tool-rail a, .tool-rail button.rail-btn {
             display: flex; align-items: center; justify-content: center; gap: 4px;
             min-height: 44px; padding: 8px 6px; border-radius: 8px; border: 1px solid #333;
             background: #181818; color: #f0a500; font-weight: 700; font-size: 12px;
             text-decoration: none; text-align: center; cursor: pointer; line-height: 1.2;
         }
-        .tool-rail .rail-wide { grid-column: 1 / -1; }
-        .tool-more { margin: 0 0 10px; border: 1px solid #333; border-radius: 8px; background: #141414; }
+                .tool-more { margin: 0 0 10px; border: 1px solid #333; border-radius: 8px; background: #141414; }
         .tool-more > summary {
             list-style: none; cursor: pointer; min-height: 44px; padding: 10px 12px;
             font-weight: 700; font-size: 13px; color: #ccc;
@@ -431,7 +432,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.90</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-169</div>
+        <h1>MCR Dispatch Hub v9.91</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-170</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -546,26 +547,6 @@
                     </div>
                 </div>
 
-                <div class="tool-rail" aria-label="Primary tools">
-                    <a class="state-console-link rail-wide" href="/state" id="stateConsoleLink">📍 State Console</a>
-                    <a class="team-calendar-link" href="/calendar">🗓️ Calendar</a>
-                    <button type="button" class="rail-btn" onclick="generateFinalMessages()">✅ Messages</button>
-                    <a class="closing-email-link" href="/closing-email-reconstructor">✉️ Closing Notes</a>
-                    <a href="/service-responses">⏱ Service responses</a>
-                </div>
-                <details class="tool-more">
-                    <summary>More tools</summary>
-                    <div class="tool-more-list">
-                        <a class="admin-panel-link" href="/admin" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
-                        <a class="location-lookup-link" href="/location-lookup">🔍 Location Lookup</a>
-                        <a class="shipments-link" href="/shipments">📦 RMA Shipments</a>
-                        <a class="messages-link" href="/inbound-mail" id="inboundMailLink">✉ Inbound Mail</a>
-                        <a class="mileage-log-link" href="/mileage-log">🚗 Mileage log</a>
-                        <a class="restock-tracker-link" href="/restock-tracker?state=GA" id="restockLink">📊 Restock Tracker</a>
-                        <a href="/saturday-oncall">📞 Saturday On-Call</a>
-                        <a class="help-link" href="/help" target="_blank">❓ Help</a>
-                    </div>
-                </details>
 
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
@@ -611,6 +592,27 @@
             </div>
 
             <div class="results-panel">
+                <div class="tool-rail" aria-label="Primary tools">
+                    <a class="state-console-link rail-wide" href="/state" id="stateConsoleLink">📍 State Console</a>
+                    <a class="team-calendar-link" href="/calendar">🗓️ Calendar</a>
+                    <button type="button" class="rail-btn" onclick="generateFinalMessages()">✅ Messages</button>
+                    <a class="closing-email-link" href="/closing-email-reconstructor">✉️ Closing Notes</a>
+                    <a href="/service-responses">⏱ Service responses</a>
+                </div>
+                <details class="tool-more">
+                    <summary>More tools</summary>
+                    <div class="tool-more-list">
+                        <a class="admin-panel-link" href="/admin" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
+                        <a class="location-lookup-link" href="/location-lookup">🔍 Location Lookup</a>
+                        <a class="shipments-link" href="/shipments">📦 RMA Shipments</a>
+                        <a class="messages-link" href="/inbound-mail" id="inboundMailLink">✉ Inbound Mail</a>
+                        <a class="mileage-log-link" href="/mileage-log">🚗 Mileage log</a>
+                        <a class="restock-tracker-link" href="/restock-tracker?state=GA" id="restockLink">📊 Restock Tracker</a>
+                        <a href="/saturday-oncall">📞 Saturday On-Call</a>
+                        <a class="help-link" href="/help" target="_blank">❓ Help</a>
+                    </div>
+                </details>
+
                 <!-- ROUTE MAP VISUALIZER -->
                 <!-- Sits above the technician cards and outside #results on
                      purpose (see .map-panel CSS). Stays hidden until a board
@@ -4547,6 +4549,11 @@ function distanceMatrixStatus(state) {
                 </div>`;
             }
 
+            // 2026-10-04: cluster and remote-location restock banners removed.
+            // They fired on ordinary GA stops (Augusta) that the local dispatcher
+            // already handles, clusters are not in use outside Georgia, and
+            // Show all service locations on the map is the opportunistic check.
+            clusterBannerHtml = '';
             let html = (window.unknownCodesBannerHtml || '') + (window.skippedSaturdayBannerHtml || '') + (window.dateMismatchBannerHtml || '') + clusterBannerHtml + headerHtml;
 
             // Helper to render a tech card
