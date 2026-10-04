@@ -3109,6 +3109,26 @@
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
                 showToast(isEdit ? 'Technician updated' : 'Technician added', 'success');
+                var wasActive = existingTech.active !== false;
+                if (isEdit && wasActive && payload.active === false) {
+                    var dropOnCall = confirm(name + ' is now inactive. Remove them from today and every future Saturday on-call assignment?');
+                    if (dropOnCall) {
+                        try {
+                            var today = new Date();
+                            var fromDay = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+                            var onRes = await fetch('/.netlify/functions/save-on-call', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'delete-future', name: name, fromDay: fromDay, state: currentState, technician_id: 'inactive', day: fromDay })
+                            });
+                            var onData = await onRes.json();
+                            if (!onRes.ok || !onData.ok) throw new Error(onData.error || ('HTTP ' + onRes.status));
+                            showToast(onData.removed ? ('Removed ' + onData.removed + ' future on-call assignment' + (onData.removed === 1 ? '' : 's')) : 'No future on-call assignments to remove', 'success');
+                        } catch (oe) {
+                            showToast('Technician saved, but on-call removal failed: ' + oe.message, 'error');
+                        }
+                    }
+                }
 
                 if (document.getElementById('techIsDispatcher').checked && currentUser && currentUser.role === 'admin') {
                     var dUser = document.getElementById('techDispatcherUsername').value.trim().toLowerCase();
