@@ -77,6 +77,8 @@
         .more-ai-row .tool-more > summary { white-space: nowrap; padding: 10px 14px; }
         .more-ai-row #aiCommandBarHome { flex: 1 1 auto; min-width: 0; }
         .more-ai-row #aiCommandBar { margin-top: 0 !important; }
+        #aiCommandStatus:empty, #aiCommandDiff:empty { display: none; }
+        .more-ai-row #aiCommandBar { padding: 6px 8px !important; }
         @media (max-width: 640px) {
             .more-ai-row { flex-wrap: wrap; }
             .more-ai-row #aiCommandBarHome { flex: 1 1 220px; }
@@ -454,7 +456,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.94</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-173</div>
+        <h1>MCR Dispatch Hub v9.95</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-174</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -622,18 +624,18 @@
                     <div style="display:flex; gap:6px; align-items:center;">
                         <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
                         <input type="text" id="aiCommandInput" autocomplete="off"
-                            placeholder="move stop 2…"
+                            placeholder="move stop 2 from Robert…"
                             onkeydown="if(event.key==='Enter'){event.preventDefault();submitAiCommand();}"
-                            style="flex:0 1 168px; width:168px; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
-                        <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
-                            title="Scan the whole board for stop-to-technician swaps that would reduce total drive time"
-                            style="flex:0 0 auto; padding:7px 8px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer; white-space:nowrap;">Analyze</button>
-                        <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
-                            style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+                            style="flex:1 1 190px; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
                         <button type="button" id="aiSendBtn" onclick="submitAiCommand()"
                             style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+                        <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
+                            style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+                        <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
+                            title="Scan the whole board for stop-to-technician swaps that would reduce total drive time"
+                            style="flex:0 0 auto; padding:7px 8px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer; white-space:nowrap;">Analyze Routes</button>
                     </div>
-                    <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
+                    <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px;"></div>
                     <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
                 </div></div>
 </div>
