@@ -456,7 +456,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.97</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-176</div>
+        <h1>MCR Dispatch Hub v9.98</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-177</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -8528,6 +8528,20 @@ ${content}</body></html>`;
                 completedByTech[r.tech].push(r);
             });
             const allTechNames = new Set([...Object.keys(assignments), ...Object.keys(completedByTech)]);
+            // Available techs with no stops still get a home pin. Show all
+            // locations only adds service sites, so an idle tech was invisible
+            // and looked like nobody to reassign to. Out techs stay off the map.
+            let unavailableForMap = new Set();
+            try {
+                const dateStr = document.getElementById('dispatchDate')?.value;
+                if (dateStr) unavailableForMap = getUnavailableTechsForDate(dateStr);
+            } catch (e) { /* availability not ready yet */ }
+            Object.keys(TECHS).forEach(tech => {
+                const info = TECHS[tech] || {};
+                if (info.active === false || unavailableForMap.has(tech)) return;
+                if (info.lat == null || info.lng == null) return;
+                allTechNames.add(tech);
+            });
 
             dispatchMapTechOrder(assignments, allTechNames).forEach((tech, techIndex) => {
                 const _baseIdx = techIndex % MAP_ROUTE_COLOR_NAMES.length;
@@ -8579,9 +8593,11 @@ ${content}</body></html>`;
                     completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code: r.code, loc: loc });
                 });
 
-                if (!pts.length && !completedPts.length && !futurePts.length) return;
-
                 const info = TECHS[tech] || {};
+                const hasHome = info.lat != null && info.lng != null && info.active !== false;
+                if (!pts.length && !completedPts.length && !futurePts.length && !hasHome) return;
+                if (!pts.length && !completedPts.length && !futurePts.length && unavailableForMap.has(tech)) return;
+
                 const home = (info.lat != null && info.lng != null)
                     ? { lat: Number(info.lat), lng: Number(info.lng), label: info.startLocation || '' }
                     : null;
@@ -8896,7 +8912,7 @@ ${content}</body></html>`;
                 const doneCount = route.completedPts.length;
                 const countLabel = doneCount
                     ? route.pts.length + ' + ' + doneCount + ' done'
-                    : String(route.pts.length);
+                    : (route.pts.length ? String(route.pts.length) : 'home');
                 return '<span class="map-legend-chip' + (_dispatchMapHiddenTechs.has(route.tech) ? ' off' : '') + '"'
                     + ' onclick="zoomDispatchMapTech(\'' + arg + '\')" title="Zoom to this route">'
                     + '<span class="map-legend-swatch" style="background:' + route.color + ';"></span>'
