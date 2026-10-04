@@ -66,6 +66,37 @@
         }
         .panel-toggle:hover { background: #33334a; }
 
+        .tool-rail { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0 10px; }
+        .tool-rail a, .tool-rail button.rail-btn {
+            display: flex; align-items: center; justify-content: center; gap: 4px;
+            min-height: 44px; padding: 8px 6px; border-radius: 8px; border: 1px solid #333;
+            background: #181818; color: #f0a500; font-weight: 700; font-size: 12px;
+            text-decoration: none; text-align: center; cursor: pointer; line-height: 1.2;
+        }
+        .tool-rail .rail-wide { grid-column: 1 / -1; }
+        .tool-more { margin: 0 0 10px; border: 1px solid #333; border-radius: 8px; background: #141414; }
+        .tool-more > summary {
+            list-style: none; cursor: pointer; min-height: 44px; padding: 10px 12px;
+            font-weight: 700; font-size: 13px; color: #ccc;
+        }
+        .tool-more > summary::-webkit-details-marker { display: none; }
+        .tool-more[open] > summary { border-bottom: 1px solid #2a2a2a; }
+        .tool-more-list { display: flex; flex-direction: column; padding: 6px; gap: 4px; }
+        .tool-more-list a {
+            display: block; padding: 10px 12px; border-radius: 6px; background: #1c1c1c;
+            color: #d0d0d0; text-decoration: none; font-size: 13px; font-weight: 650; min-height: 40px;
+        }
+        .tech-card.is-compact { padding: 10px 12px; }
+        .tech-card-summary { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .tech-card-next { font-size: 12px; color: #666; margin-top: 2px; }
+        .tech-card-body { display: none; margin-top: 8px; }
+        .tech-card-body.open { display: block; }
+        .tech-expand-btn { background: #2a2a3e; color: #ddd; border: 1px solid #555; border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: 700; cursor: pointer; min-height: 36px; }
+        @media (min-width: 960px) {
+            .tool-rail { grid-template-columns: 1fr 1fr; }
+            .tech-cards-grid .tech-card.is-compact { padding: 12px 14px; }
+        }
+
         #showControlsBtn {
             display: none;
             position: fixed;
@@ -284,9 +315,9 @@
                so Generate/Print and Location Codes stay reachable without
                scrolling back up past a long results list. */
             .desktop-layout { display: flex; align-items: flex-start; gap: 28px; }
-            .input-panel { flex: 0 0 380px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; transition: flex-basis 0.25s ease, opacity 0.2s ease; }
+            .input-panel { flex: 0 0 320px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; transition: flex-basis 0.25s ease, opacity 0.2s ease; }
             .results-panel { flex: 1 1 auto; min-width: 0; }
-            #dispatchMap { height: 480px; }
+            #dispatchMap { height: 560px; }
             .desktop-layout.controls-collapsed .input-panel {
                 flex: 0 0 0;
                 width: 0;
@@ -400,7 +431,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.88</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: blobs-166</div>
+        <h1>MCR Dispatch Hub v9.89</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-167</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -430,7 +461,7 @@
                             <option value="WV">West Virginia</option>
                         </select>
                         <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:6px;padding:4px 10px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;">🐕 Watchdog</a>
-                        <a href='/saturday-oncall' style='display:inline-block;margin-left:6px;padding:4px 10px;background:#0a6e5c;color:#f0f0f0;border:1px solid #14a085;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;'>📞 Saturday On-Call</a>
+                        
                     </div>
                     <div>
                         <label>Dispatch Date:</label>
@@ -510,18 +541,27 @@
                     </div>
                 </div>
 
-                <a class='restock-tracker-link' href='/restock-tracker?state=GA' id='restockLink' style='display:block; background:#2c3e50; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none; margin-top:10px;'>📊 Restock Tracker</a>
-                <a class='team-calendar-link' href='/calendar' style='display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>🗓️ Team Calendar</a>
-                <a class='shipments-link' href='/shipments' style='display:block; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>📦 RMA Shipments</a>
-                <a class='location-lookup-link' href='/location-lookup' style='display:block; background:#181818; color:#7ec8e3; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>🔍 Location Lookup</a>
-                <a class='state-console-link' href='/state' id='stateConsoleLink' style='display:block; background:#181818; color:#f0a500; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>📍 State Console</a>
-                <a class='closing-email-link' href='/closing-email-reconstructor' style='display:block; background:#181818; color:#e0c080; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>✉️ Closing Notes</a>
-                <button type="button" onclick="generateFinalMessages()" class="messages-link" style="display:block; width:100%; background:#181818; color:#7edb8e; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; border:none; cursor:pointer;">✅ Messages</button>
-                <a class='messages-link' href='/inbound-mail' id='inboundMailLink' style='display:block; width:100%; background:#181818; color:#9ad0ff; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>✉ Inbound Mail</a>
-                <a class='mileage-log-link' href='/mileage-log' style='display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>🚗 Mileage log</a>
-                <a class='admin-panel-link' href='/service-responses' style='display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>⏱ Service responses</a>
-                <a class='admin-panel-link' href='/admin' onclick='localStorage.setItem(\'dispatchReturnState\', document.getElementById(\'stateSelector\')?.value || \'')' style='display:block; background:#181818; color:#c8c8c8; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;'>Admin Panel</a>
-                <a class='help-link' href='/help' style='display:block; background:#181818; color:#aaa; text-align:center; padding:10px; border-radius:6px; margin-bottom:10px; font-weight:bold; font-size:14px; text-decoration:none;' target='_blank'>❓ Help</a>
+                <div class="tool-rail" aria-label="Primary tools">
+                    <a class="state-console-link rail-wide" href="/state" id="stateConsoleLink">📍 State Console</a>
+                    <a class="team-calendar-link" href="/calendar">🗓️ Calendar</a>
+                    <button type="button" class="rail-btn" onclick="generateFinalMessages()">✅ Messages</button>
+                    <a class="closing-email-link" href="/closing-email-reconstructor">✉️ Closing Notes</a>
+                    <a href="/service-responses">⏱ Service responses</a>
+                </div>
+                <details class="tool-more">
+                    <summary>More tools</summary>
+                    <div class="tool-more-list">
+                        <a class="admin-panel-link" href="/admin" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
+                        <a class="location-lookup-link" href="/location-lookup">🔍 Location Lookup</a>
+                        <a class="shipments-link" href="/shipments">📦 RMA Shipments</a>
+                        <a class="messages-link" href="/inbound-mail" id="inboundMailLink">✉ Inbound Mail</a>
+                        <a class="mileage-log-link" href="/mileage-log">🚗 Mileage log</a>
+                        <a class="restock-tracker-link" href="/restock-tracker?state=GA" id="restockLink">📊 Restock Tracker</a>
+                        <a href="/saturday-oncall">📞 Saturday On-Call</a>
+                        <a class="help-link" href="/help" target="_blank">❓ Help</a>
+                    </div>
+                </details>
+
 
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
@@ -4547,17 +4587,31 @@ function distanceMatrixStatus(state) {
                       scopeLabel
                     : '';
 
-                let cardHtml = `<div class="tech-card">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                        <strong>${techNumber != null ? `<span style="color:#7ec8e3;">#${techNumber}</span> ` : ''}${tech} (${window.troubleOnlyFilter ? items.filter(isStopVisible).length + ' of ' + items.length : items.length})</strong>
+                const visibleCount = items.filter(isStopVisible).length;
+                const nextStop = items.find(isStopVisible);
+                const nextLabel = nextStop && LOCATIONS[nextStop.code]
+                    ? `${nextStop.code} · ${LOCATIONS[nextStop.code].name || ''}`
+                    : 'No stops in view';
+                let cardOpen = false;
+                try { cardOpen = JSON.parse(sessionStorage.getItem('dispatchExpandedTechs') || '[]').includes(techKey); } catch (e) {}
+                let cardHtml = `<div class="tech-card is-compact">
+                    <div class="tech-card-summary">
                         <div>
-                            <button class="control-btn" style="background:#17a2b8; color:white;" onclick="openTechRoute('${techKey}')">🗺️ Route</button>
-                            <button class="control-btn" style="background:#d68910; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻ Sort</button>
-                            <button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍</button>
+                            <strong>${techNumber != null ? `<span style="color:#7ec8e3;">#${techNumber}</span> ` : ''}${tech} (${window.troubleOnlyFilter ? visibleCount + ' of ' + items.length : items.length})</strong>
+                            <div class="tech-card-next">Next: ${nextLabel}</div>
+                            ${routeSummary ? `<div style="font-size:12px;color:#888;margin-top:2px;">📏 ${routeSummary} total</div>` : ''}
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
+                            <button type="button" class="tech-expand-btn" aria-expanded="${cardOpen ? 'true' : 'false'}" onclick="toggleTechCard('${techKey}', this)">${cardOpen ? 'Hide stops' : 'Stops'}</button>
+                            <div>
+                                <button class="control-btn" style="background:#17a2b8; color:white;" onclick="openTechRoute('${techKey}')">🗺️</button>
+                                <button class="control-btn" style="background:#d68910; color:white;" onclick="resortTechStops('${tech}')" title="Re-sort this tech's stops by distance -- useful after a stop gets reassigned to them">↻</button>
+                            </div>
                         </div>
                     </div>
-                    ${routeSummary ? `<div style="font-size:12px;color:#888;margin-bottom:4px;">📏 ${routeSummary} total</div>` : ''}
-                    <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0; margin-bottom:4px;"></div>`;
+                    <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0;"></div>
+                    <div class="tech-card-body${cardOpen ? ' open' : ''}" id="tech-body-${techKey}">
+                    <div style="text-align:right;margin-bottom:4px;"><button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍 Cluster</button></div>`;
                 
                 items.forEach((item, index) => {
                     // 2026-08-29: trouble-only filter -- skip building HTML for a
@@ -4701,9 +4755,24 @@ function distanceMatrixStatus(state) {
                                 </div>
                              </div>`;
                 });
-                cardHtml += `</div>`;
+                cardHtml += `</div></div>`;
                 return cardHtml;
             }
+            function toggleTechCard(techKey, btn) {
+                const body = document.getElementById('tech-body-' + techKey);
+                if (!body) return;
+                const open = body.classList.toggle('open');
+                if (btn) {
+                    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    btn.textContent = open ? 'Hide stops' : 'Stops';
+                }
+                try {
+                    const set = new Set(JSON.parse(sessionStorage.getItem('dispatchExpandedTechs') || '[]'));
+                    if (open) set.add(techKey); else set.delete(techKey);
+                    sessionStorage.setItem('dispatchExpandedTechs', JSON.stringify([...set]));
+                } catch (e) {}
+            }
+            window.toggleTechCard = toggleTechCard;
 
             // 2026-08-29: trouble-only filter helper. isSameDay/urgent items are
             // always visible regardless of the filter; it only ever hides a
