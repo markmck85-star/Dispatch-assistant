@@ -458,7 +458,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-182</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-184</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -2215,6 +2215,7 @@ function distanceMatrixStatus(state) {
             const availableTechs = [];
             const outTechs = [];
             const outNames = [];
+            const outKeys = [];
 
             techsToShow.forEach(tech => {
                 const isCompDay = compDayTechs.has(tech);
@@ -2236,14 +2237,15 @@ function distanceMatrixStatus(state) {
                               isCompDay && compInfo ? compInfo.reason : '';
 
                 outNames.push(displayName(tech));
+                outKeys.push(tech);
                 outTechs.push(`<button type="button" onclick="toggleManualUnavail('${tech}')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:${bg};border:none;border-radius:6px;padding:7px 10px;margin-bottom:4px;cursor:pointer;">
                     <span style="color:#ddd;font-size:13px;font-weight:700;">${displayName(tech)} <span style="color:#aaa;font-weight:500;">· ${statusText}</span></span>
                     <span style="color:#888;font-size:11px;flex-shrink:0;">${isManual ? 'Mark in' : 'Override'}</span>
                 </button>`);
             });
 
-            const markOutOptions = availableTechs
-                .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+            window._availableForMarkOut = availableTechs.slice().sort((a, b) => displayName(a).localeCompare(displayName(b)));
+            const markOutOptions = window._availableForMarkOut
                 .map(t => `<option value="${t}">${displayName(t)}</option>`).join('');
             html += `<div style="display:flex; gap:6px; margin-bottom:10px;">
                 <select id="availMarkOutSelect" style="flex:1; background:#1a1a1a; color:#ddd; border:1px solid #444; border-radius:6px; padding:6px 8px; font-size:13px;">
@@ -2274,7 +2276,13 @@ function distanceMatrixStatus(state) {
                 } else {
                     strip.style.display = 'block';
                     var outLabel = names.length === 1 ? '1 technician out' : (names.length + ' technicians out');
-                    strip.innerHTML = `<strong style="color:#ffb4b4;">${outLabel}</strong> · ${names.join(', ')} <button type="button" onclick="toggleControls()" style="margin-left:8px;background:#2a2a3e;color:#ddd;border:1px solid #555;border-radius:6px;padding:4px 8px;cursor:pointer;">Mark technician unavailable</button>`;
+                    var chips = outKeys.map(function(tech, i) {
+                        var safe = encodeURIComponent(tech);
+                        return '<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 6px 2px 0;padding:2px 4px 2px 8px;border:1px solid #555;border-radius:12px;background:#2a1c1c;">'
+                            + names[i]
+                            + '<button type="button" title="Put this technician back on the board" onclick="removeStripUnavailable(decodeURIComponent(\'' + safe + '\'))" style="background:transparent;color:#ffb4b4;border:none;padding:2px 6px;cursor:pointer;font-size:14px;line-height:1;">&#10005;</button></span>';
+                    }).join('');
+                    strip.innerHTML = `<strong style="color:#ffb4b4;">${outLabel}</strong> · ${chips} <button type="button" onclick="openStripMarkOut()" style="margin-left:8px;background:#2a2a3e;color:#ddd;border:1px solid #555;border-radius:6px;padding:4px 8px;cursor:pointer;">Mark technician unavailable</button>`;
                 }
             }
         }
@@ -2283,6 +2291,44 @@ function distanceMatrixStatus(state) {
         function markSelectedTechUnavailable() {
             const select = document.getElementById('availMarkOutSelect');
             if (!select || !select.value) return;
+            toggleManualUnavail(select.value);
+        }
+
+        function openStripMarkOut() {
+            const strip = document.getElementById('availabilityStrip');
+            if (!strip) return;
+            const existing = document.getElementById('stripMarkOutSelect');
+            if (existing) { existing.focus(); return; }
+            const techs = window._availableForMarkOut || [];
+            const picker = document.createElement('div');
+            picker.id = 'stripMarkOutPicker';
+            picker.style.cssText = 'display:flex; gap:6px; margin-top:8px; align-items:center;';
+            if (!techs.length) {
+                picker.innerHTML = '<span style="color:#aaa;font-size:13px;">Everyone on this board is already unavailable.</span>';
+            } else {
+                const opts = techs.map(function(t) {
+                    return '<option value="' + String(t).replace(/"/g, '"') + '">' + displayName(t) + '</option>';
+                }).join('');
+                picker.innerHTML = '<select id="stripMarkOutSelect" style="flex:1; min-width:0; background:#1a1a1a; color:#ddd; border:1px solid #555; border-radius:6px; padding:6px 8px; font-size:14px;">'
+                    + '<option value="" disabled selected>Choose a technician…</option>' + opts + '</select>'
+                    + '<button type="button" onclick="confirmStripMarkOut()" style="background:#5c1a1a; color:#fff; border:none; border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; white-space:nowrap;">Mark unavailable</button>';
+            }
+            strip.appendChild(picker);
+            const select = document.getElementById('stripMarkOutSelect');
+            if (select) select.focus();
+        }
+
+        function removeStripUnavailable(tech) {
+            if (!tech) return;
+            toggleManualUnavail(tech);
+        }
+
+        function confirmStripMarkOut() {
+            const select = document.getElementById('stripMarkOutSelect');
+            if (!select || !select.value) {
+                if (select) select.focus();
+                return;
+            }
             toggleManualUnavail(select.value);
         }
 
