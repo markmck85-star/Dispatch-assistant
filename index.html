@@ -458,7 +458,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-184</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-185</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -8530,15 +8530,24 @@ ${content}</body></html>`;
           return layer;
         }
         
-        // Lower 48 plus Alaska and Hawaii. Stops the expanded map from panning to another continent.
-        window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[17.5, -168.5], [72.5, -64]]);
+        // Lower 48 only. Same limit in the normal map and the expanded map.
+        window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[24.4, -125.2], [49.4, -66.8]]);
+        function lockDispatchMapToUs(map) {
+            if (!map || !window.DISPATCH_MAP_US_BOUNDS) return;
+            map.setMaxBounds(window.DISPATCH_MAP_US_BOUNDS);
+            const fitZoom = map.getBoundsZoom(window.DISPATCH_MAP_US_BOUNDS, false);
+            if (isFinite(fitZoom)) map.setMinZoom(Math.max(4, Math.ceil(fitZoom)));
+            if (!window.DISPATCH_MAP_US_BOUNDS.contains(map.getCenter())) {
+                map.panInsideBounds(window.DISPATCH_MAP_US_BOUNDS, { animate: false });
+            }
+        }
         function clampDispatchMapView(view) {
             const b = window.DISPATCH_MAP_US_BOUNDS;
             if (!view || !b) return view;
             return {
                 lat: Math.min(b.getNorth(), Math.max(b.getSouth(), view.lat)),
                 lng: Math.min(b.getEast(), Math.max(b.getWest(), view.lng)),
-                zoom: Math.max(3, view.zoom || 4)
+                zoom: Math.max(4, view.zoom || 5)
             };
         }
         function ensureDispatchMap() {
@@ -8550,12 +8559,13 @@ ${content}</body></html>`;
                 scrollWheelZoom: false,
                 maxBounds: window.DISPATCH_MAP_US_BOUNDS,
                 maxBoundsViscosity: 1.0,
-                minZoom: 3,
+                minZoom: 4,
                 worldCopyJump: false
             });
             addBasemap(_dispatchMap);
             L.control.scale({ imperial: true, metric: false }).addTo(_dispatchMap);
             _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds
+            lockDispatchMapToUs(_dispatchMap);
 
             // Wheel zoom is off until the map is clicked, so scrolling past a
             // long board doesn't hijack the page scroll into a zoom.
@@ -9125,6 +9135,7 @@ ${content}</body></html>`;
             requestAnimationFrame(() => {
                 if (_dispatchMap) {
                     _dispatchMap.invalidateSize();
+                    lockDispatchMapToUs(_dispatchMap);
                     // Re-fit so the current route/pins are centered in the new
                     // viewport rather than left wherever they sat before.
                     if (window._dispatchMapUserView) {

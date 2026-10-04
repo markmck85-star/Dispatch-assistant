@@ -1139,14 +1139,23 @@ function addBasemap(map) {
   return layer;
 }
 
-window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[17.5, -168.5], [72.5, -64]]);
+window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[24.4, -125.2], [49.4, -66.8]]);
+function lockStateMapToUs(map) {
+  if (!map || !window.DISPATCH_MAP_US_BOUNDS) return;
+  map.setMaxBounds(window.DISPATCH_MAP_US_BOUNDS);
+  const fitZoom = map.getBoundsZoom(window.DISPATCH_MAP_US_BOUNDS, false);
+  if (isFinite(fitZoom)) map.setMinZoom(Math.max(4, Math.ceil(fitZoom)));
+  if (!window.DISPATCH_MAP_US_BOUNDS.contains(map.getCenter())) {
+    map.panInsideBounds(window.DISPATCH_MAP_US_BOUNDS, { animate: false });
+  }
+}
 function clampStateMapView(view) {
   const b = window.DISPATCH_MAP_US_BOUNDS;
   if (!view || !b) return view;
   return {
     lat: Math.min(b.getNorth(), Math.max(b.getSouth(), view.lat)),
     lng: Math.min(b.getEast(), Math.max(b.getWest(), view.lng)),
-    zoom: Math.max(3, view.zoom || 4)
+    zoom: Math.max(4, view.zoom || 5)
   };
 }
 function ensureStateMap() {
@@ -1157,13 +1166,14 @@ function ensureStateMap() {
     scrollWheelZoom: false,
     maxBounds: window.DISPATCH_MAP_US_BOUNDS,
     maxBoundsViscosity: 1.0,
-    minZoom: 3,
+    minZoom: 4,
     worldCopyJump: false
   });
   addBasemap(_stateMap);
   L.control.scale({ imperial: true, metric: false }).addTo(_stateMap);
   const initState = (document.getElementById('stateSel') || {}).value || 'GA';
   _stateMap.setView(stateCenterFor(initState), initState === 'CA' ? 6 : 7);
+  lockStateMapToUs(_stateMap);
   _stateMap.on('click', () => _stateMap.scrollWheelZoom.enable());
   _stateMap.on('mouseout', () => _stateMap.scrollWheelZoom.disable());
   _stateMap.on('zoomend moveend', function() {
@@ -1705,6 +1715,7 @@ function _fitStateMapAfterResize() {
   requestAnimationFrame(() => {
     if (_stateMap) {
       _stateMap.invalidateSize();
+      lockStateMapToUs(_stateMap);
       if (window._stateMapUserView) {
         const clampedFs = clampStateMapView(window._stateMapUserView);
         window._stateMapUserView = clampedFs;

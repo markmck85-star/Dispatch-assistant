@@ -1004,14 +1004,23 @@ function addBasemap(map) {
   });
   layer.addTo(map);
 }
-window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[17.5, -168.5], [72.5, -64]]);
+window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[24.4, -125.2], [49.4, -66.8]]);
+function lockSatMapToUs(map) {
+  if (!map || !window.DISPATCH_MAP_US_BOUNDS) return;
+  map.setMaxBounds(window.DISPATCH_MAP_US_BOUNDS);
+  const fitZoom = map.getBoundsZoom(window.DISPATCH_MAP_US_BOUNDS, false);
+  if (isFinite(fitZoom)) map.setMinZoom(Math.max(4, Math.ceil(fitZoom)));
+  if (!window.DISPATCH_MAP_US_BOUNDS.contains(map.getCenter())) {
+    map.panInsideBounds(window.DISPATCH_MAP_US_BOUNDS, { animate: false });
+  }
+}
 function clampSatMapView(view) {
   const b = window.DISPATCH_MAP_US_BOUNDS;
   if (!view || !b) return view;
   return {
     lat: Math.min(b.getNorth(), Math.max(b.getSouth(), view.lat)),
     lng: Math.min(b.getEast(), Math.max(b.getWest(), view.lng)),
-    zoom: Math.max(3, view.zoom || 4)
+    zoom: Math.max(4, view.zoom || 5)
   };
 }
 function ensureMap() {
@@ -1020,12 +1029,13 @@ function ensureMap() {
     scrollWheelZoom: false,
     maxBounds: window.DISPATCH_MAP_US_BOUNDS,
     maxBoundsViscosity: 1.0,
-    minZoom: 3,
+    minZoom: 4,
     worldCopyJump: false
   });
   addBasemap(satMap);
   L.control.scale({ imperial: true, metric: false }).addTo(satMap);
   satMap.setView([37, -90], 4);
+  lockSatMapToUs(satMap);
   satMap.on('click', () => satMap.scrollWheelZoom.enable());
   satMap.on('mouseout', () => satMap.scrollWheelZoom.disable());
   satMap.on('zoomend moveend', function() {
@@ -1328,6 +1338,7 @@ function _fitSatMapAfterResize() {
   requestAnimationFrame(() => {
     if (satMap) {
       satMap.invalidateSize();
+      lockSatMapToUs(satMap);
       if (window._satMapUserView) {
         satMap.setView([window._satMapUserView.lat, window._satMapUserView.lng], window._satMapUserView.zoom, { animate: false });
       } else if (satMapBounds && satMapBounds.isValid()) {
