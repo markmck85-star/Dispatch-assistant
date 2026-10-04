@@ -458,7 +458,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-181</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-182</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -2261,9 +2261,10 @@ function distanceMatrixStatus(state) {
             const names = outTechs.length ? outNames : [];
             const summary = document.getElementById('availabilitySummary');
             if (summary) {
+                var outLabel = names.length === 1 ? '1 technician out' : (names.length + ' technicians out');
                 summary.textContent = names.length
-                    ? `👥 ${names.length} out · ${names.join(', ')}`
-                    : '👥 No one marked out';
+                    ? `👥 ${outLabel} · ${names.join(', ')}`
+                    : '👥 No technicians marked out';
             }
             const strip = document.getElementById('availabilityStrip');
             if (strip) {
@@ -2272,7 +2273,8 @@ function distanceMatrixStatus(state) {
                     strip.innerHTML = '';
                 } else {
                     strip.style.display = 'block';
-                    strip.innerHTML = `<strong style="color:#ffb4b4;">${names.length} out</strong> · ${names.join(', ')} <button type="button" onclick="toggleControls()" style="margin-left:8px;background:#2a2a3e;color:#ddd;border:1px solid #555;border-radius:6px;padding:4px 8px;cursor:pointer;">Mark technician unavailable</button>`;
+                    var outLabel = names.length === 1 ? '1 technician out' : (names.length + ' technicians out');
+                    strip.innerHTML = `<strong style="color:#ffb4b4;">${outLabel}</strong> · ${names.join(', ')} <button type="button" onclick="toggleControls()" style="margin-left:8px;background:#2a2a3e;color:#ddd;border:1px solid #555;border-radius:6px;padding:4px 8px;cursor:pointer;">Mark technician unavailable</button>`;
                 }
             }
         }
