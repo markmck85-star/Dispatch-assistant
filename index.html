@@ -68,9 +68,9 @@
                name on its own line (badges/date drop beneath it), then one
                wrapping row of buttons, then the Reassign dropdown. */
             .os-stop-name { display: block; }
-            .os-stop-actions { display: flex !important; flex-direction: row !important; flex-wrap: wrap; gap: 6px; }
+            .os-stop-actions { display: flex !important; flex-direction: row !important; flex-wrap: wrap; gap: 4px; }
             .os-stop-actions > div { display: contents !important; }
-            .os-stop-actions .control-btn { margin: 0 !important; font-size: 13px !important; padding: 8px 8px !important; }
+            .os-stop-actions .control-btn { margin: 0 !important; font-size: 13px !important; padding: 8px 6px !important; }
             .os-stop-actions select.control-btn { order: 9; flex: 0 0 100%; width: 100%; max-width: 100%; box-sizing: border-box; }
         }
         /* True phone width: always a single column. */
@@ -4837,7 +4837,7 @@ function distanceMatrixStatus(state) {
                     </div>
                     <div id="traffic-result-${techKey}" style="font-size:13px; color:#2e7d32; padding:2px 0;"></div>
                     <div class="tech-card-body${cardOpen ? ' open' : ''}" id="tech-body-${techKey}">
-                    <div style="text-align:right;margin-bottom:4px;"><button class="control-btn" style="background:#444; color:#aaa; padding:2px 6px;" onclick="showClusterPopover(event,'${techKey}')" title="Set cluster for these stops (rarely needed)">📍 Cluster</button></div>`;
+`;
                 
                 items.forEach((item, index) => {
                     // 2026-08-29: trouble-only filter -- skip building HTML for a
