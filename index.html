@@ -42,9 +42,9 @@
         .same-day-badge { display: inline-block; background: #dc3545; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-left: 5px; vertical-align: middle; }
         .report-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 2000; overflow-y: auto; padding: 20px; display: none; }
         .report-overlay.active { display: block; }
-        .os-stop { padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: flex-start; gap: 6px; }
+        .os-stop { padding: 10px; border-bottom: 1px solid #eee; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
         .os-stop-moves, .os-stop-actions { flex: 0 0 auto; }
-        .os-stop-main { flex: 1 1 auto; min-width: 0; }
+        .os-stop-main { flex: 1 1 180px; min-width: 160px; }
         .hidden { display: none; }
         @media print { #printableReport { display: block; } .container { display: none; } }
         #printableReport { display: none; }
@@ -460,7 +460,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-191</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-192</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
