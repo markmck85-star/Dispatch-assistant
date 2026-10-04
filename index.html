@@ -64,9 +64,14 @@
                 margin: 8px 0 0 !important; align-items: flex-start !important;
                 box-sizing: border-box;
             }
-            .os-stop-actions select.control-btn { width: 100%; max-width: 100%; box-sizing: border-box; margin-left: 0; }
-            .os-stop-actions > div { display: flex; flex-wrap: wrap; gap: 6px; }
-            .os-stop-actions .control-btn { margin-left: 0; }
+            /* Same layout for every stop no matter how long its name is:
+               name on its own line (badges/date drop beneath it), then one
+               wrapping row of buttons, then the Reassign dropdown. */
+            .os-stop-name { display: block; }
+            .os-stop-actions { display: flex !important; flex-direction: row !important; flex-wrap: wrap; gap: 6px; }
+            .os-stop-actions > div { display: contents !important; }
+            .os-stop-actions .control-btn { margin: 0 !important; font-size: 13px !important; padding: 8px 8px !important; }
+            .os-stop-actions select.control-btn { order: 9; flex: 0 0 100%; width: 100%; max-width: 100%; box-sizing: border-box; }
         }
         /* True phone width: always a single column. */
         @media (max-width: 640px) {
@@ -4950,7 +4955,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div class="os-stop-main">
-                                    <div><span onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${needsReviewBadge}${restockByStr}</div>
+                                    <div><span class="os-stop-name" onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${needsReviewBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">${isFuturePushed ? legLabel : '📏 ' + legLabel + (index === 0 ? ' from home' : ' from prev. stop')}</div>
                                     ${ticketInfoStr}
