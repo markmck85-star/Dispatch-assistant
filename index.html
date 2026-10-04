@@ -66,6 +66,14 @@
         }
         .panel-toggle:hover { background: #33334a; }
 
+        .board-context { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 0 10px; }
+        .board-context label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #555; font-weight: 700; flex: 1 1 140px; }
+        .board-context select, .board-context input[type="date"] { min-height: 40px; font-size: 15px; }
+        .board-context #dispatchTomorrowBtn, .board-context #watchdogLink {
+            min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
+            background: #181818; color: #f0f0f0; font-weight: 700; font-size: 13px; text-decoration: none;
+            display: inline-flex; align-items: center;
+        }
         .tool-rail { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
         .results-panel > .tool-rail a, .results-panel > .tool-rail button.rail-btn { flex: 1 1 140px; }
         .results-panel > .tool-more { margin-bottom: 10px; }
@@ -432,7 +440,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.91</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-170</div>
+        <h1>MCR Dispatch Hub v9.92</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-171</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -443,32 +451,7 @@
             <div class="input-panel">
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
-                    <div>
-                        <label>Region:</label>
-                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateInboundMailLink(); updateRestockLink(); updateStateConsoleLink();">
-                            <option value="AL">Alabama</option>
-                            <option value="CA">California</option>
-                            <option value="CO">Colorado</option>
-                            <option value="FL">Florida</option>
-                            <option value="GA">Georgia / NC / SC</option>
-                            <option value="ID">Idaho</option>
-                            <option value="IL">Illinois</option>
-                            <option value="IN">Indiana</option>
-                            <option value="MI">Michigan</option>
-                            <option value="MN">Minnesota</option>
-                            <option value="NV">Nevada</option>
-                            <option value="OH">Ohio</option>
-                            <option value="OR">Oregon</option>
-                            <option value="WV">West Virginia</option>
-                        </select>
-                        <a id="watchdogLink" href="/watchdog/GA" style="display:inline-block;margin-left:6px;padding:4px 10px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:12px;text-decoration:none;vertical-align:middle;">🐕 Watchdog</a>
-                        
-                    </div>
-                    <div>
-                        <label>Dispatch Date:</label>
-                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
-                        <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
-                    </div>
+
                     <div>
                         <label>Journal Low At:</label>
                         <select id="journalThresholdSelector" onchange="setJournalThreshold(this.value)">
@@ -592,6 +575,31 @@
             </div>
 
             <div class="results-panel">
+                <div class="board-context">
+                    <label>Region
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateInboundMailLink(); updateRestockLink(); updateStateConsoleLink();">
+                            <option value="AL">Alabama</option>
+                            <option value="CA">California</option>
+                            <option value="CO">Colorado</option>
+                            <option value="FL">Florida</option>
+                            <option value="GA">Georgia / NC / SC</option>
+                            <option value="ID">Idaho</option>
+                            <option value="IL">Illinois</option>
+                            <option value="IN">Indiana</option>
+                            <option value="MI">Michigan</option>
+                            <option value="MN">Minnesota</option>
+                            <option value="NV">Nevada</option>
+                            <option value="OH">Ohio</option>
+                            <option value="OR">Oregon</option>
+                            <option value="WV">West Virginia</option>
+                        </select>
+                    </label>
+                    <label>Dispatch Date
+                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
+                    </label>
+                    <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
+                    <a id="watchdogLink" href="/watchdog/GA">Watchdog</a>
+                </div>
                 <div class="tool-rail" aria-label="Primary tools">
                     <a class="state-console-link rail-wide" href="/state" id="stateConsoleLink">📍 State Console</a>
                     <a class="team-calendar-link" href="/calendar">🗓️ Calendar</a>
