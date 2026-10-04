@@ -1324,8 +1324,12 @@ function openDayDetail(dayStr) {
             Edit
           </button>
           <button type="button" class="entry-remove" data-oncall-remove
-            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}" data-name="${escapeHtml(row.technicians.name)}">
             Remove
+          </button>
+          <button type="button" class="entry-remove" data-oncall-remove-future
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}" data-name="${escapeHtml(row.technicians.name)}">
+            All future Saturdays
           </button>
         </div>
       </div>`;
@@ -1531,6 +1535,41 @@ dayDetailList.addEventListener('click', async (e) => {
       alert('Error pushing to BlueFolder: ' + err.message);
       pushBtn.disabled = false;
       pushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
+  const futureBtn = e.target.closest('[data-oncall-remove-future]');
+  if (futureBtn) {
+    const { state, day, tech, name } = futureBtn.dataset;
+    if (!confirm('Remove ' + (name || 'this technician') + ' from ' + day + ' and every later on-call Saturday? This week and future weeks only. A one-week comp day already on the calendar is left as-is.')) return;
+    futureBtn.disabled = true;
+    futureBtn.textContent = 'Removing…';
+    try {
+      const { data, error } = await sb.from('on_call_schedule')
+        .select('state, day, technician_id')
+        .eq('technician_id', tech)
+        .gte('day', day)
+        .order('day', { ascending: true });
+      if (error) throw new Error(error.message);
+      const rows = data || [];
+      if (!rows.length) throw new Error('No on-call rows from this Saturday forward.');
+      for (const row of rows) {
+        const res = await fetch('/.netlify/functions/save-on-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: row.state, day: row.day, technician_id: row.technician_id, action: 'delete' })
+        });
+        const body = await res.json();
+        if (!res.ok || !body.ok) throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      await loadMonth();
+      openDayDetail(day);
+      alert('Removed ' + rows.length + ' on-call assignment' + (rows.length === 1 ? '' : 's') + '.');
+    } catch (err) {
+      alert('Error removing future on-call entries: ' + err.message);
+      futureBtn.disabled = false;
+      futureBtn.textContent = 'All future Saturdays';
     }
     return;
   }
