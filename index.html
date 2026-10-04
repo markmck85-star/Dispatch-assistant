@@ -431,7 +431,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.89</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-168</div>
+        <h1>MCR Dispatch Hub v9.90</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-169</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -2244,15 +2244,17 @@ function distanceMatrixStatus(state) {
             showBtn.style.display = collapsed ? 'block' : 'none';
             panelBtn.textContent = collapsed ? '📁 Show Controls' : '📁 Hide Controls';
             panelBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            try { localStorage.setItem('mcr_controls_collapsed', collapsed ? '1' : '0'); } catch { /* silent */ }
+            try { localStorage.setItem('mcr_controls_collapsed_v2', collapsed ? '1' : '0'); } catch { /* silent */ }
         }
 
         function restoreControlsState() {
-            // Default is the large-map view. Only reopen the sidebar if this
-            // browser explicitly saved it open.
+            // Default is the large-map view. The previous key remembered
+            // "sidebar open" from before this layout, which flashed the map
+            // and then put the controls back. Ignore that key. Only reopen
+            // if this browser chose Show Controls after rail-169.
             let collapsed = true;
             try {
-                const saved = localStorage.getItem('mcr_controls_collapsed');
+                const saved = localStorage.getItem('mcr_controls_collapsed_v2');
                 if (saved === '0') collapsed = false;
             } catch { /* silent */ }
             const layout = document.querySelector('.desktop-layout');
