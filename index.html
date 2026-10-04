@@ -54,11 +54,8 @@
             /* Two cards across when there is room (controls hidden), one card
                when the controls panel is open and the column is narrow. */
             .tech-cards-grid { columns: 380px; column-gap: 14px; }
-            .os-stop-actions .control-btn { white-space: nowrap; }
-        }
-        /* True phone width only: stack the stop's buttons under its info. */
-        @media (max-width: 640px) {
-            .tech-cards-grid { columns: 1 !important; }
+            /* Stop info on top, its buttons underneath and left-aligned so
+               nothing runs off the right edge of the card. */
             .tech-cards-grid .os-stop { display: block; font-size: 16px; }
             .os-stop-moves { float: left; margin-right: 8px; }
             .os-stop-main { display: block; overflow: hidden; }
@@ -67,8 +64,13 @@
                 margin: 8px 0 0 !important; align-items: flex-start !important;
                 box-sizing: border-box;
             }
-            .os-stop-actions select.control-btn { width: 100%; max-width: 100%; box-sizing: border-box; }
+            .os-stop-actions select.control-btn { width: 100%; max-width: 100%; box-sizing: border-box; margin-left: 0; }
             .os-stop-actions > div { display: flex; flex-wrap: wrap; gap: 6px; }
+            .os-stop-actions .control-btn { margin-left: 0; }
+        }
+        /* True phone width: always a single column. */
+        @media (max-width: 640px) {
+            .tech-cards-grid { columns: 1 !important; }
         }
         .hidden { display: none; }
         @media print { #printableReport { display: block; } .container { display: none; } }
