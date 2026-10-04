@@ -89,11 +89,32 @@ exports.handler = async (event) => {
   }
 
   const { state, technician_id, day, action } = body;
+  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  // Admin marks a technician inactive and confirms they should leave the
+  // rotation. Name match, from this day forward, every state.
+  if (action === 'delete-future') {
+    const name = String(body.name || '').trim();
+    const fromDay = String(body.fromDay || day || '').trim();
+    if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(fromDay)) {
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'name and fromDay are required' }) };
+    }
+    const { data: rows, error: findErr } = await sb
+      .from('on_call_schedule')
+      .select('state, day, technician_id, technicians!inner(name)')
+      .gte('day', fromDay);
+    if (findErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: findErr.message }) };
+    const matches = (rows || []).filter(r => (r.technicians?.name || '').toLowerCase() === name.toLowerCase());
+    for (const row of matches) {
+      const { error: delErr } = await sb.from('on_call_schedule').delete().match({ state: row.state, day: row.day, technician_id: row.technician_id });
+      if (delErr) return { statusCode: 500, body: JSON.stringify({ ok: false, error: delErr.message, removed: matches.indexOf(row) }) };
+    }
+    return { statusCode: 200, body: JSON.stringify({ ok: true, removed: matches.length }) };
+  }
+
   if (!state || !technician_id || !day) {
     return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'state, technician_id, and day are required' }) };
   }
-
-  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   // ---- push: create a BlueFolder appointment for an existing local row ----
   if (action === 'push') {
