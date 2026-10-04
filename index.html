@@ -456,7 +456,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.98</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-177</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-179</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -882,24 +882,60 @@
         };
         const THURSDAY_COMP_TECHS = ['Robert Medley']; // Robert Medley takes Thu comp day before his on-call Sat; all other on-call techs take Mon.
 
+        function isoShift(dateStr, days) {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const dt = new Date(y, m - 1, d + days);
+            return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+        }
+        function standingCompDay(satStr, techName) {
+            return isoShift(satStr, /robert medley/i.test(techName || '') ? -2 : -5);
+        }
+        function explicitCompInWeek(techName, weekStart, weekEnd) {
+            const byDay = window.bfUnavailable || {};
+            let cursor = weekStart;
+            while (cursor <= weekEnd) {
+                const row = byDay[cursor] && byDay[cursor][techName];
+                if (row && row.reason === 'comp_day') return cursor;
+                cursor = isoShift(cursor, 1);
+            }
+            return '';
+        }
         function getCompDaysForDate(dateStr) {
-            // Returns [{tech, saturdayDateStr, dayName, reason}] for techs on comp day on dateStr
-            const results = [];
-            Object.entries(ONCALL_SCHEDULE_GA).forEach(([satStr, techs]) => {
-                const satDate = new Date(satStr + 'T12:00:00');
-                techs.forEach(tech => {
-                    const offset = THURSDAY_COMP_TECHS.includes(tech) ? -2 : -5; // Thu=Sat-2, Mon=Sat-5
-                    const compDate = new Date(satDate);
-                    compDate.setDate(satDate.getDate() + offset);
-                    const compStr = compDate.toISOString().split('T')[0];
-                    if (compStr === dateStr) {
-                        const dayName = THURSDAY_COMP_TECHS.includes(tech) ? 'Thursday' : 'Monday';
-                        results.push({ tech, saturdayDateStr: satStr, dayName,
-                            reason: `Comp day — on call Sat ${satStr}` });
-                    }
+            // Standing rule follows the calendar on-call row: Monday before
+            // that Saturday, Thursday for Robert Medley. A Comp Day saved on
+            // the calendar for that week replaces the standing day for that
+            // week only. Replacing the on-call technician changes every
+            // future week that still uses the standing day.
+            const out = [];
+            (window.onCallEntries || []).forEach(entry => {
+                if (!entry || !entry.day || !entry.technician) return;
+                const weekStart = isoShift(entry.day, -5);
+                const weekEnd = isoShift(entry.day, -1);
+                const explicit = explicitCompInWeek(entry.technician, weekStart, weekEnd);
+                const compDay = explicit || standingCompDay(entry.day, entry.technician);
+                if (compDay !== dateStr) return;
+                out.push({
+                    tech: entry.technician,
+                    saturdayDateStr: entry.day,
+                    reason: explicit
+                        ? 'Comp day — this week only, on call Sat ' + entry.day
+                        : 'Comp day — on call Sat ' + entry.day
                 });
             });
-            return results;
+            return out;
+        }
+        async function loadOnCallSchedule() {
+            const selected = (document.getElementById('stateSelector')?.value || CURRENT_STATE || 'GA').toUpperCase();
+            const state = (selected === 'NC' || selected === 'SC') ? 'GA' : selected;
+            const since = isoShift(new Date().toISOString().slice(0, 10), -21);
+            const until = isoShift(since, 160);
+            try {
+                const res = await fetch('/.netlify/functions/get-on-call?state=' + encodeURIComponent(state) + '&since=' + since + '&until=' + until);
+                if (!res.ok) return;
+                const data = await res.json();
+                window.onCallEntries = data.entries || [];
+                if (typeof refreshAvailabilityPanel === 'function') refreshAvailabilityPanel();
+            } catch (e) { /* keep the last roster */ }
         }
 
         function getUnavailableTechsForDate(dateStr) {
@@ -912,7 +948,8 @@
             // On Saturdays (GA only), mark everyone not on the on-call list as unavailable
             const selectedDate = new Date(dateStr + 'T12:00:00');
             if (selectedDate.getDay() === 6 && CURRENT_STATE === 'GA') {
-                const onCall = new Set(ONCALL_SCHEDULE_GA[dateStr] || []);
+                const live = (window.onCallEntries || []).filter(e => e.day === dateStr).map(e => e.technician);
+                const onCall = new Set(live.length ? live : (ONCALL_SCHEDULE_GA[dateStr] || []));
                 Object.keys(TECHS).forEach(tech => {
                     if (!onCall.has(tech)) unavailable.add(tech);
                 });
@@ -2633,6 +2670,7 @@ function distanceMatrixStatus(state) {
                     refreshAvailabilityPanel();
                 }
             } catch { /* silent fail — falls back to comp-day/manual/Saturday logic only */ }
+            loadOnCallSchedule();
             const dateInput = document.getElementById('dispatchDate');
             if (dateInput) {
                 // 2026-08-25, simplified same day: the "default to tomorrow

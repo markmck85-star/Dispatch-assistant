@@ -414,6 +414,7 @@
     <div class="form-group">
       <label for="compDaySelect">Comp day</label>
       <select id="compDaySelect"></select>
+      <label class="check-label" style="margin-top:8px;"><input type="checkbox" id="compDayThisWeekOnly" checked> This week only. Other on-call Saturdays keep the usual day.</label>
     </div>
     <div class="modal-actions">
       <button type="button" class="btn-cancel" id="compDaySkipBtn">Skip</button>
@@ -1144,11 +1145,9 @@ const compDayModal = document.getElementById('compDayModal');
 let compDayCtx = null;
 
 async function promptCompDay(newTechId, oldTechId, satDay, state) {
-  // Georgia's on-call comp days are automatic: the State Console and daily
-  // digest compute them from the on-call schedule (Thursday for Robert Medley,
-  // Monday for everyone else), so adding a separate comp-day entry here would
-  // give the technician two. Other states record comp days as calendar entries.
-  if (String(state).toUpperCase() === 'GA') return false;
+  // Every state, including Georgia, records the comp day on the calendar.
+  // Monday before the on-call Saturday is only the suggestion. Robert Medley
+  // is suggested Thursday. Either can be changed, or skipped.
   const [y, m, d] = satDay.split('-').map(Number);
   if (new Date(y, m - 1, d).getDay() !== 6) return false;
   const days = [];
@@ -1180,14 +1179,18 @@ async function promptCompDay(newTechId, oldTechId, satDay, state) {
     if (out) opt.disabled = true;
     sel.appendChild(opt);
   }
-  const suggested = oldComp && !outByDay.has(oldComp.day) ? oldComp.day : '';
+  const name = techNameById.get(String(newTechId)) || '';
+  const suggestedOffset = /robert medley/i.test(name) ? 2 : 5;
+  const usual = isoLocal(new Date(y, m - 1, d - suggestedOffset));
+  let suggested = oldComp && !outByDay.has(oldComp.day) ? oldComp.day : usual;
+  if (outByDay.has(suggested)) suggested = '';
   sel.value = suggested;
 
-  const name = techNameById.get(String(newTechId)) || 'The new technician';
+  const displayName = name || techNameById.get(String(newTechId)) || 'The new technician';
   document.getElementById('compDayTitle').textContent = 'Comp Day';
   document.getElementById('compDayBody').textContent =
-    `${name} is now on call for ${state} on ${fmtShortDay(satDay)}. Pick a comp day that week.` +
-    (suggested ? ` Suggested: ${fmtShortDay(suggested)}, the same day the replaced technician had.` : '');
+    `${displayName} is on call for ${state} on ${fmtShortDay(satDay)}. The usual day is already applied to every other week from the on-call row. Pick a day only if this week is different.` +
+    (suggested ? ` Suggested: ${fmtShortDay(suggested)}.` : '');
   compDayCtx = { technician_id: newTechId };
   compDayModal.classList.add('active');
   return true;
@@ -1200,7 +1203,12 @@ document.getElementById('compDaySkipBtn').addEventListener('click', () => {
 });
 document.getElementById('compDaySaveBtn').addEventListener('click', async () => {
   const day = document.getElementById('compDaySelect').value;
+  const thisWeekOnly = document.getElementById('compDayThisWeekOnly');
   if (!day) { alert('Choose a day, or press Skip.'); return; }
+  if (thisWeekOnly && !thisWeekOnly.checked) {
+    alert('Leave "This week only" checked. A different standing day is not saved from here — replace the Saturday on-call person to change every future week, or leave Robert Medley on the rotation for the Thursday rule.');
+    return;
+  }
   const btn = document.getElementById('compDaySaveBtn');
   btn.disabled = true;
   btn.textContent = 'Saving…';
@@ -1814,8 +1822,8 @@ document.getElementById('onCallForm').addEventListener('submit', async (e) => {
     loadMonth();
     // A different technician took over this Saturday: offer a comp day for them.
     let prompted = false;
-    if (oldKey && String(oldKey.technician_id) !== String(technician_id)) {
-      prompted = await promptCompDay(technician_id, oldKey.technician_id, day, state);
+    if (!oldKey || String(oldKey.technician_id) !== String(technician_id)) {
+      prompted = await promptCompDay(technician_id, oldKey ? oldKey.technician_id : '', day, state);
     }
     if (!prompted) reshowPendingConflicts();
   } catch (err) {
