@@ -67,6 +67,20 @@
         .panel-toggle:hover { background: #33334a; }
 
         .board-context { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 0 10px; }
+
+        .board-inline { display: flex; align-items: center; gap: 6px; }
+        .board-inline input[type="date"] { flex: 1 1 auto; min-width: 0; }
+        .board-inline #dispatchTomorrowBtn { flex: 0 0 auto; }
+        .board-context { align-items: flex-end; }
+        .more-ai-row { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
+        .more-ai-row .tool-more { flex: 0 0 auto; width: auto; margin: 0; }
+        .more-ai-row .tool-more > summary { white-space: nowrap; padding: 10px 14px; }
+        .more-ai-row #aiCommandBarHome { flex: 1 1 auto; min-width: 0; }
+        .more-ai-row #aiCommandBar { margin-top: 0 !important; }
+        @media (max-width: 640px) {
+            .more-ai-row { flex-wrap: wrap; }
+            .more-ai-row #aiCommandBarHome { flex: 1 1 220px; }
+        }
         .board-context label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #555; font-weight: 700; flex: 1 1 140px; }
         .board-context select, .board-context input[type="date"] { min-height: 40px; font-size: 15px; }
         .board-context #dispatchTomorrowBtn, .board-context #watchdogLink {
@@ -440,7 +454,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.92</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-171</div>
+        <h1>MCR Dispatch Hub v9.93</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-172</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -477,25 +491,6 @@
                 <!-- Compact voice/text command bar. Only useful once a board
                      exists, so it stays disabled until processDispatch() has
                      populated window.currentAssignments (see refreshAiBarState). -->
-                <div id="aiCommandBarHome"><div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
-                        <input type="text" id="aiCommandInput" autocomplete="off"
-                            placeholder='e.g. "move stop 2 from Robert to Keontae"'
-                            onkeydown="if(event.key==='Enter'){event.preventDefault();submitAiCommand();}"
-                            style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
-                        <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
-                            style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
-                        <button type="button" id="aiSendBtn" onclick="submitAiCommand()"
-                            style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
-                    </div>
-                    <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
-                    <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
-                    <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
-                        title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
-                        style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
-                </div></div>
-
                 <!-- AVAILABILITY PANEL -->
                 <div id="availabilityPanel" style="margin-top:10px; padding:8px 10px; background:#1e1e1e; border:1px solid #444; border-radius:8px; display:none;">
                     <button type="button" id="availabilityToggle" onclick="toggleAvailabilityDetails()" aria-expanded="false" style="width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;background:transparent;border:none;color:#ffa500;font-weight:bold;font-size:13px;cursor:pointer;padding:2px 0;text-align:left;">
@@ -595,9 +590,11 @@
                         </select>
                     </label>
                     <label>Dispatch Date
-                        <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
+                        <span class="board-inline">
+                            <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
+                            <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
+                        </span>
                     </label>
-                    <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
                     <a id="watchdogLink" href="/watchdog/GA">Watchdog</a>
                 </div>
                 <div class="tool-rail" aria-label="Primary tools">
@@ -607,7 +604,8 @@
                     <a class="closing-email-link" href="/closing-email-reconstructor">✉️ Closing Notes</a>
                     <a href="/service-responses">⏱ Service responses</a>
                 </div>
-                <details class="tool-more">
+                <div class="more-ai-row">
+<details class="tool-more">
                     <summary>More tools</summary>
                     <div class="tool-more-list">
                         <a class="admin-panel-link" href="/admin" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
@@ -620,6 +618,25 @@
                         <a class="help-link" href="/help" target="_blank">❓ Help</a>
                     </div>
                 </details>
+<div id="aiCommandBarHome"><div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
+                        <input type="text" id="aiCommandInput" autocomplete="off"
+                            placeholder='e.g. "move stop 2 from Robert to Keontae"'
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();submitAiCommand();}"
+                            style="flex:1; min-width:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#111; color:#f0f0f0; font-size:13px;">
+                        <button type="button" id="aiMicBtn" onclick="toggleAiVoice()" title="Dictate a command"
+                            style="flex-shrink:0; padding:7px 9px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:14px; cursor:pointer;">🎤</button>
+                        <button type="button" id="aiSendBtn" onclick="submitAiCommand()"
+                            style="flex-shrink:0; padding:7px 12px; border-radius:6px; border:1px solid #2a6496; background:#2a6496; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;">Run</button>
+                    </div>
+                    <div id="aiCommandStatus" style="font-size:11px; color:#888; margin-top:5px; min-height:14px;"></div>
+                    <div id="aiCommandDiff" style="font-size:12px; margin-top:2px;"></div>
+                    <button type="button" id="aiAnalyzeRoutesBtn" onclick="analyzeRoutes()"
+                        title="Scan the whole board for stop-to-technician swaps that would reduce total drive time -- especially catches a tech with two stops that force a backtrack when someone else has a stop much nearer one of them"
+                        style="margin-top:6px; padding:6px 10px; border-radius:6px; border:1px solid #555; background:#2a2a3e; color:#ccc; font-size:12px; cursor:pointer;">🧭 Analyze Routes</button>
+                </div></div>
+</div>
 
                 <!-- ROUTE MAP VISUALIZER -->
                 <!-- Sits above the technician cards and outside #results on
