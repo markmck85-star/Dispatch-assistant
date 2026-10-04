@@ -5,6 +5,7 @@
 //
 // Dispatcher role: change-own-pin only.
 // Admin role: list / create / update / set-pin / set-active.
+// Email is stored on the dispatchers row only. It never creates or edits a technician.
 //
 // POST { adminUsername, adminPin, action, ... }
 
@@ -12,9 +13,34 @@ const { createClient } = require('@supabase/supabase-js');
 
 const ALL_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
 const ROLES = new Set(['admin', 'dispatcher']);
+const USER_COLS = 'id, username, role, states, active, technician_id, phone, pin, last_seen_at, email';
 
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+}
+
+function missingEmailColumn(err) {
+  const msg = String((err && err.message) || err || '');
+  return /email/i.test(msg) && /column|schema cache|does not exist/i.test(msg);
+}
+
+function fail(err) {
+  if (missingEmailColumn(err)) {
+    return json(500, {
+      ok: false,
+      error: 'The email column does not exist on the dispatchers table. Add a text column named email on dispatchers, then save again. This login was not turned into a technician record.'
+    });
+  }
+  return json(500, { ok: false, error: (err && err.message) || 'Server error' });
+}
+
+function cleanEmail(value) {
+  const email = String(value || '').trim();
+  if (!email) return '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: 'Email must look like name@company.com' };
+  }
+  return email;
 }
 
 function publicUser(row) {
@@ -26,6 +52,7 @@ function publicUser(row) {
     active: row.active !== false,
     technicianId: row.technician_id || null,
     phone: row.phone || '',
+    email: row.email || '',
     pin: row.pin || '',
     lastSeenAt: row.last_seen_at || null,
   };
@@ -72,7 +99,7 @@ exports.handler = async (event) => {
         .from('dispatchers')
         .update({ pin: newPin })
         .eq('id', gate.user.id)
-        .select('id, username, role, states, active, technician_id, phone, pin')
+        .select(USER_COLS)
         .single();
       if (error) throw error;
       return json(200, { ok: true, user: publicUser(data) });
@@ -83,7 +110,7 @@ exports.handler = async (event) => {
     if (action === 'list') {
       const { data, error } = await sb
         .from('dispatchers')
-        .select('id, username, role, states, active, technician_id, phone, pin, last_seen_at')
+        .select(USER_COLS)
         .order('username', { ascending: true });
       if (error) throw error;
       return json(200, { ok: true, users: (data || []).map(publicUser) });
@@ -117,7 +144,7 @@ exports.handler = async (event) => {
           .from('dispatchers')
           .update({ username, pin, role, states, active: true, technician_id: tech.id })
           .eq('id', existingLink.id)
-          .select('id, username, role, states, active, technician_id, phone, pin')
+          .select(USER_COLS)
           .single();
         if (error) throw error;
         return json(200, { ok: true, user: publicUser(data), updated: true });
@@ -127,7 +154,7 @@ exports.handler = async (event) => {
           .from('dispatchers')
           .update({ pin, role, states, active: true, technician_id: tech.id })
           .eq('id', existingUser.id)
-          .select('id, username, role, states, active, technician_id, phone, pin')
+          .select(USER_COLS)
           .single();
         if (error) throw error;
         return json(200, { ok: true, user: publicUser(data), updated: true });
@@ -135,7 +162,7 @@ exports.handler = async (event) => {
       const { data, error } = await sb
         .from('dispatchers')
         .insert({ username, pin, role, states, active: true, technician_id: tech.id })
-        .select('id, username, role, states, active, technician_id, phone, pin')
+        .select(USER_COLS)
         .single();
       if (error) throw error;
       return json(200, { ok: true, user: publicUser(data) });
@@ -153,6 +180,8 @@ exports.handler = async (event) => {
       if (!/^\d{4,8}$/.test(pin)) {
         return json(400, { ok: false, error: 'PIN must be 4–8 digits' });
       }
+      const email = cleanEmail(body.email);
+      if (email && email.error) return json(400, { ok: false, error: email.error });
       const { data: existing } = await sb.from('dispatchers').select('id').ilike('username', username).maybeSingle();
       if (existing) return json(409, { ok: false, error: 'That username already exists' });
       const { data, error } = await sb
@@ -164,8 +193,9 @@ exports.handler = async (event) => {
           states,
           active: true,
           technician_id: body.technicianId || null,
+          email: email || null,
         })
-        .select('id, username, role, states, active, technician_id, phone, pin')
+        .select(USER_COLS)
         .single();
       if (error) throw error;
       return json(200, { ok: true, user: publicUser(data) });
@@ -177,7 +207,7 @@ exports.handler = async (event) => {
 
       const { data: target, error: lookupErr } = await sb
         .from('dispatchers')
-        .select('id, username, role, active')
+        .select('id, username, role, active, technician_id')
         .eq('id', id)
         .maybeSingle();
       if (lookupErr) throw lookupErr;
@@ -207,6 +237,11 @@ exports.handler = async (event) => {
           patch.states = body.states.map(s => String(s).toUpperCase()).filter(s => ALL_STATES.includes(s));
         }
         if ('technicianId' in body) patch.technician_id = body.technicianId || null;
+        if ('email' in body) {
+          const email = cleanEmail(body.email);
+          if (email && email.error) return json(400, { ok: false, error: email.error });
+          patch.email = email || null;
+        }
       }
 
       if (!Object.keys(patch).length) return json(400, { ok: false, error: 'Nothing to update' });
@@ -215,7 +250,7 @@ exports.handler = async (event) => {
         .from('dispatchers')
         .update(patch)
         .eq('id', id)
-        .select('id, username, role, states, active, technician_id, phone, pin')
+        .select(USER_COLS)
         .single();
       if (error) throw error;
       return json(200, { ok: true, user: publicUser(data) });
@@ -223,6 +258,6 @@ exports.handler = async (event) => {
 
     return json(400, { ok: false, error: 'Unknown action' });
   } catch (err) {
-    return json(500, { ok: false, error: err.message || 'Server error' });
+    return fail(err);
   }
 };
