@@ -45,6 +45,24 @@
         .os-stop { padding: 10px; border-bottom: 1px solid #eee; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
         .os-stop-moves, .os-stop-actions { flex: 0 0 auto; }
         .os-stop-main { flex: 1 1 180px; min-width: 160px; }
+        .tech-card { overflow: hidden; }
+        /* Phone: one card across, controls stay inside the card instead of
+           painting onto the next column. */
+        @media (max-width: 980px) {
+            .tech-cards-grid { columns: 1 !important; }
+            .tech-cards-grid .tech-card { font-size: 16px; padding: 12px; }
+            .tech-cards-grid .os-stop { display: block; font-size: 16px; }
+            .os-stop-moves { float: left; margin-right: 8px; }
+            .os-stop-main { display: block; overflow: hidden; }
+            .os-stop-actions {
+                clear: both; float: none; width: 100%; max-width: 100%;
+                margin: 8px 0 0 !important; align-items: stretch !important;
+                box-sizing: border-box;
+            }
+            .os-stop-actions select.control-btn { width: 100%; max-width: 100%; box-sizing: border-box; }
+            .os-stop-actions > div { display: flex; flex-wrap: wrap; gap: 6px; }
+            .tech-cards-grid .control-btn { font-size: 14px !important; padding: 8px 10px !important; }
+        }
         .hidden { display: none; }
         @media print { #printableReport { display: block; } .container { display: none; } }
         #printableReport { display: none; }
@@ -460,7 +478,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-192</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-193</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
