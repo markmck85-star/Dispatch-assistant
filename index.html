@@ -456,7 +456,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v9.95</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-174</div>
+        <h1>MCR Dispatch Hub v9.96</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-175</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -4522,7 +4522,7 @@ function distanceMatrixStatus(state) {
                 const wo = meta.woNumber ? ` <span style="color:#aaa;font-size:12px;">WO ${meta.woNumber}</span>` : '';
                 headerHtml = `<div style="margin-bottom:15px;"><span style="font-weight:bold;color:#ff6b35;">⚡ URGENT</span>${wo}<br><span style="font-size:13px;">${issue}${sla}</span></div>`;
             } else {
-                headerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:15px;"><span style="font-weight:bold;color:#007bff;">Generated Dispatches:</span><button type="button" onclick="toggleAllTechStops(this)" style="padding:6px 10px;border-radius:6px;border:1px solid #007bff;background:#fff;color:#007bff;font-size:12px;font-weight:700;cursor:pointer;">Show all stops</button></div>';
+                headerHtml = '<div style="margin-bottom:15px;text-align:center;"><div style="font-weight:bold;color:#007bff;margin-bottom:8px;">Generated Dispatches:</div><button type="button" onclick="toggleAllTechStops(this)" style="padding:8px 14px;border-radius:6px;border:1px solid #007bff;background:#fff;color:#007bff;font-size:13px;font-weight:700;cursor:pointer;">Show all stops</button></div>';
             }
 
             // Detect same-day items and right form flags across all assignments
