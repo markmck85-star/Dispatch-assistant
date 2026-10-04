@@ -183,10 +183,12 @@
            history modal (9999) so the two never fight if both are ever
            opened in sequence. #dispatchMap's fixed 320px height is overridden
            to fill whatever's left below the header row. */
-        .map-panel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
-        .map-panel.map-fullscreen .map-panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-        .map-panel.map-fullscreen #dispatchMapSlot { flex: 1; height: auto; min-height: 0; display: flex; flex-direction: column; }
-        .map-panel.map-fullscreen #dispatchMap { flex: 1; height: 100%; min-height: 240px; }
+        .map-panel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; height: 100dvh; height: 100svh; overflow: hidden; }
+        .map-panel.map-fullscreen .map-panel-head { flex: 0 0 auto; }
+        .map-panel.map-fullscreen .map-panel-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .map-panel.map-fullscreen #dispatchMapSlot { flex: 1 1 auto; height: auto; min-height: 0; display: flex; flex-direction: column; }
+        .map-panel.map-fullscreen #dispatchMap { flex: 1 1 auto; height: 100%; min-height: 0; }
+        .map-panel.map-fullscreen #dispatchMapDock { flex: 0 0 auto; max-height: 46vh; overflow-y: auto; background: #161616; border-top: 1px solid #444; margin: 6px -10px -10px; padding: 6px 10px 8px; z-index: 5; }
         .map-panel label { font-size: 15px !important; color: #ddd !important; gap: 10px !important; min-height: 44px; }
         .map-panel label input[type="checkbox"] { width: 22px; height: 22px; accent-color: #7edb8e; flex-shrink: 0; }
         .map-panel .leaflet-control-zoom a { width: 40px !important; height: 40px !important; line-height: 40px !important; font-size: 22px !important; }
@@ -456,7 +458,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-179</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-180</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -671,6 +673,7 @@
                                 <div class="map-load-label" id="dispatchMapLoaderText">Loading map…</div>
                             </div>
                         </div>
+                        <div id="dispatchMapDock">
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
                             <input type="checkbox" id="mapShowCompletedToggle" checked onchange="toggleMapShowCompleted(this.checked)">
                             Show completed stops (✓, muted)
@@ -682,6 +685,7 @@
                         <div style="font-size:11px;color:#777;margin:0 0 4px;">&#x1F4C5; dashed pin = pushed to a later date (not part of today's route/mileage)</div>
                         <div id="dispatchMapLegend"></div>
                         <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
+                        </div>
                     </div>
                 </div>
                 <div id="resultsPanelLoading">
@@ -8478,12 +8482,29 @@ ${content}</body></html>`;
           return layer;
         }
         
+        // Lower 48 plus Alaska and Hawaii. Stops the expanded map from panning to another continent.
+        window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[17.5, -168.5], [72.5, -64]]);
+        function clampDispatchMapView(view) {
+            const b = window.DISPATCH_MAP_US_BOUNDS;
+            if (!view || !b) return view;
+            return {
+                lat: Math.min(b.getNorth(), Math.max(b.getSouth(), view.lat)),
+                lng: Math.min(b.getEast(), Math.max(b.getWest(), view.lng)),
+                zoom: Math.max(3, view.zoom || 4)
+            };
+        }
         function ensureDispatchMap() {
             if (_dispatchMap) return _dispatchMap;
             const el = document.getElementById('dispatchMap');
             if (!el || typeof L === 'undefined') return null;
 
-            _dispatchMap = L.map(el, { scrollWheelZoom: false });
+            _dispatchMap = L.map(el, {
+                scrollWheelZoom: false,
+                maxBounds: window.DISPATCH_MAP_US_BOUNDS,
+                maxBoundsViscosity: 1.0,
+                minZoom: 3,
+                worldCopyJump: false
+            });
             addBasemap(_dispatchMap);
             L.control.scale({ imperial: true, metric: false }).addTo(_dispatchMap);
             _dispatchMap.setView([32.8, -83.6], 7); // placeholder until the first fitBounds
@@ -9031,8 +9052,8 @@ ${content}</body></html>`;
             }
             document.addEventListener('keydown', _mapFullscreenEscHandler);
             const bar = document.getElementById('aiCommandBar');
-            const body = document.getElementById('dispatchMapBody');
-            if (bar && body && bar.parentElement !== body) body.appendChild(bar);
+            const dock = document.getElementById('dispatchMapDock') || document.getElementById('dispatchMapBody');
+            if (bar && dock && bar.parentElement !== dock) dock.appendChild(bar);
             _fitDispatchMapAfterResize();
         }
 
@@ -9059,9 +9080,11 @@ ${content}</body></html>`;
                     // Re-fit so the current route/pins are centered in the new
                     // viewport rather than left wherever they sat before.
                     if (window._dispatchMapUserView) {
+                        const clamped = clampDispatchMapView(window._dispatchMapUserView);
+                        window._dispatchMapUserView = clamped;
                         _dispatchMap.setView(
-                            [window._dispatchMapUserView.lat, window._dispatchMapUserView.lng],
-                            window._dispatchMapUserView.zoom,
+                            [clamped.lat, clamped.lng],
+                            clamped.zoom,
                             { animate: false }
                         );
                     } else if (_dispatchMapBounds && _dispatchMapBounds.isValid()) {

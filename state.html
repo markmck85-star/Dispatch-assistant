@@ -97,10 +97,12 @@
   .map-load-label { color: #d7e6f5; font-size: 17px; font-weight: 650; text-align: center; padding: 0 16px; }
   /* Hide/Expand controls, mirroring index.html's dispatch-board map panel. */
   #stateMapPanel.collapsed #stateMapBody { display: none; }
-  #stateMapPanel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; }
-  #stateMapPanel.map-fullscreen #stateMapBody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  #stateMapPanel.map-fullscreen #stateMapSlot { flex: 1; height: auto; min-height: 0; display: flex; flex-direction: column; }
-  #stateMapPanel.map-fullscreen #stateMap { flex: 1; height: 100%; min-height: 240px; }
+  #stateMapPanel.map-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; margin: 0; border-radius: 0; padding: 10px; display: flex; flex-direction: column; height: 100dvh; height: 100svh; overflow: hidden; }
+  #stateMapPanel.map-fullscreen .map-panel-head { flex: 0 0 auto; }
+  #stateMapPanel.map-fullscreen #stateMapBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  #stateMapPanel.map-fullscreen #stateMapSlot { flex: 1 1 auto; height: auto; min-height: 0; display: flex; flex-direction: column; }
+  #stateMapPanel.map-fullscreen #stateMap { flex: 1 1 auto; height: 100%; min-height: 0; }
+  #stateMapPanel.map-fullscreen #stateMapDock { flex: 0 0 auto; max-height: 46vh; overflow-y: auto; background: #161616; border-top: 1px solid #444; margin: 6px -10px -10px; padding: 6px 10px 8px; z-index: 5; }
   #stateMapToggleBtn, #stateMapFullscreenBtn, #stateMapFullscreenCloseBtn { padding: 4px 10px; background: #2a2a3e; color: #ccc; border: 1px solid #555; border-radius: 6px; font-size: 12px; cursor: pointer; }
   #stateMapToggleBtn:hover, #stateMapFullscreenBtn:hover, #stateMapFullscreenCloseBtn:hover { background: #33334a; }
   #stateMapFullscreenCloseBtn { display: none; }
@@ -216,6 +218,7 @@
             <div class="map-load-label" id="stateMapLoaderText">Loading California routes…</div>
           </div>
         </div>
+        <div id="stateMapDock">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
           <input type="checkbox" id="mapShowCompletedToggle" checked onchange="window._stateMapShowCompleted = this.checked; renderStateMap(document.getElementById('stateSel').value, window._stateMapDate);">
           Show completed stops (✓, muted)
@@ -227,6 +230,7 @@
         <div style="font-size:11px;color:#777;margin:2px 0 0;">📅 dashed pin = pushed to a later date · 🟠 pulsing ring = trouble ticket at/near its SLA deadline</div>
         <div id="stateMapLegend"></div>
         <div id="stateMapNote" class="map-note" style="display:none;"></div>
+        </div>
       </div>
 
       <!-- AI DISPATCH ASSISTANT COMMAND BAR -- deliberately OUTSIDE
@@ -1135,11 +1139,27 @@ function addBasemap(map) {
   return layer;
 }
 
+window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[17.5, -168.5], [72.5, -64]]);
+function clampStateMapView(view) {
+  const b = window.DISPATCH_MAP_US_BOUNDS;
+  if (!view || !b) return view;
+  return {
+    lat: Math.min(b.getNorth(), Math.max(b.getSouth(), view.lat)),
+    lng: Math.min(b.getEast(), Math.max(b.getWest(), view.lng)),
+    zoom: Math.max(3, view.zoom || 4)
+  };
+}
 function ensureStateMap() {
   if (_stateMap) return _stateMap;
   const el = document.getElementById('stateMap');
   if (!el || typeof L === 'undefined') return null;
-  _stateMap = L.map(el, { scrollWheelZoom: false });
+  _stateMap = L.map(el, {
+    scrollWheelZoom: false,
+    maxBounds: window.DISPATCH_MAP_US_BOUNDS,
+    maxBoundsViscosity: 1.0,
+    minZoom: 3,
+    worldCopyJump: false
+  });
   addBasemap(_stateMap);
   L.control.scale({ imperial: true, metric: false }).addTo(_stateMap);
   const initState = (document.getElementById('stateSel') || {}).value || 'GA';
@@ -1352,7 +1372,9 @@ async function renderStateMap(state, dispatchDate) {
     window._stateMapFitting = true;
     try {
       if (window._stateMapUserView) {
-        map.setView([window._stateMapUserView.lat, window._stateMapUserView.lng], window._stateMapUserView.zoom, { animate: false });
+        const clamped = clampStateMapView(window._stateMapUserView);
+        window._stateMapUserView = clamped;
+        map.setView([clamped.lat, clamped.lng], clamped.zoom, { animate: false });
       } else if (bounds.isValid()) {
         if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(bounds.getCenter(), 12);
         else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 14 });
@@ -1658,8 +1680,8 @@ function _openStateMapFullscreen() {
   }
   document.addEventListener('keydown', _stateMapFullscreenEscHandler);
   const bar = document.getElementById('stateAiCommandBar');
-  const body = document.getElementById('stateMapBody');
-  if (bar && body && bar.parentElement !== body) body.appendChild(bar);
+  const dock = document.getElementById('stateMapDock') || document.getElementById('stateMapBody');
+  if (bar && dock && bar.parentElement !== dock) dock.appendChild(bar);
   _fitStateMapAfterResize();
 }
 
@@ -1684,7 +1706,9 @@ function _fitStateMapAfterResize() {
     if (_stateMap) {
       _stateMap.invalidateSize();
       if (window._stateMapUserView) {
-        _stateMap.setView([window._stateMapUserView.lat, window._stateMapUserView.lng], window._stateMapUserView.zoom, { animate: false });
+        const clampedFs = clampStateMapView(window._stateMapUserView);
+        window._stateMapUserView = clampedFs;
+        _stateMap.setView([clampedFs.lat, clampedFs.lng], clampedFs.zoom, { animate: false });
       } else if (window._stateMapBounds && window._stateMapBounds.isValid()) {
         _stateMap.fitBounds(window._stateMapBounds, { padding: [28, 28], maxZoom: 14 });
       }

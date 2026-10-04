@@ -37,9 +37,11 @@
   .demo-banner { display:none; background:#3a2a00; border:1px solid #f0a500; border-radius:8px; padding:10px 12px; margin-bottom:14px; color:#ffe1a8; font-size:13.5px; }
   .demo-banner a { color:#fff; }
   .suggest { font-size:12px; color:#9ad7c8; margin-top:6px; }
-  #satMapPanel.map-fullscreen { position:fixed; top:0; left:0; right:0; bottom:0; z-index:10000; margin:0; border-radius:0; padding:10px; background:#181818; display:flex; flex-direction:column; }
-  #satMapPanel.map-fullscreen #satMapBody { flex:1; display:flex; flex-direction:column; min-height:0; }
-  #satMapPanel.map-fullscreen #satMap { flex:1; height:auto; margin-bottom:0; }
+  #satMapPanel.map-fullscreen { position:fixed; top:0; left:0; right:0; bottom:0; z-index:10000; margin:0; border-radius:0; padding:10px; background:#181818; display:flex; flex-direction:column; height:100dvh; height:100svh; overflow:hidden; }
+  #satMapPanel.map-fullscreen .map-panel-head { flex:0 0 auto; }
+  #satMapPanel.map-fullscreen #satMapBody { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  #satMapPanel.map-fullscreen #satMap { flex:1 1 auto; height:auto; min-height:0; margin-bottom:0; }
+  #satMapPanel.map-fullscreen #satMapDock { flex:0 0 auto; max-height:46vh; overflow-y:auto; background:#161616; border-top:1px solid #444; margin:6px -10px -10px; padding:6px 10px 8px; z-index:5; }
   .map-panel-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
   #satMapFullscreenBtn, #satMapFullscreenCloseBtn { padding:4px 10px; background:#2a2a3e; color:#ccc; border:1px solid #555; border-radius:6px; font-size:12px; cursor:pointer; }
   #satMapFullscreenBtn:hover, #satMapFullscreenCloseBtn:hover { background:#33334a; }
@@ -127,10 +129,12 @@
       </div>
       <div id="satMapBody">
         <div id="satMap"></div>
+        <div id="satMapDock">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:6px 0 0;">
           <input type="checkbox" id="satShowAllSitesToggle" onchange="window._satShowAllSites = this.checked; if (this.checked) ensureRestockScheduleCache(true).then(function(){ renderMap(); }); else renderMap();">
           Show all kiosks
         </label>
+        </div>
       </div>
       <div id="satAiCommandBarHome">
       <div id="satAiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
@@ -1000,9 +1004,25 @@ function addBasemap(map) {
   });
   layer.addTo(map);
 }
+window.DISPATCH_MAP_US_BOUNDS = L.latLngBounds([[17.5, -168.5], [72.5, -64]]);
+function clampSatMapView(view) {
+  const b = window.DISPATCH_MAP_US_BOUNDS;
+  if (!view || !b) return view;
+  return {
+    lat: Math.min(b.getNorth(), Math.max(b.getSouth(), view.lat)),
+    lng: Math.min(b.getEast(), Math.max(b.getWest(), view.lng)),
+    zoom: Math.max(3, view.zoom || 4)
+  };
+}
 function ensureMap() {
   if (satMap) return;
-  satMap = L.map('satMap', { scrollWheelZoom: false });
+  satMap = L.map('satMap', {
+    scrollWheelZoom: false,
+    maxBounds: window.DISPATCH_MAP_US_BOUNDS,
+    maxBoundsViscosity: 1.0,
+    minZoom: 3,
+    worldCopyJump: false
+  });
   addBasemap(satMap);
   L.control.scale({ imperial: true, metric: false }).addTo(satMap);
   satMap.setView([37, -90], 4);
@@ -1231,7 +1251,9 @@ function renderMap() {
     window._satMapFitting = true;
     try {
       if (window._satMapUserView) {
-        satMap.setView([window._satMapUserView.lat, window._satMapUserView.lng], window._satMapUserView.zoom, { animate: false });
+        const clamped = clampSatMapView(window._satMapUserView);
+        window._satMapUserView = clamped;
+        satMap.setView([clamped.lat, clamped.lng], clamped.zoom, { animate: false });
       } else {
         satMap.fitBounds(satMapBounds, { padding: [30, 30], maxZoom: 12 });
       }
@@ -1281,8 +1303,8 @@ function _openSatMapFullscreen() {
   }
   document.addEventListener('keydown', _satMapFullscreenEscHandler);
   const bar = document.getElementById('satAiCommandBar');
-  const body = document.getElementById('satMapBody');
-  if (bar && body && bar.parentElement !== body) body.appendChild(bar);
+  const dock = document.getElementById('satMapDock') || document.getElementById('satMapBody');
+  if (bar && dock && bar.parentElement !== dock) dock.appendChild(bar);
   _fitSatMapAfterResize();
 }
 
