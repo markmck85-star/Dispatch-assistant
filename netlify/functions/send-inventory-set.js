@@ -120,39 +120,34 @@ async function buildSet(supabase, since, stateFilter) {
   return { sheets, notes };
 }
 
+function stripSignature(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  const cut = lines.findIndex((line) => /^(--|—|director of operations|mcr technical service)/i.test(line.trim()) || /^\(?\d{3}\)?\s*\d{3}-\d{4}/.test(line.trim()));
+  return (cut > 0 ? lines.slice(0, cut) : lines).join("\n").trim();
+}
 function previewText(since, sheets, notes, extraNote) {
   const ready = sheets.filter((s) => s.ready);
   const held = sheets.filter((s) => !s.ready);
   const lines = [];
-  lines.push("Inventory count sheets received since " + since + ".");
-  lines.push(ready.length + " sheet" + (ready.length === 1 ? "" : "s") + " attached. " + held.length + " held back because the date or file name is not ready.");
-  lines.push("");
   if (extraNote) { lines.push(extraNote); lines.push(""); }
-  const concerns = ready.filter((s) => s.concerns.length);
-  if (concerns.length) {
-    lines.push("Notes from the sheets:");
-    for (const s of concerns) {
-      lines.push(s.state + " " + s.name + " (" + s.sheetDate + ")");
-      for (const c of s.concerns) lines.push("  " + c);
+  lines.push("Inventory count sheets since " + since + " are attached (" + ready.length + ").");
+  lines.push("");
+  const noteBody = notes.map((n) => stripSignature(n.text)).filter(Boolean);
+  if (noteBody.length) {
+    lines.push(noteBody.join("\n\n"));
+    lines.push("");
+  }
+  const sheetNotes = ready.filter((s) => (s.concerns || []).some((c) => /note:/i.test(c)));
+  if (sheetNotes.length) {
+    lines.push("Notes written on the sheets:");
+    for (const s of sheetNotes) {
+      lines.push(s.name + (s.state ? ", " + s.state : ""));
+      for (const c of s.concerns.filter((c) => /note:/i.test(c))) lines.push("  " + c.replace(/^.*note:\s*/i, ""));
     }
     lines.push("");
   }
-  if (notes.length) {
-    lines.push("Notes from the mailbox message" + (notes.length === 1 ? "" : "s") + ":");
-    for (const n of notes) {
-      if (n.subject) lines.push("Subject: " + n.subject);
-      lines.push(n.text);
-      lines.push("");
-    }
-  }
-  lines.push("Attached:");
-  for (const s of ready) lines.push(s.state + " " + s.name + " - " + s.filename);
-  if (held.length) {
-    lines.push("");
-    lines.push("Held back:");
-    for (const s of held) lines.push(s.state + " " + s.name + " - " + s.issues.join("; "));
-  }
-  return lines.join("\n");
+  if (held.length) lines.push("Held back (date or file name not ready): " + held.map((s) => s.name).join(", "));
+  return lines.join("\n").trim();
 }
 
 exports.handler = async (event) => {
