@@ -432,22 +432,50 @@ function receivedRowsHtml(rec) {
       "</td><td>" + esc(t.subject || "") + "</td></tr>";
   }).join("");
 }
-function showTechSheet(i) {
+async function showTechSheet(i) {
   const box = document.getElementById("techSheet");
   const recName = (window.RECEIVED || [])[i] && window.RECEIVED[i].name;
-  const s = DETAIL_SHEETS.find((x) => recName && String(x.name).toLowerCase() === String(recName).toLowerCase());
   if (!box) return;
-  if (!s) {
-    box.innerHTML = '<div class="note">No saved spreadsheet lines for ' + esc(recName || "that name") + " yet. The mail credited them, but the sheet was not read.</div>";
-    return;
-  }
-  const rows = (s.items || []).map((it) => "<tr>" + itemCells(it) + "</tr>").join("") ||
-    '<tr><td colspan="6" class="note">No form, ribbon, paper, or card lines on this sheet.</td></tr>';
-  box.innerHTML = '<div class="note"><b>' + esc(s.name) + "</b> · " + esc(s.sheetDate || "no date") + " · " + esc(s.filename) +
-    (s.ready ? "" : ' <span class="tag out">Held</span>') + "</div>" +
-    "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
-    rows + "</tbody></table>";
+  box.innerHTML = '<div class="note">Loading ' + esc(recName || "sheet") + "...</div>";
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  try {
+    const res = await fetch("/.netlify/functions/get-inventory-history?name=" + encodeURIComponent(recName || ""));
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    const list = data.sheets || [];
+    if (!list.length) {
+      box.innerHTML = '<div class="note">No saved spreadsheet for ' + esc(recName || "that name") + " yet.</div>";
+      return;
+    }
+    window.TECH_HISTORY = list;
+    box.innerHTML = '<div class="note"><b>' + esc(data.name || recName) + "</b> · " + list.length + " saved sheet" + (list.length === 1 ? "" : "s") +
+      ". Newest is open. Older weeks show up here as they arrive.</div>" +
+      '<div class="note">' + list.map((s, n) => '<button class="mini" type="button" onclick="openHistorySheet(' + n + ')">' +
+        esc(s.sheetDate || "no date") + "</button>").join(" ") + "</div>" +
+      '<div id="techSheetBody"><div class="note">Loading lines...</div></div>';
+    openHistorySheet(0);
+  } catch (err) {
+    box.innerHTML = '<div class="note">Could not open that sheet: ' + esc(err.message) + "</div>";
+  }
+}
+async function openHistorySheet(n) {
+  const body = document.getElementById("techSheetBody");
+  const s = (window.TECH_HISTORY || [])[n];
+  if (!body || !s) return;
+  body.innerHTML = '<div class="note">Loading ' + esc(s.filename) + "...</div>";
+  try {
+    const res = await fetch("/.netlify/functions/get-inventory-history?id=" + encodeURIComponent(s.id));
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    const rows = (data.items || []).map((it) => "<tr>" + itemCells(it) + "</tr>").join("") ||
+      '<tr><td colspan="6" class="note">No lines were read from this sheet.</td></tr>';
+    const file = data.downloadUrl ? ' · <a href="' + esc(data.downloadUrl) + '">Download spreadsheet</a>' : "";
+    body.innerHTML = '<div class="note">' + esc(data.filename) + file + "</div>" +
+      "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
+      rows + "</tbody></table>";
+  } catch (err) {
+    body.innerHTML = '<div class="note">Could not open that file: ' + esc(err.message) + "</div>";
+  }
 }
 function unmatchedHtml(list) {
   if (!list.length) return '<div class="note">No unmatched mail.</div>';
