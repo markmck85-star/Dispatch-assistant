@@ -22,6 +22,7 @@ const {
   flagPlaceholderForPromotion,
 } = require("./lib/placeholder-sites");
 const { parseMileageWorkbookBuffer, evaluateMileageReport } = require("./lib/mileage-check.js");
+const { parseInventoryWorkbookBuffer } = require("./lib/inventory-sheet.js");
 
 // 2026-09-20: extracts file attachments from a raw multipart/form-data
 // body, byte-accurately -- added for the technician mileage sanity-check
@@ -1916,6 +1917,16 @@ exports.handler = async (event) => {
               .from('inventory-sheets')
               .upload(storagePath, att.content, { contentType: att.contentType || 'application/octet-stream', upsert: true });
             if (upErr) { console.error(`[mailgun-inbound] inventory sheet upload failed (${att.filename}):`, upErr.message); continue; }
+            // Read the counts out of the sheet (see lib/inventory-sheet.js). A
+            // layout it can't read leaves parsed null with the reason in
+            // parse_error; the file is kept either way.
+            let parsedSheet = null;
+            let parseErr = null;
+            try {
+              parsedSheet = parseInventoryWorkbookBuffer(att.content);
+            } catch (pe) {
+              parseErr = String(pe && pe.message ? pe.message : pe).slice(0, 300);
+            }
             const { error: rowErr } = await supabase.from('inventory_sheets').upsert({
               inbound_email_id: inboundEmailId,
               filename: att.filename,
@@ -1923,6 +1934,8 @@ exports.handler = async (event) => {
               size_bytes: att.content.length,
               storage_path: storagePath,
               received_at: receivedAt.toISOString(),
+              parsed: parsedSheet,
+              parse_error: parseErr,
             }, { onConflict: 'inbound_email_id,filename' });
             if (rowErr) console.error(`[mailgun-inbound] inventory_sheets insert failed (${att.filename}):`, rowErr.message);
             else console.log(`[mailgun-inbound] Inventory sheet saved: ${att.filename} (${att.content.length} bytes)`);
