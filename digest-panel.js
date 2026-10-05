@@ -358,8 +358,9 @@
       if (!tl.length && (d.techLoadNext || []).length) {
         tl = d.techLoadNext;
         tlUsedNext = true;
-        if (d.preview && d.preview.date) {
-          tlTitle += ' \u00B7 ' + new Date(d.preview.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        var tlDate = (d.preview && d.preview.date) || (d.availability && d.availability.nextDate);
+        if (tlDate) {
+          tlTitle += ' \u00B7 ' + new Date(tlDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         }
       }
       var over = tl.filter(function (t) { return t.overloaded; });
