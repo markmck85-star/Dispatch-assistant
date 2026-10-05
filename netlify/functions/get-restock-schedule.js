@@ -47,6 +47,17 @@ function json(statusCode, obj) {
   };
 }
 
+// A query like .in('site_id', [...]) puts every id in the request URL. With all
+// states loaded (~1000 sites) that URL is ~39 KB and the database API rejects
+// it with a 400, which surfaced as HTTP 500 here. Split into small batches and
+// run them in parallel instead.
+const IN_CHUNK = 100;
+function chunk(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
 function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + Math.round(days));
@@ -84,22 +95,26 @@ exports.handler = async (event) => {
   // without touching the automated overdue calculation below at all --
   // see mark-site-restocked.js for the reasoning. Only the most recent
   // confirmation per site matters for display.
-  const { data: manualConfirmations, error: confirmErr } = await supabase
+  const confirmResults = await Promise.all(chunk(siteIds, IN_CHUNK).map((ids) => supabase
     .from('site_manual_restock_confirmations')
     .select('site_id, confirmed_at, note')
-    .in('site_id', siteIds)
-    .order('confirmed_at', { ascending: false });
+    .in('site_id', ids)));
+  const confirmErr = (confirmResults.find((r) => r.error) || {}).error;
   if (confirmErr) return json(500, { ok: false, error: 'manual confirmations fetch failed: ' + confirmErr.message });
+  const manualConfirmations = confirmResults.flatMap((r) => r.data || [])
+    .sort((x, y) => String(y.confirmed_at || '').localeCompare(String(x.confirmed_at || '')));
   const latestConfirmationBySite = {};
   for (const c of (manualConfirmations || [])) {
     if (!latestConfirmationBySite[c.site_id]) latestConfirmationBySite[c.site_id] = c;
   }
 
-  const { data: nonRestockAcks, error: ackErr } = await supabase
+  const ackResults = await Promise.all(chunk(siteIds, IN_CHUNK).map((ids) => supabase
     .from('site_nonrestock_acks')
     .select('site_id, appointment_number')
-    .in('site_id', siteIds);
+    .in('site_id', ids)));
+  const ackErr = (ackResults.find((r) => r.error) || {}).error;
   if (ackErr) return json(500, { ok: false, error: 'non-restock ack fetch failed: ' + ackErr.message });
+  const nonRestockAcks = ackResults.flatMap((r) => r.data || []);
   const ackedApptBySite = {};
   for (const a of (nonRestockAcks || [])) {
     if (!a.site_id) continue;
@@ -108,25 +123,36 @@ exports.handler = async (event) => {
   }
 
   // Paginate -- a full state's visit history can run into the thousands of rows.
-  let allVisits = [];
-  let from = 0;
+  // Site ids are batched (see IN_CHUNK) and each batch paginates on its own;
+  // rows are re-sorted by started_at afterwards so the per-site grouping below
+  // sees the same chronological order as a single query would give.
   const pageSize = 1000;
-  while (true) {
-    let visitsQuery = supabase
-      .from('site_visits')
-      .select('site_id, started_at, is_restock, included_restock, tech_name_raw, appointment_number, closing_note, imported_at, tickets(inbound_email_id)')
-      .in('site_id', siteIds)
-      .not('started_at', 'is', null)
-      .order('started_at', { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (since) visitsQuery = visitsQuery.gte('started_at', since + 'T00:00:00');
-    if (until) visitsQuery = visitsQuery.lte('started_at', until + 'T23:59:59');
-    const { data: page, error: visitsErr } = await visitsQuery;
-    if (visitsErr) return json(500, { ok: false, error: 'site_visits fetch failed: ' + visitsErr.message });
-    allVisits = allVisits.concat(page);
-    if (page.length < pageSize) break;
-    from += pageSize;
+  async function fetchVisitsFor(ids) {
+    let rows = [];
+    let from = 0;
+    while (true) {
+      let visitsQuery = supabase
+        .from('site_visits')
+        .select('site_id, started_at, is_restock, included_restock, tech_name_raw, appointment_number, closing_note, imported_at, tickets(inbound_email_id)')
+        .in('site_id', ids)
+        .not('started_at', 'is', null)
+        .order('started_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (since) visitsQuery = visitsQuery.gte('started_at', since + 'T00:00:00');
+      if (until) visitsQuery = visitsQuery.lte('started_at', until + 'T23:59:59');
+      const { data: page, error: visitsErr } = await visitsQuery;
+      if (visitsErr) return { error: visitsErr };
+      rows = rows.concat(page);
+      if (page.length < pageSize) break;
+      from += pageSize;
+    }
+    return { rows };
   }
+  const visitResults = await Promise.all(chunk(siteIds, IN_CHUNK).map(fetchVisitsFor));
+  const visitsErrObj = (visitResults.find((r) => r.error) || {}).error;
+  if (visitsErrObj) return json(500, { ok: false, error: 'site_visits fetch failed: ' + visitsErrObj.message });
+  const allVisits = visitResults.flatMap((r) => r.rows)
+    .sort((x, y) => String(x.started_at).localeCompare(String(y.started_at)));
 
   // True data-freshness signal: when the underlying Salesforce report was
   // last imported into Supabase (via the closed-ticket import), not "now" --
@@ -164,14 +190,17 @@ exports.handler = async (event) => {
   // separate question from the projected/predicted date (next1), which is
   // just a cycle-based estimate with no awareness of what's actually been
   // dispatched.
-  const { data: upcoming, error: upcomingErr } = await supabase
+  const upcomingResults = await Promise.all(chunk(siteIds, IN_CHUNK).map((ids) => supabase
     .from('assignments')
     .select('site_id, dispatch_date, technician_id, technicians(name)')
-    .in('site_id', siteIds)
+    .in('site_id', ids)
     .eq('status', 'planned')
     .gte('dispatch_date', todayStr)
-    .order('dispatch_date', { ascending: true });
+    .order('dispatch_date', { ascending: true })));
+  const upcomingErr = (upcomingResults.find((r) => r.error) || {}).error;
   if (upcomingErr) return json(500, { ok: false, error: 'assignments fetch failed: ' + upcomingErr.message });
+  const upcoming = upcomingResults.flatMap((r) => r.data || [])
+    .sort((x, y) => String(x.dispatch_date).localeCompare(String(y.dispatch_date)));
   const scheduledBySite = {};
   for (const row of (upcoming || [])) {
     if (!scheduledBySite[row.site_id]) {
