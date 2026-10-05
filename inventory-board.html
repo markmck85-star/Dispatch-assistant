@@ -753,7 +753,9 @@ function detailHtml(data) {
       '<tr><td colspan="6" class="note">No form, ribbon, paper, or card lines on this sheet.</td></tr>';
     return '<details class="grp"><summary>' + esc(s.name) + ' <span class="count">' + esc(s.state || "") + "</span> " + tag +
       '<span class="hint" style="font-weight:400;">' + esc(s.sheetDate || "no date") + "</span></summary>" +
-      '<div class="note">' + esc(s.filename) + issues + "</div>" +
+      '<div class="note">' + esc(s.filename) +
+      (s.id ? ' · <button class="mini" type="button" onclick="downloadSheet(\'' + esc(s.id) + '\')">Download spreadsheet</button>' : "") +
+      issues + "</div>" +
       "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
       rows + "</tbody></table></details>";
   }).join("");
@@ -761,6 +763,17 @@ function detailHtml(data) {
     "</b> · " + esc(n.sender || "") + "<pre style=\"white-space:pre-wrap;font:inherit;margin:8px 0 0;\">" + esc(n.text) + "</pre></div>").join("");
   return '<div class="note">' + (data.readyCount || 0) + " ready to send, " + (data.heldCount || 0) + " held for a date or file-name problem.</div>" +
     blocks + (notes ? '<h2 style="border-top:1px solid var(--line);">Notes from the mailbox</h2>' + notes : "");
+}
+async function downloadSheet(id) {
+  try {
+    const res = await fetch("/.netlify/functions/get-inventory-history?id=" + encodeURIComponent(id));
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    if (!data.downloadUrl) throw new Error("No file saved for this sheet");
+    window.open(data.downloadUrl, "_blank");
+  } catch (err) {
+    window.alert("Download failed: " + err.message);
+  }
 }
 async function loadDetail() {
   const since = document.getElementById("since").value;
