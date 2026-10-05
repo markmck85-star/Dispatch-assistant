@@ -170,7 +170,7 @@
 
   <div class="wrap">
     <section class="stats">
-      <div class="stat ok"><b id="statIn">–</b><span>Received</span></div>
+      <div class="stat ok"><b id="statIn">–</b><span>Received <i id="statInFix" style="font-style:normal;color:var(--bad);"></i></span></div>
       <div class="stat miss"><b id="statOut">–</b><span>Missing</span></div>
       <div class="stat"><b id="statAll">–</b><span>People who should submit</span></div>
       <div class="stat"><b>Review</b><span>Sheets stay here until an admin forwards the set</span></div>
@@ -633,6 +633,8 @@ async function loadChecks() {
     const list = data.sheets || [];
     const cnt = document.getElementById("cntChecks");
     cnt.textContent = data.needFix || 0;
+    const fx = document.getElementById("statInFix");
+    if (fx) fx.textContent = data.needFix ? "(" + data.needFix + " need a date fixed)" : "";
     cnt.className = "count " + (data.needFix ? "bad" : "good");
     if (!list.length) {
       body.innerHTML = '<div class="note">All ' + (data.checked || 0) + " sheets have a matching, sensible date in the file name and inside the sheet.</div>";
