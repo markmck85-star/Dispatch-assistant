@@ -1895,6 +1895,43 @@ exports.handler = async (event) => {
         }
       }
 
+      // 2026-10-05: keep the technician's weekly inventory count sheet.
+      // Until now only the email text was stored, so the counts inside the
+      // attached spreadsheet were unreachable (needed for the projected-stock
+      // check). Saves the original file to the private 'inventory-sheets'
+      // storage bucket and indexes it in inventory_sheets; parsing the counts
+      // comes later, once the sheet's row layout is confirmed from real files.
+      // Non-fatal: a storage problem never affects normal mail handling. Same
+      // inventory test as get-inventory-receipts.js (address, or "Inventory"
+      // in the subject from an MCR sender), and forwards are kept too.
+      try {
+        const invAddr = /inventory@mcrtechservice\.com/.test(payrollHay);
+        const invSubject = /inventory/i.test(subject || '') && /mcrtechservice\.com/i.test(sender || '') && !/service response/i.test(subject || '');
+        if ((invAddr || invSubject) && inboundEmailId) {
+          const sheetFiles = attachments.filter((a) => /\.(xlsx|xlsm|xls|csv)$/i.test(a.filename || '') && a.content && a.content.length > 0);
+          for (const att of sheetFiles) {
+            const safeName = String(att.filename).replace(/[^A-Za-z0-9._-]+/g, '_');
+            const storagePath = `${inboundEmailId}/${safeName}`;
+            const { error: upErr } = await supabase.storage
+              .from('inventory-sheets')
+              .upload(storagePath, att.content, { contentType: att.contentType || 'application/octet-stream', upsert: true });
+            if (upErr) { console.error(`[mailgun-inbound] inventory sheet upload failed (${att.filename}):`, upErr.message); continue; }
+            const { error: rowErr } = await supabase.from('inventory_sheets').upsert({
+              inbound_email_id: inboundEmailId,
+              filename: att.filename,
+              content_type: att.contentType || null,
+              size_bytes: att.content.length,
+              storage_path: storagePath,
+              received_at: receivedAt.toISOString(),
+            }, { onConflict: 'inbound_email_id,filename' });
+            if (rowErr) console.error(`[mailgun-inbound] inventory_sheets insert failed (${att.filename}):`, rowErr.message);
+            else console.log(`[mailgun-inbound] Inventory sheet saved: ${att.filename} (${att.content.length} bytes)`);
+          }
+        }
+      } catch (invSheetEx) {
+        console.error('[mailgun-inbound] Inventory sheet capture failed (non-fatal):', invSheetEx.message);
+      }
+
       // ITI/TechWeb closing emails go straight into site_visits, not
       // `tickets` -- unlike trouble/maintenance emails, these arrive
       // already CLOSED (they're the legacy system's own after-the-fact
