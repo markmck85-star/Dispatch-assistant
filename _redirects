@@ -23,4 +23,5 @@
 
 /:state          /state.html?state=:state    200
 /watchdog/:state /watchdog-log.html?state=:state    200
+/time                /time-off.html        200
 /*               /index.html      200
