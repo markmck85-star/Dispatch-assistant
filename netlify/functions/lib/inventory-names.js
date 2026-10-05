@@ -16,6 +16,10 @@
  * Only a single match is ever returned. Two candidates, a different first name
  * with the same last name, a company name: all return null, so the sheet stays
  * visible as unmatched instead of crediting the wrong person.
+ *
+ * ALIASES: a sheet name that is not the roster name, but is the same person.
+ * Paul Gerhart is Rich Gerhart (legal name Paul, goes by Rich). The roster card
+ * stays Rich. Do not rename it.
  */
 const NOISE = new Set([
   "mcr", "field", "services", "service", "sst", "inventory", "master", "sheet", "inc", "llc", "tech",
@@ -27,6 +31,11 @@ const PLACES = new Set([
   "north", "south", "detroit", "al", "ar", "ca", "co", "fl", "ga", "id", "il", "in", "mi", "mn", "ms",
   "nc", "nv", "oh", "or", "sc", "wv",
 ]);
+
+// sheet tokens joined, matched to a roster name (case-insensitive, full name)
+const ALIASES = {
+  "paul gerhart": "rich gerhart",
+};
 
 function rawWords(s) {
   return String(s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
@@ -41,6 +50,12 @@ function resolveSheetTech(roster, rawName) {
   if (!toks.length) return null;
   const set = new Set(toks);
   const real = (roster || []).filter((t) => !t.extra);
+
+  const aliasTarget = ALIASES[toks.join(" ")];
+  if (aliasTarget) {
+    const hit = real.filter((t) => rawWords(t.name).join(" ") === aliasTarget);
+    if (hit.length === 1) return hit[0];
+  }
 
   const full = real.filter((t) => {
     const tw = rawWords(t.name);
