@@ -1581,6 +1581,23 @@ exports.handler = async (event) => {
     const attachments = extractAttachments(rawBuffer);
     const timesheetAttachments = attachments.filter((a) => /_Expense_.*\.xlsx$/i.test(a.filename || ""));
 
+    // 2026-10-05: spot technicians' inventory count sheets by their CONTENT, not
+    // by who the mail was addressed to. A combined email (several sheets in one
+    // message, or inventory@ only on BCC) shows no inventory address at all, and
+    // the subject can be anything. A spreadsheet counts as a sheet when it has a
+    // tech name plus the item table with registration-form rows
+    // (see lib/inventory-sheet.js). Used below to keep such mail out of the
+    // dispatch/ticket paths and to save the files.
+    const inventorySheetAtts = [];
+    for (const a of attachments) {
+      if (!/\.(xlsx|xlsm|xls)$/i.test(a.filename || "") || !a.content || !a.content.length) continue;
+      if (timesheetAttachments.includes(a)) continue;
+      try {
+        const ps = parseInventoryWorkbookBuffer(a.content);
+        if (ps && ps.techName && ps.items.length >= 5 && ps.summary && ps.summary.forms.length > 0) inventorySheetAtts.push({ att: a, parsed: ps });
+      } catch (invParseEx) { /* not an inventory sheet */ }
+    }
+
     const sender    = fields["sender"] || fields["from"] || "unknown";
     const subject   = fields["subject"] || "";
     // Prioritize full body fields over stripped — stripped versions lose forwarded content
@@ -1724,7 +1741,7 @@ exports.handler = async (event) => {
     {
       const payrollHayEarly = ((fields['To'] || fields['to'] || '') + ' ' + (fields['Cc'] || fields['cc'] || '') + ' ' +
         (fields['recipient'] || fields['Recipient'] || '') + ' ' + (subject || '')).toLowerCase();
-      if (/inventory@mcrtechservice\.com|expense@mcrtechservice\.com/.test(payrollHayEarly)) {
+      if (/inventory@mcrtechservice\.com|expense@mcrtechservice\.com/.test(payrollHayEarly) || inventorySheetAtts.length > 0) {
         if (parsed) console.log('[mailgun-inbound] Inventory/expense mail -- skipping dispatch parsing');
         parsed = null;
       }
@@ -1777,7 +1794,7 @@ exports.handler = async (event) => {
       const ccHeaderEarly = fields['Cc'] || fields['cc'] || '';
       const recipientEarly = fields['recipient'] || fields['Recipient'] || '';
       const payrollHay = (toHeaderEarly + ' ' + ccHeaderEarly + ' ' + recipientEarly + ' ' + (subject || '')).toLowerCase();
-      const isPayroll = /inventory@mcrtechservice\.com/.test(payrollHay) || /expense@mcrtechservice\.com/.test(payrollHay);
+      const isPayroll = /inventory@mcrtechservice\.com/.test(payrollHay) || /expense@mcrtechservice\.com/.test(payrollHay) || inventorySheetAtts.length > 0;
       const classifiedAs = isReplyOnly ? 'reply' : (classifiedAsMap[dispatchType] || 'unknown');
       const parseStatus = (isReplyOnly || isPayroll) ? 'ignored' : (parsed ? 'parsed' : 'failed');
       const mailgunMessageId = fields['Message-Id'] || fields['message-id'] || null;
@@ -1920,27 +1937,14 @@ exports.handler = async (event) => {
       // inventory test as get-inventory-receipts.js (address, or "Inventory"
       // in the subject from an MCR sender), and forwards are kept too.
       try {
-        const invAddr = /inventory@mcrtechservice\.com/.test(payrollHay);
-        const invSubject = /inventory/i.test(subject || '') && /mcrtechservice\.com/i.test(sender || '') && !/service response/i.test(subject || '');
-        if ((invAddr || invSubject) && inboundEmailId) {
-          const sheetFiles = attachments.filter((a) => /\.(xlsx|xlsm|xls|csv)$/i.test(a.filename || '') && a.content && a.content.length > 0);
-          for (const att of sheetFiles) {
+        if (inventorySheetAtts.length && inboundEmailId) {
+          for (const { att, parsed: parsedSheet } of inventorySheetAtts) {
             const safeName = String(att.filename).replace(/[^A-Za-z0-9._-]+/g, '_');
             const storagePath = `${inboundEmailId}/${safeName}`;
             const { error: upErr } = await supabase.storage
               .from('inventory-sheets')
               .upload(storagePath, att.content, { contentType: att.contentType || 'application/octet-stream', upsert: true });
             if (upErr) { console.error(`[mailgun-inbound] inventory sheet upload failed (${att.filename}):`, upErr.message); continue; }
-            // Read the counts out of the sheet (see lib/inventory-sheet.js). A
-            // layout it can't read leaves parsed null with the reason in
-            // parse_error; the file is kept either way.
-            let parsedSheet = null;
-            let parseErr = null;
-            try {
-              parsedSheet = parseInventoryWorkbookBuffer(att.content);
-            } catch (pe) {
-              parseErr = String(pe && pe.message ? pe.message : pe).slice(0, 300);
-            }
             const { error: rowErr } = await supabase.from('inventory_sheets').upsert({
               inbound_email_id: inboundEmailId,
               filename: att.filename,
@@ -1949,7 +1953,7 @@ exports.handler = async (event) => {
               storage_path: storagePath,
               received_at: receivedAt.toISOString(),
               parsed: parsedSheet,
-              parse_error: parseErr,
+              parse_error: null,
             }, { onConflict: 'inbound_email_id,filename' });
             if (rowErr) console.error(`[mailgun-inbound] inventory_sheets insert failed (${att.filename}):`, rowErr.message);
             else console.log(`[mailgun-inbound] Inventory sheet saved: ${att.filename} (${att.content.length} bytes)`);

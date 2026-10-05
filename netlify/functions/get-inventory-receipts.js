@@ -180,6 +180,19 @@ function resolveEmail(email, roster) {
   return { tech: null, reason: "No technician name or known address found." };
 }
 
+// Roster lookup by the name written on a count sheet: exact name, else a unique
+// first-initial + last-name match. Never guesses between two people.
+function findTechByName(roster, raw) {
+  const w = words(raw);
+  if (!w.length) return null;
+  const real = roster.filter((t) => !t.extra);
+  const exact = real.filter((t) => words(t.name).join(" ") === w.join(" "));
+  if (exact.length === 1) return exact[0];
+  const last = w[w.length - 1];
+  const cand = real.filter((t) => { const tw = words(t.name); return tw.length > 1 && tw[tw.length - 1] === last && tw[0][0] === w[0][0]; });
+  return cand.length === 1 ? cand[0] : null;
+}
+
 /** Pure function so it can be tested without a database. */
 function matchInventory(roster, inventoryMail) {
   const received = [];
@@ -191,7 +204,7 @@ function matchInventory(roster, inventoryMail) {
   for (const e of inventoryMail) {
     const r = resolveEmail(e, roster);
     if (!r.tech) {
-      unmatched.push({ subject: e.subject, sender: e.sender, receivedAt: e.received_at, to: e.to_address, reason: r.reason });
+      unmatched.push({ id: e.id, subject: e.subject, sender: e.sender, receivedAt: e.received_at, to: e.to_address, reason: r.reason });
       continue;
     }
     const cur = byTech.get(r.tech.id);
@@ -278,7 +291,41 @@ exports.handler = async (event) => {
     return false;
   });
 
-  const { received, missing, unmatched } = matchInventory(roster, inventoryMail);
+  const matched = matchInventory(roster, inventoryMail);
+  let { received, missing, unmatched } = matched;
+
+  // 2026-10-05: also credit technicians from the NAME WRITTEN INSIDE a saved
+  // count sheet. Covers a combined email carrying several sheets (one email, no
+  // technician name in the subject) and mail with inventory@ only on BCC. A
+  // credit from the email's own subject/sender still wins when it exists.
+  const { data: sheetRows } = await supabase
+    .from("inventory_sheets")
+    .select("id, inbound_email_id, filename, received_at, tech:parsed->>techName")
+    .gte("received_at", sinceIso)
+    .not("parsed", "is", null)
+    .order("received_at", { ascending: false })
+    .limit(500);
+  const mailById = new Map((mails || []).map((m) => [m.id, m]));
+  const creditedEmailIds = new Set();
+  for (const sr of sheetRows || []) {
+    const tech = findTechByName(roster, sr.tech);
+    if (!tech) continue;
+    const already = received.find((r) => r.name === tech.name);
+    if (already) { if (sr.inbound_email_id === already.emailId) creditedEmailIds.add(sr.inbound_email_id); continue; }
+    const mail = mailById.get(sr.inbound_email_id);
+    received.push({
+      name: tech.name,
+      state: tech.home_state,
+      email: tech.email || null,
+      subject: mail ? mail.subject : sr.filename,
+      receivedAt: sr.received_at,
+      emailId: sr.inbound_email_id,
+      matchedBy: "sheet",
+    });
+    missing = missing.filter((x) => x.name !== tech.name);
+    creditedEmailIds.add(sr.inbound_email_id);
+  }
+  unmatched = unmatched.filter((u) => !creditedEmailIds.has(u.id));
 
   return json(200, {
     ok: true,
