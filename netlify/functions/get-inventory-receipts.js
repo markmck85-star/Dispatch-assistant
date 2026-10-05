@@ -66,6 +66,17 @@ const FORWARDER_EMAILS = new Set(["tkadri@mcrtechservice.com"]);
 // they really do file one.
 const EXTRA_ROSTER = [];
 
+// People who never file an inventory themselves. Listed by roster name.
+const NOT_EXPECTED = ["TJ Kadri"];
+
+// Contractor COMPANIES that file ONE sheet for their whole crew. The company is
+// the expected submitter (listed and counted as its own entry); the individual
+// crew members are not expected separately. Add more companies here as TJ
+// confirms them. `members` are roster names.
+const CONTRACTOR_COMPANIES = [
+  { name: "KMG Computers", home_state: "WV", members: ["Craig Gosnell", "Zach Roach", "Cody Vanorsdale"] },
+];
+
 // States whose technicians are not MCR's yet. They are skipped until liveFrom
 // (YYYY-MM-DD, Eastern), so the expected-submitter count stays honest and CA
 // switches on by itself on its takeover date.
@@ -249,7 +260,18 @@ exports.handler = async (event) => {
     .order("name", { ascending: true });
   if (tErr) return json(500, { error: tErr.message });
   let roster = [...(techs || []), ...EXTRA_ROSTER];
+  // Crew members covered by a company sheet are not expected on their own; the
+  // company takes their place as one contractor entry.
+  const covered = new Set(CONTRACTOR_COMPANIES.flatMap((c) => c.members.map((m) => m.toLowerCase())));
+  roster = roster.filter((t) => !covered.has(String(t.name || "").toLowerCase()));
+  roster = roster.filter((t) => !NOT_EXPECTED.some((n) => n.toLowerCase() === String(t.name || "").toLowerCase()));
+  for (const c of CONTRACTOR_COMPANIES) {
+    roster.push({ id: "company-" + c.name.toLowerCase().replace(/\W+/g, "-"), name: c.name, home_state: c.home_state, email: null, active: true, is_contractor: true, company: true });
+  }
   roster = roster.filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
+  // Everyone a sheet could belong to, before the display filters below: a sheet
+  // from a hidden contractor (or a not-yet-live state) is not an unknown sheet.
+  const rosterAll = roster.slice();
   const excludeContractors = params.excludeContractors === "1";
   const includeNotLive = params.includeNotLive === "1";
   if (excludeContractors) roster = roster.filter((t) => !t.is_contractor);
@@ -314,6 +336,25 @@ exports.handler = async (event) => {
     creditedEmailIds.add(sr.inbound_email_id);
   }
   unmatched = unmatched.filter((u) => !creditedEmailIds.has(u.id));
+
+  // A saved sheet whose name matches nobody on the roster would otherwise vanish
+  // (it credits no one and is not in the mail-level unmatched list). Show it.
+  const seenSheetNames = new Set();
+  for (const sr of sheetRows || []) {
+    if (resolveSheetTech(rosterAll, sr.tech)) continue;
+    const key = String(sr.tech || "").toLowerCase() + "|" + String(sr.filename || "").toLowerCase();
+    if (seenSheetNames.has(key)) continue;
+    seenSheetNames.add(key);
+    const mail = mailById.get(sr.inbound_email_id);
+    unmatched.push({
+      id: sr.inbound_email_id,
+      subject: sr.filename,
+      sender: 'sheet name: "' + (sr.tech || "none") + '"',
+      receivedAt: sr.received_at,
+      to: mail ? mail.to_address : null,
+      reason: "This sheet's name does not match anyone on the roster, so it is not counted.",
+    });
+  }
 
   return json(200, {
     ok: true,
