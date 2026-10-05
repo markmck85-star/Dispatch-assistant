@@ -168,7 +168,8 @@ exports.handler = async (event) => {
   catch (err) { return json(500, { error: err.message }); }
 
   const ready = built.sheets.filter((s) => s.ready);
-  const text = previewText(since, built.sheets, built.notes, String(body.note || "").trim());
+  const builtText = previewText(since, built.sheets, built.notes, String(body.note || "").trim());
+  const text = String(body.body || "").trim() || builtText;
   const subject = String(body.subject || "").trim() || ("Inventory counts since " + since);
   const preview = {
     ok: true,
