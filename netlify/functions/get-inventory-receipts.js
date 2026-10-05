@@ -52,6 +52,7 @@
  *   matching on attachment filename, and counting attachments.
  */
 const { createClient } = require("@supabase/supabase-js");
+const { resolveSheetTech } = require("./lib/inventory-names.js");
 
 // Addresses that forward other people's inventory. From-address and
 // signature matching are skipped for these.
@@ -180,19 +181,6 @@ function resolveEmail(email, roster) {
   return { tech: null, reason: "No technician name or known address found." };
 }
 
-// Roster lookup by the name written on a count sheet: exact name, else a unique
-// first-initial + last-name match. Never guesses between two people.
-function findTechByName(roster, raw) {
-  const w = words(raw);
-  if (!w.length) return null;
-  const real = roster.filter((t) => !t.extra);
-  const exact = real.filter((t) => words(t.name).join(" ") === w.join(" "));
-  if (exact.length === 1) return exact[0];
-  const last = w[w.length - 1];
-  const cand = real.filter((t) => { const tw = words(t.name); return tw.length > 1 && tw[tw.length - 1] === last && tw[0][0] === w[0][0]; });
-  return cand.length === 1 ? cand[0] : null;
-}
-
 /** Pure function so it can be tested without a database. */
 function matchInventory(roster, inventoryMail) {
   const received = [];
@@ -308,7 +296,7 @@ exports.handler = async (event) => {
   const mailById = new Map((mails || []).map((m) => [m.id, m]));
   const creditedEmailIds = new Set();
   for (const sr of sheetRows || []) {
-    const tech = findTechByName(roster, sr.tech);
+    const tech = resolveSheetTech(roster, sr.tech);
     if (!tech) continue;
     const already = received.find((r) => r.name === tech.name);
     if (already) { if (sr.inbound_email_id === already.emailId) creditedEmailIds.add(sr.inbound_email_id); continue; }

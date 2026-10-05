@@ -30,6 +30,7 @@
  * GET ?state=GA  &rollsPerRestock=1  &reserveWeeks=4
  */
 const { createClient } = require("@supabase/supabase-js");
+const { resolveSheetTech } = require("./lib/inventory-names.js");
 
 const LIKELY_ARRIVED_DAYS = 7;
 const ALREADY_COUNTED_DAYS = 5;
@@ -47,18 +48,6 @@ const normCode = (v) => { const s = String(v == null ? "" : v).replace(/\s+/g, "
 function etDate(d) { return new Date(d).toLocaleDateString("en-CA", { timeZone: "America/New_York" }); }
 function addDaysStr(ymd, n) { const d = new Date(ymd + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 function daysBetween(a, b) { return Math.round((new Date(b + "T12:00:00Z") - new Date(a + "T12:00:00Z")) / 86400000); }
-
-function findTech(roster, rawName) {
-  const n = norm(rawName);
-  if (!n) return null;
-  let hit = roster.find((t) => norm(t.name) === n);
-  if (hit) return hit;
-  const parts = n.split(" ");
-  const last = parts[parts.length - 1];
-  const first = parts[0];
-  const cand = roster.filter((t) => { const p = norm(t.name).split(" "); return p[p.length - 1] === last && p[0][0] === first[0]; });
-  return cand.length === 1 ? cand[0] : null;
-}
 
 // Current-year forms = the form item with the latest year in its name.
 function currentYearForms(parsed) {
@@ -90,10 +79,13 @@ exports.handler = async (event) => {
   const byTech = new Map();
   for (const s of sheets || []) {
     const p = s.parsed || {};
-    const tech = findTech(roster, p.techName);
-    if (!tech || !p.invDate) continue;
+    const tech = resolveSheetTech(roster, p.techName);
+    if (!tech) continue;
+    // Some sheets have no readable date cell; fall back to the day the sheet
+    // arrived (Eastern) and mark it.
+    const date = p.invDate || etDate(s.received_at);
     if (!byTech.has(tech.id)) byTech.set(tech.id, { tech, list: [] });
-    byTech.get(tech.id).list.push({ date: p.invDate, receivedAt: s.received_at, parsed: p, filename: s.filename });
+    byTech.get(tech.id).list.push({ date, dateFromArrival: !p.invDate, receivedAt: s.received_at, parsed: p, filename: s.filename });
   }
 
   const out = [];
@@ -185,7 +177,7 @@ exports.handler = async (event) => {
 
     out.push({
       name: tech.name, state: tech.home_state, contractor: !!tech.is_contractor,
-      sheetDate: L.date, previousSheetDate: P ? P.date : null,
+      sheetDate: L.date, sheetDateFromArrival: !!L.dateFromArrival, previousSheetDate: P ? P.date : null,
       itemName: cy.name, counted: cy.count, par: cy.par,
       restocksSince: since, estUsedSince: Math.round(usedSince * 10) / 10,
       shipments: arr.list, shippedRollsSince: arr.rolls,
