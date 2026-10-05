@@ -188,6 +188,17 @@ function parseInventoryGrid(grid) {
     journal: pick('journal').map((i) => ({ code: i.code, name: i.name, par: i.par, count: i.count, inTransit: i.inTransit, toOrder: i.toOrder })),
     cleaningCards: pick('cleaning_cards').map((i) => ({ code: i.code, name: i.name, par: i.par, count: i.count, inTransit: i.inTransit, toOrder: i.toOrder })),
     partialsPresent: out.partials.some((p) => p.partialRolls > 0),
+    // Partial-roll counts are only brought current on month-end sheets (the last
+    // business day, or the Monday after a weekend month-end). On any other week
+    // they are last month's numbers carried forward, so the stock check should
+    // lean on whole-roll counts and treat partials as unchanged. Heuristic from
+    // the sheet date: last 3 days of a month, or the first 3.
+    partialsLikelyCurrent: (() => {
+      if (!out.invDate) return null;
+      const [y, m, d] = out.invDate.split('-').map(Number);
+      const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      return d >= daysInMonth - 2 || d <= 3;
+    })(),
   };
   if (!out.summary.forms.length) warnings.push('No registration-form rows recognized');
   return out;
