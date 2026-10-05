@@ -217,6 +217,29 @@
         <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span></summary>
         <div id="unmBody"><div class="note">Loading&hellip;</div></div>
       </details>
+    <section class="panel">
+      <h2>Send reviewed set <span class="hint" style="font-weight:400;">preview first, nothing sends until you press Send</span></h2>
+      <div class="settings-grid">
+        <div>
+          <label>Send to (editable, for testing)</label>
+          <input id="sendTo" type="text" placeholder="name@example.com" />
+          <p class="hint">One to three addresses, comma separated. This browser remembers the last address. It is not filled in for you.</p>
+          <label>Subject</label>
+          <input id="sendSubject" type="text" />
+          <label>Note to add at the top</label>
+          <textarea id="sendNote" placeholder="Optional note for this send"></textarea>
+        </div>
+        <div>
+          <label>Message (edit before sending)</label>
+          <textarea id="sendPreview" style="min-height:180px;"></textarea>
+          <p class="hint" id="sendMsg">Preview fills this box from the mailbox notes. Change anything before Send. Send uses this text, not the original mail.</p>
+        </div>
+      </div>
+      <div class="save-row">
+        <button class="save" type="button" onclick="previewSet()">Preview</button>
+        <button class="save" type="button" style="background:#9b2c2c;" onclick="sendSet()">Send</button>
+      </div>
+
     </section>
 
     <section class="panel">
@@ -270,32 +293,6 @@
       <h2>Count sheets <span class="hint" style="font-weight:400;">lines from the saved spreadsheets, newest sheet per person</span></h2>
       <div id="detailMsg" class="hint" style="padding:8px 18px 0;"></div>
       <div id="detailBody"><div class="note">Loading...</div></div>
-    </section>
-
-    <section class="panel">
-      <h2>Send reviewed set <span class="hint" style="font-weight:400;">preview first, nothing sends until you press Send</span></h2>
-      <div class="settings-grid">
-        <div>
-          <label>Send to (editable, for testing)</label>
-          <input id="sendTo" type="text" placeholder="name@example.com" />
-          <p class="hint">One to three addresses, comma separated. This browser remembers the last address. It is not filled in for you.</p>
-          <label>Subject</label>
-          <input id="sendSubject" type="text" />
-          <label>Note to add at the top</label>
-          <textarea id="sendNote" placeholder="Optional note for this send"></textarea>
-        </div>
-        <div>
-          <label>Message (edit before sending)</label>
-          <textarea id="sendPreview" style="min-height:180px;"></textarea>
-          <p class="hint" id="sendMsg">Preview fills this box from the mailbox notes. Change anything before Send. Send uses this text, not the original mail.</p>
-        </div>
-      </div>
-      <div class="save-row">
-        <button class="save" type="button" onclick="previewSet()">Preview</button>
-        <button class="save" type="button" style="background:#9b2c2c;" onclick="sendSet()">Send</button>
-      </div>
-    </section>
-
     </section>
 
     <section class="panel">
