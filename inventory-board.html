@@ -670,7 +670,7 @@ function markDateTextSeen(id) {
   seen[id] = new Date().toISOString();
   localStorage.setItem("invDateTextSeen", JSON.stringify(seen));
 }
-async async function loadDateTexts(since) {
+async function loadDateTexts(since) {
   const panel = document.getElementById("dateTextPanel");
   if (!panel) return;
   try {
@@ -682,29 +682,53 @@ async async function loadDateTexts(since) {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || String(res.status));
     const drafts = data.drafts || [];
+    const autoOn = !!data.auto;
+    const toggle = '<div class="save-row"><button class="save" type="button" id="dateTextAutoBtn" onclick="toggleDateTextAuto(' + (autoOn ? "false" : "true") + ')">' +
+      (autoOn ? "Turn auto text off" : "Turn auto text on") + "</button>" +
+      '<span class="hint">' + (autoOn ? "Auto is on. A bad date texts within about 10 minutes, 3 at a time." : "Auto is off. Nothing texts until you press Send text.") + "</span></div>";
     if (!drafts.length) {
-      panel.innerHTML = '<div class="note">No date-text drafts. Shadow only: nothing is texted from this page.</div>';
+      panel.innerHTML = toggle + '<div class="note">No date texts waiting. File-name tidy-up notes stay on the list above and are not texted.</div>';
       return;
     }
     const seen = dateTextSeen();
-    panel.innerHTML = '<div class="note">Shadow only. One draft per sheet that needs a date fix. Confirm marks that you looked. Nothing is texted.</div>' +
+    panel.innerHTML = toggle +
+      '<div class="note">One text per sheet with a bad date. Send text asks before it goes. Auto only runs when the switch above is on.</div>' +
       drafts.map((d) => '<div class="settings-grid" style="margin-top:10px;">' +
         '<div><div class="hint">' + esc(d.name) + (d.state ? " · " + esc(d.state) : "") + "</div>" +
         '<div class="hint">' + esc(d.filename) + "</div>" +
-        '<div class="hint">' + (d.smsAddress ? "Text address on file" : "No text address on the card") +
+        '<div class="hint">' + (d.alreadySent ? "Already texted" : (d.smsAddress ? "Text address on file" : "No text address on the card")) +
         (seen[d.id] ? " · looked at" : "") + "</div></div>" +
         '<div><textarea id="dateText-' + esc(d.id) + '" style="min-height:110px;">' + esc(d.text) + "</textarea>" +
-        '<div class="save-row"><button class="save" type="button" onclick="confirmDateText(\'' + String(d.id).replace(/'/g, "") + '\')">Confirm looked</button></div>' +
+        '<div class="save-row"><button class="save" type="button" onclick="sendDateText(\'' + String(d.id).replace(/'/g, "") + '\')"' +
+        (d.alreadySent || !d.smsAddress ? " disabled" : "") + '>Send text</button></div>' +
         '<div class="hint" id="dateTextMsg-' + esc(d.id) + '"></div></div></div>').join("");
   } catch (err) {
-    panel.innerHTML = '<div class="note">Date-text drafts unavailable: ' + esc(err.message) + "</div>";
+    panel.innerHTML = '<div class="note">Date texts unavailable: ' + esc(err.message) + "</div>";
   }
 }
-async function confirmDateText(id) {
+async function toggleDateTextAuto(enabled) {
+  const btn = document.getElementById("dateTextAutoBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/.netlify/functions/preview-inventory-date-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set-auto", enabled: enabled })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    loadDateTexts(document.getElementById("since").value);
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    alert(err.message);
+  }
+}
+async function sendDateText(id) {
   const box = document.getElementById("dateText-" + id);
   const msg = document.getElementById("dateTextMsg-" + id);
   if (!box) return;
-  msg.textContent = "Saving...";
+  if (!confirm("Send this text now?")) return;
+  msg.textContent = "Sending...";
   try {
     const res = await fetch("/.netlify/functions/preview-inventory-date-text", {
       method: "POST",
@@ -714,7 +738,7 @@ async function confirmDateText(id) {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || String(res.status));
     markDateTextSeen(id);
-    msg.textContent = data.sent ? "Sent." : "Looked at. Not sent (shadow).";
+    msg.textContent = data.sent ? "Sent." : "Not sent.";
   } catch (err) {
     msg.textContent = err.message;
   }

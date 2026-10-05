@@ -7,14 +7,14 @@
 
 [functions."check-report-sync-health"]
   schedule = "15,35,55 * * * *"
-  
+
 [functions."pull-mailbox"]
   timeout = 26
 
 [functions."pull-shipments-mailbox"]
   timeout = 26
   schedule = "*/20 * * * *"
-  
+
 [functions."closings-sync"]
   timeout = 26
   schedule = "0 */2 * * *"
@@ -32,3 +32,7 @@
 
 [functions."get-distance-matrix"]
   timeout = 26
+
+# Date-fix texts. Does nothing until the board switch is on. Caps at 3 per run.
+[functions."preview-inventory-date-text"]
+  schedule = "*/10 * * * *"
