@@ -33,6 +33,7 @@
 [functions."get-distance-matrix"]
   timeout = 26
 
-# Date-fix texts. Does nothing until the board switch is on. Caps at 3 per run.
-[functions."preview-inventory-date-text"]
+# Date-fix texts. The public function has no schedule (Netlify blocks those).
+# This wrapper is the 10-minute check. It does nothing until the board switch is on.
+[functions."run-inventory-date-text"]
   schedule = "*/10 * * * *"
