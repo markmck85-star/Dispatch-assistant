@@ -7,6 +7,15 @@
  * subjects that say Inventory) against active technician cards.
  *
  * GET /.netlify/functions/get-inventory-receipts?since=2026-09-22
+ *      optional: &state=GA  &includeContractors=1  &includeNotLive=1
+ *
+ * v2.2 (2026-10-05): who is EXPECTED to submit. The roster used to be every
+ * active technician card plus the owner (85 people), which overstated it:
+ *   - contractors are left out unless includeContractors=1 (which of them send
+ *     inventory is not settled; the technicians.is_contractor flag drives this);
+ *   - the owner has no inventory, so the extra-roster entry is gone;
+ *   - states MCR has not taken over yet (NOT_LIVE below) are left out until their
+ *     start date, then included automatically.
  *
  * v2 CHANGES -- matching is now per EMAIL, not per tech, and tiered:
  *
@@ -51,8 +60,16 @@ const FORWARDER_EMAILS = new Set(["tkadri@mcrtechservice.com"]);
 // Owner / office staff who file inventory but have no technician card.
 // `emails` is optional; with none, the owner is credited only when the
 // subject says "Mike" as a standalone word and no technician matched.
-const EXTRA_ROSTER = [
-  { id: "extra-mike", name: "Mike", home_state: null, email: null, emails: [], active: true, extra: true },
+// 2026-10-05: the owner does not keep an inventory, so he is no longer on the
+// roster (it showed him as permanently missing). Add office staff here only if
+// they really do file one.
+const EXTRA_ROSTER = [];
+
+// States whose technicians are not MCR's yet. They are skipped until liveFrom
+// (YYYY-MM-DD, Eastern), so the expected-submitter count stays honest and CA
+// switches on by itself on its takeover date.
+const NOT_LIVE = [
+  { state: "CA", liveFrom: "2026-11-01" },
 ];
 
 function json(statusCode, obj) {
@@ -225,13 +242,21 @@ exports.handler = async (event) => {
 
   const { data: techs, error: tErr } = await supabase
     .from("technicians")
-    .select("id, name, home_state, email, active")
+    .select("id, name, home_state, email, active, is_contractor")
     .eq("active", true)
     .order("home_state", { ascending: true })
     .order("name", { ascending: true });
   if (tErr) return json(500, { error: tErr.message });
   let roster = [...(techs || []), ...EXTRA_ROSTER];
   roster = roster.filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
+  const includeContractors = params.includeContractors === "1";
+  const includeNotLive = params.includeNotLive === "1";
+  if (!includeContractors) roster = roster.filter((t) => !t.is_contractor);
+  if (!includeNotLive) {
+    const todayEt = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const hidden = new Set(NOT_LIVE.filter((x) => todayEt < x.liveFrom).map((x) => x.state));
+    roster = roster.filter((t) => !hidden.has(String(t.home_state || "").toUpperCase()));
+  }
   if (/^[A-Z]{2}$/.test(stateFilter)) {
     roster = roster.filter((t) => String(t.home_state || "").toUpperCase() === stateFilter);
   }
@@ -259,6 +284,7 @@ exports.handler = async (event) => {
     ok: true,
     since,
     techCount: roster.length,
+    includeContractors,
     received,
     missing,
     unmatched,
