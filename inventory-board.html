@@ -188,7 +188,7 @@
           </select>
         </div>
         <label style="display:flex;gap:8px;align-items:center;min-width:170px;margin:0 0 6px;"><input id="incContractors" type="checkbox" style="width:auto;margin:0;" /> Hide contractors</label>
-                <button class="save" type="button" onclick="loadBoard(); loadShipments(); loadProjection();">Refresh</button>
+                <button class="save" type="button" onclick="loadBoard(); loadShipments(); loadProjection(); loadChecks();">Refresh</button>
       </div>
     </section>
 
@@ -207,6 +207,10 @@
           <thead><tr><th>Tech</th><th>State</th><th>Date</th><th>Email</th></tr></thead>
           <tbody id="recBody"><tr><td colspan="4" class="note">Loading&hellip;</td></tr></tbody>
         </table>
+      </details>
+      <details class="grp" id="grpChecks">
+        <summary>Sheet check <span class="count bad" id="cntChecks">&ndash;</span></summary>
+        <div id="chkBody"><div class="note">Loading&hellip;</div></div>
       </details>
       <details class="grp" id="grpUnmatched">
         <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span></summary>
@@ -440,7 +444,7 @@ function esc(s) {
 }
 // Remember which groups are open, so a Refresh does not snap them shut.
 const GRP_KEY = "inventory-board-open-groups";
-const GRP_IDS = ["grpMissing", "grpReceived", "grpUnmatched"];
+const GRP_IDS = ["grpMissing", "grpReceived", "grpChecks", "grpUnmatched"];
 function restoreGroups() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(GRP_KEY) || "null"); } catch (e) {}
@@ -618,6 +622,34 @@ try {
   if (savedProj) { document.getElementById("projRolls").value = savedProj.rolls; document.getElementById("projReserve").value = savedProj.reserve; }
 } catch (e) {}
 
+
+async function loadChecks() {
+  const since = document.getElementById("since").value;
+  const body = document.getElementById("chkBody");
+  try {
+    const res = await fetch("/.netlify/functions/get-inventory-sheet-checks?since=" + encodeURIComponent(since));
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    const list = data.sheets || [];
+    const cnt = document.getElementById("cntChecks");
+    cnt.textContent = data.needFix || 0;
+    cnt.className = "count " + (data.needFix ? "bad" : "good");
+    if (!list.length) {
+      body.innerHTML = '<div class="note">All ' + (data.checked || 0) + " sheets have a matching, sensible date in the file name and inside the sheet.</div>";
+      return;
+    }
+    body.innerHTML = '<div class="note">' + (data.needFix || 0) + " of " + (data.checked || 0) + " sheets need a date fixed; " +
+      Math.max(0, list.length - (data.needFix || 0)) + " more have a small file-name or repeat note. Nothing is sent from here.</div>" +
+      "<table><thead><tr><th>Tech</th><th>File</th><th>What to fix</th></tr></thead><tbody>" +
+      list.map((s) => "<tr><td>" + esc(s.name) + '<div class="hint">' + esc(s.state || "") + (s.viaCombinedEmail ? " &middot; sent in the combined email" : "") + "</div></td>" +
+        "<td>" + esc(s.filename) + '<div class="hint">sheet date: ' + esc(s.sheetDate || "none") + "</div></td>" +
+        "<td>" + s.issues.map((i) => '<div class="' + (i.kind === "fix" ? "warnline" : "hint") + '">' + esc(i.text) + "</div>").join("") + "</td></tr>").join("") +
+      "</tbody></table>";
+  } catch (err) {
+    body.innerHTML = '<div class="note">Sheet check unavailable: ' + esc(err.message) + "</div>";
+  }
+}
+
 async function loadShipments() {
   const state = document.getElementById("stateFilter").value;
   const msg = document.getElementById("shipMsg");
@@ -686,6 +718,7 @@ restoreGroups();
 loadBoard();
 loadShipments();
 loadProjection();
+loadChecks();
 
 </script>
 </body>
