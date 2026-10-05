@@ -145,6 +145,7 @@ async function loadDrafts(supabase, since) {
       filename: r.filename,
       sheetDate: r.inv || null,
       smsAddress: tech.sms_address || null,
+      phone: tech.phone || null,
       issues: lines,
       text: draftText(tech.name, r.filename, lines),
       receivedAt: r.received_at,
