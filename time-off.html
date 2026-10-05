@@ -3,31 +3,56 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Days Off — MCR</title>
+<title>Days off by pay period</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f4f6f8; color: #1c2834; }
-  header { background: #16324f; color: #fff; padding: 16px 20px; }
-  header a { color: #d6e6f5; }
-  main { max-width: 920px; margin: 0 auto; padding: 18px 16px 40px; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
-  button, select { min-height: 40px; border-radius: 8px; border: 1px solid #c5d0da; background: #fff; padding: 8px 12px; font-weight: 650; }
-  button.primary { background: #16324f; color: #fff; border-color: #16324f; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { color: #5c6b7a; font-size: 13px; margin: 0 0 14px; }
+  :root { --ink:#16324f; --paper:#f3f6f8; --card:#fff; --line:#d5e0e8; --muted:#5c6b7a; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--paper); color: #1c2834; }
+  header { background: linear-gradient(180deg, #1b3d5c 0%, #16324f 100%); color: #fff; padding: 22px 28px 18px; }
+  header a { color: #d6e6f5; text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  .kicker { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #b7c9da; margin-bottom: 8px; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  main { max-width: 1100px; margin: 0 auto; padding: 22px 24px 48px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 720px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px; }
+  button, select { min-height: 40px; border-radius: 8px; border: 1px solid #c5d0da; background: #fff; padding: 8px 12px; font-weight: 650; cursor: pointer; }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
   .period { font-size: 18px; font-weight: 750; margin: 0 0 12px; }
-  .card { background: #fff; border: 1px solid #d7e0e8; border-radius: 10px; margin: 0 0 10px; overflow: hidden; }
-  .card h2 { margin: 0; padding: 10px 12px; background: #eef3f7; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 16px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 26px; letter-spacing: -0.03em; color: var(--ink); }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 0 rgba(22,50,79,.04); }
+  .card h2 { margin: 0; padding: 12px 14px; background: #eef3f7; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; }
+  .card h2 span { font-variant-numeric: tabular-nums; color: var(--ink); }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 8px 12px; border-top: 1px solid #e6edf3; font-size: 14px; }
-  th { color: #5c6b7a; font-size: 12px; }
-  .empty, .err { padding: 14px; color: #5c6b7a; }
+  th, td { text-align: left; padding: 8px 14px; border-top: 1px solid #e6edf3; font-size: 14px; }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .empty, .err { padding: 14px; color: var(--muted); }
   .err { color: #9b2c2c; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #eef3f7; }
+  .pill.vacation { background: #e7f0e4; color: #24613a; }
+  .pill.comp { background: #e5f3f4; color: #1f6f78; }
+  .pill.out { background: #f8eee6; color: #8a4b12; }
   .tag { font-size: 11px; font-weight: 700; color: #1f6f78; }
+  @media (max-width: 800px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    h1 { font-size: 22px; }
+    .stats, .grid { grid-template-columns: 1fr; }
+  }
+  @media print {
+    header { background: #fff; color: #000; }
+    header a { color: #000; }
+    .bar, .kicker { display: none; }
+    .grid { display: block; }
+    .card { break-inside: avoid; margin-bottom: 10px; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <div style="font-size:13px;margin-bottom:6px;"><a href="/">Dispatch</a> · <a href="/calendar">Calendar</a> · <a href="/mileage">Mileage check</a> · <a href="/inventory-board">Inventory</a></div>
+  <div class="kicker"><a href="/">Dispatch</a> · <a href="/calendar">Calendar</a> · <a href="/mileage">Mileage check</a> · <a href="/inventory-board">Inventory</a></div>
   <h1>Days off by pay period</h1>
 </header>
 <main>
@@ -67,6 +92,11 @@ function standingCompDay(sat, name) {
 }
 function esc(s) {
   return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"' }[c]));
+}
+function pillClass(reason) {
+  if (reason === 'Vacation' || reason === 'PTO') return 'vacation';
+  if (reason === 'Comp day') return 'comp';
+  return 'out';
 }
 
 async function load() {
@@ -118,11 +148,20 @@ async function load() {
       return;
     }
     out.className = '';
-    out.innerHTML = [...byName.entries()].map(([name, list]) =>
+    const all = [...byName.values()].flat();
+    const vac = all.filter(r => r.reason === 'Vacation').length;
+    const comp = all.filter(r => r.reason === 'Comp day').length;
+    const stats = '<div class="stats">' +
+      '<div class="stat"><b>' + byName.size + '</b><span>People with time off</span></div>' +
+      '<div class="stat"><b>' + all.length + '</b><span>Days in this period</span></div>' +
+      '<div class="stat"><b>' + vac + '</b><span>Vacation days</span></div>' +
+      '<div class="stat"><b>' + comp + '</b><span>Comp days</span></div></div>';
+    const cards = [...byName.entries()].map(([name, list]) =>
       '<section class="card"><h2>' + esc(name) + '<span>' + list.length + '</span></h2><table><tr><th>Day</th><th>Reason</th><th>Note</th></tr>' +
-      list.map(r => '<tr><td>' + esc(pretty(r.day)) + '</td><td>' + esc(r.reason) + (r.source === 'On-call' ? ' <span class="tag">standing</span>' : '') + '</td><td>' + esc(r.note) + '</td></tr>').join('') +
+      list.map(r => '<tr><td>' + esc(pretty(r.day)) + '</td><td><span class="pill ' + pillClass(r.reason) + '">' + esc(r.reason) + '</span>' + (r.source === 'On-call' ? ' <span class="tag">standing</span>' : '') + '</td><td>' + esc(r.note) + '</td></tr>').join('') +
       '</table></section>'
     ).join('');
+    out.innerHTML = stats + '<div class="grid">' + cards + '</div>';
   } catch (err) {
     out.className = 'err';
     out.textContent = err.message;
@@ -140,7 +179,7 @@ function printPdf() {
   const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Days off ' + data.start + '</title>' +
     '<style>body{font-family:Arial,sans-serif;padding:16px;font-size:13px;} table{border-collapse:collapse;width:100%;margin:0 0 16px;} td,th{border:1px solid #999;padding:4px;text-align:left;} h2,h3{margin:12px 0 6px;} .btn{margin-bottom:12px;}</style></head><body>' +
     '<button class="btn" onclick="window.print()">Save as PDF / Print</button>' +
-    '<h2>MCR Technical Service, LLC</h2><h3>Days off — ' + pretty(data.start) + ' to ' + pretty(data.end) + '</h3>' +
+    '<h2>MCR Technical Service, LLC</h2><h3>Days off, ' + pretty(data.start) + ' to ' + pretty(data.end) + '</h3>' +
     rows + '</body></html>';
   const w = window.open('', '_blank');
   if (!w) { alert('Allow pop-ups to open the PDF view.'); return; }
