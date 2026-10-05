@@ -1715,6 +1715,20 @@ exports.handler = async (event) => {
       }
     }
 
+    // 2026-10-05: inventory@ / expense@ mail is never a dispatch. It was already
+    // flagged 'ignored' further down, but a subject like "I am sharing 'GA SST -
+    // ... - 20261004' with you" (a Google Drive share notice copied to
+    // inventory@) still went through the subject-fallback above, created an open
+    // trouble ticket with WO "20261004" and would have fired the watchdog SMS.
+    // Clearing `parsed` here keeps it out of every ticket, board and SMS path.
+    {
+      const payrollHayEarly = ((fields['To'] || fields['to'] || '') + ' ' + (fields['Cc'] || fields['cc'] || '') + ' ' +
+        (fields['recipient'] || fields['Recipient'] || '') + ' ' + (subject || '')).toLowerCase();
+      if (/inventory@mcrtechservice\.com|expense@mcrtechservice\.com/.test(payrollHayEarly)) {
+        if (parsed) console.log('[mailgun-inbound] Inventory/expense mail -- skipping dispatch parsing');
+        parsed = null;
+      }
+    }
     const dispatchType = parsed ? parsed.type : 'unknown';
     const states = detectStates(effectiveBody + ' ' + subject);
 
