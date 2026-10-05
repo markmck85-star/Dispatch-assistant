@@ -1755,7 +1755,13 @@ exports.handler = async (event) => {
 
       const classifiedAsMap = { trouble: 'trouble', maintenance: 'maintenance', restock: 'dispatch_list', rma_shipping: 'rma_shipping', techweb_closing: 'closing_note_email' };
       const toHeaderEarly = fields['To'] || fields['to'] || '';
-      const payrollHay = (toHeaderEarly + ' ' + (subject || '')).toLowerCase();
+      // 2026-10-05: inventory@ / expense@ can arrive on the Cc line (or only as
+      // the forwarding recipient) while To is someone else, e.g. a tech emails
+      // TJ and copies inventory@. Checking To alone left those in Inbound Mail
+      // as unparsed and invisible to the inventory board's address match.
+      const ccHeaderEarly = fields['Cc'] || fields['cc'] || '';
+      const recipientEarly = fields['recipient'] || fields['Recipient'] || '';
+      const payrollHay = (toHeaderEarly + ' ' + ccHeaderEarly + ' ' + recipientEarly + ' ' + (subject || '')).toLowerCase();
       const isPayroll = /inventory@mcrtechservice\.com/.test(payrollHay) || /expense@mcrtechservice\.com/.test(payrollHay);
       const classifiedAs = isReplyOnly ? 'reply' : (classifiedAsMap[dispatchType] || 'unknown');
       const parseStatus = (isReplyOnly || isPayroll) ? 'ignored' : (parsed ? 'parsed' : 'failed');
@@ -1770,7 +1776,12 @@ exports.handler = async (event) => {
 
       const inboundEmailRow = {
         mailbox: fields['recipient'] || fields['Recipient'] || null,
-        to_address: toHeader,
+        // Keep the Cc line too when it carries the inventory/expense mailbox, so
+        // the existing to_address filters (inbound-mail page, inventory board)
+        // recognise the message.
+        to_address: (isPayroll && ccHeaderEarly && !/(inventory|expense)@mcrtechservice\.com/i.test(toHeader || ''))
+          ? [toHeader, ccHeaderEarly].filter(Boolean).join(', ')
+          : toHeader,
         sender,
         subject,
         body_text: textBody || null,
