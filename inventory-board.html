@@ -207,6 +207,7 @@
           <thead><tr><th>Tech</th><th>State</th><th>Date</th><th>Email</th></tr></thead>
           <tbody id="recBody"><tr><td colspan="4" class="note">Loading&hellip;</td></tr></tbody>
         </table>
+        <div id="techSheet"></div>
       </details>
       <details class="grp" id="grpChecks">
         <summary>Sheet check <span class="count bad" id="cntChecks">&ndash;</span></summary>
@@ -286,7 +287,7 @@
         <div>
           <label>Preview</label>
           <textarea id="sendPreview" readonly style="min-height:180px;"></textarea>
-          <p class="hint" id="sendMsg">Ready sheets are attached. Sheets with a date or file-name problem are listed and left off.</p>
+          <p class="hint" id="sendMsg">Preview is the note that goes with the sheets. Spreadsheet lines stay on the name button, not in this message.</p>
         </div>
       </div>
       <div class="save-row">
@@ -425,13 +426,31 @@ function missingRowsHtml(miss) {
   return miss.map((t) => "<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
     "</td><td>" + esc(t.email || "") + "</td></tr>").join("");
 }
+let DETAIL_SHEETS = [];
 function receivedRowsHtml(rec) {
   if (!rec.length) return '<tr><td colspan="4" class="note">Nothing received yet in this period.</td></tr>';
-  return rec.map((t) => {
+  return rec.map((t, i) => {
     const day = t.receivedAt ? new Date(t.receivedAt).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
-    return "<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") + "</td><td class=\"mono\">" + esc(day) +
+    return "<tr><td><button class=\"mini\" type=\"button\" onclick=\"showTechSheet(" + i + ")\">" + esc(t.name) + "</button></td><td class=\"mono\">" + esc(t.state || "") + "</td><td class=\"mono\">" + esc(day) +
       "</td><td>" + esc(t.subject || "") + "</td></tr>";
   }).join("");
+}
+function showTechSheet(i) {
+  const box = document.getElementById("techSheet");
+  const recName = (window.RECEIVED || [])[i] && window.RECEIVED[i].name;
+  const s = DETAIL_SHEETS.find((x) => recName && String(x.name).toLowerCase() === String(recName).toLowerCase());
+  if (!box) return;
+  if (!s) {
+    box.innerHTML = '<div class="note">No saved spreadsheet lines for ' + esc(recName || "that name") + " yet. The mail credited them, but the sheet was not read.</div>";
+    return;
+  }
+  const rows = (s.items || []).map((it) => "<tr>" + itemCells(it) + "</tr>").join("") ||
+    '<tr><td colspan="6" class="note">No form, ribbon, paper, or card lines on this sheet.</td></tr>';
+  box.innerHTML = '<div class="note"><b>' + esc(s.name) + "</b> · " + esc(s.sheetDate || "no date") + " · " + esc(s.filename) +
+    (s.ready ? "" : ' <span class="tag out">Held</span>') + "</div>" +
+    "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
+    rows + "</tbody></table>";
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function unmatchedHtml(list) {
   if (!list.length) return '<div class="note">No unmatched mail.</div>';
@@ -455,8 +474,11 @@ async function loadBoard() {
   document.getElementById("cntMissing").textContent = miss.length;
   document.getElementById("cntReceived").textContent = rec.length;
   document.getElementById("cntUnmatched").textContent = unm.length;
+  window.RECEIVED = rec;
   document.getElementById("missBody").innerHTML = missingRowsHtml(miss);
   document.getElementById("recBody").innerHTML = receivedRowsHtml(rec);
+  const sheetBox = document.getElementById("techSheet");
+  if (sheetBox) sheetBox.innerHTML = "";
   document.getElementById("unmBody").innerHTML = unmatchedHtml(unm);
 }
 
@@ -726,6 +748,7 @@ async function loadDetail() {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || String(res.status));
     msg.textContent = "";
+    DETAIL_SHEETS = data.sheets || [];
     document.getElementById("detailBody").innerHTML = detailHtml(data);
     if (!document.getElementById("sendSubject").value) document.getElementById("sendSubject").value = "Inventory counts since " + since;
   } catch (err) {
