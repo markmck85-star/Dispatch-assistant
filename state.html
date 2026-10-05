@@ -2623,6 +2623,9 @@ function updateDispatchBackLinks() {
   try {
     if (/^\d{4}-\d{2}-\d{2}$/.test(date)) sessionStorage.setItem('mcr_pending_dispatch_date', date);
     if (/^[A-Z]{2}$/.test(state)) sessionStorage.setItem('mcr_pending_dispatch_state', state);
+    // Also remember it for the dispatch page itself (covers returning with the
+    // browser Back button, which does not use the link above).
+    if (/^[A-Z]{2}$/.test(state)) localStorage.setItem('lastSelectedState', ({ NC: 'GA', SC: 'GA' })[state] || state);
   } catch (err) { /* private mode */ }
   ['backToDispatchTop', 'backToDispatchBottom'].forEach((id) => {
     const a = document.getElementById(id);

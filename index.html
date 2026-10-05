@@ -2389,6 +2389,16 @@ function distanceMatrixStatus(state) {
         }
 
 
+        // Keep the header button's label truthful: "Hide all stops" only when
+        // every tech card is actually open, otherwise "Show all stops".
+        function syncAllStopsButton() {
+            const bodies = Array.from(document.querySelectorAll('.tech-card-body'));
+            const allOpen = bodies.length > 0 && bodies.every(b => b.classList.contains('open'));
+            document.querySelectorAll('.all-stops-btn').forEach(btn => {
+                btn.textContent = allOpen ? 'Hide all stops' : 'Show all stops';
+            });
+        }
+        window.syncAllStopsButton = syncAllStopsButton;
         function toggleAllTechStops(btn) {
             const bodies = Array.from(document.querySelectorAll('.tech-card-body'));
             if (!bodies.length) return;
@@ -2405,7 +2415,7 @@ function distanceMatrixStatus(state) {
                 if (open && body.id) keys.push(body.id.replace('tech-body-', ''));
             });
             try { sessionStorage.setItem('dispatchExpandedTechs', JSON.stringify(keys)); } catch (e) {}
-            if (btn) btn.textContent = open ? 'Hide all stops' : 'Show all stops';
+            syncAllStopsButton();
         }
         function toggleControls() {
             const layout = document.querySelector('.desktop-layout');
@@ -2532,6 +2542,33 @@ function distanceMatrixStatus(state) {
             }
             refreshDispatchTomorrowBtnLabel();
         }
+
+        // The State Console's "Back to Dispatch Tool" link sends ?state= (and
+        // stores mcr_pending_dispatch_state), but nothing here ever read it, so
+        // the board came back on whatever state was last used on THIS page
+        // (lastSelectedState). Adopt the handed-off state first, before any of
+        // the restore logic below runs. NC/SC fold into the combined GA board.
+        (function adoptHandedOffState() {
+            try {
+                const p = new URLSearchParams(window.location.search);
+                let st = (p.get('state') || sessionStorage.getItem('mcr_pending_dispatch_state') || '').trim().toUpperCase();
+                sessionStorage.removeItem('mcr_pending_dispatch_state');
+                st = ({ NC: 'GA', SC: 'GA' })[st] || st;
+                if (/^[A-Z]{2}$/.test(st)) {
+                    localStorage.setItem('lastSelectedState', st);
+                    // A leftover admin-return value would otherwise win over it.
+                    localStorage.removeItem('dispatchReturnState');
+                }
+                // Drop ?state= from the address bar so a later manual reload
+                // does not snap the board back to it after the dispatcher
+                // has switched states on this page.
+                if (p.has('state')) {
+                    p.delete('state');
+                    const qs = p.toString();
+                    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+                }
+            } catch (e) { /* storage blocked: fall back to normal restore */ }
+        })();
 
         const BOARD_STATE_MAP = { NC: 'GA', SC: 'GA' };
         const BOARD_ALL_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','NV','OH','OR','WV'];
@@ -4644,9 +4681,9 @@ function distanceMatrixStatus(state) {
                 const slaStr = meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : '');
                 const sla = slaStr ? ` &mdash; <span style="color:#ffa500;">SLA ends ${slaStr}</span>` : '';
                 const wo = meta.woNumber ? ` <span style="color:#aaa;font-size:12px;">WO ${meta.woNumber}</span>` : '';
-                headerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:15px;">\n                    <button type="button" onclick="toggleAllTechStops(this)" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Show all stops</button>\n                    <button type="button" onclick="generateFinalMessages()" style="flex:0 1 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Messages</button>\n                    <button type="button" onclick="printReport()" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Print Dispatch Summary</button>\n                </div>' + `<div style="margin-bottom:15px;"><span style="font-weight:bold;color:#ff6b35;">⚡ URGENT</span>${wo}<br><span style="font-size:13px;">${issue}${sla}</span></div>`;
+                headerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:15px;">\n                    <button type="button" class="all-stops-btn" onclick="toggleAllTechStops(this)" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Show all stops</button>\n                    <button type="button" onclick="generateFinalMessages()" style="flex:0 1 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Messages</button>\n                    <button type="button" onclick="printReport()" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Print Dispatch Summary</button>\n                </div>' + `<div style="margin-bottom:15px;"><span style="font-weight:bold;color:#ff6b35;">⚡ URGENT</span>${wo}<br><span style="font-size:13px;">${issue}${sla}</span></div>`;
             } else {
-                headerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:15px;">\n                    <button type="button" onclick="toggleAllTechStops(this)" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Show all stops</button>\n                    <button type="button" onclick="generateFinalMessages()" style="flex:0 1 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Messages</button>\n                    <button type="button" onclick="printReport()" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Print Dispatch Summary</button>\n                </div>';
+                headerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:15px;">\n                    <button type="button" class="all-stops-btn" onclick="toggleAllTechStops(this)" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Show all stops</button>\n                    <button type="button" onclick="generateFinalMessages()" style="flex:0 1 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Messages</button>\n                    <button type="button" onclick="printReport()" style="flex:0 0 auto;padding:12px 16px;border-radius:8px;border:none;background:#007bff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;">Print Dispatch Summary</button>\n                </div>';
             }
 
             // Detect same-day items and right form flags across all assignments
@@ -4997,6 +5034,7 @@ function distanceMatrixStatus(state) {
                     if (open) set.add(techKey); else set.delete(techKey);
                     sessionStorage.setItem('dispatchExpandedTechs', JSON.stringify([...set]));
                 } catch (e) {}
+                syncAllStopsButton();
             }
             window.toggleTechCard = toggleTechCard;
 
@@ -5082,6 +5120,7 @@ function distanceMatrixStatus(state) {
 
             resultsDiv.innerHTML = html;
             resultsDiv.classList.remove('hidden');
+            if (window.syncAllStopsButton) window.syncAllStopsButton();
             document.getElementById('resultsPanelLoading')?.remove();
             if (preserveScroll) {
                 window.scrollTo(0, _savedScrollY);
@@ -9447,6 +9486,9 @@ ${content}</body></html>`;
             if (panel) panel.classList.remove('visible');
         }
 
+        // Stops start collapsed on every fresh page load (a re-render within
+        // the session still remembers which cards the dispatcher opened).
+        try { sessionStorage.removeItem('dispatchExpandedTechs'); } catch (e) {}
         document.addEventListener('DOMContentLoaded', function() {
             refreshAiBarState();
             restoreDispatchMapState();
