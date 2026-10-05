@@ -7,12 +7,12 @@
  * subjects that say Inventory) against active technician cards.
  *
  * GET /.netlify/functions/get-inventory-receipts?since=2026-09-22
- *      optional: &state=GA  &includeContractors=1  &includeNotLive=1
+ *      optional: &state=GA  &excludeContractors=1  &includeNotLive=1
  *
  * v2.2 (2026-10-05): who is EXPECTED to submit. The roster used to be every
  * active technician card plus the owner (85 people), which overstated it:
- *   - contractors are left out unless includeContractors=1 (which of them send
- *     inventory is not settled; the technicians.is_contractor flag drives this);
+ *   - contractors DO send their inventory to the office, so they stay on the
+ *     roster; &excludeContractors=1 hides them (technicians.is_contractor);
  *   - the owner has no inventory, so the extra-roster entry is gone;
  *   - states MCR has not taken over yet (NOT_LIVE below) are left out until their
  *     start date, then included automatically.
@@ -249,9 +249,9 @@ exports.handler = async (event) => {
   if (tErr) return json(500, { error: tErr.message });
   let roster = [...(techs || []), ...EXTRA_ROSTER];
   roster = roster.filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
-  const includeContractors = params.includeContractors === "1";
+  const excludeContractors = params.excludeContractors === "1";
   const includeNotLive = params.includeNotLive === "1";
-  if (!includeContractors) roster = roster.filter((t) => !t.is_contractor);
+  if (excludeContractors) roster = roster.filter((t) => !t.is_contractor);
   if (!includeNotLive) {
     const todayEt = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
     const hidden = new Set(NOT_LIVE.filter((x) => todayEt < x.liveFrom).map((x) => x.state));
@@ -284,7 +284,7 @@ exports.handler = async (event) => {
     ok: true,
     since,
     techCount: roster.length,
-    includeContractors,
+    excludeContractors,
     received,
     missing,
     unmatched,
