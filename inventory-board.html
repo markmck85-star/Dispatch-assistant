@@ -187,7 +187,8 @@
             <option>OH</option><option>OR</option><option>SC</option><option>WV</option>
           </select>
         </div>
-        <button class="save" type="button" onclick="loadBoard(); loadShipments();">Refresh</button>
+        <label style="display:flex;gap:8px;align-items:center;min-width:170px;margin:0 0 6px;"><input id="incContractors" type="checkbox" style="width:auto;margin:0;" /> Include contractors</label>
+                <button class="save" type="button" onclick="loadBoard(); loadShipments();">Refresh</button>
       </div>
     </section>
 
@@ -462,6 +463,7 @@ async function loadBoard() {
   const state = document.getElementById("stateFilter").value;
   let url = "/.netlify/functions/get-inventory-receipts?since=" + encodeURIComponent(since);
   if (state) url += "&state=" + encodeURIComponent(state);
+  if (document.getElementById("incContractors").checked) url += "&includeContractors=1";
   const res = await fetch(url);
   const data = await res.json();
   const rec = data.received || [];
