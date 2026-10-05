@@ -151,8 +151,17 @@
     details.grp .count.bad { background: #fde8ee; color: var(--bad); }
     details.grp .count.good { background: #e4f0e6; color: var(--ok); }
     details.grp .count.warn { background: #f5e8d0; color: var(--warn); }
+    @media (min-width: 981px) {
+      header, .wrap, footer {
+        max-width: 1200px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      header { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+      .wrap { padding-top: 28px; }
+    }
     @media (max-width: 980px) {
-      .stats, .grid2, .rules { grid-template-columns: 1fr; }
+      .stats, .grid2, .rules, .settings-grid { grid-template-columns: 1fr; }
       .wrap, header, footer { padding-left: 16px; padding-right: 16px; }
     }
   </style>
