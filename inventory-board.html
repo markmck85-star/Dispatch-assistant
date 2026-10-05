@@ -243,7 +243,7 @@
     </section>
 
     <section class="panel">
-      <h2>Shipments on the way &mdash; Neumo to technicians</h2>
+      <h2>Shipments on the way, Neumo to technicians</h2>
       <div style="padding:10px 18px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
         <label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:500;">
           <input type="checkbox" id="showDelivered" style="width:auto;" onchange="renderShipments()" /> Show delivered
@@ -654,9 +654,69 @@ async function loadChecks() {
       list.map((s) => "<tr><td>" + esc(s.name) + '<div class="hint">' + esc(s.state || "") + (s.viaCombinedEmail ? " &middot; sent in the combined email" : "") + "</div></td>" +
         "<td>" + esc(s.filename) + '<div class="hint">sheet date: ' + esc(s.sheetDate || "none") + "</div></td>" +
         "<td>" + s.issues.map((i) => '<div class="' + (i.kind === "fix" ? "warnline" : "hint") + '">' + esc(i.text) + "</div>").join("") + "</td></tr>").join("") +
-      "</tbody></table>";
+      "</tbody></table>" +
+      '<div id="dateTextPanel" class="note">Loading date-text drafts...</div>';
+    loadDateTexts(since);
   } catch (err) {
     body.innerHTML = '<div class="note">Sheet check unavailable: ' + esc(err.message) + "</div>";
+  }
+}
+
+function dateTextSeen() {
+  try { return JSON.parse(localStorage.getItem("invDateTextSeen") || "{}"); } catch (e) { return {}; }
+}
+function markDateTextSeen(id) {
+  const seen = dateTextSeen();
+  seen[id] = new Date().toISOString();
+  localStorage.setItem("invDateTextSeen", JSON.stringify(seen));
+}
+async async function loadDateTexts(since) {
+  const panel = document.getElementById("dateTextPanel");
+  if (!panel) return;
+  try {
+    const res = await fetch("/.netlify/functions/preview-inventory-date-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ since: since, confirm: false })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    const drafts = data.drafts || [];
+    if (!drafts.length) {
+      panel.innerHTML = '<div class="note">No date-text drafts. Shadow only: nothing is texted from this page.</div>';
+      return;
+    }
+    const seen = dateTextSeen();
+    panel.innerHTML = '<div class="note">Shadow only. One draft per sheet that needs a date fix. Confirm marks that you looked. Nothing is texted.</div>' +
+      drafts.map((d) => '<div class="settings-grid" style="margin-top:10px;">' +
+        '<div><div class="hint">' + esc(d.name) + (d.state ? " · " + esc(d.state) : "") + "</div>" +
+        '<div class="hint">' + esc(d.filename) + "</div>" +
+        '<div class="hint">' + (d.smsAddress ? "Text address on file" : "No text address on the card") +
+        (seen[d.id] ? " · looked at" : "") + "</div></div>" +
+        '<div><textarea id="dateText-' + esc(d.id) + '" style="min-height:110px;">' + esc(d.text) + "</textarea>" +
+        '<div class="save-row"><button class="save" type="button" onclick="confirmDateText(\'' + String(d.id).replace(/'/g, "") + '\')">Confirm looked</button></div>' +
+        '<div class="hint" id="dateTextMsg-' + esc(d.id) + '"></div></div></div>').join("");
+  } catch (err) {
+    panel.innerHTML = '<div class="note">Date-text drafts unavailable: ' + esc(err.message) + "</div>";
+  }
+}
+async function confirmDateText(id) {
+  const box = document.getElementById("dateText-" + id);
+  const msg = document.getElementById("dateTextMsg-" + id);
+  if (!box) return;
+  msg.textContent = "Saving...";
+  try {
+    const res = await fetch("/.netlify/functions/preview-inventory-date-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true, id: id, text: box.value })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    markDateTextSeen(id);
+    msg.textContent = data.sent ? "Sent." : "Looked at. Not sent (shadow).";
+  } catch (err) {
+    msg.textContent = err.message;
   }
 }
 
