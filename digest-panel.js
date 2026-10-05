@@ -85,6 +85,7 @@
     '.dp-pill .big{font-size:18px;font-weight:700;color:var(--dp-title);}',
     '.dp-pill .big.heavy{color:#c0504d;}.dp-pill .big.light{color:#2f9a80;}',
     '.dp-pill .sm{font-size:12px;color:var(--dp-muted);}',
+    '.dp-pill.click{cursor:pointer;}.dp-pill.click:hover{border-color:var(--dp-accent);}',
     '.dp-overlay{position:fixed;inset:0;z-index:20000;background:rgba(16,24,40,.55);display:flex;align-items:center;justify-content:center;padding:12px;}',
     '.dp-modal{background:var(--dp-bg);color:var(--dp-text);border:1px solid var(--dp-border);border-radius:10px;padding:16px;width:100%;max-width:440px;max-height:92vh;overflow-y:auto;}',
     '.dp-modal h3{color:var(--dp-title);font-size:17px;margin:0 0 10px;}',
@@ -132,6 +133,7 @@
     var loadedFor = null;       // "STATE|mode" the current data belongs to
     var isOpen = !opts.collapsible;
     var loading = false;
+    var wxOpen = false;         // weather detail list expanded (tap the Weather card)
     if (opts.collapsible) {
       try { isOpen = localStorage.getItem(opts.storageKey) === '1'; } catch (e) { isOpen = false; }
     }
@@ -142,11 +144,37 @@
       return 'GA';
     }
 
+    // Weather alerts are shown only through the Weather card, so they are not
+    // repeated in the Needs attention list (or counted twice in the badge).
+    // Same for "Out today/Out Mon, Oct 5: ..." lines: the Technicians out
+    // section below already lists who is out and when.
+    function attentionItems(d) {
+      return ((d && d.attention) || []).filter(function (a) {
+        var t = String((a && a.text) || '');
+        return t.indexOf('Weather:') !== 0 && !/^Out [^:]*:/.test(t);
+      });
+    }
+    function outCount(d) {
+      var av = (d && d.availability) || {};
+      return (av.outToday || []).length + (av.outNext || []).length;
+    }
+    function badgeText(d) {
+      if (!d) return '';
+      var parts = [];
+      var n = attentionItems(d).length;
+      if (n) parts.push(n + ' to review');
+      var wx = (d.weather && d.weather.alerts) || [];
+      if (wx.length) parts.push(wx.length + ' weather');
+      var oc = outCount(d);
+      if (oc) parts.push(oc + ' out');
+      return parts.length ? parts.join(' \u00B7 ') : 'all clear';
+    }
+
     // ---- shell
     function shell() {
       var title = mode === 'morning' ? 'Morning brief' : 'End of day';
       var badge = '';
-      if (data && data.attention) badge = data.attention.length ? data.attention.length + ' to review' : 'all clear';
+      if (data && data.attention) badge = badgeText(data);
       var head = opts.collapsible
         ? '<button type="button" class="dp-head" data-dp-toggle><span class="dp-chev">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' +
           '<span>\uD83D\uDCCB ' + esc(title) + '</span><span class="dp-badge">' + esc(badge) + '</span></button>'
@@ -198,9 +226,11 @@
       setStatus(d.date + ' \u00B7 ' + tzName + ' \u00B7 generated ' +
         new Date(d.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
       var h = '';
+      var tlUsedNext = false;
 
       // Needs attention
-      var att = d.attention || [];
+      var att = attentionItems(d);
+      var alerts = (d.weather && d.weather.alerts) || [];
       h += sec('Needs attention', att.length,
         att.length ? att.map(function (a) { return item(a.level === 'high' ? 'high' : 'info', esc(a.text)); }).join('') : empty('Nothing flagged right now.'), true);
 
@@ -212,17 +242,17 @@
         wSmall = w.callsToday + ' stops, ' + w.availableTechs + ' techs available (' + w.callsPerTech + ' per tech vs ' + w.baselineCallsPerTech +
           ' usual, ' + w.ratio + 'x). Heavy at ' + w.heavyTrigger + 'x, light under ' + w.lightBelow + 'x.';
       }
-      var alerts = (d.weather && d.weather.alerts) || [];
       var wxBig = 'No severe alerts', wxSmall = '';
       if (d.weather && !d.weather.ok) { wxBig = 'Weather unavailable'; wxSmall = esc(d.weather.error || ''); }
-      else if (alerts.length) { wxBig = alerts.length + ' severe alert' + (alerts.length === 1 ? '' : 's'); wxSmall = alerts.map(function (a) { return esc(a.event); }).join(', '); }
+      else if (alerts.length) { wxBig = alerts.length + ' severe alert' + (alerts.length === 1 ? '' : 's'); wxSmall = wxOpen ? 'Tap to hide details' : 'Tap for details'; }
       h += '<div class="dp-pills"><div class="dp-pill"><div class="sm">Workload</div><div class="big ' + esc(w.label) + '">' + esc(wl) + '</div><div class="sm">' + wSmall + '</div></div>' +
-        '<div class="dp-pill"><div class="sm">Weather</div><div class="big">' + esc(wxBig) + '</div><div class="sm">' + wxSmall + '</div></div></div>';
+        '<div class="dp-pill' + (alerts.length ? ' click' : '') + '"' + (alerts.length ? ' data-dp-wx role="button" tabindex="0"' : '') + '><div class="sm">Weather</div><div class="big">' +
+        (alerts.length ? '<span data-dp-wxchev>' + (wxOpen ? '\u25BE' : '\u25B8') + '</span> ' : '') + esc(wxBig) + '</div><div class="sm" data-dp-wxsm>' + wxSmall + '</div></div></div>';
       if (alerts.length) {
-        h += sec('Weather alerts', alerts.length, alerts.map(function (a) {
+        h += '<div data-dp-wxlist style="' + (wxOpen ? '' : 'display:none;') + 'margin:0 0 10px;">' + alerts.map(function (a) {
           return item(a.severity === 'Extreme' ? 'high' : 'warn', esc(a.event), esc(a.areas) +
             (a.ends ? ' \u00B7 until ' + esc(new Date(a.ends).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })) : ''));
-        }).join(''), true);
+        }).join('') + '</div>';
       }
 
       // Availability
@@ -322,8 +352,18 @@
 
       // Technician load
       var tl = d.techLoad || [];
+      var tlTitle = 'Technician load';
+      // When today has no stops (a Sunday, or before the board is built) but the
+      // next workday does, show that day's load here instead of an empty section.
+      if (!tl.length && (d.techLoadNext || []).length) {
+        tl = d.techLoadNext;
+        tlUsedNext = true;
+        if (d.preview && d.preview.date) {
+          tlTitle += ' \u00B7 ' + new Date(d.preview.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        }
+      }
       var over = tl.filter(function (t) { return t.overloaded; });
-      h += sec('Technician load', over.length ? over.length + ' flagged' : null,
+      h += sec(tlTitle, over.length ? over.length + ' flagged' : null,
         tl.length ? tl.map(function (t) {
           return item(t.overloaded ? 'high' : 'ok', esc(t.technicianName || 'Unassigned'),
             t.stops + ' stop' + (t.stops === 1 ? '' : 's') + ' \u00B7 about ' + esc(t.driveText) + ' driving' + (t.incompleteEstimate ? ' (some distances missing)' : '') + (t.reasons.length ? ' \u00B7 ' + esc(t.reasons.join(', ')) : ''));
@@ -358,14 +398,14 @@
         if (p.restocksQueued.length) pHtml += '<div class="dp-lab">Restocks already queued</div>' + p.restocksQueued.map(function (x) { return item('info', esc(x.siteName), esc(x.siteCode || '')); }).join('');
         if (p.installs.length) pHtml += '<div class="dp-lab">Installs and surveys</div>' + p.installs.map(function (i) { return item('info', esc(i.siteText), esc(i.startText || '')); }).join('');
         var tln = d.techLoadNext || [];
-        if (tln.length) pHtml += '<div class="dp-lab">Load so far</div>' + tln.map(function (t) { return item(t.overloaded ? 'high' : 'ok', esc(t.technicianName || 'Unassigned'), t.stops + ' stops \u00B7 about ' + esc(t.driveText) + ' driving'); }).join('');
+        if (tln.length && !tlUsedNext) pHtml += '<div class="dp-lab">Load so far</div>' + tln.map(function (t) { return item(t.overloaded ? 'high' : 'ok', esc(t.technicianName || 'Unassigned'), t.stops + ' stops \u00B7 about ' + esc(t.driveText) + ' driving'); }).join('');
         h += sec('Preview: ' + esc(pl), null, pHtml || empty('Nothing queued yet.'), true);
       }
 
       var o = out(); if (o) o.innerHTML = h;
       // keep the collapsed-header badge current
       var badgeEl = root.querySelector('.dp-badge');
-      if (badgeEl) badgeEl.textContent = att.length ? att.length + ' to review' : 'all clear';
+      if (badgeEl) badgeEl.textContent = badgeText(d);
     }
 
     // ---- special project form
@@ -439,7 +479,7 @@
 
     // ---- events
     root.addEventListener('click', function (e) {
-      var t = e.target.closest('[data-dp-toggle],[data-dp-mode],[data-dp-refresh],[data-dp-add],[data-dp-edit],[data-dp-ticket]');
+      var t = e.target.closest('[data-dp-toggle],[data-dp-mode],[data-dp-refresh],[data-dp-add],[data-dp-edit],[data-dp-ticket],[data-dp-wx]');
       if (!t) return;
       if (t.hasAttribute('data-dp-toggle')) {
         isOpen = !isOpen;
@@ -448,6 +488,13 @@
         if (body) body.style.display = isOpen ? '' : 'none';
         var chev = root.querySelector('.dp-chev'); if (chev) chev.textContent = isOpen ? '\u25BE' : '\u25B8';
         if (isOpen) load(false);
+        return;
+      }
+      if (t.hasAttribute('data-dp-wx')) {
+        wxOpen = !wxOpen;
+        var wl2 = root.querySelector('[data-dp-wxlist]'); if (wl2) wl2.style.display = wxOpen ? '' : 'none';
+        var wc = root.querySelector('[data-dp-wxchev]'); if (wc) wc.textContent = wxOpen ? '\u25BE' : '\u25B8';
+        var ws = root.querySelector('[data-dp-wxsm]'); if (ws) ws.textContent = wxOpen ? 'Tap to hide details' : 'Tap for details';
         return;
       }
       if (t.hasAttribute('data-dp-mode')) { mode = t.getAttribute('data-dp-mode'); data = null; shell(); load(true); return; }
