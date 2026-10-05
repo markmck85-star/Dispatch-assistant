@@ -188,7 +188,7 @@
           </select>
         </div>
         <label style="display:flex;gap:8px;align-items:center;min-width:170px;margin:0 0 6px;"><input id="incContractors" type="checkbox" style="width:auto;margin:0;" /> Hide contractors</label>
-                <button class="save" type="button" onclick="loadBoard(); loadShipments(); loadProjection(); loadChecks();">Refresh</button>
+                <button class="save" type="button" onclick="loadBoard(); loadShipments(); loadProjection(); loadChecks(); loadDetail();">Refresh</button>
       </div>
     </section>
 
@@ -248,7 +248,7 @@
       </div>
     </section>
 
-    <section class="grid2">
+    <section>
       <div class="panel" id="projPanel">
         <h2>Projected forms on hand <span class="hint" style="font-weight:400;">estimate, current-year forms, whole rolls &middot; nothing is sent from here</span></h2>
         <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;padding:0 18px 8px;">
@@ -263,77 +263,38 @@
         </table>
         <div class="note" id="projNote"></div>
       </div>
+    </section>
 
-      <div class="panel">
-        <h2>Sample — McKelvey forms, ribbon, and supplies</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Neumo code</th>
-              <th>Item</th>
-              <th>Par</th>
-              <th>Count</th>
-              <th>Order</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td class="mono">010101030</td>
-              <td>Current-year forms · red 4×8.5 · 800/roll · 2027</td>
-              <td>30</td>
-              <td>20</td>
-              <td>10</td>
-            </tr>
-            <tr>
-              <td class="mono">10101026</td>
-              <td>Previous-year forms · green 4×8.5 · 800/roll · 2026</td>
-              <td>3</td>
-              <td>4</td>
-              <td>—</td>
-            </tr>
-            <tr>
-              <td class="mono">10300072</td>
-              <td>Ribbon IMAK 110mm × 360 · 24/box</td>
-              <td>24</td>
-              <td>14</td>
-              <td>10</td>
-            </tr>
-            <tr>
-              <td class="mono">10901041</td>
-              <td>Journal paper coated · 4/box</td>
-              <td>16</td>
-              <td>21</td>
-              <td>—</td>
-            </tr>
-            <tr>
-              <td class="mono">40200058</td>
-              <td>Magstripe cleaning cards</td>
-              <td>25</td>
-              <td>19</td>
-              <td>6</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="note">
-          Days-of-supply stays off until closed-ticket restocks are joined per tech.
-          No company-wide “two boxes / six rolls” tripwire. Box = 3 rolls when we convert later.
+    <section class="panel">
+      <h2>Count sheets <span class="hint" style="font-weight:400;">lines from the saved spreadsheets, newest sheet per person</span></h2>
+      <div id="detailMsg" class="hint" style="padding:8px 18px 0;"></div>
+      <div id="detailBody"><div class="note">Loading...</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Send reviewed set <span class="hint" style="font-weight:400;">preview first, nothing sends until you press Send</span></h2>
+      <div class="settings-grid">
+        <div>
+          <label>Send to (editable, for testing)</label>
+          <input id="sendTo" type="text" placeholder="name@example.com" />
+          <p class="hint">One to three addresses, comma separated. This browser remembers the last address. It is not filled in for you.</p>
+          <label>Subject</label>
+          <input id="sendSubject" type="text" />
+          <label>Note to add at the top</label>
+          <textarea id="sendNote" placeholder="Optional note for this send"></textarea>
+        </div>
+        <div>
+          <label>Preview</label>
+          <textarea id="sendPreview" readonly style="min-height:180px;"></textarea>
+          <p class="hint" id="sendMsg">Ready sheets are attached. Sheets with a date or file-name problem are listed and left off.</p>
         </div>
       </div>
-
-      <div class="panel">
-        <h2>Partials — month-end / DCO rules</h2>
-        <div class="bucket"><span>608–800</span><span class="keep">Keep</span></div>
-        <div class="bucket"><span>408–600</span><span class="keep">Keep</span></div>
-        <div class="bucket"><span>208–400 · code 10101055</span><span class="keep">Keep · 33</span></div>
-        <div class="bucket"><span>208–400 · code 10101030</span><span class="keep">Keep · 5</span></div>
-        <div class="bucket"><span>128–200</span><span class="ship">Returnable · 10</span></div>
-        <div class="bucket"><span>0–120</span><span class="ship">Returnable · 44</span></div>
-        <div class="note">
-          Neumo takes partials at <strong>200 sheets or below</strong> only.
-          Larger leftover previous-year rolls stay with the technician to burn at sites
-          whose dispatch PY count is 200 or under — even when restock was not requested.
-        </div>
+      <div class="save-row">
+        <button class="save" type="button" onclick="previewSet()">Preview</button>
+        <button class="save" type="button" style="background:#9b2c2c;" onclick="sendSet()">Send</button>
       </div>
+    </section>
+
     </section>
 
     <section class="panel">
@@ -389,14 +350,14 @@
       </div>
       <div class="rule">
         <h3>Intentionally not in v1</h3>
-        <p>Per-tech velocity flags, auto call-tags, in-app counting, parsed spreadsheet counts, spare-kit tracking. Those wait until submissions are reliable.</p>
+        <p>Spare-roll matching and low-stock alerts stay off until the projection has been checked against the next real sheet.</p>
       </div>
     </section>
   </div>
 
   <footer>
-    Live received/missing from the inventory mailbox. Forms table below is still the sample McKelvey sheet until we parse attachments.
-    Product codes are Neumo’s; this board does not rename them.
+    Live received/missing from the inventory mailbox. Count sheets below are the lines read from the saved spreadsheets.
+    Product codes are the vendor codes; this board does not rename them.
   </footer>
 <script>
 const KEY = "ga-inventory-reminder-settings";
@@ -720,6 +681,113 @@ restoreGroups();
 loadBoard();
 loadShipments();
 loadProjection();
+
+const SEND_KEY = "inventory-board-send-to";
+function loadSendTo() {
+  const el = document.getElementById("sendTo");
+  try { el.value = localStorage.getItem(SEND_KEY) || ""; } catch (e) {}
+  document.getElementById("sendSubject").value = "Inventory counts since " + document.getElementById("since").value;
+}
+function rememberSendTo() {
+  try { localStorage.setItem(SEND_KEY, document.getElementById("sendTo").value || ""); } catch (e) {}
+}
+function itemCells(it) {
+  return "<td class=\"mono\">" + esc(it.code || "") + "</td><td>" + esc(it.name || "") + "</td><td>" + (it.par == null ? "-" : esc(it.par)) +
+    "</td><td>" + (it.count == null ? "-" : esc(it.count)) + "</td><td>" + (it.toOrder ? esc(it.toOrder) : "-") +
+    "</td><td>" + esc(it.comment || "") + "</td>";
+}
+function detailHtml(data) {
+  const sheets = data.sheets || [];
+  if (!sheets.length) return '<div class="note">No saved sheets in this window.</div>';
+  const blocks = sheets.map((s) => {
+    const tag = s.ready ? '<span class="tag in">Ready</span>' : '<span class="tag out">Held</span>';
+    const issues = (s.issues || []).map((t) => '<div class="warnline">' + esc(t) + "</div>").join("");
+    const rows = (s.items || []).map((it) => "<tr>" + itemCells(it) + "</tr>").join("") ||
+      '<tr><td colspan="6" class="note">No form, ribbon, paper, or card lines on this sheet.</td></tr>';
+    return '<details class="grp"><summary>' + esc(s.name) + ' <span class="count">' + esc(s.state || "") + "</span> " + tag +
+      '<span class="hint" style="font-weight:400;">' + esc(s.sheetDate || "no date") + "</span></summary>" +
+      '<div class="note">' + esc(s.filename) + issues + "</div>" +
+      "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
+      rows + "</tbody></table></details>";
+  }).join("");
+  const notes = (data.notes || []).map((n) => '<div class="note" style="border-top:1px solid var(--line);"><b>' + esc(n.subject || "(no subject)") +
+    "</b> · " + esc(n.sender || "") + "<pre style=\"white-space:pre-wrap;font:inherit;margin:8px 0 0;\">" + esc(n.text) + "</pre></div>").join("");
+  return '<div class="note">' + (data.readyCount || 0) + " ready to send, " + (data.heldCount || 0) + " held for a date or file-name problem.</div>" +
+    blocks + (notes ? '<h2 style="border-top:1px solid var(--line);">Notes from the mailbox</h2>' + notes : "");
+}
+async function loadDetail() {
+  const since = document.getElementById("since").value;
+  const state = document.getElementById("stateFilter").value;
+  const msg = document.getElementById("detailMsg");
+  let url = "/.netlify/functions/get-inventory-detail?since=" + encodeURIComponent(since);
+  if (state) url += "&state=" + encodeURIComponent(state);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    msg.textContent = "";
+    document.getElementById("detailBody").innerHTML = detailHtml(data);
+    if (!document.getElementById("sendSubject").value) document.getElementById("sendSubject").value = "Inventory counts since " + since;
+  } catch (err) {
+    msg.textContent = "Count sheets unavailable: " + err.message;
+  }
+}
+async function previewSet() {
+  rememberSendTo();
+  const msg = document.getElementById("sendMsg");
+  msg.textContent = "Building preview...";
+  try {
+    const res = await fetch("/.netlify/functions/send-inventory-set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: document.getElementById("sendTo").value,
+        since: document.getElementById("since").value,
+        state: document.getElementById("stateFilter").value,
+        subject: document.getElementById("sendSubject").value,
+        note: document.getElementById("sendNote").value,
+        confirm: false
+      })
+    });
+    const data = await res.json();
+    if (data.text) document.getElementById("sendPreview").value = data.text;
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    msg.textContent = (data.readyCount || 0) + " sheets would be attached. " + (data.heldCount || 0) + " held. Nothing sent.";
+  } catch (err) {
+    msg.textContent = "Preview failed: " + err.message;
+  }
+}
+async function sendSet() {
+  rememberSendTo();
+  const to = document.getElementById("sendTo").value.trim();
+  if (!to) { document.getElementById("sendMsg").textContent = "Enter an address first. Use your own for a test."; return; }
+  if (!window.confirm("Send the ready sheets to " + to + "?")) return;
+  const msg = document.getElementById("sendMsg");
+  msg.textContent = "Sending...";
+  try {
+    const res = await fetch("/.netlify/functions/send-inventory-set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: to,
+        since: document.getElementById("since").value,
+        state: document.getElementById("stateFilter").value,
+        subject: document.getElementById("sendSubject").value,
+        note: document.getElementById("sendNote").value,
+        confirm: true
+      })
+    });
+    const data = await res.json();
+    if (data.text) document.getElementById("sendPreview").value = data.text;
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    msg.textContent = "Sent to " + (data.to || []).join(", ") + " with " + (data.attached || 0) + " files.";
+  } catch (err) {
+    msg.textContent = "Send failed: " + err.message;
+  }
+}
+
+loadSendTo();
+loadDetail();
 loadChecks();
 
 </script>
