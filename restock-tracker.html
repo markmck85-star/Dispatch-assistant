@@ -1025,7 +1025,7 @@ async function resolveReviewItem(id, decision, btnEl) {
     // Refresh the underlying dashboard numbers if this was a confirm --
     // the site's last-restock date may have just changed.
     if (decision === 'confirmed') {
-      loadLiveDashboard().catch(() => {});
+      scheduleQuietRefresh();
     }
   } catch (err) {
     buttons.forEach((b) => { b.disabled = false; b.style.opacity = '1'; });
@@ -1328,9 +1328,27 @@ function applyLocalRestockConfirm(siteCode) {
   renderDashboard(d);
 }
 
+// The region the page is currently showing. The "State" box is blank unless the
+// user typed in it (blank means every state), so quiet refreshes must not read
+// it directly or they silently switch to an all-states load.
+function currentLiveRegion() {
+  const box = ((document.getElementById('liveState') || {}).value || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(box)) return box;
+  const saved = (localStorage.getItem('mcr_restock_last_region') || '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(saved) ? saved : '';
+}
+
+// Several confirms in a row (reviewing a list of closing notes) trigger one
+// reload after the last one instead of one reload per click.
+let _quietRefreshTimer = null;
+function scheduleQuietRefresh() {
+  clearTimeout(_quietRefreshTimer);
+  _quietRefreshTimer = setTimeout(() => { refreshLiveDashboardQuiet(); }, 1500);
+}
+
 async function refreshLiveDashboardQuiet() {
   try {
-    const state = (document.getElementById('liveState') || {}).value.trim().toUpperCase();
+    const state = currentLiveRegion();
     if (state && !/^[A-Z]{2}$/.test(state)) return;
     const preset = (document.getElementById('liveRangePreset') || {}).value || 'nov1';
     const { since, until } = resolveLiveRange(preset);
