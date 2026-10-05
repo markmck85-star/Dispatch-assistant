@@ -42,14 +42,28 @@ function normCode(v) {
   return s.replace(/^0+/, '');
 }
 function toIsoDate(v) {
+  const plus12 = (d) => new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10);
+  const sane = (iso) => (iso && iso >= "2024-01-01" && iso <= "2031-12-31" ? iso : null);
   if (v instanceof Date && !isNaN(v.getTime())) {
     // +12h so a value a few seconds before midnight (a SheetJS quirk) still
     // lands on the right calendar day.
-    return new Date(v.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10);
+    return sane(plus12(v));
+  }
+  if (typeof v === "number" && v > 40000 && v < 60000) {
+    // Excel serial date stored as a plain number.
+    return sane(plus12(new Date(Math.round((v - 25569) * 86400000))));
   }
   const s = cellText(v);
+  if (!s) return null;
+  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return sane(`${iso[1]}-${iso[2]}-${iso[3]}`);
+  const m = s.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (m) {
+    const yy = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return sane(`${yy}-${String(m[1]).padStart(2, "0")}-${String(m[2]).padStart(2, "0")}`);
+  }
   const d = new Date(s);
-  return s && !isNaN(d.getTime()) ? new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10) : null;
+  return !isNaN(d.getTime()) ? sane(plus12(d)) : null;
 }
 
 const FORM_BUCKET = /^(\d+)\s*-\s*(\d+)$/;
@@ -76,7 +90,14 @@ function parseInventoryGrid(grid) {
     for (let c = 0; c < row.length; c++) {
       const t = cellText(row[c]);
       if (/^tech name:?$/i.test(t)) out.techName = cellText(row[c + 1]) || null;
-      if (/^inv(entory)? date:?$/i.test(t)) out.invDate = toIsoDate(row[c + 1]);
+      // The date label varies ("Inv Date:", "Inventory Date", "Date:", or label and
+      // value in one cell), so accept any "date" label and look in the same cell
+      // and the next few cells to the right.
+      if (!out.invDate && /^(inv(entory)?\.?\s*)?date\b/i.test(t)) {
+        const sameCell = t.replace(/^[^:]*:/, "");
+        out.invDate = toIsoDate(sameCell && sameCell !== t ? sameCell : null) ||
+          toIsoDate(row[c + 1]) || toIsoDate(row[c + 2]) || toIsoDate(row[c + 3]);
+      }
       if (/^whse/i.test(t)) out.warehouse = cellText(row[c + 1]) || null;
     }
   }
@@ -192,12 +213,18 @@ function parseInventoryGrid(grid) {
     // business day, or the Monday after a weekend month-end). On any other week
     // they are last month's numbers carried forward, so the stock check should
     // lean on whole-roll counts and treat partials as unchanged. Heuristic from
-    // the sheet date: last 3 days of a month, or the first 3.
+    // the sheet date: the last 3 days of a month, or the Monday/Tuesday right
+    // after a month that ended on a weekend. (Sheets dated in the first few days
+    // of a month after a weekday month-end, e.g. a Saturday the 3rd, are not.)
     partialsLikelyCurrent: (() => {
       if (!out.invDate) return null;
       const [y, m, d] = out.invDate.split('-').map(Number);
       const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-      return d >= daysInMonth - 2 || d <= 3;
+      if (d >= daysInMonth - 2) return true;
+      const prevEnd = new Date(Date.UTC(y, m - 1, 0));      // last day of previous month
+      const prevEndDow = prevEnd.getUTCDay();                // 0 Sun .. 6 Sat
+      const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      return d <= 3 && (prevEndDow === 6 || prevEndDow === 0) && (dow === 1 || dow === 2);
     })(),
   };
   if (!out.summary.forms.length) warnings.push('No registration-form rows recognized');
