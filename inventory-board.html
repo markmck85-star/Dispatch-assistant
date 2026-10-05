@@ -164,8 +164,7 @@
     <p class="sub">
       Technicians send the Neumo count sheet to <strong>inventory@mcrtechservice.com</strong>.
       This list is who has submitted a sheet versus who is still missing.
-      Use the date when a holiday moves inventory off Monday. Filter by state if you only want one territory.
-      Use the date when a holiday moves inventory off Monday. Filter by state if you only want one territory.
+      Counts start from the most recent Friday, so a sheet sent early (after Friday's last call) still counts toward Monday's inventory. Change the date if a holiday moves inventory off Monday. Filter by state if you only want one territory.
     </p>
   </header>
 
@@ -410,12 +409,15 @@ function saveSettings() {
 }
 loadSettings();
 
-function lastMonday() {
+// Inventory is due Monday morning, but techs who are off Saturday often send it
+// after their last call on Friday. Default the window to the most recent Friday
+// (today, if it is Friday) so those early sheets count. Built from local date
+// parts: toISOString() is UTC and can land a day late on a Friday/Monday evening.
+function lastFriday() {
   const d = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? 6 : day - 1;
+  const diff = (d.getDay() - 5 + 7) % 7;
   d.setDate(d.getDate() - diff);
-  return d.toISOString().slice(0, 10);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 function esc(s) {
   return String(s || "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
@@ -615,7 +617,7 @@ async function markDelivered(id, delivered) {
   }
 }
 
-document.getElementById("since").value = lastMonday();
+document.getElementById("since").value = lastFriday();
 restoreGroups();
 loadBoard();
 loadShipments();
