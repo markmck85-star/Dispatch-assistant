@@ -696,10 +696,11 @@ async function loadDateTexts(since) {
       drafts.map((d) => '<div class="settings-grid" style="margin-top:10px;">' +
         '<div><div class="hint">' + esc(d.name) + (d.state ? " · " + esc(d.state) : "") + "</div>" +
         '<div class="hint">' + esc(d.filename) + "</div>" +
-        '<div class="hint">' + (d.alreadySent ? "Already texted" : (d.smsAddress ? "Text address on file" : "No text address on the card")) +
+        '<div class="hint">' + (d.phone ? esc(d.phone) + " · " : "") + (d.alreadySent ? "Already texted" : (d.smsAddress ? "Text address on file" : "No text address on the card, copy and paste")) +
         (seen[d.id] ? " · looked at" : "") + "</div></div>" +
         '<div><textarea id="dateText-' + esc(d.id) + '" style="min-height:110px;">' + esc(d.text) + "</textarea>" +
-        '<div class="save-row"><button class="save" type="button" onclick="sendDateText(\'' + String(d.id).replace(/'/g, "") + '\')"' +
+        '<div class="save-row"><button class="save" type="button" onclick="copyDateText(\'' + String(d.id).replace(/'/g, "") + '\')">Copy text</button>' +
+        '<button class="save" type="button" onclick="sendDateText(\'' + String(d.id).replace(/'/g, "") + '\')"' +
         (d.alreadySent || !d.smsAddress ? " disabled" : "") + '>Send text</button></div>' +
         '<div class="hint" id="dateTextMsg-' + esc(d.id) + '"></div></div></div>').join("");
   } catch (err) {
@@ -721,6 +722,25 @@ async function toggleDateTextAuto(enabled) {
   } catch (err) {
     if (btn) btn.disabled = false;
     alert(err.message);
+  }
+}
+async function copyDateText(id) {
+  const box = document.getElementById("dateText-" + id);
+  const msg = document.getElementById("dateTextMsg-" + id);
+  if (!box) return;
+  const text = box.value;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+    else {
+      box.focus();
+      box.select();
+      document.execCommand("copy");
+    }
+    if (msg) msg.textContent = "Copied. Paste it into your text app.";
+  } catch (err) {
+    box.focus();
+    box.select();
+    if (msg) msg.textContent = "Select the text and copy it.";
   }
 }
 async function sendDateText(id) {
