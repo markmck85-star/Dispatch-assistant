@@ -142,8 +142,9 @@
     details.grp:first-of-type { border-top: 0; }
     details.grp > summary {
       list-style: none; cursor: pointer; padding: 12px 18px; font-weight: 600; font-size: 14px;
-      display: flex; gap: 10px; align-items: center; background: #fdfbf6;
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #fdfbf6;
     }
+    details.grp > summary .hint { font-weight: 400; flex: 1 1 180px; }
     details.grp > summary::-webkit-details-marker { display: none; }
     details.grp > summary::before { content: "\25B8"; color: var(--muted); font-size: 12px; }
     details.grp[open] > summary::before { content: "\25BE"; }
@@ -204,14 +205,14 @@
     <section class="panel">
       <h2>Submissions</h2>
       <details class="grp" id="grpMissing" open>
-        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span></summary>
+        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span><span class="hint">Expand to see who has not sent a sheet yet</span></summary>
         <table>
           <thead><tr><th>Tech</th><th>State</th><th>Mailbox</th></tr></thead>
           <tbody id="missBody"><tr><td colspan="3" class="note">Loading&hellip;</td></tr></tbody>
         </table>
       </details>
       <details class="grp" id="grpReceived">
-        <summary>Received <span class="count good" id="cntReceived">&ndash;</span></summary>
+        <summary>Received <span class="count good" id="cntReceived">&ndash;</span><span class="hint">Expand to view or download received inventory sheets</span></summary>
         <table>
           <thead><tr><th>Tech</th><th>State</th><th>Date</th><th>Email</th></tr></thead>
           <tbody id="recBody"><tr><td colspan="4" class="note">Loading&hellip;</td></tr></tbody>
@@ -219,11 +220,11 @@
         <div id="techSheet"></div>
       </details>
       <details class="grp" id="grpChecks">
-        <summary>Sheet check <span class="count bad" id="cntChecks">&ndash;</span></summary>
+        <summary>Sheet check <span class="count bad" id="cntChecks">&ndash;</span><span class="hint">Expand to see sheets that need a fix before they go out</span></summary>
         <div id="chkBody"><div class="note">Loading&hellip;</div></div>
       </details>
       <details class="grp" id="grpUnmatched">
-        <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span></summary>
+        <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span><span class="hint">Expand to see inventory mail that could not be matched to a technician</span></summary>
         <div id="unmBody"><div class="note">Loading&hellip;</div></div>
       </details>
     <section class="panel">
