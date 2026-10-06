@@ -74,6 +74,7 @@
 // it: not finished the previous business day and on the board again today).
 
 const { createClient } = require('@supabase/supabase-js');
+const { computeAreaWeight } = require('./lib/area-workload');
 const { computeSlaDeadline, resolveTimezone, HOLIDAYS_2026 } = require('./slaCalculator.js');
 
 // ---------------------------------------------------------------- config
@@ -292,7 +293,7 @@ exports.handler = async (event) => {
 
     // ---- sites in this territory
     const { data: sites, error: sitesErr } = await supabase
-      .from('sites').select('id, site_code, name, state')
+      .from('sites').select('id, site_code, name, state, lat, lng')
       .in('state', regionStates).eq('active', true);
     if (sitesErr) return json(500, { error: 'sites fetch failed: ' + sitesErr.message });
     const siteById = {};
@@ -302,7 +303,7 @@ exports.handler = async (event) => {
     // ---- technicians in this territory
     const regionList = `{${regionStates.join(',')}}`;
     const { data: techsRaw, error: techErr } = await supabase
-      .from('technicians').select('id, name')
+      .from('technicians').select('id, name, lat, lng')
       .or(`home_state.in.(${regionStates.join(',')}),additional_states.ov.${regionList}`)
       .eq('active', true).order('name');
     if (techErr) return json(500, { error: 'technicians fetch failed: ' + techErr.message });
@@ -747,6 +748,15 @@ exports.handler = async (event) => {
       }
     }
 
+    // ---- Workload by area (PREVIEW, 2026-10-06): the same stops measured per area against
+    // the technicians who can actually reach it (see lib/area-workload.js). Shown beside
+    // the territory-wide label above; it does not change that label or the attention list.
+    const areaWeight = await safe('area workload', async () => computeAreaWeight({
+      techs, sites: sites || [], assignments: histAssignments, todayStr,
+      isBusinessDay, isOut: (day, id) => outOn(day).has(id), onCallTodayIds,
+      heavyTrigger, lightBelow: LIGHT_RATIO,
+    }), null);
+
     // ---- Saturday on-call (this or the coming Saturday)
     const saturday = await safe('saturday on-call', async () => {
       const { data: onCallRows } = await supabase.from('on_call_schedule')
@@ -848,6 +858,7 @@ exports.handler = async (event) => {
       restocks,
       techLoad,
       techLoadNext,
+      areaWeight,
       saturday,
       openShipments,
       preview,
