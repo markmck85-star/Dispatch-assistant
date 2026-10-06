@@ -658,13 +658,13 @@ async function loadChecks() {
     const cnt = document.getElementById("cntChecks");
     cnt.textContent = data.needFix || 0;
     const fx = document.getElementById("statInFix");
-    if (fx) fx.textContent = data.needFix ? "(" + data.needFix + " need a date fixed)" : "";
+    if (fx) fx.textContent = data.needFix ? "(" + data.needFix + " need a fix)" : "";
     cnt.className = "count " + (data.needFix ? "bad" : "good");
     if (!list.length) {
-      body.innerHTML = '<div class="note">All ' + (data.checked || 0) + " sheets have a matching, sensible date in the file name and inside the sheet.</div>";
+      body.innerHTML = '<div class="note">All ' + (data.checked || 0) + " sheets have a matching, sensible date in the file name and inside the sheet, and nothing on the way is missing from In Transit.</div>";
       return;
     }
-    body.innerHTML = '<div class="note">' + (data.needFix || 0) + " of " + (data.checked || 0) + " sheets need a date fixed; " +
+    body.innerHTML = '<div class="note">' + (data.needFix || 0) + " of " + (data.checked || 0) + " sheets need a fix; " +
       Math.max(0, list.length - (data.needFix || 0)) + " more have a small file-name or repeat note. Nothing is sent from here.</div>" +
       "<table><thead><tr><th>Tech</th><th>File</th><th>What to fix</th></tr></thead><tbody>" +
       list.map((s) => "<tr><td>" + esc(s.name) + '<div class="hint">' + esc(s.state || "") + (s.viaCombinedEmail ? " &middot; sent in the combined email" : "") + "</div></td>" +
@@ -701,14 +701,14 @@ async function loadDateTexts(since) {
     const autoOn = !!data.auto;
     const toggle = '<div class="save-row"><button class="save" type="button" id="dateTextAutoBtn" onclick="toggleDateTextAuto(' + (autoOn ? "false" : "true") + ')">' +
       (autoOn ? "Turn auto text off" : "Turn auto text on") + "</button>" +
-      '<span class="hint">' + (autoOn ? "Auto is on. A bad date texts within about 10 minutes, 3 at a time." : "Auto is off. Nothing texts until you press Send text.") + "</span></div>";
+      '<span class="hint">' + (autoOn ? "Auto is on. A date or In Transit problem texts within about 10 minutes, 3 at a time." : "Auto is off. Nothing texts until you press Send text.") + "</span></div>";
     if (!drafts.length) {
-      panel.innerHTML = toggle + '<div class="note">No date texts waiting. File-name tidy-up notes stay on the list above and are not texted.</div>';
+      panel.innerHTML = toggle + '<div class="note">No fix texts waiting. File-name tidy-up notes stay on the list above and are not texted.</div>';
       return;
     }
     const seen = dateTextSeen();
     panel.innerHTML = toggle +
-      '<div class="note">One text per sheet with a bad date. Send text asks before it goes. Auto only runs when the switch above is on.</div>' +
+      '<div class="note">One text per sheet with a date or In Transit problem. Send text asks before it goes. Auto only runs when the switch above is on.</div>' +
       drafts.map((d) => '<div class="settings-grid" style="margin-top:10px;">' +
         '<div><div class="hint">' + esc(d.name) + (d.state ? " · " + esc(d.state) : "") + "</div>" +
         '<div class="hint">' + esc(d.filename) + "</div>" +
@@ -881,7 +881,7 @@ function detailHtml(data) {
   }).join("");
   const notes = (data.notes || []).map((n) => '<div class="note" style="border-top:1px solid var(--line);"><b>' + esc(n.subject || "(no subject)") +
     "</b> · " + esc(n.sender || "") + "<pre style=\"white-space:pre-wrap;font:inherit;margin:8px 0 0;\">" + esc(n.text) + "</pre></div>").join("");
-  return '<div class="note">' + (data.readyCount || 0) + " ready to send, " + (data.heldCount || 0) + " held for a date or file-name problem.</div>" +
+  return '<div class="note">' + (data.readyCount || 0) + " ready to send, " + (data.heldCount || 0) + " held for a date, file-name or In Transit problem.</div>" +
     blocks + (notes ? '<h2 style="border-top:1px solid var(--line);">Notes from the mailbox</h2>' + notes : "");
 }
 async function downloadSheet(id) {
