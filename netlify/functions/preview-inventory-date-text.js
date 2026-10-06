@@ -1,10 +1,14 @@
 /**
- * preview-inventory-date-text.js  (v2, 2026-10-05)
+ * preview-inventory-date-text.js  (v3, 2026-10-06)
  * SAVE AS: netlify/functions/preview-inventory-date-text.js
  *
  * One text per sheet with a real date problem (no date, bad file date,
- * file and sheet disagree, future or wrong year). Tidy file-name notes
- * are not texted.
+ * file and sheet disagree, future or wrong year) or an empty In Transit for
+ * something already on the way to them (v3, see lib/inventory-transit.js).
+ * Tidy file-name notes are not texted.
+ *
+ * v3 also lets a newer clean sheet from the same person cancel an older
+ * flagged one, so nobody is texted about a sheet they already corrected.
  *
  * Auto is off until the board switch is turned on. The switch is stored in
  * app_settings (inventoryDateTextAuto). A schedule runs this file about
@@ -15,6 +19,7 @@
  */
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
+const { transitProblems, shipmentsForTech } = require("./lib/inventory-transit.js");
 
 const STALE_DAYS = 7;
 const AUTO_CAP = 3;
@@ -66,9 +71,18 @@ function firstName(name) {
   const w = String(name || "").trim().split(/\s+/).filter(Boolean);
   return w[0] || "there";
 }
-function draftText(name, filename, lines) {
+function draftText(name, filename, lines, transitLines) {
+  const tl = transitLines || [];
+  if (!tl.length) {
+    const why = lines.slice(0, 2).join(". ");
+    return `Hi ${firstName(name)}, the inventory sheet ${filename} needs a date fix (${why}). Please resend it to inventory@mcrtechservice.com with the count date in the Inv Date cell and as YYYYMMDD in the file name. Thanks.`;
+  }
+  const inTransit = tl.slice(0, 2).join(". ");
+  if (!lines.length) {
+    return `Hi ${firstName(name)}, the inventory sheet ${filename} needs a fix: ${inTransit}. Please add it to the In Transit column and resend it to inventory@mcrtechservice.com. Thanks.`;
+  }
   const why = lines.slice(0, 2).join(". ");
-  return `Hi ${firstName(name)}, the inventory sheet ${filename} needs a date fix (${why}). Please resend it to inventory@mcrtechservice.com with the count date in the Inv Date cell and as YYYYMMDD in the file name. Thanks.`;
+  return `Hi ${firstName(name)}, the inventory sheet ${filename} needs fixes. Date: ${why}. Also, ${inTransit}. Please correct both (count date in the Inv Date cell and as YYYYMMDD in the file name, shipments in the In Transit column) and resend it to inventory@mcrtechservice.com. Thanks.`;
 }
 function truthy(v) {
   if (v === true || v === "true") return true;
@@ -125,19 +139,28 @@ async function loadDrafts(supabase, since) {
   const roster = techs || [];
   const { data: rows, error } = await supabase
     .from("inventory_sheets")
-    .select("id, filename, received_at, tech:parsed->>techName, inv:parsed->>invDate")
+    .select("id, filename, received_at, tech:parsed->>techName, inv:parsed->>invDate, items:parsed->items")
     .gte("received_at", since + "T00:00:00-04:00")
     .not("parsed", "is", null)
     .order("received_at", { ascending: true })
     .limit(800);
   if (error) throw new Error(error.message);
+  // Neumo -> technician shipments, for the In Transit check (a failure here must not break the page).
+  let allShips = [];
+  try {
+    const { data: shipRows } = await supabase.from("consumable_shipments")
+      .select("technician_id, tech_name_raw, status, shipped_at, request_date, delivered_at, items")
+      .gte("request_date", addDays(since, -30)).limit(2000);
+    allShips = shipRows || [];
+  } catch (e) { allShips = []; }
   const latest = new Map();
   for (const r of rows || []) {
     const tech = resolveSheetTech(roster, r.tech);
     if (!tech) continue;
     const arrived = etDate(r.received_at);
     const lines = fixLines(r.filename, r.inv || null, arrived);
-    if (!lines.length) continue;
+    const transitLines = r.inv ? transitProblems(Array.isArray(r.items) ? r.items : [], r.inv, shipmentsForTech(tech, allShips)).map((t) => t.text) : [];
+    if (!lines.length && !transitLines.length) { latest.delete(tech.id); continue; } // a newer clean sheet replaces an older flagged one
     latest.set(tech.id, {
       id: r.id,
       name: tech.name,
@@ -146,8 +169,8 @@ async function loadDrafts(supabase, since) {
       sheetDate: r.inv || null,
       smsAddress: tech.sms_address || null,
       phone: tech.phone || null,
-      issues: lines,
-      text: draftText(tech.name, r.filename, lines),
+      issues: lines.concat(transitLines),
+      text: draftText(tech.name, r.filename, lines, transitLines),
       receivedAt: r.received_at,
     });
   }

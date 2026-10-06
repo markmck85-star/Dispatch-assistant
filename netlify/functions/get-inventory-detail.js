@@ -1,15 +1,20 @@
 /**
- * get-inventory-detail.js  (v1, 2026-10-05)
+ * get-inventory-detail.js  (v2, 2026-10-06)
  * SAVE AS: netlify/functions/get-inventory-detail.js
  *
  * Read-only. Returns the line items already parsed from saved count sheets,
  * plus the email text that arrived with them (the notes techs put in the
  * message). Used by the inventory board review screen. Sends nothing.
  *
+ * v2 (2026-10-06): a sheet whose In Transit column is empty for an item Neumo has
+ * already requested or shipped to that technician is held like a date problem
+ * (see lib/inventory-transit.js for the exact rule).
+ *
  * GET ?since=YYYY-MM-DD&state=GA
  */
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
+const { transitProblems, shipmentsForTech } = require("./lib/inventory-transit.js");
 
 const NAME_FORMAT = /^[A-Z]{2}(?:\s*,\s*[A-Z]{2})*\s*SST\s*-\s*MCR\s+[A-Za-z.'_ ]+?\s*-\s*\d{8}\.(xlsx|xls)$/i;
 const STALE_DAYS = 7;
@@ -78,6 +83,15 @@ exports.handler = async (event) => {
   const { data: techs } = await supabase.from("technicians").select("id, name, home_state, email, is_contractor").eq("active", true);
   const roster = techs || [];
 
+  // Neumo -> technician shipments, for the In Transit check (a failure here must not break the page).
+  let allShips = [];
+  try {
+    const { data: shipRows } = await supabase.from("consumable_shipments")
+      .select("technician_id, tech_name_raw, status, shipped_at, request_date, delivered_at, items")
+      .gte("request_date", addDays(since, -30)).limit(2000);
+    allShips = shipRows || [];
+  } catch (e) { allShips = []; }
+
   const { data: rows, error } = await supabase
     .from("inventory_sheets")
     .select("id, inbound_email_id, filename, storage_path, received_at, parsed")
@@ -102,7 +116,8 @@ exports.handler = async (event) => {
     const key = tech ? tech.id : "name:" + String(parsed.techName || r.filename).toLowerCase();
     if (latest.has(key)) continue;
     const arrived = etDate(r.received_at);
-    const issues = readyIssues(r.filename, parsed.invDate || null, arrived);
+    const transit = tech ? transitProblems(parsed.items || [], parsed.invDate || null, shipmentsForTech(tech, allShips)) : [];
+    const issues = readyIssues(r.filename, parsed.invDate || null, arrived).concat(transit.map((t) => t.text));
     const items = (parsed.items || []).filter(keepItem).map((it) => ({
       code: it.code,
       name: it.name,
@@ -125,6 +140,7 @@ exports.handler = async (event) => {
       emailId: r.inbound_email_id,
       ready: issues.length === 0,
       issues,
+      transitIssues: transit.map((t) => t.text),
       items,
       partialsCurrent: parsed.summary ? parsed.summary.partialsLikelyCurrent : null,
       warnings: parsed.warnings || [],

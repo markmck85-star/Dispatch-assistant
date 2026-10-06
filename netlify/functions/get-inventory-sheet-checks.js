@@ -1,5 +1,5 @@
 /**
- * get-inventory-sheet-checks.js  (v1, 2026-10-05)
+ * get-inventory-sheet-checks.js  (v2, 2026-10-06)
  * SAVE AS: netlify/functions/get-inventory-sheet-checks.js
  *
  * Looks at every saved inventory count sheet and lists the ones with a date or
@@ -18,6 +18,8 @@
  *   fix   file name and sheet disagree (both dates shown)
  *   fix   a date is in the future, or in the wrong year
  *   fix   a date is more than 7 days before the day the sheet arrived
+ *   fix   In Transit left empty for an item already requested/shipped to them
+ *         (see lib/inventory-transit.js; added 2026-10-06)
  *   note  same sheet date as that technician's previous sheet (old sheet reused?)
  *   note  file name does not follow the standard format
  *
@@ -25,6 +27,7 @@
  */
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
+const { transitProblems, shipmentsForTech } = require("./lib/inventory-transit.js");
 
 const STALE_DAYS = 7;
 // The name part may not contain " - " (that is how extras like "- MASTER SHEET -" sneak in).
@@ -78,12 +81,21 @@ exports.handler = async (event) => {
   const lookback = addDays(since, -46);
   const { data: rows, error } = await supabase
     .from("inventory_sheets")
-    .select("id, inbound_email_id, filename, received_at, tech:parsed->>techName, inv:parsed->>invDate")
+    .select("id, inbound_email_id, filename, received_at, tech:parsed->>techName, inv:parsed->>invDate, items:parsed->items")
     .gte("received_at", lookback + "T00:00:00-04:00")
     .not("parsed", "is", null)
     .order("received_at", { ascending: true })
     .limit(2000);
   if (error) return json(500, { error: error.message });
+
+  // Neumo -> technician shipments, for the In Transit check (a failure here must not break the page).
+  let allShips = [];
+  try {
+    const { data: shipRows } = await supabase.from("consumable_shipments")
+      .select("technician_id, tech_name_raw, status, shipped_at, request_date, delivered_at, items")
+      .gte("request_date", addDays(since, -60)).limit(3000);
+    allShips = shipRows || [];
+  } catch (e) { allShips = []; }
 
   const emailIds = [...new Set((rows || []).map((r) => r.inbound_email_id).filter(Boolean))];
   const senderById = new Map();
@@ -133,6 +145,14 @@ exports.handler = async (event) => {
       }
       if (fd.iso && !sheetIso && Number(fd.year) !== Number(arrived.slice(0, 4)) && !issues.some((i) => i.code === "wrong_year")) {
         issues.push({ kind: "fix", code: "wrong_year", text: `File name date ${fd.iso} is the wrong year` });
+      }
+
+      // In Transit left empty although something is already on the way to them.
+      // Only a technician's newest sheet is checked: once they resubmit, the old one is superseded.
+      if (tech && sheetIso && idx === list.length - 1) {
+        for (const t of transitProblems(Array.isArray(r.items) ? r.items : [], sheetIso, shipmentsForTech(tech, allShips))) {
+          issues.push({ kind: "fix", code: t.code, text: t.text });
+        }
       }
 
       // repeated date: an earlier, different submission by the same person with the same sheet date
