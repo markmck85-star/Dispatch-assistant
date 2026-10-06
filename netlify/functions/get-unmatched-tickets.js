@@ -107,6 +107,11 @@ exports.handler = async (event) => {
       .is("site_id", null)
       .in("ticket_kind", ["trouble", "maintenance"])
       .eq("status", "open")
+      // 2026-10-06: a ticket someone marked resolved (a phantom, e.g. an inventory
+      // sheet email misread as a ticket) must not keep raising this toast. Marking
+      // it resolved on the State Console now clears it here too, without having to
+      // also close the ticket.
+      .is("manually_resolved_at", null)
       .order("received_at", { ascending: false });
 
     if (error) return json(500, { error: error.message });

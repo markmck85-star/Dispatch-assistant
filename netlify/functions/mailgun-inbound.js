@@ -315,6 +315,53 @@ function nextWorkDayStrForSiteCode(siteCode) {
   return `${scratch.getUTCFullYear()}-${String(scratch.getUTCMonth()+1).padStart(2,'0')}-${String(scratch.getUTCDate()).padStart(2,'0')}`;
 }
 
+// 2026-10-06: an inventory sheet's own file name doubles as its email subject
+// ("GA SST - MCR SEAN REICH   - 20261005", "IN SST - MCR Aaron Schrop - MASTER
+// SHEET - 20261005", "MI SST - MCR CALEB CAROEN - 20261004 - Master"). When a
+// tech sends one to the dispatch address with no attachment the app can read
+// (Sean Reich, Mon 10/5 8:11 AM ET -- the real sheet came in an hour later), the
+// ticket reader took the trailing date for a work order number and raised a
+// phantom open trouble ticket "WO 20261005" plus a "new location" prompt. No real
+// Neumo ticket subject starts "XX SST - MCR <name> - <8-digit date>", so this
+// shape is treated as inventory mail and kept out of the ticket/board/SMS paths.
+const INVENTORY_SHEET_SUBJECT_RE = new RegExp(
+  "^\\s*(?:(?:re|fwd?|fw)\\s*:\\s*)*[A-Z]{2}\\s+SST\\s*[-\\u2013\\u2014]\\s*MCR\\s+[A-Za-z][A-Za-z .'-]*?" +
+  "\\s*[-\\u2013\\u2014]\\s*(?:MASTER\\s+SHEET\\s*[-\\u2013\\u2014]\\s*)?\\d{8}\\b", "i"
+);
+
+/**
+ * Which day's dispatch board a plain TROUBLE ticket goes on (2026-10-06).
+ *
+ * Mark's rule: a trouble ticket that comes in while the office is working
+ * belongs on TODAY's board even when its 4-hour SLA rolls into tomorrow
+ * morning -- the dispatcher decides whether to send someone now (a tech who
+ * is close by, a heavy day tomorrow, tomorrow off, or overtime that is worth
+ * it) instead of the ticket sitting invisible on tomorrow's board.
+ *
+ * "While the office is working" = a covered work day (Mon-Fri, or Saturday in
+ * a state with on-call coverage, never Sunday) between 8:00 AM and 5:00 PM in
+ * the site's own timezone, the same hours calculateSlaDeadline uses. Judged
+ * at the moment the ticket is put on the board, so the address-sweep path
+ * (a ticket matched to its site later) lands on today too, not a day in the
+ * past.
+ *
+ * Outside those hours it keeps the 2026-09-19 behaviour: the day the ticket's
+ * own SLA deadline falls on (a Saturday-evening ticket belongs on Monday's
+ * board, since nobody is dispatching Saturday night).
+ */
+function troubleBoardDateStr(rawSiteCode, slaEndIso, now) {
+  const tz = getTimezoneForSiteCode(rawSiteCode);
+  const stateCode = rawSiteCode ? rawSiteCode.substring(0, 2) : null;
+  const n = getZonedParts(now || new Date(), tz);
+  const nowDay = new Date(Date.UTC(n.year, n.month - 1, n.day));
+  const pad = (v) => String(v).padStart(2, '0');
+  if (isCoveredWorkDay(nowDay, stateCode) && n.hour >= 8 && n.hour < 17) {
+    return `${n.year}-${pad(n.month)}-${pad(n.day)}`;
+  }
+  const p = getZonedParts(new Date(slaEndIso), tz);
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+}
+
 // Shared by both the primary ticket-ingestion path and the address-sweep
 // sibling-linking path below (2026-09-02) -- previously this whole block
 // only ran once, inline, for the ticket that triggered the current
@@ -342,8 +389,8 @@ async function autoAddTicketToBoard({
         // overwrites an existing planned/completed/reassigned entry, even a
         // cancelled one from earlier that day. A second ticket at an
         // already-touched site+date needs manual adding, same as the
-        // status quo. Trouble tickets always target today (they're urgent
-        // by nature); maintenance tickets target their own parsed due date
+        // status quo. Trouble tickets target today while the office is working,
+        // else their SLA's day (see troubleBoardDateStr); maintenance tickets target their own parsed due date
         // when one was found, falling back to today when the free-text
         // description didn't yield a confident date (agreed with Mark
         // 2026-07-21 -- best-guess placement beats losing it silently);
@@ -400,9 +447,11 @@ async function autoAddTicketToBoard({
                 // ticket's own already-computed SLA deadline's calendar day
                 // (in the site's local timezone) instead wires the same,
                 // correct answer into where the board actually places it.
-                const tzForSla = getTimezoneForSiteCode(rawSiteCode);
-                const p = getZonedParts(new Date(slaEndIso), tzForSla);
-                dispatchDateStr = `${p.year}-${String(p.month).padStart(2,'0')}-${String(p.day).padStart(2,'0')}`;
+                // 2026-10-06 (Mark): during working hours the ticket goes on
+                // TODAY's board even if the SLA lands tomorrow; only after
+                // hours / on an uncovered day does it follow the SLA's day.
+                // See troubleBoardDateStr above for the full reasoning.
+                dispatchDateStr = troubleBoardDateStr(rawSiteCode, slaEndIso);
               } else {
                 dispatchDateStr = nextWorkDayStrForSiteCode(rawSiteCode);
               }
@@ -605,6 +654,8 @@ async function autoAddTicketToBoard({
 // matter how many times the board was reprocessed, since this function
 // was previously only ever called from inside THIS file).
 module.exports.autoAddTicketToBoard = autoAddTicketToBoard;
+module.exports._troubleBoardDateStr = troubleBoardDateStr;
+module.exports._inventorySheetSubjectRe = INVENTORY_SHEET_SUBJECT_RE;
 
 function calculateSlaDeadline(receivedAt, timezone, stateCode) {
   let remaining = 240; // 4 hours in minutes
@@ -1741,7 +1792,8 @@ exports.handler = async (event) => {
     {
       const payrollHayEarly = ((fields['To'] || fields['to'] || '') + ' ' + (fields['Cc'] || fields['cc'] || '') + ' ' +
         (fields['recipient'] || fields['Recipient'] || '') + ' ' + (subject || '')).toLowerCase();
-      if (/inventory@mcrtechservice\.com|expense@mcrtechservice\.com/.test(payrollHayEarly) || inventorySheetAtts.length > 0) {
+      if (/inventory@mcrtechservice\.com|expense@mcrtechservice\.com/.test(payrollHayEarly) || inventorySheetAtts.length > 0
+        || INVENTORY_SHEET_SUBJECT_RE.test(subject || '')) {
         if (parsed) console.log('[mailgun-inbound] Inventory/expense mail -- skipping dispatch parsing');
         parsed = null;
       }
