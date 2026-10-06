@@ -291,8 +291,8 @@
         </div>
         <div id="projMsg" class="hint" style="padding:0 18px 8px;"></div>
         <table>
-          <thead><tr><th>Technician</th><th>Last sheet</th><th>Counted</th><th>Since then</th><th>Projected now</th><th>Weeks of supply</th><th>Spare</th></tr></thead>
-          <tbody id="projBody"><tr><td colspan="7" class="note">Loading...</td></tr></tbody>
+          <thead><tr><th>Technician</th><th>Last sheet</th><th>Counted</th><th>Since then</th><th>Projected now</th><th>On the way</th><th>Weeks of supply</th><th>Spare</th></tr></thead>
+          <tbody id="projBody"><tr><td colspan="8" class="note">Loading...</td></tr></tbody>
         </table>
         <div class="note" id="projNote"></div>
       </div>
@@ -593,6 +593,7 @@ function renderShipments() {
   document.getElementById("shipBody").innerHTML = shipmentRowsHtml(SHIPMENTS, !!(box && box.checked));
 }
 
+function shortDate(ymd) { const m = String(ymd || "").match(/^\d{4}-(\d{2})-(\d{2})/); return m ? Number(m[1]) + "/" + Number(m[2]) : String(ymd || ""); }
 function projNum(v, d) { return v == null ? "-" : (Math.round(v * Math.pow(10, d || 1)) / Math.pow(10, d || 1)).toString(); }
 async function loadProjection() {
   const state = document.getElementById("stateFilter").value;
@@ -609,7 +610,7 @@ async function loadProjection() {
     msg.textContent = "";
     const rows = data.technicians || [];
     if (!rows.length) {
-      document.getElementById("projBody").innerHTML = '<tr><td colspan="7" class="note">No readable count sheets yet. A technician appears here after one of their sheets arrives.</td></tr>';
+      document.getElementById("projBody").innerHTML = '<tr><td colspan="8" class="note">No readable count sheets yet. A technician appears here after one of their sheets arrives.</td></tr>';
       document.getElementById("projNote").textContent = "";
       return;
     }
@@ -620,18 +621,24 @@ async function loadProjection() {
           (t.calibration.impliedRollsPerRestock != null ? ", about " + t.calibration.impliedRollsPerRestock + " rolls per restock" : "") +
           (t.calibration.note ? " (" + esc(t.calibration.note) + ")" : "") + "</div>" : "";
       const cmt = (t.comment || []).map((c) => '<div class="hint">Note: ' + esc(c) + "</div>").join("");
+      // On the way: form rolls requested or shipped but not delivered yet (its own column, not part of Projected now)
+      const inc = (t.onTheWay || []).length
+        ? "<b>+" + t.onTheWayRolls + "</b>" +
+          (t.onTheWay || []).map((o) => '<div class="hint">' + projNum(o.rolls, 0) + " rolls " + (o.status === "shipped" ? "shipped " : "requested ") + esc(shortDate(o.date)) + "</div>").join("") +
+          '<div class="hint">&rarr; ' + projNum(t.projectedAfterArrival) + " on arrival</div>"
+        : "-";
       return "<tr><td>" + esc(t.name) + '<div class="hint">' + esc(t.state || "") + (t.contractor ? " &middot; contractor" : "") + "</div>" + cmt + cal + "</td>" +
         "<td>" + esc(t.sheetDate) + "</td><td>" + projNum(t.counted, 0) + "</td>" +
         "<td>" + t.restocksSince + " restocks &middot; about -" + projNum(t.estUsedSince) + ship + "</td>" +
-        "<td><b>" + projNum(t.projectedNow) + "</b></td><td>" + (t.weeksSupply == null ? "-" : projNum(t.weeksSupply)) +
+        "<td><b>" + projNum(t.projectedNow) + "</b></td><td>" + inc + "</td><td>" + (t.weeksSupply == null ? "-" : projNum(t.weeksSupply)) +
         "</td><td>" + (t.spareRolls ? "+" + t.spareRolls : "0") + "</td></tr>";
     }).join("");
     const a = data.assumptions || {};
     document.getElementById("projNote").textContent = "Estimate only. Counted rolls, minus restocks completed since the sheet at " + a.rollsPerRestock +
-      " roll each, plus shipments that arrived since. Spare = rolls beyond " + a.reserveWeeks + " weeks of typical use. Shipments you mark delivered make this more accurate. Partial rolls are not included.";
+      " roll each, plus shipments that arrived since. Spare = rolls beyond " + a.reserveWeeks + " weeks of typical use. Shipments you mark delivered make this more accurate. On the way = form rolls requested or shipped but not delivered yet; they are not counted in Projected now. Partial rolls are not included.";
   } catch (err) {
     msg.textContent = "Projection unavailable: " + err.message;
-    document.getElementById("projBody").innerHTML = '<tr><td colspan="7" class="note">Could not load the projection.</td></tr>';
+    document.getElementById("projBody").innerHTML = '<tr><td colspan="8" class="note">Could not load the projection.</td></tr>';
   }
 }
 try {
