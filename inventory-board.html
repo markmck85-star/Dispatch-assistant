@@ -127,7 +127,9 @@
     .hint { font-size: 12px; color: var(--muted); }
     .tag.ship { background: #e3ecf8; color: #1d4e89; }
     tr.dim td { opacity: 0.6; }
-    button.mini {
+    button.mini, a.mini {
+      display: inline-block; text-decoration: none;
+
       background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
       padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; margin-top: 4px;
     }
@@ -212,7 +214,7 @@
         </table>
       </details>
       <details class="grp" id="grpReceived">
-        <summary>Received <span class="count good" id="cntReceived">&ndash;</span><span class="hint">Expand to view or download received inventory sheets</span></summary>
+        <summary>Received <span class="count good" id="cntReceived">&ndash;</span><span class="hint">Expand, then tap View / download on a name</span></summary>
         <table>
           <thead><tr><th>Tech</th><th>State</th><th>Date</th><th>Email</th></tr></thead>
           <tbody id="recBody"><tr><td colspan="4" class="note">Loading&hellip;</td></tr></tbody>
@@ -438,7 +440,7 @@ function receivedRowsHtml(rec) {
   if (!rec.length) return '<tr><td colspan="4" class="note">Nothing received yet in this period.</td></tr>';
   return rec.map((t, i) => {
     const day = t.receivedAt ? new Date(t.receivedAt).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
-    return "<tr><td><button class=\"mini\" type=\"button\" onclick=\"showTechSheet(" + i + ")\">" + esc(t.name) + "</button></td><td class=\"mono\">" + esc(t.state || "") + "</td><td class=\"mono\">" + esc(day) +
+    return "<tr><td>" + esc(t.name) + "<div><button class=\"mini\" type=\"button\" onclick=\"showTechSheet(" + i + ")\">View / download</button></div></td><td class=\"mono\">" + esc(t.state || "") + "</td><td class=\"mono\">" + esc(day) +
       "</td><td>" + esc(t.subject || "") + "</td></tr>";
   }).join("");
 }
@@ -479,7 +481,7 @@ async function openHistorySheet(n) {
     if (!res.ok || data.error) throw new Error(data.error || String(res.status));
     const rows = (data.items || []).map((it) => "<tr>" + itemCells(it) + "</tr>").join("") ||
       '<tr><td colspan="6" class="note">No lines were read from this sheet.</td></tr>';
-    const file = data.downloadUrl ? ' · <a href="' + esc(data.downloadUrl) + '">Download spreadsheet</a>' : "";
+    const file = data.downloadUrl ? ' <a class="mini" href="' + esc(data.downloadUrl) + '">Download spreadsheet</a>' : "";
     body.innerHTML = '<div class="note">' + esc(data.filename) + file + "</div>" +
       "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
       rows + "</tbody></table>";
