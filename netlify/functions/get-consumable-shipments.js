@@ -1,5 +1,5 @@
 /**
- * get-consumable-shipments.js  (v3, 2026-09-30)
+ * get-consumable-shipments.js  (v4, 2026-10-06)
  * SAVE AS: netlify/functions/get-consumable-shipments.js   (ONE file, no lib/ folder needed)
  *
  * Reads Neumo's consumable restock shipments out of inbound_emails and
@@ -23,6 +23,24 @@
  * held 18 instead of 24) and each item gets receivedUnits: the adjusted
  * number if there is one, otherwise the shipped units. Anything doing stock
  * math should use receivedUnits, never units.
+ *
+ * v4 (2026-10-06): first real traffic from the shipments mailbox showed four
+ * gaps, all fixed here:
+ *   - Tracking numbers are matched in any letter case and stored in capitals.
+ *     (The warehouse sometimes types them lowercase, e.g. "1z2v330a4241514022";
+ *     the old capitals-only match left that shipment stuck on "requested".)
+ *   - The warehouse's newer reply wording is read: "Shipped via UPS GND.
+ *     Master tracking for (5) boxes: 1Z..." gives the box count and method.
+ *   - The mailbox poll saves the raw MIME body (quoted-printable, sometimes
+ *     Windows-1252). It is decoded before parsing, so soft line breaks can no
+ *     longer split a SKU or tracking number and a cp1252 dash is still a dash.
+ *   - Multi-technician requests ("10/6 - DCO MCR TECHS IL SST -", with one
+ *     "MCR NAME - IL SST" block per tech) become one shipment per tech.
+ *     A warehouse reply to one of those has not been seen yet, so tracking for
+ *     them is not matched to a tech until its format is known.
+ *   - "Boxes shipped differs from requested" now says which way it differs: more
+ *     shipped than parsed usually means the request has a line this page does not
+ *     read (for example CLEANING CARDS).
  *
  * Query: ?since=YYYY-MM-DD (default 45 days)  &state=GA (tech's state)
  *
@@ -88,7 +106,19 @@ const ITEM_RE = new RegExp(
   "gi"
 );
 
-const TRACKING_RE = /\b1Z[0-9A-Z]{16}\b/g;
+// Multi-tech request: "10/6 - DCO MCR TECHS IL SST -", one block per tech in the body.
+const DCO_SUBJECT_RE = new RegExp(
+  "^\\s*(?:(?:re|fwd?|fw)\\s*:\\s*)*(\\d{1,2})\\/(\\d{1,2})\\s*" + DASH +
+  "\\s*DCO\\s+MCR\\s+TECHS\\s+([A-Z]{2})\\s+SST",
+  "i"
+);
+// "MCR RYAN BARNES - IL SST" (a tech's block header inside a multi-tech request)
+const TECH_BLOCK_RE = new RegExp("MCR\\s+([A-Za-z][A-Za-z .'-]*?)\\s*" + DASH + "\\s*([A-Z]{2})\\s+SST", "g");
+
+const TRACKING_RE = /\b1Z[0-9A-Z]{16}\b/gi;
+// "Master tracking for (5) boxes" / "(5) boxes" in the warehouse's newer reply wording
+const MASTER_BOXES_RE = /\(\s*(\d+)\s*\)\s*box(?:es)?\b/i;
+const SHIPPED_VIA_RE = /Shipped\s+via\s+(UPS\s+[A-Za-z]+|[A-Za-z]+)/i;
 const SHIPPED_RE = /(\d+)\s+Box(?:es)?\s+shipped\s+via\s+([A-Za-z ]+?)(?=\s*(?:\r|\n|Tracking|$))/i;
 const FWD_DATE_RE = /Date:\s*(?:[A-Za-z]+\s+)?([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})/;
 
@@ -114,8 +144,103 @@ function forwardedDate(body) {
   return m[3] + "-" + pad(mi + 1) + "-" + pad(Number(m[2]));
 }
 
+// The mailbox poll stores the raw MIME body, so quoted-printable text arrives as
+// "=\r\n" soft breaks and "=C2=A0"-style bytes. Decode it (only when the body
+// says it is quoted-printable) before any matching happens.
+function decodeQuotedPrintable(raw) {
+  const joined = raw.replace(/=\r?\n/g, "");
+  return joined.replace(/(?:=[0-9A-Fa-f]{2})+/g, (run) => {
+    const bytes = Buffer.from(run.replace(/=/g, ""), "hex");
+    const utf8 = bytes.toString("utf8");
+    if (!utf8.includes("\uFFFD")) return utf8;
+    // Not valid UTF-8: treat as Windows-1252 (en/em dash and nbsp are what matter here).
+    let out = "";
+    for (const b of bytes) {
+      out += b === 0x96 ? "\u2013" : b === 0x97 ? "\u2014" : b === 0xA0 ? " " : b === 0x92 ? "'" : String.fromCharCode(b);
+    }
+    return out;
+  });
+}
+
 function cleanBody(s) {
-  return String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&nbsp;/gi, " ");
+  let t = String(s || "");
+  if (/Content-Transfer-Encoding:\s*quoted-printable/i.test(t)) t = decodeQuotedPrintable(t);
+  return t.replace(/<br\s*\/?>/gi, "\n").replace(/&nbsp;/gi, " ");
+}
+
+/** Item lines shaped "N BOX M UNIT - SKU description" anywhere in `text`. */
+function extractItems(text) {
+  const items = [];
+  const seen = new Set();
+  let im;
+  ITEM_RE.lastIndex = 0;
+  while ((im = ITEM_RE.exec(text)) !== null) {
+    const item = {
+      boxes: Number(im[1]),
+      units: Number(im[2]),
+      unit: im[3].toUpperCase(),
+      sku: im[4],
+      description: (im[5] || "").replace(/\s+/g, " ").trim(),
+    };
+    const k = item.sku + "|" + item.boxes + "|" + item.units;
+    if (seen.has(k)) continue; // the same request quoted twice in a long thread
+    seen.add(k);
+    items.push(item);
+  }
+  return items;
+}
+
+/**
+ * Multi-technician request ("10/6 - DCO MCR TECHS IL SST -") -> one partial
+ * shipment per "MCR NAME - XX SST" block. Returns [] if it is not that shape or
+ * no tech block has any item (e.g. a bare reply, whose format is not known yet).
+ */
+function parseMultiTechEmail(email) {
+  const subject = String(email.subject || "");
+  const sm = subject.match(DCO_SUBJECT_RE);
+  if (!sm) return [];
+  const body = cleanBody(email.body_text);
+  const requestDate = requestDateFrom(Number(sm[1]), Number(sm[2]), email.received_at);
+
+  const heads = [];
+  let hm;
+  TECH_BLOCK_RE.lastIndex = 0;
+  while ((hm = TECH_BLOCK_RE.exec(body)) !== null) {
+    heads.push({ name: hm[1].replace(/\s+/g, " ").trim(), state: hm[2].toUpperCase(), start: hm.index, end: hm.index + hm[0].length });
+  }
+  const out = [];
+  const seenTech = new Set();
+  heads.forEach((h, i) => {
+    const stop = i + 1 < heads.length ? heads[i + 1].start : body.length;
+    let block = body.slice(h.end, stop);
+    const ty = block.search(/THANK\s+YOU/i);
+    if (ty >= 0) block = block.slice(0, ty);
+    const items = extractItems(block);
+    const key = h.name.toLowerCase() + "|" + h.state;
+    if (!items.length || seenTech.has(key)) return;
+    seenTech.add(key);
+    out.push({
+      emailId: email.id,
+      requestDate,
+      techNameRaw: h.name,
+      state: h.state,
+      items,
+      tracking: [],
+      boxesShipped: null,
+      shipMethod: /PLEASE\s+SHIP\s+UPS\s+GROUND/i.test(body) ? "UPS GROUND" : null,
+      shippedAt: null,
+      sawRequestText: true,
+      sawReplyText: false,
+    });
+  });
+  return out;
+}
+
+/** One email -> zero or more partial shipments (single-tech or multi-tech request). */
+function parseShipEmails(email) {
+  const single = parseShipEmail(email);
+  if (single) return [single];
+  return parseMultiTechEmail(email);
 }
 
 /**
@@ -132,27 +257,12 @@ function parseShipEmail(email) {
   const techNameRaw = sm[3].replace(/\s+/g, " ").trim();
   const state = sm[4].toUpperCase();
 
-  // Items: only lines shaped "N BOX M UNIT - SKU description".
-  const items = [];
-  const seen = new Set();
-  let im;
-  ITEM_RE.lastIndex = 0;
-  while ((im = ITEM_RE.exec(body)) !== null) {
-    const item = {
-      boxes: Number(im[1]),
-      units: Number(im[2]),
-      unit: im[3].toUpperCase(),
-      sku: im[4],
-      description: (im[5] || "").replace(/\s+/g, " ").trim(),
-    };
-    const k = item.sku + "|" + item.boxes + "|" + item.units;
-    if (seen.has(k)) continue; // the same request quoted twice in a long thread
-    seen.add(k);
-    items.push(item);
-  }
+  const items = extractItems(body);
 
-  const tracking = [...new Set((body.match(TRACKING_RE) || []))];
+  const tracking = [...new Set((body.match(TRACKING_RE) || []).map((t) => t.toUpperCase()))];
   const sh = body.match(SHIPPED_RE);
+  const mb = body.match(MASTER_BOXES_RE);
+  const sv = body.match(SHIPPED_VIA_RE);
   const isReply = /^\s*re\s*:/i.test(subject) || !!sh || tracking.length > 0;
 
   return {
@@ -162,8 +272,10 @@ function parseShipEmail(email) {
     state,
     items,
     tracking,
-    boxesShipped: sh ? Number(sh[1]) : null,
-    shipMethod: sh ? sh[2].trim().toUpperCase() : (/PLEASE\s+SHIP\s+UPS\s+GROUND/i.test(body) ? "UPS GROUND" : null),
+    boxesShipped: sh ? Number(sh[1]) : (tracking.length && mb ? Number(mb[1]) : null),
+    shipMethod: sh ? sh[2].trim().toUpperCase()
+      : (tracking.length && sv ? sv[1].trim().toUpperCase()
+        : (/PLEASE\s+SHIP\s+UPS\s+GROUND/i.test(body) ? "UPS GROUND" : null)),
     // The reply's own date: from a forwarded header if present, else when it arrived.
     shippedAt: tracking.length ? (forwardedDate(body) || String(email.received_at || "").slice(0, 10) || null) : null,
     sawRequestText: items.length > 0,
@@ -221,7 +333,9 @@ function buildShipments(parsed, roster) {
     if (!tech) warnings.push("Technician name in the subject did not match exactly one active technician.");
     if (!g.items.length) warnings.push("Tracking reply seen but the original request (items) has not been seen.");
     if (g.boxesShipped != null && g.items.length && g.boxesShipped !== boxesRequested) {
-      warnings.push("Boxes shipped (" + g.boxesShipped + ") differs from boxes requested (" + boxesRequested + ").");
+      warnings.push(g.boxesShipped > boxesRequested
+        ? "Boxes shipped (" + g.boxesShipped + ") is more than the " + boxesRequested + " read from the request; the request may include a line this page does not read (for example cleaning cards)."
+        : "Boxes shipped (" + g.boxesShipped + ") is fewer than boxes requested (" + boxesRequested + ").");
     }
     out.push({
       technician: tech ? { id: tech.id, name: tech.name, state: tech.home_state } : null,
@@ -397,7 +511,7 @@ exports.handler = async (event) => {
     .from("inbound_emails")
     .select("id, received_at, sender, subject, to_address, body_text")
     .gte("received_at", since + "T00:00:00-04:00")
-    .ilike("subject", "%RESTOCK MCR%")
+    .or("subject.ilike.%RESTOCK MCR%,subject.ilike.%DCO MCR%")
     .order("received_at", { ascending: true })
     .limit(500);
   if (mErr) return json(500, { error: mErr.message });
@@ -405,8 +519,8 @@ exports.handler = async (event) => {
   const parsed = [];
   const skipped = [];
   for (const e of mails || []) {
-    const p = parseShipEmail(e);
-    if (p) parsed.push(p);
+    const ps = parseShipEmails(e);
+    if (ps.length) parsed.push(...ps);
     else skipped.push({ emailId: e.id, subject: e.subject });
   }
   const fresh = buildShipments(parsed, roster);
@@ -451,6 +565,7 @@ exports.handler = async (event) => {
 
 // Exposed for tests only.
 exports._parseShipEmail = parseShipEmail;
+exports._parseShipEmails = parseShipEmails;
 exports._buildShipments = buildShipments;
 exports._syncShipments = syncShipments;
 exports._shape = shape;
