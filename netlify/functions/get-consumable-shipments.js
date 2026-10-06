@@ -36,8 +36,9 @@
  *     longer split a SKU or tracking number and a cp1252 dash is still a dash.
  *   - Multi-technician requests ("10/6 - DCO MCR TECHS IL SST -", with one
  *     "MCR NAME - IL SST" block per tech) become one shipment per tech.
- *     A warehouse reply to one of those has not been seen yet, so tracking for
- *     them is not matched to a tech until its format is known.
+ *     The warehouse's reply to one of those lists each tech's own tracking
+ *     number right after that tech's "MCR NAME - IL SST" line (lowercase, with a
+ *     T-number after it); each tech gets their own tracking from it.
  *   - "Boxes shipped differs from requested" now says which way it differs: more
  *     shipped than parsed usually means the request has a line this page does not
  *     read (for example CLEANING CARDS).
@@ -113,7 +114,9 @@ const DCO_SUBJECT_RE = new RegExp(
   "i"
 );
 // "MCR RYAN BARNES - IL SST" (a tech's block header inside a multi-tech request)
-const TECH_BLOCK_RE = new RegExp("MCR\\s+([A-Za-z][A-Za-z .'-]*?)\\s*" + DASH + "\\s*([A-Z]{2})\\s+SST", "g");
+const TECH_BLOCK_RE = new RegExp(
+  "MCR\\s+([A-Za-z][A-Za-z.'-]*(?:\\s+[A-Za-z][A-Za-z.'-]*){0,3})\\s*" + DASH + "\\s*([A-Z]{2})\\s+SST", "g"
+);
 
 const TRACKING_RE = /\b1Z[0-9A-Z]{16}\b/gi;
 // "Master tracking for (5) boxes" / "(5) boxes" in the warehouse's newer reply wording
@@ -192,8 +195,12 @@ function extractItems(text) {
 
 /**
  * Multi-technician request ("10/6 - DCO MCR TECHS IL SST -") -> one partial
- * shipment per "MCR NAME - XX SST" block. Returns [] if it is not that shape or
- * no tech block has any item (e.g. a bare reply, whose format is not known yet).
+ * shipment per "MCR NAME - XX SST" block. The warehouse's reply to one of these
+ * repeats each tech's block with that tech's own tracking number written right
+ * after the header ("MCR RYAN BARNES - IL SST-1Z...."), and quotes the original
+ * request underneath, so each tech's items and tracking are merged across every
+ * block that names them. Returns [] if the subject is not this shape or no tech
+ * block has an item or a tracking number.
  */
 function parseMultiTechEmail(email) {
   const subject = String(email.subject || "");
@@ -201,6 +208,7 @@ function parseMultiTechEmail(email) {
   if (!sm) return [];
   const body = cleanBody(email.body_text);
   const requestDate = requestDateFrom(Number(sm[1]), Number(sm[2]), email.received_at);
+  const sv = body.match(SHIPPED_VIA_RE);
 
   const heads = [];
   let hm;
@@ -208,31 +216,41 @@ function parseMultiTechEmail(email) {
   while ((hm = TECH_BLOCK_RE.exec(body)) !== null) {
     heads.push({ name: hm[1].replace(/\s+/g, " ").trim(), state: hm[2].toUpperCase(), start: hm.index, end: hm.index + hm[0].length });
   }
-  const out = [];
-  const seenTech = new Set();
+  const byTech = new Map();
   heads.forEach((h, i) => {
     const stop = i + 1 < heads.length ? heads[i + 1].start : body.length;
     let block = body.slice(h.end, stop);
     const ty = block.search(/THANK\s+YOU/i);
     if (ty >= 0) block = block.slice(0, ty);
-    const items = extractItems(block);
     const key = h.name.toLowerCase() + "|" + h.state;
-    if (!items.length || seenTech.has(key)) return;
-    seenTech.add(key);
+    if (!byTech.has(key)) byTech.set(key, { name: h.name, state: h.state, items: [], tracking: [] });
+    const t = byTech.get(key);
+    for (const it of extractItems(block)) {
+      if (!t.items.some((x) => x.sku === it.sku && x.boxes === it.boxes && x.units === it.units)) t.items.push(it);
+    }
+    for (const tr of (block.match(TRACKING_RE) || []).map((x) => x.toUpperCase())) {
+      if (!t.tracking.includes(tr)) t.tracking.push(tr);
+    }
+  });
+
+  const out = [];
+  for (const t of byTech.values()) {
+    if (!t.items.length && !t.tracking.length) continue;
     out.push({
       emailId: email.id,
       requestDate,
-      techNameRaw: h.name,
-      state: h.state,
-      items,
-      tracking: [],
+      techNameRaw: t.name,
+      state: t.state,
+      items: t.items,
+      tracking: t.tracking,
       boxesShipped: null,
-      shipMethod: /PLEASE\s+SHIP\s+UPS\s+GROUND/i.test(body) ? "UPS GROUND" : null,
-      shippedAt: null,
-      sawRequestText: true,
-      sawReplyText: false,
+      shipMethod: t.tracking.length && sv ? sv[1].trim().toUpperCase()
+        : (/PLEASE\s+SHIP\s+UPS\s+GROUND/i.test(body) ? "UPS GROUND" : null),
+      shippedAt: t.tracking.length ? (forwardedDate(body) || String(email.received_at || "").slice(0, 10) || null) : null,
+      sawRequestText: t.items.length > 0,
+      sawReplyText: t.tracking.length > 0,
     });
-  });
+  }
   return out;
 }
 
