@@ -283,7 +283,7 @@
 
     <section>
       <div class="panel" id="projPanel">
-        <h2>Projected forms on hand <span class="hint" style="font-weight:400;">estimate, left / current-year forms, whole rolls &middot; nothing is sent from here</span></h2>
+        <h2>Projected forms on hand <span class="hint" style="font-weight:400;">predicted, left / current-year forms, whole rolls &middot; nothing is sent from here</span></h2>
         <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;padding:0 18px 8px;">
           <div style="min-width:150px;"><label>Rolls used per restock</label><input id="projRolls" type="number" min="0" step="0.1" value="1" /></div>
           <div style="min-width:150px;"><label>Weeks to keep in reserve</label><input id="projReserve" type="number" min="0" step="1" value="4" /></div>
@@ -618,7 +618,7 @@ async function loadProjection() {
       const ship = t.shippedRollsSince ? " &middot; +" + t.shippedRollsSince + " shipped" : "";
       const cal = t.calibration
         ? '<div class="hint">Between ' + esc(t.calibration.from) + " and " + esc(t.calibration.to) + ": " + t.calibration.restocks + " restocks" +
-          (t.calibration.impliedRollsPerRestock != null ? ", about " + t.calibration.impliedRollsPerRestock + " rolls per restock" : "") +
+          (t.calibration.impliedRollsPerRestock != null ? ", predicted " + t.calibration.impliedRollsPerRestock + " rolls per restock" : "") +
           (t.calibration.note ? " (" + esc(t.calibration.note) + ")" : "") + "</div>" : "";
       const cmt = (t.comment || []).map((c) => '<div class="hint">Note: ' + esc(c) + "</div>").join("");
       // On the way: form rolls requested or shipped but not delivered yet (its own column, not part of Projected now)
@@ -632,12 +632,12 @@ async function loadProjection() {
         (t.itemName ? '<div class="hint">' + esc(t.itemName) + (t.formSide ? " · " + esc(t.formSide) + " forms" : "") + "</div>" : "") +
         (t.previousYear ? '<div class="hint">not counted: ' + esc(t.previousYear.name || "previous year") + " " + projNum(t.previousYear.count, 0) + "</div>" : "") +
         "</td>" +
-        "<td>" + t.restocksSince + " restocks &middot; about -" + projNum(t.estUsedSince) + ship + "</td>" +
+        "<td>" + t.restocksSince + " restocks &middot; predicted -" + projNum(t.estUsedSince) + ship + "</td>" +
         "<td><b>" + projNum(t.projectedNow) + "</b></td><td>" + inc + "</td><td>" + (t.weeksSupply == null ? "-" : projNum(t.weeksSupply)) +
         "</td><td>" + (t.spareRolls ? "+" + t.spareRolls : "0") + "</td></tr>";
     }).join("");
     const a = data.assumptions || {};
-    document.getElementById("projNote").textContent = "Estimate only. Counted rolls, minus restocks completed since the sheet at " + a.rollsPerRestock +
+    document.getElementById("projNote").textContent = "Predicted only. Counted rolls, minus restocks completed since the sheet at " + a.rollsPerRestock +
       " roll each, plus shipments that arrived since. Spare = rolls beyond " + a.reserveWeeks + " weeks of typical use. Shipments you mark delivered make this more accurate. On the way = form rolls requested or shipped but not delivered yet; they are not counted in Projected now. Partial-count buckets are not included. A whole-roll row whose description says partials still counts. Restocks come off the newest year (left / red in Georgia), not the previous-year color.";
   } catch (err) {
     msg.textContent = "Projection unavailable: " + err.message;
