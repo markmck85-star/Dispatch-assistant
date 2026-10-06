@@ -13,7 +13,11 @@
 
 [functions."pull-shipments-mailbox"]
   timeout = 26
-  schedule = "*/20 * * * *"
+# 2026-10-06: schedule paused. The mailbox now answers "Basic authentication is
+# disabled" to the password login, so every 20-minute run only fails (and repeated
+# failed logins can trip a Microsoft lockout). Shipment emails are meant to reach the
+# app by forward/cc instead. To resume polling later, remove the # below:
+#  schedule = "*/20 * * * *"
 
 # 2026-10-06: on-demand twin of the shipments mailbox poll above. Netlify blocks
 # direct URL calls to a scheduled function, so this unscheduled copy runs the very
