@@ -68,6 +68,7 @@
     '.dp-sbody{padding:0 11px 10px;}',
     '.dp-sub{margin-top:6px;}',
     '.dp-sub>summary{font-size:12.5px;color:var(--dp-muted);padding:5px 0;text-transform:uppercase;letter-spacing:.03em;}',
+    '.dp-sub-note{font-size:12px;color:var(--dp-muted);margin:2px 0 8px;}',
     '.dp-empty{color:var(--dp-muted);font-size:13px;padding:3px 0;}',
     '.dp-lab{color:var(--dp-muted);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin:9px 0 4px;}',
     '.dp-item{border-left:4px solid #8d99a8;background:var(--dp-card);border-radius:4px;padding:7px 9px;margin-bottom:5px;}',
@@ -253,6 +254,23 @@
           return item(a.severity === 'Extreme' ? 'high' : 'warn', esc(a.event), esc(a.areas) +
             (a.ends ? ' \u00B7 until ' + esc(new Date(a.ends).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })) : ''));
         }).join('') + '</div>';
+      }
+
+      // Workload by area (preview): same stops, but each area is compared with the techs who can reach it
+      var aw = d.areaWeight;
+      if (aw && (aw.areas || []).length) {
+        var awLvl = { heavy: 'high', light: 'ok', regular: 'info', uncovered: 'high' };
+        var awRows = aw.areas.map(function (a) {
+          var meta = a.calls + (a.calls === 1 ? ' stop' : ' stops') + ' \u00B7 about ' + a.effectiveTechs + ' tech' + (a.effectiveTechs === 1 ? '' : 's') + ' can reach it';
+          if (a.ratio != null) meta += ' \u00B7 ' + a.callsPerTech + ' per tech vs ' + a.baselineCallsPerTech + ' usual (' + a.ratio + 'x)';
+          var tg = a.label === 'heavy' ? tag('Heavy', 'red') : (a.label === 'light' ? tag('Light', 'green') : (a.label === 'regular' ? tag('Regular') : (a.label === 'uncovered' ? tag('No one in range', 'red') : '')));
+          var who = (a.reachers || []).slice(0, 8).map(function (r) { return esc(r.name.split(' ')[0]) + (r.reach < 0.995 ? ' (' + Math.round(r.reach * 100) + '%)' : ''); }).join(', ');
+          return item(awLvl[a.label] || 'info', esc(a.name), esc(meta) + (a.note ? '<br>' + esc(a.note) : '') + (who ? '<br>Reach: ' + who : ''), tg);
+        }).join('');
+        var awHead = aw.busiest ? 'Busiest: ' + esc(aw.busiest.name) + ' \u00B7 ' + esc({ heavy: 'Heavy', light: 'Light', regular: 'Regular' }[aw.busiest.label] || '') + ' (' + aw.busiest.ratio + 'x usual)' : '';
+        h += sec('Workload by area <span class="dp-count">(preview)</span>', null,
+          (awHead ? '<div class="dp-sub-note">' + awHead + '</div>' : '') + awRows +
+          '<div class="dp-sub-note">Preview only: it does not change the Workload label above. Each area is measured against the technicians who can reach it (full credit within an hour, tapering to none at two hours).</div>', false);
       }
 
       // Availability
