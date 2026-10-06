@@ -1,5 +1,5 @@
 /**
- * get-inventory-projection.js  (v1, 2026-10-05)
+ * get-inventory-projection.js  (v2, 2026-10-06)
  * SAVE AS: netlify/functions/get-inventory-projection.js
  *
  * SHADOW MODE: estimates each technician's current-year registration-form
@@ -27,6 +27,20 @@
  * shipped no later than 5 days before the sheet date are assumed to be in that
  * count already. Partial rolls are ignored (only reliable at month-end).
  *
+ * v2 (2026-10-06): adds "on the way" per technician -- current-year form rolls in
+ * shipments that are requested or shipped but not yet delivered, so a low projected
+ * number is not alarming when the box is already coming. It is reported separately
+ * and is NOT added into projectedNow (that stays "what the tech should have in hand
+ * now"); the page shows it in its own column with the total after arrival.
+ *   - shipped, not delivered, shipped within LIKELY_ARRIVED_DAYS (older ones are
+ *     already treated as arrived above)
+ *   - requested, no tracking yet, requested within REQUEST_STALE_DAYS (older ones
+ *     are assumed never to have shipped and are ignored)
+ *   - same "already in the count" rule as arrivals: skipped if it shipped / was
+ *     requested ALREADY_COUNTED_DAYS or more before the sheet date
+ *   - only rolls of the technician's own current-year form count (other items such
+ *     as paper, ribbon and cleaning cards are ignored), same match as arrivals
+ *
  * GET ?state=GA  &rollsPerRestock=1  &reserveWeeks=4
  */
 const { createClient } = require("@supabase/supabase-js");
@@ -34,6 +48,7 @@ const { resolveSheetTech } = require("./lib/inventory-names.js");
 
 const LIKELY_ARRIVED_DAYS = 7;
 const ALREADY_COUNTED_DAYS = 5;
+const REQUEST_STALE_DAYS = 14;
 const AVG_WINDOW_DAYS = 56;
 
 function json(statusCode, obj) {
@@ -112,7 +127,7 @@ exports.handler = async (event) => {
 
     // Two plain queries (by id, by name) instead of .or(), so names with
     // spaces or punctuation cannot break the filter string.
-    const shipCols = "shipped_at, status, delivered_at, items, tech_name_raw, technician_id";
+    const shipCols = "shipped_at, request_date, status, delivered_at, items, tech_name_raw, technician_id";
     const [byId, byName] = await Promise.all([
       supabase.from("consumable_shipments").select(shipCols).eq("technician_id", tech.id),
       supabase.from("consumable_shipments").select(shipCols).ilike("tech_name_raw", tech.name),
@@ -144,10 +159,31 @@ exports.handler = async (event) => {
       return { rolls, list: got };
     };
 
+    // Rolls still on the way: requested or shipped, not delivered, not old enough to
+    // have been treated as arrived. Reported on its own (see header note).
+    const onTheWayFor = (fromDate, toDate) => {
+      const list = []; let rolls = 0;
+      for (const sh of ships || []) {
+        const r = rollsFor(sh);
+        if (!r || sh.status === "cancelled" || sh.status === "delivered") continue;
+        const isShipped = !!sh.shipped_at;
+        const startedOn = isShipped ? sh.shipped_at : sh.request_date;
+        if (!startedOn) continue;
+        if (isShipped && daysBetween(sh.shipped_at, toDate) > LIKELY_ARRIVED_DAYS) continue;      // treated as arrived
+        if (!isShipped && daysBetween(sh.request_date, toDate) > REQUEST_STALE_DAYS) continue;    // never shipped, stale
+        if (startedOn <= addDaysStr(fromDate, -ALREADY_COUNTED_DAYS)) continue;                    // assumed in the count
+        list.push({ status: isShipped ? "shipped" : "requested", date: startedOn, rolls: r });
+        rolls += r;
+      }
+      list.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      return { rolls, list };
+    };
+
     const since = await restocksBetween(L.date, today);
     const arr = arrivedBetween(L.date, today);
     const usedSince = since * rollsPerRestock;
     const projected = cy.count - usedSince + arr.rolls;
+    const incoming = onTheWayFor(L.date, today);
 
     const { data: recent } = await supabase.from("site_visits").select("started_at, is_restock, included_restock")
       .ilike("tech_name_raw", tech.name).gte("started_at", windowStart + "T00:00:00-05:00").limit(3000);
@@ -182,6 +218,8 @@ exports.handler = async (event) => {
       restocksSince: since, estUsedSince: Math.round(usedSince * 10) / 10,
       shipments: arr.list, shippedRollsSince: arr.rolls,
       projectedNow: Math.round(projected * 10) / 10,
+      onTheWay: incoming.list, onTheWayRolls: incoming.rolls,
+      projectedAfterArrival: Math.round((projected + incoming.rolls) * 10) / 10,
       weeklyRestocks: Math.round(weeklyRestocks * 10) / 10, weeklyUseRolls: Math.round(weeklyUse * 10) / 10,
       weeksSupply: weeksSupply == null ? null : Math.round(weeksSupply * 10) / 10,
       spareRolls: spare,
