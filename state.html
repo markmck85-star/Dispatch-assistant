@@ -257,6 +257,9 @@
     <!-- Morning brief / End of day panel (sits below the map so the map is always first) (digest-panel.js). Collapsible; loads only when opened. -->
     <div id="digestPanelHome"></div>
 
+    <!-- Georgia traffic from 511GA (traffic-panel.js). Collapsible; loads only when opened; hides itself outside Georgia. -->
+    <div id="trafficPanelHome"></div>
+
     <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
       <span>🔄 Restock Status</span>
       <button type="button" id="restockToggleBtn" onclick="toggleRestockSection()"
@@ -3048,6 +3051,16 @@ startStateLivePoll();
     var home = document.getElementById('digestPanelHome');
     if (!sel || !home || !window.DigestPanel) return;
     DigestPanel.mount(home, { theme: 'dark', collapsible: true, stateSelectEl: sel, storageKey: 'mcr_state_digest_open' });
+  })();
+</script>
+<script src="/traffic-panel.js"></script>
+<script>
+  // Georgia traffic panel (511GA) -- follows the State Console's own state dropdown.
+  (function () {
+    var sel = document.getElementById('stateSel');
+    var home = document.getElementById('trafficPanelHome');
+    if (!sel || !home || !window.TrafficPanel) return;
+    TrafficPanel.mount(home, { theme: 'dark', collapsible: true, stateSelectEl: sel, storageKey: 'mcr_state_traffic_open' });
   })();
 </script>
 <script>
