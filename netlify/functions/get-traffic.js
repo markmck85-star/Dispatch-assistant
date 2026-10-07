@@ -38,11 +38,14 @@ const { createClient } = require('@supabase/supabase-js');
 
 const FEED_URL = 'https://511ga.org/api/v2/get/event';
 const CACHE_KEY = 'traffic/ga-events';
+const MI_FEED_URL = 'https://mdotridedata.state.mi.us/api/v1/organization/michigan_department_of_transportation/dataset/incidents/query';
+const MI_CACHE_KEY = 'traffic/mi-events';
+const MI_DIR = { 1: 'NB', 2: 'SB', 3: 'both', 4: 'WB', 5: 'EB' };
 const FRESH_MS = 3 * 60 * 1000;          // reuse the stored copy this long
 const MIN_RETRY_MS = 60 * 1000;          // never call 511GA more than once a minute
 const STALE_AFTER_MS = 10 * 60 * 1000;   // older than this = tell the viewer it is stale
 const FEED_TIMEOUT_MS = 8000;
-const REGION_STATES = { GA: ['GA', 'NC', 'SC'] };
+const REGION_STATES = { GA: ['GA', 'NC', 'SC'], MI: ['MI'] };
 const TIMEZONE = 'America/New_York';
 const DEFAULT_RADIUS_MI = 10;
 const MAX_RADIUS_MI = 25;
@@ -52,7 +55,7 @@ const MAX_EVENTS_PER_SITE = 5;
 const MAX_STATEWIDE = 30;
 const MI_PER_DEG_LAT = 69.0;
 
-let memCache = null; // fallback if Blobs is unavailable (survives warm invocations only)
+const memCache = { GA: null, MI: null }; // fallback if Blobs is unavailable (survives warm invocations only)
 
 function json(statusCode, obj) {
   return {
@@ -104,6 +107,80 @@ function scrub(message, key) {
   return m;
 }
 
+
+function field(row, name) {
+  if (row[name] != null) return row[name];
+  const dashed = name.replace(/_/g, '-');
+  return row[dashed];
+}
+function miDirection(row) {
+  const n = Number(field(row, 'dir_of_travel'));
+  if (MI_DIR[n]) return MI_DIR[n];
+  const loc = String(field(row, 'location_desc') || '');
+  const m = loc.match(/^(NB|SB|EB|WB)\b/i);
+  return m ? m[1].toUpperCase() : '';
+}
+function miClosed(text) {
+  return /\b(closed|closure|all lanes)\b/i.test(text);
+}
+function normalizeMichigan(row) {
+  const end = String(field(row, 'enddatetime') || '').trim();
+  if (end) return null;
+  const desc = String(field(row, 'description') || '').trim();
+  const loc = String(field(row, 'location_desc') || '').trim();
+  const text = desc || loc;
+  const crash = /\b(crash|accident|incident|disabled)\b/i.test(text);
+  const full = miClosed(text) || Number(field(row, 'bothdir')) === 1;
+  const start = String(field(row, 'startdatetime') || '').trim();
+  const updated = String(field(row, 'actdatetime') || start).trim();
+  return {
+    id: field(row, 'closure_id') || field(row, 'job_id'),
+    roadway: String(field(row, 'roadway') || ''),
+    direction: miDirection(row),
+    description: text,
+    eventType: crash ? 'accidentsAndIncidents' : 'closures',
+    subtype: crash ? 'confirmed' : '',
+    severity: '',
+    isFullClosure: full,
+    lanes: full ? 'All lanes closed' : '',
+    lat: num(field(row, 'latitude')),
+    lng: num(field(row, 'longitude')),
+    lat2: null,
+    lng2: null,
+    polyline: '',
+    start: start ? start.replace(' ', 'T') + 'Z' : null,
+    end: null,
+    updated: updated ? updated.replace(' ', 'T') + 'Z' : null,
+    recurrence: '',
+  };
+}
+function rowsOf(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.data)) return data.data;
+  if (data && Array.isArray(data.results)) return data.results;
+  if (data && Array.isArray(data.rows)) return data.rows;
+  return null;
+}
+async function fetchMichigan(key) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FEED_TIMEOUT_MS);
+  try {
+    const url = MI_FEED_URL + '?limit=500&_format=json';
+    const res = await fetch(url, {
+      headers: { api_key: key, Accept: 'application/json', 'User-Agent': 'MCR Dispatch (mckelvey@mcrtechservice.com)' },
+      signal: ctrl.signal,
+    });
+    if (res.status === 401 || res.status === 403) throw new Error('MDOT RIDE rejected the key (HTTP ' + res.status + ')');
+    if (!res.ok) throw new Error('MDOT RIDE returned HTTP ' + res.status);
+    const data = await res.json();
+    const rows = rowsOf(data);
+    if (!rows) throw new Error('MDOT RIDE returned an unexpected response');
+    return rows.map(normalizeMichigan).filter((e) => e && e.id != null && e.lat != null && e.lng != null);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchFeed(key) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FEED_TIMEOUT_MS);
@@ -134,13 +211,17 @@ async function openStore(event) {
 }
 
 // Returns { events, fetchedAt, error }. Never throws.
-async function getEvents(event, forceRefresh) {
+async function getEvents(event, forceRefresh, which) {
+  const michigan = which === 'MI';
+  const cacheKey = michigan ? MI_CACHE_KEY : CACHE_KEY;
+  const envName = michigan ? 'MDOT_RIDE_API_KEY' : 'GDOT_511_API_KEY';
+  const down = michigan ? 'MDOT RIDE' : '511GA';
   const store = await openStore(event);
   let cache = null;
   if (store) {
-    try { cache = await store.get(CACHE_KEY, { type: 'json' }); } catch (e) { cache = null; }
+    try { cache = await store.get(cacheKey, { type: 'json' }); } catch (e) { cache = null; }
   }
-  if (!cache) cache = memCache;
+  if (!cache) cache = memCache[michigan ? 'MI' : 'GA'];
 
   const now = Date.now();
   const age = cache && cache.fetchedAt ? now - Date.parse(cache.fetchedAt) : Infinity;
@@ -149,20 +230,20 @@ async function getEvents(event, forceRefresh) {
 
   let error = null;
   if (needRefresh) {
-    const key = process.env.GDOT_511_API_KEY;
+    const key = process.env[envName];
     const attemptIso = new Date().toISOString();
     if (!key) {
-      error = 'The 511GA key (GDOT_511_API_KEY) is not set in Netlify.';
+      error = 'The ' + down + ' key (' + envName + ') is not set in Netlify.';
     } else {
       try {
-        const events = await fetchFeed(key);
+        const events = michigan ? await fetchMichigan(key) : await fetchFeed(key);
         cache = { fetchedAt: attemptIso, lastAttemptAt: attemptIso, lastError: null, events };
       } catch (e) {
-        error = e && e.name === 'AbortError' ? '511GA did not respond in time.' : scrub(e && e.message, key);
+        error = e && e.name === 'AbortError' ? down + ' did not respond in time.' : scrub(e && e.message, key);
         cache = Object.assign({ events: [], fetchedAt: null }, cache || {}, { lastAttemptAt: attemptIso, lastError: error });
       }
-      memCache = cache;
-      if (store) { try { await store.setJSON(CACHE_KEY, cache); } catch (e) { /* non-fatal */ } }
+      memCache[michigan ? 'MI' : 'GA'] = cache;
+      if (store) { try { await store.setJSON(cacheKey, cache); } catch (e) { /* non-fatal */ } }
     }
   } else if (cache && cache.lastError && age > FRESH_MS) {
     error = cache.lastError; // a recent attempt failed; still inside the retry cooldown
@@ -349,7 +430,7 @@ exports.handler = async (event) => {
   try {
     const now = new Date();
     const nowMs = now.getTime();
-    const feed = await getEvents(event, params.refresh === '1');
+    const feed = await getEvents(event, params.refresh === '1', state);
     if (!feed.events.length && feed.error) return json(502, { ok: false, error: feed.error });
 
     const active = feed.events.filter((e) => isActive(e, nowMs));
@@ -424,6 +505,7 @@ exports.handler = async (event) => {
       ok: true,
       supported: true,
       state,
+      source: state === 'MI' ? 'MDOT RIDE' : '511GA',
       date: todayStr,
       generatedAt: now.toISOString(),
       fetchedAt: feed.fetchedAt,
