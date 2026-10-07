@@ -256,8 +256,14 @@ exports.handler = async (event) => {
     const done = remaining.length === 0;
     await store.setJSON(cursorKey, { state: state, since: since, afterUid: lastUid, done: done, updatedAt: new Date().toISOString() });
 
+    let matchedClosings = null;
+    if (inserted > 0) {
+      try { matchedClosings = await require("./match-mailbox-closings").matchClosings(state); }
+      catch (e) { matchedClosings = { ok: false, error: e.message }; }
+    }
     return json(200, {
       ok: true,
+      matchedClosings: matchedClosings,
       state: state,
       found: uids.length,
       examined: examined,
