@@ -42,8 +42,30 @@
       color: var(--muted);
     }
     h1 { margin: 6px 0 8px; font-size: 28px; letter-spacing: -0.03em; }
-    .sub { color: var(--muted); max-width: 720px; }
+    .sub { color: var(--muted); max-width: 78ch; }
     .wrap { padding: 24px 32px 64px; display: grid; gap: 20px; }
+    .shell { width: min(1680px, calc(100% - 32px)); margin-left: auto; margin-right: auto; }
+    .toolbar {
+      position: sticky; top: 0; z-index: 6;
+      background: rgba(246, 241, 232, 0.94);
+      backdrop-filter: blur(8px);
+    }
+    .jumps { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 4px; }
+    .jumps a {
+      font-size: 12px; color: var(--ink); text-decoration: none;
+      border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; background: #fff;
+    }
+    .people { display: grid; grid-template-columns: 1fr; }
+    .person {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px;
+      padding: 10px 14px; border-bottom: 1px solid var(--line); align-items: center;
+    }
+    .person .who { font-weight: 600; }
+    .person a { color: var(--muted); font-size: 12px; text-decoration: none; word-break: break-all; }
+    .person a:hover { text-decoration: underline; }
+    .table-scroll { overflow-x: auto; }
+    .desk { display: grid; gap: 20px; }
+    .side { display: grid; gap: 20px; align-content: start; }
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -154,23 +176,31 @@
     details.grp .count.bad { background: #fde8ee; color: var(--bad); }
     details.grp .count.good { background: #e4f0e6; color: var(--ok); }
     details.grp .count.warn { background: #f5e8d0; color: var(--warn); }
-    @media (min-width: 981px) {
-      header, .wrap, footer {
-        max-width: 1200px;
-        margin-left: auto;
-        margin-right: auto;
-      }
-      header { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+    @media (min-width: 1100px) {
+      .shell { width: min(1680px, calc(100% - 48px)); }
+      header.shell { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
       .wrap { padding-top: 28px; }
+      .desk { grid-template-columns: minmax(0, 1.55fr) minmax(340px, 0.78fr); align-items: start; }
+      .side { position: sticky; top: 86px; }
+      .side .settings-grid { grid-template-columns: 1fr; }
+      .people { grid-template-columns: 1fr 1fr; }
+      .person:nth-child(odd) { border-right: 1px solid var(--line); }
+    }
+    @media (min-width: 1500px) {
+      .shell { width: min(1840px, calc(100% - 64px)); }
+      .people { grid-template-columns: 1fr 1fr 1fr; }
+      .person { border-right: 1px solid var(--line); }
+      .person:nth-child(3n) { border-right: 0; }
     }
     @media (max-width: 980px) {
       .stats, .grid2, .rules, .settings-grid { grid-template-columns: 1fr; }
       .wrap, header, footer { padding-left: 16px; padding-right: 16px; }
+      .shell { width: 100%; }
     }
   </style>
 </head>
 <body>
-  <header>
+  <header class="shell">
     <div class="kicker"><a href="/admin.html" style="color:inherit;">← Admin</a> · Neumo / ITI · Inventory mailbox · all states</div>
     <h1>Inventory board</h1>
     <p class="sub">
@@ -180,14 +210,21 @@
     </p>
   </header>
 
-  <div class="wrap">
+  <div class="wrap shell">
     <section class="stats">
       <div class="stat ok"><b id="statIn">–</b><span>Received <i id="statInFix" style="font-style:normal;color:var(--bad);"></i></span></div>
       <div class="stat miss"><b id="statOut">–</b><span>Missing</span></div>
       <div class="stat"><b id="statAll">–</b><span>People who should submit</span></div>
       <div class="stat"><b>Review</b><span>Sheets stay here until an admin forwards the set</span></div>
     </section>
-    <section class="panel" style="padding:12px 18px;">
+    <section class="panel toolbar" style="padding:12px 18px;">
+      <div class="jumps">
+        <a href="#submissions">Submissions</a>
+        <a href="#sendSetPanel">Send set</a>
+        <a href="#shipments">Shipments</a>
+        <a href="#projPanel">Projected forms</a>
+        <a href="#sheets">Count sheets</a>
+      </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;">
         <div style="min-width:160px;"><label>Count since</label><input id="since" type="date" /></div>
         <div style="min-width:140px;"><label>State</label>
@@ -199,19 +236,20 @@
             <option>OH</option><option>OR</option><option>SC</option><option>WV</option>
           </select>
         </div>
+        <div style="min-width:220px;flex:1;"><label>Find a name or email</label><input id="nameFilter" type="search" placeholder="Type to filter this list" oninput="applyBoardFilter()" /></div>
         <label style="display:flex;gap:8px;align-items:center;min-width:170px;margin:0 0 6px;"><input id="incContractors" type="checkbox" style="width:auto;margin:0;" /> Hide contractors</label>
                 <button class="save" type="button" onclick="loadBoard(); loadShipments(); loadProjection(); loadChecks(); loadDetail();">Refresh</button>
       </div>
     </section>
 
-    <section class="panel">
+    <div class="desk">
+    <section class="panel" id="submissions">
       <h2>Submissions</h2>
       <details class="grp" id="grpMissing" open>
-        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span><span class="hint">Expand to see who has not sent a sheet yet</span></summary>
-        <table>
-          <thead><tr><th>Tech</th><th>State</th><th>Mailbox</th></tr></thead>
-          <tbody id="missBody"><tr><td colspan="3" class="note">Loading&hellip;</td></tr></tbody>
-        </table>
+        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span><span class="hint">Expand to see who has not sent a sheet yet</span>
+          <button class="mini" type="button" onclick="event.preventDefault(); event.stopPropagation(); copyMissing();">Copy emails</button>
+        </summary>
+        <div class="people" id="missBody"><div class="note">Loading&hellip;</div></div>
       </details>
       <details class="grp" id="grpReceived">
         <summary>Received <span class="count good" id="cntReceived">&ndash;</span><span class="hint">Expand, then tap View / download on a name</span></summary>
@@ -229,7 +267,9 @@
         <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span><span class="hint">Expand to see inventory mail that could not be matched to a technician</span></summary>
         <div id="unmBody"><div class="note">Loading&hellip;</div></div>
       </details>
-    <section class="panel">
+    </section>
+    <aside class="side">
+    <section class="panel" id="sendSetPanel">
       <h2>Send reviewed set <span class="hint" style="font-weight:400;">preview first, nothing sends until you press Send</span></h2>
       <div class="settings-grid">
         <div>
@@ -253,8 +293,10 @@
       </div>
 
     </section>
+    </aside>
+    </div>
 
-    <section class="panel">
+    <section class="panel" id="shipments">
       <h2>Shipments on the way, Neumo to technicians</h2>
       <div style="padding:10px 18px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
         <label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:500;">
@@ -262,7 +304,7 @@
         </label>
         <span class="hint" id="shipMsg"></span>
       </div>
-      <table>
+      <div class="table-scroll"><table>
         <thead>
           <tr>
             <th>Tech</th>
@@ -277,7 +319,7 @@
         <tbody id="shipBody">
           <tr><td colspan="7" class="note">Loading&hellip;</td></tr>
         </tbody>
-      </table>
+      </table></div>
       <div class="note">
         From warehouse restock requests and the tracking reply. Nothing here is confirmed delivered until someone
         taps Mark delivered. Shipments older than a week with no confirmation show as &ldquo;Likely arrived&rdquo;.
@@ -293,15 +335,15 @@
           <button class="save" type="button" onclick="loadProjection()">Update</button>
         </div>
         <div id="projMsg" class="hint" style="padding:0 18px 8px;"></div>
-        <table>
+        <div class="table-scroll"><table>
           <thead><tr><th>Technician</th><th>Last sheet</th><th>Counted</th><th>Since then</th><th>Projected now</th><th>On the way</th><th>Weeks of supply</th><th>Spare</th></tr></thead>
           <tbody id="projBody"><tr><td colspan="8" class="note">Loading...</td></tr></tbody>
-        </table>
+        </table></div>
         <div class="note" id="projNote"></div>
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="sheets">
       <h2>Count sheets <span class="hint" style="font-weight:400;">lines from the saved spreadsheets, newest sheet per person</span></h2>
       <div id="detailMsg" class="hint" style="padding:8px 18px 0;"></div>
       <div id="detailBody"><div class="note">Loading...</div></div>
@@ -365,7 +407,7 @@
     </section>
   </div>
 
-  <footer>
+  <footer class="shell">
     Live received/missing from the inventory mailbox. Count sheets below are the lines read from the saved spreadsheets.
     Product codes are the vendor codes; this board does not rename them.
   </footer>
@@ -431,14 +473,29 @@ function restoreGroups() {
   });
 }
 function missingRowsHtml(miss) {
-  if (!miss.length) return '<tr><td colspan="3" class="note">Nobody missing.</td></tr>';
-  return miss.map((t) => "<tr><td>" + esc(t.name) + "</td><td class=\"mono\">" + esc(t.state || "") +
-    "</td><td>" + esc(t.email || "") + "</td></tr>").join("");
+  if (!miss.length) return '<div class="note">Nobody missing.</div>';
+  return miss.map((t) => {
+    const mail = t.email ? '<a href="mailto:' + esc(t.email) + '">' + esc(t.email) + "</a>" : '<span class="hint">No mailbox</span>';
+    return '<article class="person"><div><div class="who">' + esc(t.name) + '</div>' + mail +
+      '</div><span class="tag">' + esc(t.state || "—") + "</span></article>";
+  }).join("");
+}
+function copyMissing() {
+  const emails = (window.BOARD_MISS || []).map((t) => t.email).filter(Boolean);
+  const msg = emails.join(", ");
+  if (!msg) return;
+  const done = () => {
+    const el = document.getElementById("cntMissing");
+    if (el) el.title = emails.length + " emails copied";
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(msg).then(done);
+  else window.prompt("Copy these addresses", msg);
 }
 let DETAIL_SHEETS = [];
 function receivedRowsHtml(rec) {
   if (!rec.length) return '<tr><td colspan="4" class="note">Nothing received yet in this period.</td></tr>';
-  return rec.map((t, i) => {
+  return rec.map((t) => {
+    const i = (window.RECEIVED || []).indexOf(t);
     const day = t.receivedAt ? new Date(t.receivedAt).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
     return "<tr><td>" + esc(t.name) + "<div><button class=\"mini\" type=\"button\" onclick=\"showTechSheet(" + i + ")\">View / download</button></div></td><td class=\"mono\">" + esc(t.state || "") + "</td><td class=\"mono\">" + esc(day) +
       "</td><td>" + esc(t.subject || "") + "</td></tr>";
@@ -503,6 +560,17 @@ function unmatchedHtml(list) {
   return list.map((t) => '<div class="note" style="border-top:1px solid var(--line);">' + esc(t.subject || "(no subject)") + " &middot; " + esc(t.sender || "") +
     (t.reason ? '<div class="hint">' + esc(t.reason) + "</div>" : "") + "</div>").join("");
 }
+
+function applyBoardFilter() {
+  const q = (document.getElementById("nameFilter").value || "").trim().toLowerCase();
+  const hit = (t) => !q || [t.name, t.email, t.state, t.subject].some((v) => String(v || "").toLowerCase().includes(q));
+  const miss = (window.BOARD_MISS || []).filter(hit);
+  const rec = (window.BOARD_REC || []).filter(hit);
+  document.getElementById("missBody").innerHTML = missingRowsHtml(miss);
+  document.getElementById("recBody").innerHTML = receivedRowsHtml(rec);
+  const hint = document.getElementById("cntMissing");
+  if (hint && q) hint.title = miss.length + " match the filter";
+}
 async function loadBoard() {
   const since = document.getElementById("since").value;
   const state = document.getElementById("stateFilter").value;
@@ -521,8 +589,9 @@ async function loadBoard() {
   document.getElementById("cntReceived").textContent = rec.length;
   document.getElementById("cntUnmatched").textContent = unm.length;
   window.RECEIVED = rec;
-  document.getElementById("missBody").innerHTML = missingRowsHtml(miss);
-  document.getElementById("recBody").innerHTML = receivedRowsHtml(rec);
+  window.BOARD_MISS = miss;
+  window.BOARD_REC = rec;
+  applyBoardFilter();
   const sheetBox = document.getElementById("techSheet");
   if (sheetBox) sheetBox.innerHTML = "";
   document.getElementById("unmBody").innerHTML = unmatchedHtml(unm);
