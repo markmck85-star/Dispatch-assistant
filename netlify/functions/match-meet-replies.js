@@ -58,12 +58,8 @@ async function matchMeetReplies() {
   const hits = [];
   for (const email of emails || []) {
     const wo = woOf(email.subject) || woOf(email.body_text);
-    let match = open.filter((t) => wo && sameWo(wo, t.wo_number));
-    if (!match.length) {
-      const hint = siteHint(email.subject).toLowerCase();
-      if (hint.length > 6) match = open.filter((t) => String(t.site_text || "").toLowerCase().includes(hint.slice(0, 18)));
-      if (match.length !== 1) match = [];
-    }
+    if (!wo) continue;
+    const match = open.filter((t) => sameWo(wo, t.wo_number));
     if (match.length !== 1) continue;
     const ticket = match[0];
     const emailAt = Date.parse(email.received_at || "") || 0;
