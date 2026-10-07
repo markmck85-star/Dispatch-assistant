@@ -37,6 +37,7 @@
   }
   select#stateSel { width: auto; min-width: 148px; max-width: 190px; }
   #statePickRow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  #stateTomorrowBtn { padding: 8px 12px; background: #3a3a3a; color: #f0f0f0; border: 1px solid #666; border-radius: 6px; font-size: 14px; font-weight: 700; cursor: pointer; }
 
   h2.section-label {
     font-size: 13px; color: #b8bcc2; margin: 20px 0 8px; text-transform: uppercase;
@@ -189,6 +190,7 @@
       <option value="WV">West Virginia</option>
     </select>
     <input type="date" id="stateConsoleDate" aria-label="Dispatch date" onchange="setConsoleDate(this.value)">
+    <button type="button" id="stateTomorrowBtn" onclick="jumpStateToNextWorkday()">Tomorrow</button>
     </div>
 
     <h2 class="section-label" style="border-top:none;padding-top:0;">🗺️ Map View</h2>
@@ -196,7 +198,7 @@
     <div id="stateMapPanel">
       <div class="map-panel-head">
         <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
-        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; var c=document.getElementById('stateConsoleDate'); if(c) c.value=this.value; updateDispatchBackLinks(); (function(){ var d=document.getElementById('stateAiCommandDiff'); if(d) d.innerHTML=''; window._stateAiRebalanceTotalSavedMi=0; })(); renderStateMap(document.getElementById('stateSel').value, this.value);"
+        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; var c=document.getElementById('stateConsoleDate'); if(c) c.value=this.value; if (typeof refreshStateTomorrowBtn==='function') refreshStateTomorrowBtn(); updateDispatchBackLinks(); (function(){ var d=document.getElementById('stateAiCommandDiff'); if(d) d.innerHTML=''; window._stateAiRebalanceTotalSavedMi=0; })(); renderStateMap(document.getElementById('stateSel').value, this.value);"
           style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
         <button type="button" id="stateMapToggleBtn" onclick="toggleStateMap()"
           aria-expanded="true" aria-controls="stateMapBody">Hide Map</button>
@@ -713,6 +715,7 @@ async function loadConsole(state, isRetry) {
       if (dateInput) dateInput.value = data.date;
       const consoleDate = document.getElementById('stateConsoleDate');
       if (consoleDate && !consoleDate.value) consoleDate.value = data.date;
+      refreshStateTomorrowBtn();
     }
     renderStateMap(state, window._stateMapDate);
     if (!data.recentTickets.length) {
@@ -2623,18 +2626,52 @@ async function showSiteHistory(code) {
   if (dateInput) dateInput.value = requested;
   const consoleDate = document.getElementById('stateConsoleDate');
   if (consoleDate) consoleDate.value = requested;
+  refreshStateTomorrowBtn();
 })();
 
+function localDateISO(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function nextStateWorkday() {
+  const d = new Date();
+  const dow = d.getDay();
+  if (dow === 5) d.setDate(d.getDate() + 3);
+  else if (dow === 6) d.setDate(d.getDate() + 2);
+  else d.setDate(d.getDate() + 1);
+  return d;
+}
+function refreshStateTomorrowBtn() {
+  const btn = document.getElementById('stateTomorrowBtn');
+  const input = document.getElementById('stateConsoleDate');
+  if (!btn) return;
+  const today = localDateISO(new Date());
+  const val = (input && input.value) || window._stateMapDate;
+  if (val && val !== today) {
+    const picked = new Date(val + 'T12:00:00');
+    if (!isNaN(picked.getTime())) {
+      btn.textContent = picked.toLocaleDateString('en-US', { weekday: 'short' });
+      return;
+    }
+  }
+  const dow = new Date().getDay();
+  btn.textContent = (dow === 0 || dow === 6) ? 'Monday' : 'Tomorrow';
+}
 function setConsoleDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return;
   window._stateMapDate = value;
   const dateInput = document.getElementById('stateMapDateInput');
   if (dateInput) dateInput.value = value;
+  const consoleDate = document.getElementById('stateConsoleDate');
+  if (consoleDate) consoleDate.value = value;
   updateDispatchBackLinks();
+  refreshStateTomorrowBtn();
   const diff = document.getElementById('stateAiCommandDiff');
   if (diff) diff.innerHTML = '';
   window._stateAiRebalanceTotalSavedMi = 0;
   loadAll();
+}
+function jumpStateToNextWorkday() {
+  setConsoleDate(localDateISO(nextStateWorkday()));
 }
 
 // 2026-09-19: hub already sends ?date= into this page; the two "Back to
