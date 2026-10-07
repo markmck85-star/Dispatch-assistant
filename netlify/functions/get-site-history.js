@@ -9,11 +9,27 @@
 // site_visits row (testing-station / TechWeb / SOS sites that are not in
 // the Salesforce closed-ticket report). Deduped by WO against existing
 // visits so kiosk sites don't show the same job twice.
+//
+// 2026-10-07: each closed-ticket visit now also carries manual_restock,
+// manual_nonrestock and counts_as_restock so the restock tracker's history
+// popup can show (and let the user change) how that visit is counted.
 
 const { createClient } = require('@supabase/supabase-js');
 
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+}
+
+// Same resolution rule as get-restock-schedule.js: which visit (ms) a manual
+// confirmation refers to. visitTimes ascending.
+function resolveConfirmationVisit(conf, visitTimes) {
+  const vdc = conf.visit_date_covered ? new Date(conf.visit_date_covered).getTime() : null;
+  if (vdc != null && visitTimes.includes(vdc)) return vdc;
+  const at = conf.confirmed_at ? new Date(conf.confirmed_at).getTime() : null;
+  if (at == null) return null;
+  let best = null;
+  for (const t of visitTimes) { if (t <= at) best = t; else break; }
+  return best;
 }
 
 function ticketAsVisit(t) {
@@ -82,7 +98,7 @@ exports.handler = async (event) => {
 
   const { data: visits, error: visitsErr, count: totalVisits } = await supabase
     .from('site_visits')
-    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, wo_number, appointment_number, needs_review, ticket_id, closing_note', { count: 'exact' })
+    .select('started_at, ended_at, duration_min, tech_name_raw, remediation, remediation_detail, is_restock, included_restock, wo_number, appointment_number, needs_review, ticket_id, closing_note', { count: 'exact' })
     .eq('site_id', site.id)
     .order('started_at', { ascending: false, nullsFirst: false })
     .range(offset, offset + PAGE_SIZE - 1);
@@ -103,6 +119,49 @@ exports.handler = async (event) => {
     inbound_email_id: v.ticket_id ? (inboundEmailIdByTicketId[v.ticket_id] || null) : null,
     source: 'site_visit',
   }));
+
+  // Manual counting state. Non-fatal: if any of this fails the history still
+  // loads, just without the flags.
+  try {
+    const { data: confs } = await supabase
+      .from('site_manual_restock_confirmations')
+      .select('confirmed_at, visit_date_covered')
+      .eq('site_id', site.id);
+    const { data: acks } = await supabase
+      .from('site_nonrestock_acks')
+      .select('appointment_number')
+      .eq('site_id', site.id);
+    const times = [];
+    let from = 0;
+    while (true) {
+      const { data: page } = await supabase
+        .from('site_visits')
+        .select('started_at')
+        .eq('site_id', site.id)
+        .not('started_at', 'is', null)
+        .order('started_at', { ascending: true })
+        .range(from, from + 999);
+      if (!page || !page.length) break;
+      for (const r of page) times.push(new Date(r.started_at).getTime());
+      if (page.length < 1000) break;
+      from += 1000;
+    }
+    const manualTimes = new Set();
+    for (const c of (confs || [])) {
+      const t = resolveConfirmationVisit(c, times);
+      if (t != null) manualTimes.add(t);
+    }
+    const ackedAppts = new Set((acks || []).map((a) => String(a.appointment_number || '').trim()).filter(Boolean));
+    for (const v of visitsWithEmail) {
+      const t = v.started_at ? new Date(v.started_at).getTime() : null;
+      const appt = String(v.appointment_number || '').trim();
+      v.manual_restock = t != null && manualTimes.has(t);
+      v.manual_nonrestock = !!appt && ackedAppts.has(appt);
+      v.counts_as_restock = !v.manual_nonrestock && (!!v.is_restock || !!v.included_restock || v.manual_restock);
+    }
+  } catch (e) {
+    // leave flags undefined
+  }
 
   // Email tickets with no matching closed-ticket visit (testing locations).
   let extraFromTickets = [];

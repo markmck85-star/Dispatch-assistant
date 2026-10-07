@@ -28,6 +28,18 @@
 //   - overdue if (avg - daysSinceLastRestock) < -7, due soon if <= 7,
 //     otherwise on track -- same thresholds as the original tool
 //
+// v3 (2026-10-07): manual restock confirmations now count as real restocks
+// ON THE VISIT'S OWN DATE. Before this, a confirmation only bumped the
+// site's "last restock" to the moment of the click (never added to the
+// restock list), so the cycle average ignored it and the next-due date was
+// measured from the wrong day. Each confirmation is resolved to the visit
+// it was made on: exact match on visit_date_covered (new-style rows store
+// the visit's started_at), otherwise the latest visit on or before
+// confirmed_at (older rows, which could only be made from a site's latest
+// visit). Also: an appointment in site_nonrestock_acks is no longer counted
+// as a restock even if Salesforce categorized it as one (e.g. a coin-jam
+// fix filed as Preventative Maintenance).
+//
 // Grouped by real site_id (sites table) rather than raw account-name text,
 // since that's already resolved upstream by the closed-ticket import --
 // no need for restock tracker's original ticketsOnly/string-matching path.
@@ -56,6 +68,20 @@ function chunk(arr, n) {
   const out = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
   return out;
+}
+
+// Which visit (ms timestamp) a manual confirmation refers to. `visitTimes`
+// must be ascending. New-style rows store the visit's exact started_at in
+// visit_date_covered; older rows stored the click time there, so fall back
+// to the latest visit on or before confirmed_at.
+function resolveConfirmationVisit(conf, visitTimes) {
+  const vdc = conf.visit_date_covered ? new Date(conf.visit_date_covered).getTime() : null;
+  if (vdc != null && visitTimes.includes(vdc)) return vdc;
+  const at = conf.confirmed_at ? new Date(conf.confirmed_at).getTime() : null;
+  if (at == null) return null;
+  let best = null;
+  for (const t of visitTimes) { if (t <= at) best = t; else break; }
+  return best;
 }
 
 function addDays(date, days) {
@@ -97,7 +123,7 @@ exports.handler = async (event) => {
   // confirmation per site matters for display.
   const confirmResults = await Promise.all(chunk(siteIds, IN_CHUNK).map((ids) => supabase
     .from('site_manual_restock_confirmations')
-    .select('site_id, confirmed_at, note')
+    .select('site_id, confirmed_at, note, visit_date_covered')
     .in('site_id', ids)));
   const confirmErr = (confirmResults.find((r) => r.error) || {}).error;
   if (confirmErr) return json(500, { ok: false, error: 'manual confirmations fetch failed: ' + confirmErr.message });
@@ -177,7 +203,31 @@ exports.handler = async (event) => {
     // trouble-ticket visit was invisible to the cycle math -- the site
     // just looked "visited, not restocked" and could show a false
     // overdue flag even though it had, in fact, just been restocked.
-    if (v.is_restock || v.included_restock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null, note: v.closing_note || null });
+    const apptKey = String(v.appointment_number || '').trim();
+    const ackedNotRestock = !!(apptKey && ackedApptBySite[v.site_id] && ackedApptBySite[v.site_id].has(apptKey));
+    if ((v.is_restock || v.included_restock) && !ackedNotRestock) bySite[v.site_id].restocks.push({ date: d, tech: v.tech_name_raw, appt: v.appointment_number, emailId: v.tickets ? v.tickets.inbound_email_id : null, note: v.closing_note || null });
+  }
+
+  // Fold manual confirmations into each site's restock list, dated on the
+  // visit they refer to (see v3 note at top).
+  const confirmationsBySite = {};
+  for (const c of manualConfirmations) {
+    if (!confirmationsBySite[c.site_id]) confirmationsBySite[c.site_id] = [];
+    confirmationsBySite[c.site_id].push(c);
+  }
+  for (const [siteId, confs] of Object.entries(confirmationsBySite)) {
+    const entry = bySite[siteId];
+    if (!entry) continue;
+    const times = entry.allVisits.map((v) => v.date.getTime()).sort((a, b) => a - b);
+    for (const c of confs) {
+      const t = resolveConfirmationVisit(c, times);
+      if (t == null) continue;
+      const visit = entry.allVisits.find((v) => v.date.getTime() === t);
+      if (!visit) continue;
+      const already = entry.restocks.some((r) => r.date.getTime() === t);
+      if (already) continue;
+      entry.restocks.push({ date: visit.date, tech: visit.tech, appt: visit.appt, emailId: visit.emailId, note: visit.note });
+    }
   }
 
   const TODAY = new Date();
@@ -215,12 +265,7 @@ exports.handler = async (event) => {
 
     const restockDates = data.restocks.map(r => r.date).sort((a, b) => a - b);
     const count = restockDates.length;
-    let last = restockDates[count - 1] || null;
-    const manual = latestConfirmationBySite[siteId];
-    if (manual && manual.confirmed_at) {
-      const confirmed = new Date(manual.confirmed_at);
-      if (!last || confirmed > last) last = confirmed;
-    }
+    const last = restockDates[count - 1] || null;
     const daysSince = last ? Math.round((TODAY - last) / 86400000) : null;
 
     let avg = null;
