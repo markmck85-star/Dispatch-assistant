@@ -449,7 +449,6 @@ async function showTechSheet(i) {
   const recName = (window.RECEIVED || [])[i] && window.RECEIVED[i].name;
   if (!box) return;
   box.innerHTML = '<div class="note">Loading ' + esc(recName || "sheet") + "...</div>";
-  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   try {
     const res = await fetch("/.netlify/functions/get-inventory-history?name=" + encodeURIComponent(recName || ""));
     const data = await res.json();
@@ -457,6 +456,7 @@ async function showTechSheet(i) {
     const list = data.sheets || [];
     if (!list.length) {
       box.innerHTML = '<div class="note">No saved spreadsheet for ' + esc(recName || "that name") + " yet.</div>";
+      scrollToSheet();
       return;
     }
     window.TECH_HISTORY = list;
@@ -465,10 +465,17 @@ async function showTechSheet(i) {
       '<div class="note">' + list.map((s, n) => '<button class="mini" type="button" onclick="openHistorySheet(' + n + ')">' +
         esc(s.sheetDate || "no date") + "</button>").join(" ") + "</div>" +
       '<div id="techSheetBody"><div class="note">Loading lines...</div></div>';
-    openHistorySheet(0);
+    await openHistorySheet(0);
   } catch (err) {
     box.innerHTML = '<div class="note">Could not open that sheet: ' + esc(err.message) + "</div>";
+    scrollToSheet();
   }
+}
+function scrollToSheet() {
+  const target = document.getElementById("techSheetFile") || document.getElementById("techSheetBody") || document.getElementById("techSheet");
+  if (!target) return;
+  target.style.scrollMarginTop = "12px";
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 async function openHistorySheet(n) {
   const body = document.getElementById("techSheetBody");
@@ -482,11 +489,13 @@ async function openHistorySheet(n) {
     const rows = (data.items || []).map((it) => "<tr>" + itemCells(it) + "</tr>").join("") ||
       '<tr><td colspan="6" class="note">No lines were read from this sheet.</td></tr>';
     const file = data.downloadUrl ? ' <a class="mini" href="' + esc(data.downloadUrl) + '">Download spreadsheet</a>' : "";
-    body.innerHTML = '<div class="note">' + esc(data.filename) + file + "</div>" +
+    body.innerHTML = '<div class="note" id="techSheetFile">' + esc(data.filename) + file + "</div>" +
       "<table><thead><tr><th>Code</th><th>Item</th><th>Par</th><th>Count</th><th>Order</th><th>Sheet note</th></tr></thead><tbody>" +
       rows + "</tbody></table>";
+    scrollToSheet();
   } catch (err) {
-    body.innerHTML = '<div class="note">Could not open that file: ' + esc(err.message) + "</div>";
+    body.innerHTML = '<div class="note" id="techSheetFile">Could not open that file: ' + esc(err.message) + "</div>";
+    scrollToSheet();
   }
 }
 function unmatchedHtml(list) {
