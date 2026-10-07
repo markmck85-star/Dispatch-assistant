@@ -136,7 +136,9 @@
     btn.textContent = 'Layout';
     btn.style.cssText = 'margin:8px 0;padding:6px 12px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#ccc;cursor:pointer;';
     btn.addEventListener('click', openPanel);
-    sel.parentNode.insertBefore(btn, sel.nextSibling);
+    var row = document.getElementById('statePickRow');
+    if (row && row.parentNode) row.parentNode.insertBefore(btn, row.nextSibling);
+    else sel.parentNode.insertBefore(btn, sel.nextSibling);
     apply();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);

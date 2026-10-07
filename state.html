@@ -31,10 +31,12 @@
   .console h1 { color: #f0a500; font-size: 21px; margin-bottom: 2px; }
   .console .subtitle { color: #888; font-size: 12px; margin-bottom: 14px; }
 
-  select#stateSel {
+  select#stateSel, #stateConsoleDate {
     background: #2a2a2a; color: #ddd; border: 1px solid #444; border-radius: 6px;
-    padding: 8px 10px; font-size: 15px; margin-bottom: 16px; width: 100%;
+    padding: 8px 10px; font-size: 15px; margin-bottom: 0;
   }
+  select#stateSel { width: auto; min-width: 148px; max-width: 190px; }
+  #statePickRow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
 
   h2.section-label {
     font-size: 13px; color: #b8bcc2; margin: 20px 0 8px; text-transform: uppercase;
@@ -151,7 +153,6 @@
     .container { max-width: 1680px; }
     .console { padding: 20px 24px; }
     .console h1 { font-size: 24px; }
-    select#stateSel { width: auto; min-width: 280px; max-width: 420px; }
     #stateMap { height: 620px; }
     .tech-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   }
@@ -164,11 +165,11 @@
 <body>
 <div class="container">
   <a href="/" id="backToDispatchTop" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
-  <a class='back-btn' href='/saturday-oncall' style='margin-top:0;margin-bottom:10px;background:#0a2e2a;color:#5bd9c0;'>📞 Saturday On-Call</a>
   <div class="console">
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
+    <div id="statePickRow">
     <select id="stateSel" onchange="window._stateMapUserView=null; window._stateMapRenderGen=(window._stateMapRenderGen||0)+1; try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} updateDispatchBackLinks(); loadAll()">
       <option value="AL">Alabama</option>
       <option value="CA">California</option>
@@ -187,13 +188,15 @@
       <option value="SC">South Carolina</option>
       <option value="WV">West Virginia</option>
     </select>
+    <input type="date" id="stateConsoleDate" aria-label="Dispatch date" onchange="setConsoleDate(this.value)">
+    </div>
 
     <h2 class="section-label" style="border-top:none;padding-top:0;">🗺️ Map View</h2>
     <div id="techStatus" class="status-line">Loading…</div>
     <div id="stateMapPanel">
       <div class="map-panel-head">
         <span class="map-panel-title" id="stateMapTitle">Today's Routes</span>
-        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; updateDispatchBackLinks(); (function(){ var d=document.getElementById('stateAiCommandDiff'); if(d) d.innerHTML=''; window._stateAiRebalanceTotalSavedMi=0; })(); renderStateMap(document.getElementById('stateSel').value, this.value);"
+        <input type="date" id="stateMapDateInput" onchange="window._stateMapDate = this.value; var c=document.getElementById('stateConsoleDate'); if(c) c.value=this.value; updateDispatchBackLinks(); (function(){ var d=document.getElementById('stateAiCommandDiff'); if(d) d.innerHTML=''; window._stateAiRebalanceTotalSavedMi=0; })(); renderStateMap(document.getElementById('stateSel').value, this.value);"
           style="background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 6px;font-size:12px;">
         <button type="button" id="stateMapToggleBtn" onclick="toggleStateMap()"
           aria-expanded="true" aria-controls="stateMapBody">Hide Map</button>
@@ -708,6 +711,8 @@ async function loadConsole(state, isRetry) {
       window._stateMapDate = data.date;
       const dateInput = document.getElementById('stateMapDateInput');
       if (dateInput) dateInput.value = data.date;
+      const consoleDate = document.getElementById('stateConsoleDate');
+      if (consoleDate && !consoleDate.value) consoleDate.value = data.date;
     }
     renderStateMap(state, window._stateMapDate);
     if (!data.recentTickets.length) {
@@ -2616,7 +2621,21 @@ async function showSiteHistory(code) {
   window._stateMapDate = requested;
   const dateInput = document.getElementById('stateMapDateInput');
   if (dateInput) dateInput.value = requested;
+  const consoleDate = document.getElementById('stateConsoleDate');
+  if (consoleDate) consoleDate.value = requested;
 })();
+
+function setConsoleDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return;
+  window._stateMapDate = value;
+  const dateInput = document.getElementById('stateMapDateInput');
+  if (dateInput) dateInput.value = value;
+  updateDispatchBackLinks();
+  const diff = document.getElementById('stateAiCommandDiff');
+  if (diff) diff.innerHTML = '';
+  window._stateAiRebalanceTotalSavedMi = 0;
+  loadAll();
+}
 
 // 2026-09-19: hub already sends ?date= into this page; the two "Back to
 // Dispatch Tool" links were bare "/" and reset the board to today.
