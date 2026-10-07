@@ -169,7 +169,7 @@
     <h1>📍 State Console</h1>
     <div class="subtitle">At-a-glance view for one state — who's out today, what's come in recently, and restock status.</div>
 
-    <select id="stateSel" onchange="window._stateMapUserView=null; try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} updateDispatchBackLinks(); loadAll()">
+    <select id="stateSel" onchange="window._stateMapUserView=null; window._stateMapRenderGen=(window._stateMapRenderGen||0)+1; try { localStorage.setItem('mcr_state_console_last', this.value); } catch (err) {} updateDispatchBackLinks(); loadAll()">
       <option value="AL">Alabama</option>
       <option value="CA">California</option>
       <option value="CO">Colorado</option>
@@ -1211,6 +1211,7 @@ async function renderStateMap(state, dispatchDate) {
   const panel = document.getElementById('stateMapPanel');
   const noteEl = document.getElementById('stateMapNote');
   if (!panel) return;
+  const renderGen = (window._stateMapRenderGen = (window._stateMapRenderGen || 0) + 1);
   setStateMapLoader(true, 'Loading ' + (state || 'state') + ' routes…');
   if (typeof L === 'undefined') { panel.style.opacity = '0.5'; setStateMapLoader(false); return; }
   if (!dispatchDate) { setStateMapLoader(false); return; } // set by loadConsole() once get-state-console.js's date is known
@@ -1387,18 +1388,25 @@ async function renderStateMap(state, dispatchDate) {
     const bounds = L.latLngBounds(visiblePoints.length ? visiblePoints : allPoints);
     window._stateMapBounds = bounds; // reused by the Expand/fullscreen resize handler
     map.invalidateSize();
+    if (renderGen !== window._stateMapRenderGen) return;
+    const selected = (document.getElementById('stateSel') || {}).value;
+    const forceFit = selected && state && selected !== window._stateMapFittedState;
     window._stateMapFitting = true;
     try {
-      if (window._stateMapUserView) {
+      if (window._stateMapUserView && !forceFit) {
         const clamped = clampStateMapView(window._stateMapUserView);
         window._stateMapUserView = clamped;
         map.setView([clamped.lat, clamped.lng], clamped.zoom, { animate: false });
       } else if (bounds.isValid()) {
+        window._stateMapUserView = null;
         if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(bounds.getCenter(), 12);
         else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 14 });
+      } else {
+        map.setView(stateCenterFor(state), state === 'CA' ? 6 : 7);
       }
+      window._stateMapFittedState = state;
     } finally {
-      window._stateMapFitting = false;
+      requestAnimationFrame(() => { window._stateMapFitting = false; });
     }
 
     renderStateMapLegend(routes);
