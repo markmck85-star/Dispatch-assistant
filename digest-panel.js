@@ -278,7 +278,11 @@
       var names = function (arr) { return arr.map(function (t) { return esc(t.name) + (t.reason ? ' (' + esc(REASON[t.reason] || 'Out') + ')' : ''); }).join(', '); };
       var avHtml = '';
       [['Out today', av.outToday], ['Back today', av.returningToday], ['Out next workday', av.outNext], ['Back next workday', av.returningNext]].forEach(function (p) {
-        if (p[1] && p[1].length) avHtml += item('info', esc(p[0]), names(p[1]));
+        if (!(p[1] && p[1].length)) return;
+        var note = p[0] === 'Out next workday'
+          ? '<br>If a next-day ticket comes in near their home, consider giving it to them today so another tech does not have to cover that drive while they are out.'
+          : '';
+        avHtml += item('info', esc(p[0]), names(p[1]) + note);
       });
       var avCount = (av.outToday || []).length + (av.outNext || []).length;
       h += sec('Technicians out', avCount, avHtml || empty('Everyone is in today and the next workday.'), avCount > 0);
