@@ -219,6 +219,28 @@ thead th.sort-asc, thead th.sort-desc { color: var(--text); }
   font-size: 11px; cursor: pointer; text-decoration: underline;
   font-family: inherit; padding: 0;
 }
+/* Site visit history popup (2026-10-07) */
+.loc-link { background:none; border:none; padding:0; font:inherit; font-weight:500; color:var(--info-tc); text-decoration:underline dotted; text-underline-offset:2px; cursor:pointer; text-align:left; display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; }
+.hist-box { background:#fff; color:#1a1a1a; border-radius:10px; max-width:680px; width:100%; padding:18px 16px 20px; position:relative; box-sizing:border-box; margin:0 auto; }
+.hist-close { position:absolute; top:10px; right:10px; background:#eee; border:none; border-radius:16px; width:32px; height:32px; font-size:18px; cursor:pointer; color:#333; }
+.hist-title { font-weight:600; font-size:17px; padding-right:36px; }
+.hist-sub { font-size:12px; color:#666; margin:4px 0 10px; line-height:1.4; }
+.hist-muted { color:#666; font-size:13px; padding:12px 0; }
+.hist-visit { padding:10px 0; border-top:1px solid #e5e5e5; font-size:13.5px; }
+.hist-visit.hist-since { background:#fff7ea; margin:0 -8px; padding:10px 8px; border-left:3px solid #BA7517; }
+.hist-visit.hist-old { opacity:0.7; }
+.hist-kind-restock { color:#2f6f3d; font-weight:600; }
+.hist-kind-service { color:#9b3b3b; font-weight:600; }
+.hist-tag { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; background:#BA7517; color:#fff; margin-left:6px; vertical-align:middle; }
+.hist-mono { font-family:'Courier New',monospace; font-size:12px; color:#555; }
+.hist-note { white-space:pre-wrap; background:#f4f4f2; border-radius:6px; padding:8px 10px; margin-top:6px; font-size:14px; line-height:1.45; }
+.hist-btns { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.hist-btn { border:none; border-radius:6px; padding:9px 14px; font-weight:600; font-size:13px; cursor:pointer; color:#fff; }
+.hist-btn:disabled { opacity:0.5; cursor:default; }
+.hist-ok { background:#1e7e34; }
+.hist-no { background:#5a3d1a; }
+.hist-divider { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#2f6f3d; padding:8px 0 2px; border-top:2px solid #2f6f3d; margin-top:6px; }
+.hist-more { width:100%; margin-top:12px; padding:10px; border:1px solid #c5cdd8; background:#fff; border-radius:6px; font-weight:600; cursor:pointer; color:#1f3a5f; }
 a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: inline-block; margin: 10px 0 0 10px; }
 </style>
 </head>
@@ -357,7 +379,7 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
     </button>
   </div>
   <div class="section-label">projected restock schedule — sorted by urgency</div>
-  <p style="font-size:12px;color:var(--muted);margin:4px 0 10px;line-height:1.45;">On <b>overdue (visited)</b> or <b>due soon (visited)</b> rows, tap <b>Notes</b> under last visit. If they restocked, Confirm restocked. If they did not, Not a restock.</p>
+  <p style="font-size:12px;color:var(--muted);margin:4px 0 10px;line-height:1.45;">On <b>overdue (visited)</b> or <b>due soon (visited)</b> rows, tap <b>Notes</b> under last visit. If they restocked, Confirm restocked. If they did not, Not a restock. Tap a <b>location name</b> to see every visit and its notes, in case an earlier visit was the restock.</p>
   <div class="table-wrap">
   <div class="table-scroll">
     <table>
@@ -1278,8 +1300,10 @@ async function confirmNotRestockedFromNote(siteCode, appt) {
     closeSourceEmail();
     applyLocalNotRestock(siteCode);
     refreshLiveDashboardQuiet();
+    return true;
   } catch (err) {
     alert('Failed to save: ' + err.message);
+    return false;
   }
 }
 
@@ -1292,8 +1316,8 @@ function applyLocalNotRestock(siteCode) {
   renderDashboard(d);
 }
 
-async function confirmRestockedFromNote(siteCode) {
-  const note = 'Confirmed restocked from closing note';
+async function confirmRestockedFromNote(siteCode, appt) {
+  const note = 'Confirmed restocked from closing note' + (appt ? ' ' + appt : '');
   try {
     const res = await fetch('/.netlify/functions/mark-site-restocked', {
       method: 'POST',
@@ -1305,8 +1329,10 @@ async function confirmRestockedFromNote(siteCode) {
     closeSourceEmail();
     applyLocalRestockConfirm(siteCode);
     refreshLiveDashboardQuiet();
+    return true;
   } catch (err) {
     alert('Failed to mark restocked: ' + err.message);
+    return false;
   }
 }
 
@@ -1395,6 +1421,172 @@ async function viewSourceEmail(inboundEmailId) {
   } catch (e) {
     body.textContent = 'Failed to load email: ' + e.message;
   }
+}
+
+// ── Site visit history popup (2026-10-07) ─────────────────────────────────
+// Tapping a location name opens the same visit history the dispatch board
+// shows (get-site-history.js), so on an "overdue (visited)" row the user
+// can read the notes from EVERY visit since the last restock -- not just
+// the most recent one -- and confirm the restock from whichever visit it
+// actually happened on. Live (Supabase-backed) data only; a manually
+// uploaded xlsx has no site codes to look up.
+let _siteHist = null; // { code, name, visits, hasMore, total }
+
+function locNameHtml(loc) {
+  const name = escapeHtml(loc.shortName);
+  if (!loc.siteCode || !currentIsLive) return name;
+  return `<button type="button" class="loc-link" data-code="${escapeHtml(loc.siteCode)}" onclick="openSiteHistory(this.dataset.code)" title="Tap to see every visit and its closing note">${name}</button>`;
+}
+
+function histLoc(code) {
+  const d = currentDashboardData;
+  return d && d.locs ? d.locs.find(l => l.siteCode === code) : null;
+}
+function histDayStart(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+function histFmtDate(d) {
+  return d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown date';
+}
+function closeSiteHistory() {
+  const o = document.getElementById('siteHistoryOverlay');
+  if (o) o.remove();
+  document.body.style.overflow = '';
+}
+function ensureHistOverlay() {
+  let o = document.getElementById('siteHistoryOverlay');
+  if (!o) {
+    o = document.createElement('div');
+    o.id = 'siteHistoryOverlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow-y:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;';
+    o.addEventListener('click', (e) => { if (e.target === o) closeSiteHistory(); });
+    o.innerHTML = '<div class="hist-box"><button type="button" class="hist-close" onclick="closeSiteHistory()" aria-label="Close">✕</button><div id="siteHistoryBody"></div></div>';
+    document.body.appendChild(o);
+    document.body.style.overflow = 'hidden';
+  }
+  return o;
+}
+
+async function openSiteHistory(code) {
+  if (!code) return;
+  ensureHistOverlay();
+  const body = document.getElementById('siteHistoryBody');
+  body.innerHTML = '<div class="hist-muted">Loading history…</div>';
+  _siteHist = null;
+  try {
+    const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(code));
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    _siteHist = { code, name: data.site.name, visits: data.visits || [], hasMore: !!data.hasMore, total: data.totalVisits };
+    renderSiteHistory();
+  } catch (e) {
+    body.innerHTML = `<div class="hist-title">Could not load history</div><div class="hist-muted">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function loadMoreSiteHistory() {
+  const h = _siteHist;
+  if (!h) return;
+  const btn = document.getElementById('histMoreBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+  try {
+    // offset counts closed-ticket visits only; the email-ticket / BlueFolder
+    // extras are merged into the first page on top of those.
+    const offset = h.visits.filter(v => v.source === 'site_visit').length;
+    const res = await fetch('/.netlify/functions/get-site-history?code=' + encodeURIComponent(h.code) + '&offset=' + offset);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    h.visits = h.visits.concat(data.visits || []);
+    h.hasMore = !!data.hasMore;
+    renderSiteHistory();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Error loading more — tap to retry'; }
+  }
+}
+
+function renderSiteHistory() {
+  const h = _siteHist;
+  const body = document.getElementById('siteHistoryBody');
+  if (!h || !body) return;
+  const loc = histLoc(h.code);
+  const lastRestockDay = loc && loc.last ? histDayStart(loc.last) : null;
+  const canAct = currentIsLive && !!loc;
+
+  let html = `<div class="hist-title">${escapeHtml(h.name || '')} <span class="hist-mono">${escapeHtml(h.code)}</span></div>`;
+  html += `<div class="hist-sub">${lastRestockDay
+    ? `Last restock on record: <b>${histFmtDate(loc.last)}</b>${loc.lastRestockAppt ? ' (' + escapeHtml(loc.lastRestockAppt) + ')' : ''}. Visits after that are highlighted. If one of them was really a restock, read its note and confirm it.`
+    : 'Visit history, newest first.'}</div>`;
+
+  if (!h.visits.length) {
+    html += '<div class="hist-muted">No visit history found for this site yet.</div>';
+    body.innerHTML = html;
+    return;
+  }
+
+  let dividerShown = false;
+  for (const v of h.visits) {
+    const when = v.started_at || v.ended_at;
+    const day = when ? histDayStart(when) : null;
+    const isRestockLike = !!v.is_restock || /preventative/i.test(v.remediation || '');
+    const isAfter = lastRestockDay != null && day != null && day > lastRestockDay;
+
+    if (lastRestockDay != null && !dividerShown && !isAfter) {
+      html += '<div class="hist-divider">↓ Last restock and earlier</div>';
+      dividerShown = true;
+    }
+
+    const kindLabel = v.source === 'bluefolder'
+      ? ('BlueFolder' + (v.remediation && v.remediation !== 'BlueFolder' ? ' · ' + v.remediation : ''))
+      : v.source === 'email_ticket'
+        ? (v.remediation || 'Ticket')
+        : (isRestockLike ? 'Restock' : (v.remediation || 'Service'));
+    const kindClass = isRestockLike ? 'hist-kind-restock' : 'hist-kind-service';
+    const dur = v.duration_min != null ? ' · ' + Math.round(v.duration_min) + ' min' : '';
+    const ids = [v.appointment_number, v.wo_number ? ((v.source === 'bluefolder' ? 'BF ' : 'WO ') + v.wo_number) : null].filter(Boolean).join(' · ');
+    const note = v.closing_note ? String(v.closing_note).replace(/&#x0D;|&#x0A;|&#13;|&#10;/gi, '\n') : '';
+
+    // Actions only on closed-ticket visits after the last restock that are not
+    // already restocks, and only when there is a note to base the call on.
+    const candidate = canAct && isAfter && v.source === 'site_visit' && !isRestockLike && v.appointment_number;
+    let actions = '';
+    if (candidate && note) {
+      const isLatestVisit = loc.lastVisitAppt && v.appointment_number === loc.lastVisitAppt;
+      actions = `<div class="hist-btns">
+        <button type="button" class="hist-btn hist-ok" data-code="${escapeHtml(h.code)}" data-appt="${escapeHtml(v.appointment_number)}" data-date="${escapeHtml(histFmtDate(when))}" onclick="histConfirmRestocked(this)">✓ Confirm restocked</button>
+        ${isLatestVisit ? `<button type="button" class="hist-btn hist-no" data-code="${escapeHtml(h.code)}" data-appt="${escapeHtml(v.appointment_number)}" onclick="histNotRestock(this)">Not a restock</button>` : ''}
+      </div>`;
+    }
+
+    html += `<div class="hist-visit${isAfter ? ' hist-since' : (lastRestockDay != null ? ' hist-old' : '')}">
+      <div><strong>${histFmtDate(when)}</strong> — <span class="${kindClass}">${escapeHtml(kindLabel)}</span>${dur}${isAfter ? '<span class="hist-tag">since last restock</span>' : ''}</div>
+      <div style="color:#555;">${escapeHtml(v.tech_name_raw || 'Unknown tech')}${v.remediation_detail ? ' — ' + escapeHtml(v.remediation_detail) : ''}${v.needs_review ? ' <span style="color:#999;">(site match unconfirmed)</span>' : ''}</div>
+      ${ids ? `<div class="hist-mono">${escapeHtml(ids)}</div>` : ''}
+      ${note ? `<div class="hist-note">${escapeHtml(note)}</div>` : (v.source === 'site_visit' ? '<div class="hist-mono" style="margin-top:4px;">No closing note captured for this visit.</div>' : '')}
+      ${actions}
+    </div>`;
+  }
+
+  if (h.hasMore) {
+    html += `<button type="button" id="histMoreBtn" class="hist-more" onclick="loadMoreSiteHistory()">Load older visits</button>`;
+  }
+  body.innerHTML = html;
+}
+
+async function histConfirmRestocked(btn) {
+  const code = btn.dataset.code, appt = btn.dataset.appt, date = btn.dataset.date;
+  if (!confirm(`Mark ${code} as restocked based on ${appt} (${date})?`)) return;
+  btn.disabled = true;
+  const ok = await confirmRestockedFromNote(code, appt);
+  if (ok) closeSiteHistory(); else btn.disabled = false;
+}
+
+async function histNotRestock(btn) {
+  const code = btn.dataset.code, appt = btn.dataset.appt;
+  btn.disabled = true;
+  const ok = await confirmNotRestockedFromNote(code, appt);
+  if (ok) closeSiteHistory(); else btn.disabled = false;
 }
 
 function adaptLiveResponse(data, state) {
@@ -1923,7 +2115,7 @@ function renderTableRows(locs) {
     const tr = document.createElement('tr');
     tr.className = cfg.rowClass;
     tr.innerHTML = `
-      <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}"><span style="display:none">${loc.siteCode || ''}</span>${loc.shortName}${loc.siteCode ? '<div style="font-size:11px;color:var(--muted);font-family:monospace;">' + loc.siteCode + '</div>' : ''}</td>
+      <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}"><span style="display:none">${loc.siteCode || ''}</span>${locNameHtml(loc)}${loc.siteCode ? '<div style="font-size:11px;color:var(--muted);font-family:monospace;">' + loc.siteCode + '</div>' : ''}</td>
       <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
       <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
       <td style="font-weight:600;">${lastRestockCell(loc)}</td>
@@ -2153,7 +2345,7 @@ function renderSharedDates(locs) {
       const tr = document.createElement('tr');
       tr.className = cfg.rowClass;
       tr.innerHTML = `
-        <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}"><span style="display:none">${loc.siteCode || ''}</span>${loc.shortName}${loc.siteCode ? '<div style="font-size:11px;color:var(--muted);font-family:monospace;">' + loc.siteCode + '</div>' : ''}</td>
+        <td style="font-weight:500; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${loc.loc}"><span style="display:none">${loc.siteCode || ''}</span>${locNameHtml(loc)}${loc.siteCode ? '<div style="font-size:11px;color:var(--muted);font-family:monospace;">' + loc.siteCode + '</div>' : ''}</td>
         <td><span class="badge ${cfg.badgeClass}">${cfg.label}</span></td>
         <td style="font-weight:600;">${fmtCell(loc.n1)}</td>
         <td style="font-weight:600;">${lastRestockCell(loc)}</td>
