@@ -39,7 +39,9 @@ const { createClient } = require('@supabase/supabase-js');
 const FEED_URL = 'https://511ga.org/api/v2/get/event';
 const CACHE_KEY = 'traffic/ga-events';
 const MI_FEED_URL = 'https://mdotridedata.state.mi.us/api/v1/organization/michigan_department_of_transportation/dataset/incidents/query';
-const MI_CACHE_KEY = 'traffic/mi-events';
+const MI_WZ_SLUGS = ['work_zone_information', 'work_zone', 'workzone'];
+const MI_BASE = 'https://mdotridedata.state.mi.us/api/v1/organization/michigan_department_of_transportation/dataset/';
+const MI_CACHE_KEY = 'traffic/mi-events-v2';
 const MI_DIR = { 1: 'NB', 2: 'SB', 3: 'both', 4: 'WB', 5: 'EB' };
 const FRESH_MS = 3 * 60 * 1000;          // reuse the stored copy this long
 const MIN_RETRY_MS = 60 * 1000;          // never call 511GA more than once a minute
@@ -154,6 +156,87 @@ function normalizeMichigan(row) {
     recurrence: '',
   };
 }
+
+function wzPoints(geom) {
+  if (!geom) return [];
+  const c = geom.coordinates;
+  if (geom.type === 'Point' && Array.isArray(c)) return [[c[1], c[0]]];
+  if (geom.type === 'LineString' && Array.isArray(c)) return c.map((p) => [p[1], p[0]]).filter((p) => Number.isFinite(p[0]));
+  if (geom.type === 'MultiLineString' && Array.isArray(c)) return c.flat().map((p) => [p[1], p[0]]).filter((p) => Number.isFinite(p[0]));
+  return [];
+}
+function normalizeWorkZone(row) {
+  const props = row.properties || row.core_details || row;
+  const core = props.core_details || props;
+  const end = String(core.end_date || props.end_date || field(row, 'enddatetime') || '').trim();
+  if (end && Date.parse(end) < Date.now()) return null;
+  const roads = core.road_names || props.road_names || [];
+  const roadway = Array.isArray(roads) ? roads.filter(Boolean).join(', ') : String(field(row, 'roadway') || roads || '');
+  const desc = String(core.description || props.description || field(row, 'description') || core.name || '').trim();
+  const impact = String(props.vehicle_impact || core.vehicle_impact || '').toLowerCase();
+  const full = /all-lanes-closed|all lanes/.test(impact) || miClosed(desc);
+  const pts = wzPoints(row.geometry || props.geometry);
+  const lat = pts.length ? pts[0][0] : num(field(row, 'latitude'));
+  const lng = pts.length ? pts[0][1] : num(field(row, 'longitude'));
+  const last = pts.length > 1 ? pts[pts.length - 1] : null;
+  return {
+    id: 'wz-' + (core.event_id || props.id || field(row, 'id') || roadway + ':' + lat),
+    roadway: roadway || 'Work zone',
+    direction: ({northbound:'NB',southbound:'SB',eastbound:'EB',westbound:'WB'}[String(core.direction || '').toLowerCase()] || ''),
+    description: desc,
+    eventType: 'roadwork',
+    subtype: 'Work zone',
+    severity: '',
+    isFullClosure: full,
+    lanes: impact ? impact.replace(/-/g, ' ') : '',
+    lat, lng,
+    lat2: last ? last[0] : null,
+    lng2: last ? last[1] : null,
+    pts,
+    polyline: '',
+    start: core.start_date || props.start_date || null,
+    end: end || null,
+    updated: core.update_date || props.update_date || null,
+    recurrence: '',
+    listNear: true,
+  };
+}
+function featuresOf(data) {
+  if (!data) return [];
+  if (Array.isArray(data.features)) return data.features;
+  if (data.feed && Array.isArray(data.feed.features)) return data.feed.features;
+  const rows = rowsOf(data) || [];
+  const out = [];
+  for (const row of rows) {
+    if (row && Array.isArray(row.features)) out.push(...row.features);
+    else if (row && row.geometry) out.push(row);
+    else out.push(row);
+  }
+  return out;
+}
+async function fetchWorkZones(key) {
+  let last = null;
+  for (const slug of MI_WZ_SLUGS) {
+    try {
+      const data = await mdotJson(MI_BASE + slug + '/query?limit=200&_format=json', key);
+      return featuresOf(data).map(normalizeWorkZone).filter((e) => e && e.lat != null && e.lng != null);
+    } catch (e) {
+      last = e;
+      if (e.status !== 400 && e.status !== 404) throw e;
+    }
+  }
+  try {
+    const data = await mdotJson('https://mdotridedata.state.mi.us/api/v1/query?_format=json', key, {
+      method: 'POST',
+      headers: { api_key: key, Accept: 'application/json', 'Content-Type': 'text/plain', 'User-Agent': 'MCR Dispatch (mckelvey@mcrtechservice.com)' },
+      body: 'SELECT * FROM michigan_department_of_transportation__work_zone_information LIMIT 200',
+    });
+    return featuresOf(data).map(normalizeWorkZone).filter((e) => e && e.lat != null && e.lng != null);
+  } catch (e) {
+    throw last || e;
+  }
+}
+
 function rowsOf(data) {
   if (Array.isArray(data)) return data;
   if (data && Array.isArray(data.data)) return data.data;
@@ -198,7 +281,13 @@ async function fetchMichigan(key) {
   }
   const rows = rowsOf(data);
   if (!rows) throw new Error('MDOT RIDE returned an unexpected response');
-  return rows.map(normalizeMichigan).filter((e) => e && e.id != null && e.lat != null && e.lng != null);
+  const incidents = rows.map(normalizeMichigan).filter((e) => e && e.id != null && e.lat != null && e.lng != null);
+  let zones = [];
+  try { zones = await fetchWorkZones(key); }
+  catch (e) { incidents.workZoneError = e.message; }
+  const all = incidents.concat(zones);
+  all.workZoneError = incidents.workZoneError || null;
+  return all;
 }
 
 async function fetchFeed(key) {
@@ -257,7 +346,7 @@ async function getEvents(event, forceRefresh, which) {
     } else {
       try {
         const events = michigan ? await fetchMichigan(key) : await fetchFeed(key);
-        cache = { fetchedAt: attemptIso, lastAttemptAt: attemptIso, lastError: null, events };
+        cache = { fetchedAt: attemptIso, lastAttemptAt: attemptIso, lastError: events.workZoneError || null, events };
       } catch (e) {
         error = e && e.name === 'AbortError' ? down + ' did not respond in time.' : scrub(e && e.message, key);
         cache = Object.assign({ events: [], fetchedAt: null }, cache || {}, { lastAttemptAt: attemptIso, lastError: error });
@@ -297,6 +386,7 @@ function decodePolyline(str) {
 function geometryFor(e) {
   let pts = e.polyline ? decodePolyline(e.polyline) : [];
   pts = pts.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
+  if (pts.length < 2 && Array.isArray(e.pts) && e.pts.length) pts = e.pts;
   if (pts.length < 2) {
     pts = [];
     if (e.lat != null && e.lng != null) pts.push([e.lat, e.lng]);
@@ -344,6 +434,7 @@ function isActive(e, nowMs) {
 // What is worth showing a dispatcher: incidents, closures, special events, and
 // full closures that are not on a recurring (e.g. overnight) schedule.
 function isAttention(e) {
+  if (e.listNear) return true;
   if (e.eventType !== 'roadwork') return true;
   return e.isFullClosure && !e.recurrence;
 }
