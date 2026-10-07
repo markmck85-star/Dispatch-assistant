@@ -161,24 +161,44 @@ function rowsOf(data) {
   if (data && Array.isArray(data.rows)) return data.rows;
   return null;
 }
-async function fetchMichigan(key) {
+async function mdotJson(url, key, init) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FEED_TIMEOUT_MS);
   try {
-    const url = MI_FEED_URL + '?limit=500&_format=json';
-    const res = await fetch(url, {
+    const res = await fetch(url, Object.assign({
       headers: { api_key: key, Accept: 'application/json', 'User-Agent': 'MCR Dispatch (mckelvey@mcrtechservice.com)' },
       signal: ctrl.signal,
-    });
-    if (res.status === 401 || res.status === 403) throw new Error('MDOT RIDE rejected the key (HTTP ' + res.status + ')');
-    if (!res.ok) throw new Error('MDOT RIDE returned HTTP ' + res.status);
-    const data = await res.json();
-    const rows = rowsOf(data);
-    if (!rows) throw new Error('MDOT RIDE returned an unexpected response');
-    return rows.map(normalizeMichigan).filter((e) => e && e.id != null && e.lat != null && e.lng != null);
+    }, init || {}));
+    const raw = await res.text();
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch (e) { data = null; }
+    if (!res.ok) {
+      const msg = (data && (data.message || data.error)) || raw.slice(0, 180) || ('HTTP ' + res.status);
+      const err = new Error('MDOT RIDE returned HTTP ' + res.status + ': ' + msg);
+      err.status = res.status;
+      throw err;
+    }
+    return data;
   } finally {
     clearTimeout(timer);
   }
+}
+async function fetchMichigan(key) {
+  key = String(key || '').trim();
+  let data;
+  try {
+    data = await mdotJson(MI_FEED_URL + '?limit=200&_format=json', key);
+  } catch (e) {
+    if (e.status !== 400) throw e;
+    data = await mdotJson('https://mdotridedata.state.mi.us/api/v1/query?_format=json', key, {
+      method: 'POST',
+      headers: { api_key: key, Accept: 'application/json', 'Content-Type': 'text/plain', 'User-Agent': 'MCR Dispatch (mckelvey@mcrtechservice.com)' },
+      body: 'SELECT * FROM michigan_department_of_transportation__incidents LIMIT 200',
+    });
+  }
+  const rows = rowsOf(data);
+  if (!rows) throw new Error('MDOT RIDE returned an unexpected response');
+  return rows.map(normalizeMichigan).filter((e) => e && e.id != null && e.lat != null && e.lng != null);
 }
 
 async function fetchFeed(key) {
