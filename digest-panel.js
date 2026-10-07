@@ -233,7 +233,11 @@
       var att = attentionItems(d);
       var alerts = (d.weather && d.weather.alerts) || [];
       h += sec('Needs attention', att.length,
-        att.length ? att.map(function (a) { return item(a.level === 'high' ? 'high' : 'info', esc(a.text)); }).join('') : empty('Nothing flagged right now.'), true);
+        att.length ? att.map(function (a) { var meet = ((d.specialProjects && d.specialProjects.armoredTruckMeets) || []).filter(function (m) {
+            return a.text && m.siteText && a.text.indexOf(m.siteText) >= 0;
+          })[0];
+          var btn = meet && meet.woNumber ? '<button type="button" class="dp-btn small" data-dp-resolve="' + esc(meet.woNumber) + '">Mark resolved</button>' : '';
+          return item(a.level === 'high' ? 'high' : 'info', esc(a.text), '', '', btn); }).join('') : empty('Nothing flagged right now.'), true);
 
       // Workload + weather
       var w = d.dayWeight || {};
@@ -329,7 +333,8 @@
           var cls = (m.needsNudge || m.meetStatus === 'needs_reschedule') ? 'high' : (m.when === 'today' ? 'warn' : 'info');
           var when = m.confirmedWallClock ? ' \u00B7 ' + esc(m.confirmedWallClock) : '';
           var last = m.daysSinceContact != null ? ' \u00B7 last carrier contact ' + (m.daysSinceContact === 0 ? 'today' : m.daysSinceContact + ' day' + (m.daysSinceContact === 1 ? '' : 's') + ' ago') : '';
-          return item(cls, esc(m.siteText) + ' <span class="m">WO ' + esc(m.woNumber) + '</span>', esc(MEET[m.meetStatus] || m.meetStatus) + when + last);
+          return item(cls, esc(m.siteText) + ' <span class="m">WO ' + esc(m.woNumber) + '</span>', esc(MEET[m.meetStatus] || m.meetStatus) + when + last, '',
+            m.woNumber ? '<button type="button" class="dp-btn small" data-dp-resolve="' + esc(m.woNumber) + '">Mark resolved</button>' : '');
         }).join('');
       }
 
@@ -502,7 +507,7 @@
 
     // ---- events
     root.addEventListener('click', function (e) {
-      var t = e.target.closest('[data-dp-toggle],[data-dp-mode],[data-dp-refresh],[data-dp-add],[data-dp-edit],[data-dp-ticket],[data-dp-wx]');
+      var t = e.target.closest('[data-dp-toggle],[data-dp-mode],[data-dp-refresh],[data-dp-add],[data-dp-edit],[data-dp-ticket],[data-dp-resolve],[data-dp-wx]');
       if (!t) return;
       if (t.hasAttribute('data-dp-toggle')) {
         isOpen = !isOpen;
@@ -529,6 +534,21 @@
         var p = all.filter(function (x) { return x.id === id; })[0];
         if (p) openForm({ id: p.id, type: p.type, title: p.title, location: p.location, date: p.scheduledDate, time: p.scheduledTime,
           status: p.status, hold: p.holdUntil, note: p.note, ticketId: p.ticketId });
+        return;
+      }
+      if (t.hasAttribute('data-dp-resolve')) {
+        var wo = t.getAttribute('data-dp-resolve');
+        var note = prompt('How was this closed? For example, Neumo cleared it remotely.', 'Resolved outside the mailbox');
+        if (note === null) return;
+        fetch('/.netlify/functions/mark-ticket-resolved', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wo_number: wo, note: note })
+        }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok || !res.j.ok) throw new Error((res.j && res.j.error) || 'Request failed');
+            load(true);
+          })
+          .catch(function (err) { alert('Could not mark resolved: ' + err.message); });
         return;
       }
       if (t.hasAttribute('data-dp-ticket')) {
