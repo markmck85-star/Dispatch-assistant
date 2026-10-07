@@ -118,6 +118,7 @@
   function eventTags(e) {
     var label = TYPE_LABEL[e.eventType] || 'Event';
     if (e.eventType === 'accidentsAndIncidents' && e.subtype) label = 'Incident: ' + e.subtype;
+    if (e.eventType === 'roadwork' && e.subtype) label = e.subtype;
     var h = tag(label, e.eventType === 'accidentsAndIncidents' ? 'amber' : '');
     if (e.isFullClosure) h += tag('Full closure', 'red');
     return h;
