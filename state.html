@@ -1319,6 +1319,14 @@ async function renderStateMap(state, dispatchDate) {
       const map = ensureStateMap();
       if (map) map.setView(stateCenterFor(state), state === 'CA' ? 6 : 7);
       plotStateAllSites(map, LOCATIONS, []);
+      // 2026-10-07: a day with no stops used to leave the previous render's
+      // legend chips (e.g. GA's techs while viewing SC) and AI-bar roster in
+      // place. Reset both to this state's own (idle) roster.
+      renderStateMapLegend([]);
+      window._stateAiRoutes = Object.keys(TECHS || {})
+        .filter(t => (TECHS[t] || {}).active !== false)
+        .map(t => ({ tech: t, stops: [], color: null }));
+      refreshStateAiBarState();
       return;
     }
 
@@ -1460,6 +1468,12 @@ async function renderStateMap(state, dispatchDate) {
     setStateMapLoader(false);
     const meta = document.getElementById('stateMapMeta');
     if (meta) meta.textContent = 'Map error: ' + err.message;
+  } finally {
+    // 2026-10-07: the loader was only hidden at the end of a successful
+    // render with stops, so the "no plottable stops" early return (and the
+    // `if (!map) return`) left "MAP LOADING..." on screen forever. Hide it on
+    // every exit, unless a newer render has since taken over.
+    if (renderGen === window._stateMapRenderGen) setStateMapLoader(false);
   }
 }
 
