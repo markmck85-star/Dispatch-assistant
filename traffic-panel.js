@@ -23,7 +23,9 @@
 
   var FN_TRAFFIC = '/.netlify/functions/get-traffic';
   var AUTO_REFRESH_MS = 3 * 60 * 1000;
-  var SUPPORTED = { GA: true };
+  var SUPPORTED = { GA: true, MI: true };
+  var SOURCE_NAME = { GA: '511GA, Georgia DOT', MI: 'MDOT RIDE' };
+  var PANEL_TITLE = { GA: 'Georgia traffic', MI: 'Michigan traffic' };
 
   var TYPE_LABEL = {
     accidentsAndIncidents: 'Incident', closures: 'Closure', specialEvents: 'Special event', roadwork: 'Road closure',
@@ -178,7 +180,7 @@
     function shell() {
       var head = opts.collapsible
         ? '<button type="button" class="tp-head" data-tp-toggle><span class="tp-chev">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' +
-          '<span>\uD83D\uDEA6 Georgia traffic</span><span class="tp-badge">' + esc(badgeText()) + '</span></button>'
+          '<span>\uD83D\uDEA6 ' + esc(PANEL_TITLE[getState()] || 'Traffic') + '</span><span class="tp-badge">' + esc(badgeText()) + '</span></button>'
         : '';
       var body = '<div class="tp-body"' + (isOpen ? '' : ' style="display:none"') + '>' +
         '<div class="tp-bar"><button type="button" class="tp-btn" data-tp-refresh>Refresh</button></div>' +
@@ -226,7 +228,7 @@
       setStatus(status);
 
       var h = '';
-      if (d.stale) h += '<div class="tp-warn">This data is more than a few minutes old' + (d.feedError ? ' (the 511GA feed is not responding: ' + esc(d.feedError) + ')' : '') + '.</div>';
+      if (d.stale) h += '<div class="tp-warn">This data is more than a few minutes old' + (d.feedError ? ' (the feed is not responding: ' + esc(d.feedError) + ')' : '') + '.</div>';
       else if (d.feedError) h += '<div class="tp-warn">' + esc(d.feedError) + '</div>';
 
       h += '<div class="tp-pills">' +
@@ -260,7 +262,7 @@
             (e.description ? '<div class="tp-ev"><div class="d">' + esc(e.description) + '</div></div>' : '') + '</div>';
         }).join('') : empty('No active incidents or closures reported.'), false);
 
-      h += '<div class="tp-foot">Source: 511GA, Georgia DOT. Traffic data refreshes about every 3 minutes; incidents are shown within ' + esc(d.radiusMiles) + ' miles of a site.</div>';
+      h += '<div class="tp-foot">Source: ' + esc(d.source || SOURCE_NAME[getState()] || 'DOT') + '. Traffic data refreshes about every 3 minutes; incidents are shown within ' + esc(d.radiusMiles) + ' miles of a site.</div>';
 
       var o = out();
       if (o) o.innerHTML = (keepError && o.innerHTML ? o.innerHTML : '') + h;
