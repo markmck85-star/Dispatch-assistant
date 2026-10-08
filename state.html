@@ -150,16 +150,24 @@
   /* Desktop: stop looking like a phone column in the middle of a 27" monitor.
      Phone layout is unchanged (container stays 900px-capped below this). */
   @media (min-width: 1100px) {
-    body { padding: 16px 18px; }
+    body { padding: 10px 12px; overflow: hidden; }
     .container { max-width: none; }
-    .console-layout { display: grid; grid-template-columns: minmax(280px, 340px) minmax(860px, 1040px) minmax(280px, 340px); gap: 16px; align-items: start; justify-content: center; }
-    #stateSideRight { grid-column: 1; }
-    .console-main { grid-column: 2; }
-    #stateSideLeft { grid-column: 3; }
-    .side-col { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 12px 14px; font-size: 15px; }
-    .console { padding: 18px 20px; }
-    .console h1 { font-size: 26px; }
-    #stateMap { height: calc(100vh - 250px); min-height: 640px; max-height: 860px; }
+    .console-layout {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr) 300px;
+      grid-template-rows: calc(100vh - 20px);
+      gap: 12px;
+      align-items: stretch;
+    }
+    #stateSideRight { grid-column: 1; grid-row: 1; }
+    .console-main { grid-column: 2; grid-row: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+    #stateSideLeft { grid-column: 3; grid-row: 1; }
+    .side-col { height: 100%; max-height: none; overflow: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 12px 14px; font-size: 15px; }
+    .console { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px; overflow: hidden; }
+    .console h1 { font-size: 24px; }
+    #stateMapPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #stateMapBody, #stateMapSlot { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #stateMap { height: 100%; min-height: 0; max-height: none; flex: 1; }
     .tech-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   }
   @media (max-width: 1099px) {
@@ -3137,6 +3145,9 @@ startStateLivePoll();
     if (!sel || !home || !window.DigestPanel) return;
     try { localStorage.setItem('mcr_state_digest_open', '1'); } catch (e) {}
     DigestPanel.mount(home, { theme: 'dark', collapsible: true, stateSelectEl: sel, storageKey: 'mcr_state_digest_open' });
+    window.addEventListener('load', function () {
+      setTimeout(function () { if (window._stateMap && window._stateMap.invalidateSize) window._stateMap.invalidateSize(); }, 400);
+    });
   })();
 </script>
 <script src="/traffic-panel.js"></script>
