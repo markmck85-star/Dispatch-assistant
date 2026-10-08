@@ -217,6 +217,27 @@
             overflow: hidden;
         }
         .tech-cards-grid .os-stop-actions { flex-wrap: wrap; max-width: 100%; }
+        /* Desktop: each stop is its own block so they don't run together. */
+        @media (min-width: 960px) {
+            .tech-cards-grid .os-stop {
+                display: block;
+                margin: 0 0 12px;
+                padding: 12px 12px 10px;
+                background: #fff;
+                border: 1px solid #d5dbe3;
+                border-left: 3px solid #6f93b0;
+                border-radius: 6px;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            }
+            .tech-cards-grid .os-stop:last-child { margin-bottom: 2px; }
+            .tech-cards-grid .os-stop-actions {
+                margin: 8px 0 0 !important;
+                padding-top: 8px;
+                border-top: 1px dashed #e1e6ec;
+                align-items: flex-start !important;
+                width: 100%;
+            }
+        }
 
         /* ── ROUTE MAP VISUALIZER ──────────────────────────────────────
            The panel deliberately lives outside #results: renderReviewBoard()
@@ -513,7 +534,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-195</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-196</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
