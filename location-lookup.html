@@ -213,7 +213,16 @@ async function loadSites() {
             opt.textContent = st;
             stateFilter.appendChild(opt);
         }
-        output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Start typing a name or code above.</div>`;
+        let initial = '';
+        try {
+            initial = (new URLSearchParams(location.search).get('state') || localStorage.getItem('lastSelectedState') || '').toUpperCase();
+        } catch (e) {}
+        if (initial && [...stateFilter.options].some(o => o.value === initial)) {
+            stateFilter.value = initial;
+            showStateLocations(initial);
+        } else {
+            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to list locations, or start typing a name or code above.</div>`;
+        }
     } catch (err) {
         output.innerHTML = `<div class="empty-state error">Error loading site list: ${err.message}</div>`;
     }
@@ -222,6 +231,23 @@ loadSites();
 
 function escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+function showStateLocations(st) {
+    const sites = allSites.filter(s => s.state === st).sort((a, b) => String(a.site_code || '').localeCompare(String(b.site_code || '')));
+    if (!sites.length) {
+        output.innerHTML = `<div class="empty-state">No locations for ${escapeHtml(st)}.</div>`;
+        return;
+    }
+    output.innerHTML = `<div class="empty-state" style="text-align:left;padding-bottom:8px;">${sites.length} locations in ${escapeHtml(st)}</div>` +
+        sites.map(s => `<div class="result-row state-location" data-code="${escapeHtml(s.site_code || '')}"><span class="state-tag">${escapeHtml(s.state)}</span><span class="code">${escapeHtml(s.site_code || '')}</span>${escapeHtml(s.name)}</div>`).join('');
+    output.querySelectorAll('.state-location').forEach(row => {
+        row.addEventListener('click', () => {
+            const site = allSites.find(s => s.state === st && s.site_code === row.dataset.code);
+            if (site) selectSite(site);
+        });
+    });
 }
 
 function runSearch() {
@@ -245,9 +271,9 @@ function runSearch() {
         resultsDropdown.classList.remove('open');
         resultsDropdown.innerHTML = '';
         if (st) {
-            loadStateFeed(st, 0);
+            showStateLocations(st);
         } else {
-            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to browse recent visits, or start typing a name/code above.</div>`;
+            output.innerHTML = `<div class="empty-state">${allSites.length} sites loaded. Select a state to list locations, or start typing a name or code above.</div>`;
         }
         return;
     }
