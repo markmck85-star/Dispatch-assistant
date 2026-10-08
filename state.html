@@ -152,10 +152,14 @@
   @media (min-width: 1100px) {
     body { padding: 16px 18px; }
     .container { max-width: none; }
-    .console-layout { display: grid; grid-template-columns: minmax(250px, 320px) minmax(760px, 980px) minmax(270px, 340px); gap: 14px; align-items: start; justify-content: center; }
-    .side-col { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 10px 12px; }
-    .console { padding: 16px 18px; }
-    #stateMap { height: 560px; }
+    .console-layout { display: grid; grid-template-columns: minmax(280px, 340px) minmax(860px, 1040px) minmax(280px, 340px); gap: 16px; align-items: start; justify-content: center; }
+    #stateSideRight { grid-column: 1; }
+    .console-main { grid-column: 2; }
+    #stateSideLeft { grid-column: 3; }
+    .side-col { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 12px 14px; font-size: 15px; }
+    .console { padding: 18px 20px; }
+    .console h1 { font-size: 26px; }
+    #stateMap { height: calc(100vh - 250px); min-height: 640px; max-height: 860px; }
     .tech-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   }
   @media (max-width: 1099px) {
@@ -3059,8 +3063,8 @@ function restoreConsolePrefs() {
     // is an opt-in view for when a dispatcher is specifically looking for
     // opportunistic restocks) -- so absence of a stored value means
     // hidden, not shown. Only an explicit '1' from a prior toggle shows it.
-    const restockVisible = localStorage.getItem('mcr_state_restockVisible') === '1';
-    setRestockSectionVisibility(restockVisible);
+    const restockSaved = localStorage.getItem('mcr_state_restockVisible');
+    setRestockSectionVisibility(restockSaved !== '0');
   } catch { /* localStorage unavailable -- fall back to HTML defaults */ }
 }
 
@@ -3131,7 +3135,7 @@ startStateLivePoll();
     var sel = document.getElementById('stateSel');
     var home = document.getElementById('digestPanelHome');
     if (!sel || !home || !window.DigestPanel) return;
-    try { localStorage.removeItem('mcr_state_digest_open'); } catch (e) {}
+    try { localStorage.setItem('mcr_state_digest_open', '1'); } catch (e) {}
     DigestPanel.mount(home, { theme: 'dark', collapsible: true, stateSelectEl: sel, storageKey: 'mcr_state_digest_open' });
   })();
 </script>
