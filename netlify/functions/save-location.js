@@ -33,8 +33,6 @@ exports.handler = async (event) => {
     defaultTech: String(payload.primaryTech || payload.defaultTech || "").trim(),
     contractorOverride: Boolean(payload.contractorOverride),
     contractorName: String(payload.contractorName || "").trim(),
-    machineType: String(payload.machineType || "SK").trim(),
-    remote: Boolean(payload.remote),
     updatedAt: new Date().toISOString(),
   };
 
@@ -51,6 +49,18 @@ exports.handler = async (event) => {
   // know or care about this field. Only including it in `record` when
   // truly present in the payload means the merge below (`{...prev,
   // ...record}`) leaves the site's existing value alone otherwise.
+  // 2026-10-07: same treatment for machineType and remote. They used to
+  // default to "SK"/false whenever a caller omitted them, silently
+  // overwriting a site's real values (e.g. surfboards flipping back to SK
+  // after a "Set Default" click). Now only written when actually sent; new
+  // sites with no machineType still fall back to "SK" below.
+  if (payload.machineType !== undefined && String(payload.machineType).trim() !== "") {
+    record.machineType = String(payload.machineType).trim();
+  }
+  if (payload.remote !== undefined) {
+    record.remote = Boolean(payload.remote);
+  }
+
   if (payload.skipArmoredMeetPrompt !== undefined) {
     record.skipArmoredMeetPrompt = Boolean(payload.skipArmoredMeetPrompt);
   }
@@ -83,6 +93,8 @@ exports.handler = async (event) => {
       const newAddress = record.address;
       const addressChanged = newAddress && newAddress !== (prev.address || "");
       const merged = { ...prev, ...record };
+      if (!merged.machineType) merged.machineType = "SK";
+      if (merged.remote === undefined) merged.remote = false;
       if (addressChanged) {
         delete merged.lat;
         delete merged.lng;
