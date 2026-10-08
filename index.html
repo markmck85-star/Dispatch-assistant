@@ -5947,6 +5947,13 @@ function distanceMatrixStatus(state) {
 
             var state = code.substring(0, 2);
             var saveAsFallback = !!(fromAssignedTech && fromTech && fromAssignedTech !== fromTech);
+            // 2026-10-07: nothing to ask when the chosen technician is already
+            // the saved primary (e.g. moving a stop back to its default after a
+            // trial reassignment) or, for the fallback path, already the saved
+            // fallback. Without this it offered to "save" the existing default.
+            var savedPrimary = (loc && (loc.primaryTech || loc.defaultTech)) || '';
+            if (toTech && toTech === savedPrimary) return;
+            if (saveAsFallback && toTech && loc && toTech === (loc.fallbackTech || '')) return;
             var roleLabel = saveAsFallback ? 'fallback' : 'primary';
             var currentNote = saveAsFallback
                 ? 'Primary stays <strong>' + fromTech + '</strong>. Stop was on ' + fromAssignedTech + '.'
