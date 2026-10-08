@@ -104,7 +104,8 @@
         .board-context label { flex: 0 0 auto; }
         .board-context #stateSelector { width: 12.2em; max-width: 34vw; }
         .board-context #dispatchDate { width: 12.2em; max-width: 34vw; }
-        .board-context #dispatchTomorrowBtn { align-self: flex-end; margin: 0 !important; flex: 0 0 auto; height: 40px; min-height: 40px; box-sizing: border-box; }
+        .board-context #dispatchTomorrowBtn { align-self: stretch; margin: 0 !important; flex: 0 0 auto; height: 40px; min-height: 40px; box-sizing: border-box; }
+        .board-tomorrow-label > span { visibility: hidden; }
 
         .board-inline { display: flex; align-items: center; gap: 6px; }
         .board-inline input[type="date"] { flex: 0 0 auto; width: 12.2em; min-width: 0; }
@@ -574,7 +575,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-204</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-205</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -715,7 +716,10 @@
                             <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
                         </span>
                     </label>
-                    <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
+                    <label class="board-tomorrow-label">
+                        <span aria-hidden="true">Date</span>
+                        <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
+                    </label>
                 </div>
                 <div id="boardToolHome"></div>
                 <div id="boardToolStack">
