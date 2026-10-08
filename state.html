@@ -3128,6 +3128,7 @@ startStateLivePoll();
     var sel = document.getElementById('stateSel');
     var home = document.getElementById('digestPanelHome');
     if (!sel || !home || !window.DigestPanel) return;
+    try { localStorage.removeItem('mcr_state_digest_open'); } catch (e) {}
     DigestPanel.mount(home, { theme: 'dark', collapsible: true, stateSelectEl: sel, storageKey: 'mcr_state_digest_open' });
   })();
 </script>
@@ -3139,6 +3140,7 @@ startStateLivePoll();
     var sel = document.getElementById('stateSel');
     var home = document.getElementById('trafficPanelHome');
     if (!sel || !home || !window.TrafficPanel) return;
+    try { localStorage.removeItem('mcr_state_traffic_open'); } catch (e) {}
     TrafficPanel.mount(home, { theme: 'dark', collapsible: true, stateSelectEl: sel, storageKey: 'mcr_state_traffic_open' });
   })();
 </script>
