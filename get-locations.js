@@ -1,0 +1,206 @@
+/**
+ * get-locations.js — v2 — Phase 2 Stage 3 (sites read cutover)
+ *
+ * Now reads from Supabase `sites` (source of truth going forward) instead
+ * of Blobs. Falls back to the old Blobs read if Supabase isn't configured
+ * or the query errors, so a Supabase outage degrades to the old behavior
+ * rather than breaking dispatch generation.
+ *
+ * Returned shape is unchanged from the Blobs version so index.html doesn't
+ * need any changes: an object keyed by site code, each value shaped like
+ * { code, state, name, address, primaryTech, fallbackTech, defaultTech,
+ *   contractorOverride, contractorName, machineType, remote, lat, lng }.
+ *
+ * v3 (2026-08-28): also resolves code-style site_aliases (e.g. a site
+ * whose site_code is GA1083 but that Neumo's own dispatch-list digest
+ * still labels under an old code like GA1018) as additional keys pointing
+ * at the same location object -- so a pasted/parsed dispatch-list code
+ * that no longer has its own `sites` row still resolves correctly instead
+ * of silently failing to match or (worse) recreating a duplicate site.
+ * Code-style aliases (GA1018, CA ATM tags KS8 / KN6, and 3-letter tags KEP / KAY)
+ * are folded in as extra keys.  free-text name aliases are left alone since they're not something
+ * index.html ever looks up as a key. A real site_code always wins if it's
+ * still live -- alias keys never overwrite an existing entry.
+ *
+ * Known gap: `cluster` (used for remote-cluster grouping) isn't in the
+ * `sites` table and has no current write path anywhere in the app (checked
+ * admin.html and every Supabase-writing function -- nothing sets it). Not
+ * carried over here. Flagged to Mark 2026-07-27 rather than silently
+ * dropped -- worth confirming whether it's still meaningfully populated
+ * before deciding whether to add the column or leave it retired, given the
+ * planned distance-matrix-based clustering rebuild makes it likely moot.
+ *
+ * v4 (2026-09-17): exposes a real `county` column (added to `sites` this
+ * same session, backfilled for California via a Gemini/Maps-grounded
+ * lookup against each site's own address). Was previously derived
+ * client-side in admin.html's locations export by guessing the first word
+ * of the site's name -- broke for CA specifically, whose names are stored
+ * as "CA - <City> DMV" with no county in them at all, so that heuristic
+ * just printed the state code on every row. Returned as `county` here
+ * (empty string when the column is null, e.g. every state besides CA
+ * until/unless they get backfilled the same way) so admin.html can read
+ * it directly instead of guessing.
+ */
+
+const { getStore, connectLambda } = require("@netlify/blobs");
+const { createClient } = require("@supabase/supabase-js");
+
+const SITE_CODE_PATTERN = /^(?:[A-Z]{2}\d+|K[A-Z]{2})$/;
+
+function getDispatchStore() {
+  return getStore("dispatch");
+}
+
+async function readFromBlobs(state) {
+  try {
+    const store = getDispatchStore();
+    const data = await store.get("locations/" + state, { type: "json" });
+    return data || {};
+  } catch (err) {
+    return {};
+  }
+}
+
+exports.handler = async (event) => {
+  connectLambda(event);
+  const params = event.queryStringParameters || {};
+  const state = (params.state || "").trim().toUpperCase();
+
+  if (!state || !/^[A-Z]{2}$/.test(state)) {
+    return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Missing or invalid state parameter" }),
+    };
+  }
+
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+      const { data: sites, error: sitesErr } = await supabase
+        .from("sites")
+        .select("id, site_code, state, name, address, county, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id, skip_armored_meet_prompt")
+        .eq("state", state);
+
+      if (sitesErr) throw sitesErr;
+
+      // Resolve primary/fallback tech ids -> names in one follow-up query
+      // rather than guessing FK constraint names for an embedded select.
+      const techIds = [...new Set(
+        (sites || []).flatMap(s => [s.primary_tech_id, s.fallback_tech_id]).filter(Boolean)
+      )];
+      let techNameById = {};
+      if (techIds.length > 0) {
+        const { data: techs, error: techErr } = await supabase
+          .from("technicians")
+          .select("id, name")
+          .in("id", techIds);
+        if (techErr) throw techErr;
+        techNameById = Object.fromEntries((techs || []).map(t => [t.id, t.name]));
+      }
+
+      const result = {};
+      const siteIdById = {};
+      for (const s of (sites || [])) {
+        const primaryTech = techNameById[s.primary_tech_id] || "";
+        const fallbackTech = techNameById[s.fallback_tech_id] || "";
+        const record = {
+          code: s.site_code,
+          state: s.state,
+          name: s.name || s.site_code,
+          address: s.address || "",
+          county: s.county || "",
+          primaryTech,
+          fallbackTech,
+          defaultTech: primaryTech, // backward-compat with embedded LOCATIONS records
+          contractorOverride: !!s.contractor_override,
+          contractorName: s.contractor_name || "",
+          machineType: s.machine_type || "SK",
+          remote: !!s.remote,
+          // 2026-09-23: dispatcher-set opt-out of the "schedule a carrier
+          // meet?" prompt for this specific site (e.g. Augusta Peach
+          // Orchard, which handles its cash side internally). Per-site,
+          // not per-state -- see save-location.js and the prompt's own
+          // "don't ask again" option in index.html.
+          skipArmoredMeetPrompt: !!s.skip_armored_meet_prompt,
+          ...(s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : {}),
+        };
+        result[s.site_code] = record;
+        siteIdById[s.id] = record;
+      }
+
+      // Fold in code-style site_aliases (e.g. an old/alternate code Neumo's
+      // dispatch-list digest still uses) as additional keys pointing at the
+      // same location object, without ever overwriting a live site_code entry.
+      const siteIds = Object.keys(siteIdById);
+      if (siteIds.length > 0) {
+        // CA has 1000+ free-text name aliases. PostgREST caps one select at
+        // 1000 rows, which silently dropped later code tags (KS8). Pull only
+        // compact aliases (no spaces) and page in case a state still exceeds.
+        let aliases = [];
+        const pageSize = 1000;
+        for (let from = 0; ; from += pageSize) {
+          const q = await supabase
+            .from("site_aliases")
+            .select("site_id, alias")
+            .in("site_id", siteIds)
+            .not("alias", "ilike", "% %")
+            .range(from, from + pageSize - 1);
+          if (q.error) throw q.error;
+          aliases = aliases.concat(q.data || []);
+          if (!q.data || q.data.length < pageSize) break;
+        }
+
+        for (const a of (aliases || [])) {
+          const alias = (a.alias || "").trim().toUpperCase();
+          if (!SITE_CODE_PATTERN.test(alias)) continue; // skip free-text name aliases
+          if (result[alias]) continue; // never clobber a real, still-live site_code
+          const record = siteIdById[a.site_id];
+          if (record) result[alias] = record;
+        }
+      }
+
+      // California (and any state still mid-migration) has site rows without
+      // lat/lng. The dispatch board still plots those from the location blob.
+      // Fill only missing coordinates, and add blob-only codes, so the state
+      // console map can place the same stops.
+      const blobLocs = await readFromBlobs(state);
+      Object.entries(blobLocs || {}).forEach(([code, blob]) => {
+        if (!blob || blob.lat == null || blob.lng == null) return;
+        const key = String(code || blob.code || "").trim().toUpperCase();
+        if (!key) return;
+        if (!result[key]) {
+          result[key] = Object.assign({}, blob, { code: blob.code || key, state: blob.state || state });
+          return;
+        }
+        if (result[key].lat == null || result[key].lng == null) {
+          result[key].lat = blob.lat;
+          result[key].lng = blob.lng;
+        }
+      });
+
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result),
+      };
+    } catch (err) {
+      console.error("[get-locations] Supabase read failed, falling back to Blobs:", err.message);
+      const fallback = await readFromBlobs(state);
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fallback),
+      };
+    }
+  }
+
+  // Supabase not configured -- old behavior
+  const data = await readFromBlobs(state);
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  };
+};
