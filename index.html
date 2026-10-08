@@ -314,8 +314,10 @@
 
         /* ── Desktop responsive layout ── */
         @media (min-width: 960px) {
-            body { padding: 24px 40px; font-size: 18px; background: #e8e8e8; }
-            .container { width: 96%; max-width: 1900px; padding: 28px 36px; }
+            /* Full window width so the last tech column's Tomorrow/Done/Cancel
+               controls are not clipped by the old 96% / 1900px cap. */
+            body { padding: 12px 8px; font-size: 18px; background: #e8e8e8; }
+            .container { width: 100%; max-width: none; padding: 16px 12px; box-sizing: border-box; }
             h1 { font-size: 30px; }
             label { font-size: 16px; }
 
@@ -378,7 +380,8 @@
                scrolling back up past a long results list. */
             .desktop-layout { display: flex; align-items: flex-start; gap: 28px; }
             .input-panel { flex: 0 0 320px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; transition: flex-basis 0.25s ease, opacity 0.2s ease; }
-            .results-panel { flex: 1 1 auto; min-width: 0; }
+            .results-panel { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+            .tech-cards-grid .tech-card { overflow: visible; }
             #dispatchMap { height: 560px; }
             .desktop-layout.controls-collapsed .input-panel {
                 flex: 0 0 0;
@@ -395,8 +398,8 @@
 
         /* Extra-wide monitors: a bit more breathing room, same readable text size */
         @media (min-width: 1700px) {
-            .container { max-width: 2200px; }
-            .tech-cards-grid { columns: 420px; column-gap: 20px; }
+            .container { max-width: none; }
+            .tech-cards-grid { columns: 360px; column-gap: 16px; }
         }
     
         /* ── Fullscreen Boot/Splash Animation ── */
@@ -493,7 +496,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-193</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-194</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
