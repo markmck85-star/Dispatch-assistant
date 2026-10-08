@@ -161,6 +161,25 @@ exports.handler = async (event) => {
         }
       }
 
+      // California (and any state still mid-migration) has site rows without
+      // lat/lng. The dispatch board still plots those from the location blob.
+      // Fill only missing coordinates, and add blob-only codes, so the state
+      // console map can place the same stops.
+      const blobLocs = await readFromBlobs(state);
+      Object.entries(blobLocs || {}).forEach(([code, blob]) => {
+        if (!blob || blob.lat == null || blob.lng == null) return;
+        const key = String(code || blob.code || "").trim().toUpperCase();
+        if (!key) return;
+        if (!result[key]) {
+          result[key] = Object.assign({}, blob, { code: blob.code || key, state: blob.state || state });
+          return;
+        }
+        if (result[key].lat == null || result[key].lng == null) {
+          result[key].lat = blob.lat;
+          result[key].lng = blob.lng;
+        }
+      });
+
       return {
         statusCode: 200,
         headers: { "Content-Type": "application/json" },
