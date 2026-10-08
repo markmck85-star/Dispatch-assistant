@@ -3700,9 +3700,20 @@ ${mergeCellsXml}
                 if (!matrixResp.ok) throw new Error('Distance matrix not available for ' + currentState + '. Build it first.');
                 var matrixData = await matrixResp.json();
                 var matrix = matrixData.matrix || {};
-                var techKeys = [...new Set(Object.keys(matrix).map(k => k.split('|')[0]))];
+                // 2026-10-07: the matrix holds BOTH tech-home->site and site->site
+                // entries, so taking every key's first segment turned site codes
+                // (NV1066, NVT005...) into "technicians". Only real, active
+                // technicians from the roster are candidates now, and the display
+                // name comes from the roster rather than un-slugging the key.
+                var techResp = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                var techData = techResp.ok ? (await techResp.json()) : {};
+                var techNameByKey = {};
+                Object.values(techData || {}).forEach(function (t) {
+                    if (t && t.name && t.active !== false) techNameByKey[String(t.name).toLowerCase().replace(/\s+/g, '-')] = t.name;
+                });
+                var techKeys = [...new Set(Object.keys(matrix).map(k => k.split('|')[0]))].filter(k => techNameByKey[k]);
 
-                if (!techKeys.length) throw new Error('Matrix is empty — rebuild the distance matrix for ' + currentState + '.');
+                if (!techKeys.length) throw new Error('No technician distances found for ' + currentState + ' — rebuild the distance matrix.');
 
                 // Fetch locations
                 var locResp = await fetch('/.netlify/functions/get-locations?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
@@ -3729,7 +3740,7 @@ ${mergeCellsXml}
                     if (!best) continue;
 
                     // Convert techKey back to display name
-                    var bestDisplay = best.replace(/-/g, ' ').replace(/\w/g, c => c.toUpperCase());
+                    var bestDisplay = techNameByKey[best];
 
                     var currentDefault = loc.primaryTech || loc.defaultTech || '';
                     var currentKey = currentDefault.toLowerCase().replace(/\s+/g, '-');
