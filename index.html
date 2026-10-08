@@ -100,7 +100,11 @@
         }
         .panel-toggle:hover { background: #33334a; }
 
-        .board-context { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 0 10px; }
+        .board-context { display: flex; flex-wrap: nowrap; align-items: flex-end; justify-content: flex-start; gap: 8px; margin: 0 0 10px; }
+        .board-context label { flex: 0 0 auto; }
+        .board-context #stateSelector { width: 12.2em; max-width: 34vw; }
+        .board-context #dispatchDate { width: 9.4em; max-width: 30vw; }
+        .board-context #dispatchTomorrowBtn { align-self: flex-end; margin: 0; flex: 0 0 auto; }
 
         .board-inline { display: flex; align-items: center; gap: 6px; }
         .board-inline input[type="date"] { flex: 1 1 auto; min-width: 0; }
@@ -570,7 +574,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-201</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-202</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -711,6 +715,7 @@
                             <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
                         </span>
                     </label>
+                    <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
                 </div>
                 <div id="boardToolHome"></div>
                 <div id="boardToolStack">
@@ -722,7 +727,6 @@
                     <a href="/service-responses">⏱ Service responses</a>
                 </div>
                 <div class="tool-side-links">
-                    <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
                     <a id="watchdogLink" href="/watchdog/GA">Watchdog</a>
                     <a id="locationLookupLink" href="/location-lookup">Location Lookup</a>
                 </div>
