@@ -103,11 +103,11 @@
         .board-context { display: flex; flex-wrap: nowrap; align-items: flex-end; justify-content: flex-start; gap: 8px; margin: 0 0 10px; }
         .board-context label { flex: 0 0 auto; }
         .board-context #stateSelector { width: 12.2em; max-width: 34vw; }
-        .board-context #dispatchDate { width: 9.4em; max-width: 30vw; }
+        .board-context #dispatchDate { width: 12.2em; max-width: 34vw; }
         .board-context #dispatchTomorrowBtn { align-self: flex-end; margin: 0; flex: 0 0 auto; }
 
         .board-inline { display: flex; align-items: center; gap: 6px; }
-        .board-inline input[type="date"] { flex: 1 1 auto; min-width: 0; }
+        .board-inline input[type="date"] { flex: 0 0 auto; width: 12.2em; min-width: 0; }
         .board-inline #dispatchTomorrowBtn { flex: 0 0 auto; }
         .board-context { align-items: flex-end; }
         .more-ai-row { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
@@ -121,7 +121,7 @@
             .more-ai-row { flex-wrap: wrap; }
             .more-ai-row #aiCommandBarHome { flex: 1 1 220px; }
         }
-        .board-context label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #555; font-weight: 700; flex: 1 1 140px; }
+        .board-context label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #555; font-weight: 700; flex: 0 0 auto; }
         .board-context select, .board-context input[type="date"] { min-height: 40px; font-size: 15px; }
         .board-context #dispatchTomorrowBtn, .board-context #watchdogLink, .board-context #locationLookupLink {
             min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
@@ -404,7 +404,7 @@
                width, so 3-across would be too cramped to read. */
             .top-row label { margin-bottom: 4px; }
             .top-row select, .top-row input { margin-bottom: 10px; font-size: 17px; padding: 14px; }
-            #dispatchDate { width: 11.5em; max-width: 42vw; padding: 10px 8px; font-size: 15px; }
+            #dispatchDate { width: 12.2em; max-width: 34vw; padding: 8px; font-size: 15px; }
             #dispatchTomorrowBtn { display:inline-block;margin:0 0 10px 6px;padding:10px 12px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:13px;font-weight:700;vertical-align:middle;cursor:pointer; }
 
             /* Availability grid — full width, 5-6 techs per row */
@@ -574,7 +574,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-202</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-203</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
