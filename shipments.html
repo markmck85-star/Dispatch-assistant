@@ -81,6 +81,17 @@
 
 <h2 style="font-size:18px;color:#1f3a5f;margin:22px 0 6px;">Consumable shipments from the mailbox</h2>
 <div class="subtitle" style="margin-bottom:10px;">Waiting on the warehouse until a reply adds tracking. A mismatch note means the reply's box count does not match the lines this page could read.</div>
+<div class="filters">
+    <div>
+        <label>State: </label>
+        <select id="consumableStateFilter"><option value="">All states</option></select>
+    </div>
+    <div>
+        <label>Technician: </label>
+        <select id="consumableTechFilter"><option value="">All technicians</option></select>
+    </div>
+    <button class="toggle-btn" onclick="loadConsumableShipments()" style="margin-left:auto;">↻ Refresh</button>
+</div>
 <div id="consumableContent"><p style="color:#6b7785;">Loading mailbox shipments…</p></div>
 
 <h2 style="font-size:18px;color:#1f3a5f;margin:22px 0 6px;">RMA parts</h2>
@@ -335,30 +346,63 @@ function phaseLabel(s) {
     if (s.phase === 'likely_arrived') return 'Likely arrived';
     return 'In transit';
 }
+let allConsumable = [];
+function consumableName(s) {
+    return (s.technician && s.technician.name) || s.techNameRaw || '';
+}
+function fillConsumableFilters() {
+    const stateSel = document.getElementById('consumableStateFilter');
+    const techSel = document.getElementById('consumableTechFilter');
+    const prevState = stateSel.value;
+    const prevTech = techSel.value;
+    const states = [...new Set(allConsumable.map(s => s.state).filter(Boolean))].sort();
+    stateSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
+    stateSel.value = states.includes(prevState) ? prevState : '';
+    const techs = [...new Set(allConsumable
+        .filter(s => !stateSel.value || s.state === stateSel.value)
+        .map(consumableName)
+        .filter(Boolean))].sort();
+    techSel.innerHTML = '<option value="">All technicians</option>' + techs.map(n => `<option value="${n}">${n}</option>`).join('');
+    techSel.value = techs.includes(prevTech) ? prevTech : '';
+}
+function renderConsumable() {
+    const host = document.getElementById('consumableContent');
+    const stateVal = document.getElementById('consumableStateFilter').value;
+    const techVal = document.getElementById('consumableTechFilter').value;
+    const rows = allConsumable.filter(s => (!stateVal || s.state === stateVal) && (!techVal || consumableName(s) === techVal));
+    if (!allConsumable.length) {
+        host.innerHTML = '<p style="color:#6b7785;">No consumable requests in the last 45 days.</p>';
+        return;
+    }
+    if (!rows.length) {
+        host.innerHTML = '<div class="empty-state">No shipments match these filters.</div>';
+        return;
+    }
+    host.innerHTML = '<div id="content"><table><thead><tr><th>Tech</th><th>State</th><th>Requested</th><th>Shipped</th><th>What</th><th>UPS</th><th>Status</th></tr></thead><tbody>' +
+        rows.map(s => {
+            const what = (s.items || []).map(itemLine).filter(Boolean).join('<br>');
+            const tracking = (s.tracking || []).map(t => `<a href="${t.url}" target="_blank" rel="noopener">${t.number}</a>`).join('<br>');
+            const warn = (s.warnings || []).length ? `<div style="color:#9b3b3b;font-size:12px;margin-top:4px;">${s.warnings.join(' ')}</div>` : '';
+            return `<tr><td>${consumableName(s)}</td><td>${s.state || ''}</td><td>${s.requestDate || ''}</td><td>${s.shippedAt || '—'}</td><td>${what || '—'}${warn}</td><td>${tracking || '—'}</td><td>${phaseLabel(s)}</td></tr>`;
+        }).join('') +
+        '</tbody></table></div>';
+}
 async function loadConsumableShipments() {
     const host = document.getElementById('consumableContent');
+    host.innerHTML = '<p style="color:#6b7785;">Loading mailbox shipments…</p>';
     try {
         const res = await fetch('/.netlify/functions/get-consumable-shipments');
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not load mailbox shipments');
-        const rows = data.shipments || [];
-        if (!rows.length) {
-            host.innerHTML = '<p style="color:#6b7785;">No consumable requests in the last 45 days.</p>';
-            return;
-        }
-        host.innerHTML = '<div id="content"><table><thead><tr><th>Tech</th><th>State</th><th>Requested</th><th>Shipped</th><th>What</th><th>UPS</th><th>Status</th></tr></thead><tbody>' +
-            rows.map(s => {
-                const name = (s.technician && s.technician.name) || s.techNameRaw || '';
-                const what = (s.items || []).map(itemLine).filter(Boolean).join('<br>');
-                const tracking = (s.tracking || []).map(t => `<a href="${t.url}" target="_blank" rel="noopener">${t.number}</a>`).join('<br>');
-                const warn = (s.warnings || []).length ? `<div style="color:#9b3b3b;font-size:12px;margin-top:4px;">${s.warnings.join(' ')}</div>` : '';
-                return `<tr><td>${name}</td><td>${s.state || ''}</td><td>${s.requestDate || ''}</td><td>${s.shippedAt || '—'}</td><td>${what || '—'}${warn}</td><td>${tracking || '—'}</td><td>${phaseLabel(s)}</td></tr>`;
-            }).join('') +
-            '</tbody></table></div>';
+        allConsumable = data.shipments || [];
+        fillConsumableFilters();
+        renderConsumable();
     } catch (err) {
         host.innerHTML = `<p style="color:#9b3b3b;">${err.message}</p>`;
     }
 }
+document.getElementById('consumableStateFilter').addEventListener('change', () => { fillConsumableFilters(); renderConsumable(); });
+document.getElementById('consumableTechFilter').addEventListener('change', renderConsumable);
 loadConsumableShipments();
 </script>
 
