@@ -125,6 +125,19 @@
             display: inline-flex; align-items: center;
         }
         .tool-rail { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+        .tool-side-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+        .tool-side-links a, .tool-side-links button {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
+            background: #181818; color: #f0f0f0; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer;
+        }
+        #sidebarToolSlot #boardToolStack .tool-rail,
+        #sidebarToolSlot #boardToolStack .tool-side-links { flex-direction: column; }
+        #sidebarToolSlot #boardToolStack .tool-rail a,
+        #sidebarToolSlot #boardToolStack .tool-rail button.rail-btn,
+        #sidebarToolSlot #boardToolStack .tool-side-links a,
+        #sidebarToolSlot #boardToolStack .tool-side-links button { flex: 0 0 auto; width: 100%; box-sizing: border-box; }
+        #sidebarToolSlot { margin: 4px 0 10px; }
         .results-panel > .tool-rail a, .results-panel > .tool-rail button.rail-btn { flex: 1 1 140px; }
         .results-panel > .tool-more { margin-bottom: 10px; }
         .tool-rail a, .tool-rail button.rail-btn {
@@ -557,7 +570,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-200</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-201</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -630,6 +643,7 @@
 
 
 
+                <div id="sidebarToolSlot"></div>
                 <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
                         <select id="urgencySelector">
@@ -695,12 +709,11 @@
                     <label>Dispatch Date
                         <span class="board-inline">
                             <input type="date" id="dispatchDate" onchange="refreshAvailabilityPanel(); processDispatch(true); updateStateConsoleLink();">
-                            <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
                         </span>
                     </label>
-                    <a id="watchdogLink" href="/watchdog/GA">Watchdog</a>
-                    <a id="locationLookupLink" href="/location-lookup">Location Lookup</a>
                 </div>
+                <div id="boardToolHome"></div>
+                <div id="boardToolStack">
                 <div class="tool-rail" aria-label="Primary tools">
                     <a class="state-console-link rail-wide" href="/state" id="stateConsoleLink">📍 State Console</a>
                     <a class="team-calendar-link" href="/calendar">🗓️ Calendar</a>
@@ -708,7 +721,11 @@
                     <a class="closing-email-link" href="/closing-email-reconstructor">✉️ Closing Notes</a>
                     <a href="/service-responses">⏱ Service responses</a>
                 </div>
-                <div class="more-ai-row">
+                <div class="tool-side-links">
+                    <button type="button" id="dispatchTomorrowBtn" onclick="jumpDispatchToNextWorkday()">Tomorrow</button>
+                    <a id="watchdogLink" href="/watchdog/GA">Watchdog</a>
+                    <a id="locationLookupLink" href="/location-lookup">Location Lookup</a>
+                </div>
 <details class="tool-more">
                     <summary>More tools</summary>
                     <div class="tool-more-list">
@@ -721,6 +738,8 @@
                         <a class="help-link" href="/help" target="_blank">❓ Help</a>
                     </div>
                 </details>
+                </div>
+<div class="more-ai-row">
 <div id="aiCommandBarHome"><div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
                     <div style="display:flex; gap:6px; align-items:center;">
                         <span style="font-size:15px; line-height:1;" title="AI Dispatch Assistant">🤖</span>
@@ -2486,6 +2505,17 @@ function distanceMatrixStatus(state) {
             try { sessionStorage.setItem('dispatchExpandedTechs', JSON.stringify(keys)); } catch (e) {}
             syncAllStopsButton();
         }
+        function placeBoardTools() {
+            const stack = document.getElementById('boardToolStack');
+            const slot = document.getElementById('sidebarToolSlot');
+            const home = document.getElementById('boardToolHome');
+            const layout = document.querySelector('.desktop-layout');
+            if (!stack || !slot || !home || !layout) return;
+            const desktop = window.matchMedia('(min-width: 960px)').matches;
+            const open = !layout.classList.contains('controls-collapsed');
+            const target = (desktop && open) ? slot : home;
+            if (stack.parentElement !== target) target.appendChild(stack);
+        }
         function toggleControls() {
             const layout = document.querySelector('.desktop-layout');
             const collapsed = layout.classList.toggle('controls-collapsed');
@@ -2495,6 +2525,7 @@ function distanceMatrixStatus(state) {
             panelBtn.textContent = collapsed ? '📁 Show Controls' : '📁 Hide Controls';
             panelBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             try { localStorage.setItem('mcr_controls_collapsed_v2', collapsed ? '1' : '0'); } catch { /* silent */ }
+            placeBoardTools();
         }
 
         function restoreControlsState() {
@@ -2517,7 +2548,9 @@ function distanceMatrixStatus(state) {
                 panelBtn.textContent = collapsed ? '📁 Show Controls' : '📁 Hide Controls';
                 panelBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             }
+            placeBoardTools();
         }
+        window.addEventListener('resize', placeBoardTools);
         function toggleAvailabilityDetails() {
             const details = document.getElementById('availabilityDetails');
             const label = document.getElementById('availabilityToggleLabel');
