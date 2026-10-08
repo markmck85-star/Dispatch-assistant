@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RMA Shipments — MCR Dispatch</title>
+<title>Shipping — MCR Dispatch</title>
 <style>
     * { box-sizing: border-box; }
     body {
@@ -75,9 +75,15 @@
 <body>
 
 <a class="back-link" href="/">← Back to Dispatch Tool</a>
-<h1>📦 RMA Shipments</h1>
-<div class="subtitle">Parts shipped to/from technicians, parsed from Neumo's shipping notification emails.</div>
+<h1>📦 Shipping</h1>
+<div class="subtitle">RMA parts from Neumo, plus consumable restocks copied from the shipping mailbox. Melinda's request is the ask. The warehouse reply-all is what adds the UPS tracking.</div>
 
+
+<h2 style="font-size:18px;color:#1f3a5f;margin:22px 0 6px;">Consumable shipments from the mailbox</h2>
+<div class="subtitle" style="margin-bottom:10px;">Waiting on the warehouse until a reply adds tracking. A mismatch note means the reply's box count does not match the lines this page could read.</div>
+<div id="consumableContent"><p style="color:#6b7785;">Loading mailbox shipments…</p></div>
+
+<h2 style="font-size:18px;color:#1f3a5f;margin:22px 0 6px;">RMA parts</h2>
 <div class="filters">
     <div>
         <label>State: </label>
@@ -314,5 +320,47 @@ document.getElementById('techFilter').addEventListener('change', render);
 
 loadShipments();
 </script>
+
+<script>
+function itemLine(it) {
+    if (!it) return '';
+    if (typeof it === 'string') return it;
+    const qty = it.boxes != null ? it.boxes + ' box' : (it.units != null ? it.units : '');
+    return [qty, it.sku, it.name || it.description || ''].filter(Boolean).join(' · ');
+}
+function phaseLabel(s) {
+    if (s.phase === 'delivered' || s.status === 'delivered') return 'Delivered';
+    if (s.phase === 'cancelled' || s.status === 'cancelled') return 'Cancelled';
+    if (s.phase === 'requested' || s.status === 'requested') return 'Waiting on warehouse';
+    if (s.phase === 'likely_arrived') return 'Likely arrived';
+    return 'In transit';
+}
+async function loadConsumableShipments() {
+    const host = document.getElementById('consumableContent');
+    try {
+        const res = await fetch('/.netlify/functions/get-consumable-shipments');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load mailbox shipments');
+        const rows = data.shipments || [];
+        if (!rows.length) {
+            host.innerHTML = '<p style="color:#6b7785;">No consumable requests in the last 45 days.</p>';
+            return;
+        }
+        host.innerHTML = '<div id="content"><table><thead><tr><th>Tech</th><th>State</th><th>Requested</th><th>Shipped</th><th>What</th><th>UPS</th><th>Status</th></tr></thead><tbody>' +
+            rows.map(s => {
+                const name = (s.technician && s.technician.name) || s.techNameRaw || '';
+                const what = (s.items || []).map(itemLine).filter(Boolean).join('<br>');
+                const tracking = (s.tracking || []).map(t => `<a href="${t.url}" target="_blank" rel="noopener">${t.number}</a>`).join('<br>');
+                const warn = (s.warnings || []).length ? `<div style="color:#9b3b3b;font-size:12px;margin-top:4px;">${s.warnings.join(' ')}</div>` : '';
+                return `<tr><td>${name}</td><td>${s.state || ''}</td><td>${s.requestDate || ''}</td><td>${s.shippedAt || '—'}</td><td>${what || '—'}${warn}</td><td>${tracking || '—'}</td><td>${phaseLabel(s)}</td></tr>`;
+            }).join('') +
+            '</tbody></table></div>';
+    } catch (err) {
+        host.innerHTML = `<p style="color:#9b3b3b;">${err.message}</p>`;
+    }
+}
+loadConsumableShipments();
+</script>
+
 </body>
 </html>
