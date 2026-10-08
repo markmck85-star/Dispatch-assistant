@@ -150,21 +150,26 @@
   /* Desktop: stop looking like a phone column in the middle of a 27" monitor.
      Phone layout is unchanged (container stays 900px-capped below this). */
   @media (min-width: 1100px) {
-    body { padding: 20px 28px; }
-    .container { max-width: 1680px; }
-    .console { padding: 20px 24px; }
-    .console h1 { font-size: 24px; }
-    #stateMap { height: 620px; }
-    .tech-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+    body { padding: 16px 18px; }
+    .container { max-width: none; }
+    .console-layout { display: grid; grid-template-columns: minmax(250px, 320px) minmax(760px, 980px) minmax(270px, 340px); gap: 14px; align-items: start; justify-content: center; }
+    .side-col { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 10px 12px; }
+    .console { padding: 16px 18px; }
+    #stateMap { height: 560px; }
+    .tech-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   }
-  @media (min-width: 1500px) {
-    .container { max-width: 1900px; }
-    #stateMap { height: 700px; }
+  @media (max-width: 1099px) {
+    .console-layout { display: flex; flex-direction: column; }
+    .console-main { order: -1; }
+    .side-col { position: static; max-height: none; background: transparent; border: none; padding: 0; }
   }
 </style>
 </head>
 <body>
 <div class="container">
+  <div class="console-layout">
+  <aside class="side-col" id="stateSideLeft"><div id="digestPanelHome"></div><div id="trafficPanelHome"></div></aside>
+  <div class="console-main">
   <a href="/" id="backToDispatchTop" class="back-btn" style="margin-top:0;margin-bottom:10px;">← Back to Dispatch Tool</a>
   <div class="console">
     <h1>📍 State Console</h1>
@@ -259,12 +264,9 @@
       </div></div>
     </div>
 
-    <!-- Morning brief / End of day panel (sits below the map so the map is always first) (digest-panel.js). Collapsible; loads only when opened. -->
-    <div id="digestPanelHome"></div>
-
-    <!-- Georgia traffic from 511GA (traffic-panel.js). Collapsible; loads only when opened; hides itself outside Georgia. -->
-    <div id="trafficPanelHome"></div>
-
+    </div>
+  </div>
+  <aside class="side-col" id="stateSideRight">
     <h2 class="section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
       <span>🔄 Restock Status</span>
       <button type="button" id="restockToggleBtn" onclick="toggleRestockSection()"
@@ -333,6 +335,7 @@
     </details>
 
     <a href="/" id="backToDispatchBottom" class="back-btn">← Back to Dispatch Tool</a>
+  </aside>
   </div>
 </div>
 
