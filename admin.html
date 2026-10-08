@@ -14,13 +14,18 @@
             .tab-bar { flex-wrap: wrap; }
             .section.active:has(.form-section) {
                 display: grid;
-                grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
-                column-gap: 24px;
-                row-gap: 8px;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 16px 22px;
                 align-items: start;
             }
-            .section.active:has(.form-section) .form-section { grid-column: 1; grid-row: 1 / span 12; }
-            .section.active:has(.form-section) > :not(.form-section) { grid-column: 2; min-width: 0; }
+            .section.active:has(.form-section) .form-section { margin-top: 0; }
+            .section.active:not(:has(.list-header)) > .form-section:only-of-type { grid-column: 1 / -1; }
+            .section.active:has(.list-header) {
+                grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+            }
+            .section.active:has(.list-header) .form-section { grid-column: 1; grid-row: 1 / span 12; }
+            .section.active:has(.list-header) > :not(.form-section) { grid-column: 2; min-width: 0; }
+            .section.active > h2 { grid-column: 1 / -1; }
             table { width: 100%; }
         }
         h1 { color: #333; margin-bottom: 8px; font-size: 24px; }
@@ -130,6 +135,7 @@
             <button id="tabLocations" class="active" onclick="switchTab('locations')">Locations</button>
             <button id="tabTechnicians" onclick="switchTab('technicians')">Technicians</button>
             <button id="tabTools" onclick="switchTab('tools')">🛠 Tools</button>
+            <button id="tabDocuments" onclick="switchTab('documents')">Documents</button>
             <button id="tabNotifications" onclick="switchTab('notifications')">Notifications</button>
             <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
             <button id="tabClosedtickets" onclick="switchTab('closedtickets')">✅ Closed Tickets</button>
@@ -362,17 +368,27 @@
             </div>
         </div>
 
-            <div class="form-section" style="margin-top:15px;">
-                <h2>Export All Locations (XLSX)</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Export all locations across every state as a multi-tab Excel workbook, one tab per state, with primary and fallback tech assignments.</p>
-                <button class="big-btn" style="background:#17a2b8;" onclick="exportLocationsCSV()">📊 Export All States to Excel</button>
+
+
+        <div id="sectionDocuments" class="section">
+            <h2>Documents</h2>
+            <p style="font-size:14px;color:#555;margin:0 0 12px;">Creates the same spreadsheets TJ keeps by hand, from the live locations and technicians. Bulletins, manuals, and new-employee forms can live here later.</p>
+            <div class="form-section">
+                <h2>MCR Service Locations</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">One tab per state, with primary and fallback technician assignments.</p>
+                <button class="big-btn" style="background:#17a2b8;" onclick="exportLocationsCSV()">Create MCR Service Locations spreadsheet</button>
             </div>
-            <div class="form-section" style="margin-top:15px;">
-                <h2>Export Company Roster (XLSX)</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Live technician roster. One version is safe to circulate. The other includes home addresses for the distance matrix.</p>
-                <button class="big-btn" style="background:#17a2b8;" onclick="exportRosterPublic()">📋 Export Roster (no addresses)</button>
-                <button class="big-btn" style="background:#6c757d; margin-top:8px;" onclick="exportRosterWithAddresses()">🏠 Export Roster (with addresses)</button>
+            <div class="form-section">
+                <h2>MCR Company Roster</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">The company-wide roster. Safe to circulate. It does not include home addresses.</p>
+                <button class="big-btn" style="background:#17a2b8;" onclick="exportRosterPublic()">Create MCR Company Roster</button>
             </div>
+            <div class="form-section">
+                <h2>MCR Company Roster with addresses</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Same roster, plus home addresses for the distance matrix. Do not send this copy company-wide.</p>
+                <button class="big-btn" style="background:#6c757d;" onclick="exportRosterWithAddresses()">Create MCR Company Roster with addresses</button>
+            </div>
+        </div>
 
         <div id="sectionDistancematrix" class="section">
             <div class="form-section">
@@ -2011,7 +2027,7 @@
                 showToast('That tab is restricted to admin users.', 'error');
                 tab = 'locations';
             }
-            var tabs = ['locations', 'technicians', 'tools', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
+            var tabs = ['locations', 'technicians', 'tools', 'documents', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
