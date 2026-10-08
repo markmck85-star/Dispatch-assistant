@@ -38,8 +38,11 @@
     .toggle-btn.active:hover { background: #832f2f; }
 
     /* Table sits in a white card and scrolls sideways on narrow screens
-       instead of squeezing nine columns together. */
-    #content {
+       instead of squeezing nine columns together.
+       2026-10-08: .table-card added so the consumable table can share this
+       look WITHOUT reusing id="content" (a duplicate id made the RMA table
+       render into the consumable box). */
+    #content, .table-card {
         background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px;
         box-shadow: 0 1px 4px rgba(16,24,40,0.06);
         overflow-x: auto;
@@ -171,6 +174,13 @@ async function loadShipments() {
         allTechnicians = data.technicians || [];
         populateFilters();
         render();
+        // 2026-10-08: the consumable technician dropdown uses this same
+        // roster, so refresh it once the roster has arrived (the two
+        // fetches finish in either order).
+        if (typeof fillConsumableFilters === 'function' && typeof allConsumable !== 'undefined' && allConsumable.length) {
+            fillConsumableFilters();
+            renderConsumable();
+        }
     } catch (e) {
         document.getElementById('content').innerHTML = '<div class="empty-state">Failed to load shipments: ' + e.message + '</div>';
     }
@@ -350,6 +360,14 @@ let allConsumable = [];
 function consumableName(s) {
     return (s.technician && s.technician.name) || s.techNameRaw || '';
 }
+// Names compare case-insensitively: the mailbox subject is uppercase
+// ("MARK MCKELVEY") while the roster is mixed case.
+function normName(n) {
+    return String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+function escAttr(v) {
+    return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
 function fillConsumableFilters() {
     const stateSel = document.getElementById('consumableStateFilter');
     const techSel = document.getElementById('consumableTechFilter');
@@ -358,18 +376,31 @@ function fillConsumableFilters() {
     const states = [...new Set(allConsumable.map(s => s.state).filter(Boolean))].sort();
     stateSel.innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${s}">${s}</option>`).join('');
     stateSel.value = states.includes(prevState) ? prevState : '';
-    const techs = [...new Set(allConsumable
-        .filter(s => !stateSel.value || s.state === stateSel.value)
-        .map(consumableName)
-        .filter(Boolean))].sort();
-    techSel.innerHTML = '<option value="">All technicians</option>' + techs.map(n => `<option value="${n}">${n}</option>`).join('');
-    techSel.value = techs.includes(prevTech) ? prevTech : '';
+    const stateVal = stateSel.value;
+
+    // 2026-10-08: build the technician list from the full active roster for
+    // the chosen state (allTechnicians, loaded by the RMA section), then add
+    // anyone named on a shipment in that state who is not on the roster.
+    // Before this, only techs who already had a shipment in the last 45 days
+    // appeared, so a state could show just one or two names.
+    const techMap = new Map();
+    for (const t of allTechnicians) {
+        if (t.name && (!stateVal || t.state === stateVal)) techMap.set(normName(t.name), t.name);
+    }
+    for (const s of allConsumable) {
+        if (stateVal && s.state !== stateVal) continue;
+        const n = consumableName(s);
+        if (n && !techMap.has(normName(n))) techMap.set(normName(n), n);
+    }
+    const techs = [...techMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    techSel.innerHTML = '<option value="">All technicians</option>' + techs.map(([key, name]) => `<option value="${escAttr(key)}">${name}</option>`).join('');
+    techSel.value = techMap.has(prevTech) ? prevTech : '';
 }
 function renderConsumable() {
     const host = document.getElementById('consumableContent');
     const stateVal = document.getElementById('consumableStateFilter').value;
     const techVal = document.getElementById('consumableTechFilter').value;
-    const rows = allConsumable.filter(s => (!stateVal || s.state === stateVal) && (!techVal || consumableName(s) === techVal));
+    const rows = allConsumable.filter(s => (!stateVal || s.state === stateVal) && (!techVal || normName(consumableName(s)) === techVal));
     if (!allConsumable.length) {
         host.innerHTML = '<p style="color:#6b7785;">No consumable requests in the last 45 days.</p>';
         return;
@@ -378,7 +409,10 @@ function renderConsumable() {
         host.innerHTML = '<div class="empty-state">No shipments match these filters.</div>';
         return;
     }
-    host.innerHTML = '<div id="content"><table><thead><tr><th>Tech</th><th>State</th><th>Requested</th><th>Shipped</th><th>What</th><th>UPS</th><th>Status</th></tr></thead><tbody>' +
+    // 2026-10-08: wrapper was id="content", the same id the RMA table
+    // renders into. getElementById('content') in the RMA code then found
+    // THIS div first, so RMA rows landed in the consumable box. Class only.
+    host.innerHTML = '<div class="table-card"><table><thead><tr><th>Tech</th><th>State</th><th>Requested</th><th>Shipped</th><th>What</th><th>UPS</th><th>Status</th></tr></thead><tbody>' +
         rows.map(s => {
             const what = (s.items || []).map(itemLine).filter(Boolean).join('<br>');
             const tracking = (s.tracking || []).map(t => `<a href="${t.url}" target="_blank" rel="noopener">${t.number}</a>`).join('<br>');
