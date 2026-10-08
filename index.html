@@ -104,7 +104,7 @@
         .board-context label { flex: 0 0 auto; }
         .board-context #stateSelector { width: 12.2em; max-width: 34vw; }
         .board-context #dispatchDate { width: 12.2em; max-width: 34vw; }
-        .board-context #dispatchTomorrowBtn { align-self: flex-end; margin: 0; flex: 0 0 auto; }
+        .board-context #dispatchTomorrowBtn { align-self: flex-end; margin: 0 !important; flex: 0 0 auto; height: 40px; min-height: 40px; box-sizing: border-box; }
 
         .board-inline { display: flex; align-items: center; gap: 6px; }
         .board-inline input[type="date"] { flex: 0 0 auto; width: 12.2em; min-width: 0; }
@@ -405,7 +405,7 @@
             .top-row label { margin-bottom: 4px; }
             .top-row select, .top-row input { margin-bottom: 10px; font-size: 17px; padding: 14px; }
             #dispatchDate { width: 12.2em; max-width: 34vw; padding: 8px; font-size: 15px; }
-            #dispatchTomorrowBtn { display:inline-block;margin:0 0 10px 6px;padding:10px 12px;background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:13px;font-weight:700;vertical-align:middle;cursor:pointer; }
+            #dispatchTomorrowBtn { display:inline-flex; align-items:center; margin:0 !important; padding:0 12px; height:40px; box-sizing:border-box; background:#3a3a3a;color:#f0f0f0;border:1px solid #666;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer; }
 
             /* Availability grid — full width, 5-6 techs per row */
             #availabilityGrid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important; gap: 10px !important; flex-wrap: unset !important; }
@@ -574,7 +574,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-203</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-204</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
