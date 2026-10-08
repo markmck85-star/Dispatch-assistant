@@ -556,7 +556,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-197</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-198</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -4973,8 +4973,12 @@ function distanceMatrixStatus(state) {
                 const nextLabel = nextStop && LOCATIONS[nextStop.code]
                     ? `${nextStop.code} · ${LOCATIONS[nextStop.code].name || ''}`
                     : 'No stops in view';
-                let cardOpen = false;
-                try { cardOpen = JSON.parse(sessionStorage.getItem('dispatchExpandedTechs') || '[]').includes(techKey); } catch (e) {}
+                // Missing key means show every stop. A saved list is an explicit choice.
+                let cardOpen = true;
+                try {
+                    const savedExpanded = sessionStorage.getItem('dispatchExpandedTechs');
+                    if (savedExpanded !== null) cardOpen = JSON.parse(savedExpanded).includes(techKey);
+                } catch (e) {}
                 let cardHtml = `<div class="tech-card is-compact">
                     <div class="tech-card-summary">
                         <div>
@@ -5148,7 +5152,10 @@ function distanceMatrixStatus(state) {
                     btn.textContent = open ? 'Hide stops' : 'Show stops';
                 }
                 try {
-                    const set = new Set(JSON.parse(sessionStorage.getItem('dispatchExpandedTechs') || '[]'));
+                    const savedExpanded = sessionStorage.getItem('dispatchExpandedTechs');
+                    const set = savedExpanded === null
+                        ? new Set(Array.from(document.querySelectorAll('.tech-card-body')).map(b => b.id.replace('tech-body-', '')))
+                        : new Set(JSON.parse(savedExpanded));
                     if (open) set.add(techKey); else set.delete(techKey);
                     sessionStorage.setItem('dispatchExpandedTechs', JSON.stringify([...set]));
                 } catch (e) {}
@@ -9637,8 +9644,8 @@ ${content}</body></html>`;
             if (panel) panel.classList.remove('visible');
         }
 
-        // Stops start collapsed on every fresh page load (a re-render within
-        // the session still remembers which cards the dispatcher opened).
+        // Stops start open on every fresh page load. A re-render within the
+        // session still remembers which cards the dispatcher closed.
         try { sessionStorage.removeItem('dispatchExpandedTechs'); } catch (e) {}
         document.addEventListener('DOMContentLoaded', function() {
             refreshAiBarState();
