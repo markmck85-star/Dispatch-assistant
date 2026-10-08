@@ -115,6 +115,7 @@
             <button id="tabLocations" class="active" onclick="switchTab('locations')">Locations</button>
             <button id="tabTechnicians" onclick="switchTab('technicians')">Technicians</button>
             <button id="tabBackup" onclick="switchTab('backup')">Backup</button>
+            <button id="tabTools" onclick="switchTab('tools')">🛠 Tools</button>
             <button id="tabNotifications" onclick="switchTab('notifications')">Notifications</button>
             <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
             <button id="tabClosedtickets" onclick="switchTab('closedtickets')">✅ Closed Tickets</button>
@@ -360,9 +361,12 @@
                 <p style="font-size:14px;color:#555;margin-bottom:10px;">Browse the closed BlueFolder service requests that have been backed up into the database (testing-station / OTC notes). This is the staging archive — most rows are not yet linked to a site code.</p>
                 <a class="big-btn" href="bluefolder.html" style="display:inline-block;text-align:center;text-decoration:none;background:#7a3b1e;color:#fff;">📁 Open BlueFolder Archive</a>
             </div>
-            <div class="form-section" style="margin-top:15px;">
+        </div>
+
+        <div id="sectionTools" class="section">
+            <div class="form-section">
                 <h2>Audit Default Technicians</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Compare current default technician assignments against the distance matrix. Flags locations where a closer tech exists and fills in any missing defaults. Requires the distance matrix to be built for this state.</p>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Compare current default technician assignments against the distance matrix. Flags locations where a closer employee exists and fills in any missing defaults. Contractors are never suggested, and sites already set to a contractor are left alone, since using a contractor is a call-by-call decision. Requires the distance matrix to be built for this state.</p>
                 <button class="big-btn" style="background:#6f42c1;color:white;" id="auditBtn" onclick="auditDefaultTechs()">🔍 Audit Default Techs</button>
                 <div id="auditResults" style="margin-top:12px;display:none;">
                     <div id="auditSummary" style="font-size:13px;margin-bottom:10px;padding:8px;background:#f8f9fa;border-radius:4px;border:1px solid #dee2e6;"></div>
@@ -2012,7 +2016,7 @@
                 showToast('That tab is restricted to admin users.', 'error');
                 tab = 'locations';
             }
-            var tabs = ['locations', 'technicians', 'backup', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
+            var tabs = ['locations', 'technicians', 'backup', 'tools', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -3708,8 +3712,12 @@ ${mergeCellsXml}
                 var techResp = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
                 var techData = techResp.ok ? (await techResp.json()) : {};
                 var techNameByKey = {};
+                var contractorNameKeys = {};
                 Object.values(techData || {}).forEach(function (t) {
-                    if (t && t.name && t.active !== false) techNameByKey[String(t.name).toLowerCase().replace(/\s+/g, '-')] = t.name;
+                    if (t && t.name && t.isContractor) contractorNameKeys[String(t.name).toLowerCase().replace(/\s+/g, '-')] = true;
+                });
+                Object.values(techData || {}).forEach(function (t) {
+                    if (t && t.name && t.active !== false && !t.isContractor) techNameByKey[String(t.name).toLowerCase().replace(/\s+/g, '-')] = t.name;
                 });
                 var techKeys = [...new Set(Object.keys(matrix).map(k => k.split('|')[0]))].filter(k => techNameByKey[k]);
 
@@ -3720,7 +3728,7 @@ ${mergeCellsXml}
                 var locations = locResp.ok ? (await locResp.json()) : {};
 
                 _auditChanges = [];
-                var missing = 0, wrong = 0, ok = 0;
+                var missing = 0, wrong = 0, ok = 0, skippedContractor = 0;
                 var listHtml = '';
 
                 var locCodes = Object.keys(locations);
@@ -3744,6 +3752,9 @@ ${mergeCellsXml}
 
                     var currentDefault = loc.primaryTech || loc.defaultTech || '';
                     var currentKey = currentDefault.toLowerCase().replace(/\s+/g, '-');
+                    // Contractors are a call-by-call decision: leave sites already set
+                    // to one (or flagged contractor-override) exactly as they are.
+                    if (loc.contractorOverride || contractorNameKeys[currentKey]) { skippedContractor++; continue; }
                     var currentEntry = matrix[currentKey + '|' + code];
                     var currentDist = currentEntry ? currentEntry.distanceMi : null;
 
@@ -3792,6 +3803,7 @@ ${mergeCellsXml}
                 summary += `<span style="color:#6f42c1"><strong>${missing}</strong> missing defaults</span> &nbsp;|&nbsp; `;
                 summary += `<span style="color:#dc3545"><strong>${wrong}</strong> suboptimal assignments</span> &nbsp;|&nbsp; `;
                 summary += `<span style="color:#2e7d32"><strong>${ok}</strong> already optimal</span>`;
+                if (skippedContractor) summary += ` &nbsp;|&nbsp; <span style="color:#666"><strong>${skippedContractor}</strong> contractor sites skipped</span>`;
 
                 document.getElementById('auditSummary').innerHTML = summary;
                 document.getElementById('auditList').innerHTML = listHtml || '<p style="color:#2e7d32;">All locations are optimally assigned!</p>';
