@@ -1027,6 +1027,8 @@ function ensureMap() {
   if (satMap) return;
   satMap = L.map('satMap', {
     scrollWheelZoom: false,
+    zoomSnap: 0.25,
+    wheelPxPerZoomLevel: 180,
     maxBounds: window.DISPATCH_MAP_US_BOUNDS,
     maxBoundsViscosity: 1.0,
     minZoom: 4,

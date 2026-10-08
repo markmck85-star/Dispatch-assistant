@@ -1195,6 +1195,8 @@ function ensureStateMap() {
   if (!el || typeof L === 'undefined') return null;
   _stateMap = L.map(el, {
     scrollWheelZoom: false,
+    zoomSnap: 0.25,
+    wheelPxPerZoomLevel: 180,
     maxBounds: window.DISPATCH_MAP_US_BOUNDS,
     maxBoundsViscosity: 1.0,
     minZoom: 4,
@@ -1229,6 +1231,22 @@ function setStateMapLoader(on, msg) {
   if (loader) loader.hidden = !on;
   const vid = loader && loader.querySelector('video');
   if (vid) { if (on) { try { vid.play(); } catch (e) {} } else { try { vid.pause(); } catch (e) {} } }
+}
+
+function stateMapRowInRegion(a, state) {
+  const code = String(a.siteCode || '').toUpperCase();
+  const siteState = String(a.state || '').toUpperCase();
+  if (siteState === state) return true;
+  if (state === 'GA') return /^(GA|NC|SC)/.test(code);
+  return code.startsWith(state);
+}
+function stateMapLocation(locations, code) {
+  if (!locations || !code) return null;
+  if (locations[code]) return locations[code];
+  const up = String(code).toUpperCase();
+  if (locations[up]) return locations[up];
+  const key = Object.keys(locations).find(k => String(k).toUpperCase() === up);
+  return key ? locations[key] : null;
 }
 async function renderStateMap(state, dispatchDate) {
   const panel = document.getElementById('stateMapPanel');
@@ -1268,7 +1286,7 @@ async function renderStateMap(state, dispatchDate) {
     Object.values(TECHS_RAW || {}).forEach(t => { if (t && t.name) TECHS[t.name] = t; });
 
     const rows = (assignData.assignments || [])
-      .filter(a => a.state === state && a.status !== 'removed');
+      .filter(a => a.status !== 'removed' && stateMapRowInRegion(a, state));
     window._stateAssignFp = rows.map(a =>
       [a.siteCode || a.code || '', a.techName || '', a.status || '', a.sequenceOrder || a.sequence_order || ''].join('|')
     ).sort().join('\n');
@@ -1298,7 +1316,7 @@ async function renderStateMap(state, dispatchDate) {
       const completedPts = [];
       (byTech[tech] || []).forEach(a => {
         const code = a.siteCode || null;
-        const loc = code ? LOCATIONS[code] : null;
+        const loc = code ? stateMapLocation(LOCATIONS, code) : null;
         if (!loc || loc.lat == null || loc.lng == null) { if (code) unmappedCodes.push(code); return; }
         if (a.status === 'completed') {
           completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code, loc, ticket: a.ticket || null, status: a.status });
