@@ -603,7 +603,7 @@
                 <textarea id="locationCodes" placeholder="Paste emails here..."></textarea>
 
                 <div class="action-btns">
-                    <button class="big-btn" onclick="processDispatch()">Generate Dispatches</button>
+                    <button class="big-btn" onclick="processDispatch(false, true)">Generate Dispatches</button>
                     <button class="big-btn" style="background:#6c757d;" onclick="printReport()">Print Dispatch Summary</button>
                 </div>
             </div>
@@ -3641,7 +3641,7 @@ function distanceMatrixStatus(state) {
             return resolved.map(c => ({ code: c, urgent: isUrgent }));
         }
 
-        async function processDispatch(auto) {
+        async function processDispatch(auto, fromButton) {
             const codesInput = document.getElementById('locationCodes');
             const resultsDiv = document.getElementById('results');
             
@@ -3759,7 +3759,7 @@ function distanceMatrixStatus(state) {
             const dispatchDateVal = document.getElementById('dispatchDate')?.value;
             if (dispatchDateVal) refreshAvailabilityPanel(dispatchDateVal);
 
-            await _processDispatchCore(auto);
+            await _processDispatchCore(auto, !!fromButton);
         }
 
         function showReceivedTimePrompt(onConfirm) {
@@ -3833,7 +3833,7 @@ function distanceMatrixStatus(state) {
             };
         }
 
-        async function _processDispatchCore(auto) {
+        async function _processDispatchCore(auto, confirmNewStops) {
             const codesInput = document.getElementById('locationCodes');
             const resultsDiv = document.getElementById('results');
 
@@ -4533,6 +4533,7 @@ function distanceMatrixStatus(state) {
             // runs are the common case and stay unlinked, matching Stage 1 scope.
             const singleTicketWo = (relevant.length === 1 && window.ticketMeta && window.ticketMeta.woNumber)
                 ? window.ticketMeta.woNumber : null;
+            const pendingNewSaves = [];
             Object.entries(assignments).forEach(([tech, stops]) => {
                 stops.forEach(item => {
                     // 2026-09-17: neither skip guard below is aware of restock
@@ -4599,13 +4600,47 @@ function distanceMatrixStatus(state) {
                     }
                     const assignedBy = CONTRACTOR_ASSIGNMENTS[item.code] ? 'contractor_rule'
                         : (item.reassignedFrom ? 'fallback_rule' : 'auto');
-                    syncAssignmentToSupabase(tech, item, 'planned', assignedBy,
-                        Object.assign(
+                    // 2026-10-07: saves are queued, not fired, so a manual
+                    // Generate Dispatches click on a day that already has a
+                    // board can be confirmed first (see after this loop).
+                    pendingNewSaves.push({ tech, item, assignedBy,
+                        opts: Object.assign(
                             { dispatchDateOverride: getItemEffectiveDateStr(item, dateStr) },
                             singleTicketWo ? { ticketWoNumber: singleTicketWo } : {}
-                        ));
+                        ) });
                 });
             });
+
+            // 2026-10-07: guard for the Generate Dispatches button. Stops that
+            // are already on the board are never re-saved (honored above), and
+            // the database keeps one row per site per date. What remains is a
+            // click on a day that is already populated while the paste box
+            // still holds stale or different text, which would quietly write
+            // new stops. Only the Generate Dispatches button itself asks (other
+            // internal re-runs, e.g. after adding a location, never prompt). For a
+            // click on a day that already has rows,
+            // list what would be added and ask first; a cancel still shows the
+            // board but saves nothing. A first import of an empty day, and the
+            // silent page-load pass, are unchanged.
+            if (pendingNewSaves.length > 0) {
+                const dayHasBoard = Object.keys(existingByCode || {}).length > 0;
+                let goSave = true;
+                if (!auto && confirmNewStops && dayHasBoard) {
+                    const codes = pendingNewSaves.map(x => x.item.code);
+                    const shown = codes.slice(0, 12).join(', ') + (codes.length > 12 ? ' and ' + (codes.length - 12) + ' more' : '');
+                    goSave = confirm(
+                        'This day already has stops on the board.\n\n' +
+                        pendingNewSaves.length + ' new stop' + (pendingNewSaves.length === 1 ? '' : 's') + ' would be added: ' + shown + '\n\n' +
+                        'Stops already on the board are left as they are.\n\n' +
+                        'OK to add the new stops, Cancel to add nothing.'
+                    );
+                }
+                if (goSave) {
+                    pendingNewSaves.forEach(x => syncAssignmentToSupabase(x.tech, x.item, 'planned', x.assignedBy, x.opts));
+                } else {
+                    console.log('[dispatch] Generate Dispatches: user declined to add ' + pendingNewSaves.length + ' new stop(s); nothing saved.');
+                }
+            }
 
             // preserveScroll=true here: this render runs as part of the
             // silent boot/auto-load pass (_processDispatchCore(auto=true)).
