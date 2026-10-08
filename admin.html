@@ -129,7 +129,6 @@
         <div class="tab-bar">
             <button id="tabLocations" class="active" onclick="switchTab('locations')">Locations</button>
             <button id="tabTechnicians" onclick="switchTab('technicians')">Technicians</button>
-            <button id="tabBackup" onclick="switchTab('backup')">Backup</button>
             <button id="tabTools" onclick="switchTab('tools')">🛠 Tools</button>
             <button id="tabNotifications" onclick="switchTab('notifications')">Notifications</button>
             <button id="tabDistancematrix" onclick="switchTab('distancematrix')">📍 Distance Matrix</button>
@@ -347,37 +346,6 @@
             </div>
         </div>
 
-        <div id="sectionBackup" class="section">
-            <div class="form-section">
-                <h2>Download Backup</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Download a JSON backup of the selected state's technicians and locations.</p>
-                <button class="big-btn" id="downloadBtn" onclick="downloadBackup()">Download State Backup</button>
-            </div>
-            <div class="form-section" style="margin-top:15px;">
-                <h2>Export All Locations (XLSX)</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Export all locations across every state as a multi-tab Excel workbook — one tab per state, matching TJ's format plus primary/fallback tech assignments.</p>
-                <button class="big-btn" style="background:#17a2b8;" onclick="exportLocationsCSV()">📊 Export All States to Excel</button>
-            </div>
-            <div class="form-section" style="margin-top:15px;">
-                <h2>Export Company Roster (XLSX)</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Generates the roster straight from live technician data instead of TJ's hand-maintained copy, so it's always current. Two versions: one safe to circulate company-wide, one for updating home addresses for the distance matrix.</p>
-                <button class="big-btn" style="background:#17a2b8;" onclick="exportRosterPublic()">📋 Export Roster (no addresses)</button>
-                <button class="big-btn" style="background:#6c757d; margin-top:8px;" onclick="exportRosterWithAddresses()">🏠 Export Roster (with addresses)</button>
-            </div>
-            <div class="form-section" style="margin-top:15px;">
-                <h2>Restore from File</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Upload a backup JSON file. The file's state must match the selected state.</p>
-                <label for="restoreFile">Select Backup File:</label>
-                <input type="file" id="restoreFile" accept=".json">
-                <button class="big-btn save-btn" id="restoreBtn" onclick="restoreBackup()">Restore from File</button>
-            </div>
-            <div class="form-section" style="margin-top:15px;">
-                <h2>BlueFolder Archive</h2>
-                <p style="font-size:14px;color:#555;margin-bottom:10px;">Browse the closed BlueFolder service requests that have been backed up into the database (testing-station / OTC notes). This is the staging archive — most rows are not yet linked to a site code.</p>
-                <a class="big-btn" href="bluefolder.html" style="display:inline-block;text-align:center;text-decoration:none;background:#7a3b1e;color:#fff;">📁 Open BlueFolder Archive</a>
-            </div>
-        </div>
-
         <div id="sectionTools" class="section">
             <div class="form-section">
                 <h2>Audit Default Technicians</h2>
@@ -393,6 +361,18 @@
                 </div>
             </div>
         </div>
+
+            <div class="form-section" style="margin-top:15px;">
+                <h2>Export All Locations (XLSX)</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Export all locations across every state as a multi-tab Excel workbook, one tab per state, with primary and fallback tech assignments.</p>
+                <button class="big-btn" style="background:#17a2b8;" onclick="exportLocationsCSV()">📊 Export All States to Excel</button>
+            </div>
+            <div class="form-section" style="margin-top:15px;">
+                <h2>Export Company Roster (XLSX)</h2>
+                <p style="font-size:14px;color:#555;margin-bottom:10px;">Live technician roster. One version is safe to circulate. The other includes home addresses for the distance matrix.</p>
+                <button class="big-btn" style="background:#17a2b8;" onclick="exportRosterPublic()">📋 Export Roster (no addresses)</button>
+                <button class="big-btn" style="background:#6c757d; margin-top:8px;" onclick="exportRosterWithAddresses()">🏠 Export Roster (with addresses)</button>
+            </div>
 
         <div id="sectionDistancematrix" class="section">
             <div class="form-section">
@@ -2031,7 +2011,7 @@
                 showToast('That tab is restricted to admin users.', 'error');
                 tab = 'locations';
             }
-            var tabs = ['locations', 'technicians', 'backup', 'tools', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
+            var tabs = ['locations', 'technicians', 'tools', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
