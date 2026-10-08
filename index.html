@@ -590,7 +590,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.00</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-214</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-215</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -6534,7 +6534,17 @@ function distanceMatrixStatus(state) {
                 </div>
                 <div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
             document.body.appendChild(div);
-            prefillAddLocationFromEmail(code);
+            var techStatus = document.createElement('div');
+            techStatus.id = 'alp-tech-status';
+            techStatus.style.cssText = 'margin:-4px 0 8px;font-size:11px;color:#aaa;min-height:14px;';
+            document.getElementById('alp-tech').insertAdjacentElement('afterend', techStatus);
+            document.getElementById('alp-address').addEventListener('blur', function() {
+                refreshTechDistancesForNewLocation(this.value);
+            });
+            Promise.resolve(prefillAddLocationFromEmail(code)).then(function() {
+                var addr = document.getElementById('alp-address');
+                if (addr && addr.value) refreshTechDistancesForNewLocation(addr.value);
+            }).catch(function() {});
 
             document.getElementById('alp-cancel').onclick = function() { div.remove(); if (onComplete) onComplete(); };
             document.getElementById('alp-save').onclick = function() {
