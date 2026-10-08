@@ -20,6 +20,13 @@
             }
             .section.active:has(.form-section) .form-section { margin-top: 0; }
             .section.active:not(:has(.list-header)) > .form-section:only-of-type { grid-column: 1 / -1; }
+            #sectionClosedtickets .big-btn, #sectionClosedtickets a.big-btn { max-width: 420px; }
+            #itLayout { display: grid; grid-template-columns: minmax(320px, 560px) minmax(280px, 1fr); gap: 16px; align-items: start; }
+            #itChart .it-bars { display: flex; align-items: flex-end; gap: 10px; height: 150px; margin: 8px 0 18px; }
+            #itChart .it-bar { flex: 0 0 28px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+            #itStates .it-state-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+            #itStates .it-state { border: 1px solid #e3e8ee; border-radius: 8px; padding: 8px 10px; background: #fff; }
+            @media (max-width: 900px) { #itLayout { grid-template-columns: 1fr; } }
             .section.active:has(.list-header) {
                 grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
             }
@@ -1516,8 +1523,10 @@
                     <div id="itStatus" style="flex:1; color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px;">Select a type to load.</div>
                     <button type="button" onclick="printIssueTrends()" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">🖨️ Save as PDF</button>
                 </div>
+                <div id="itLayout">
                 <div id="itChart"></div>
                 <div id="itStates"></div>
+                </div>
                 <div id="itSites"></div>
                 <div id="itSamples"></div>
             </div>
@@ -2647,14 +2656,14 @@
             if (!weeks.length) {
                 chartHtml += '<div class="card-detail">No weeks in range.</div>';
             } else {
-                chartHtml += '<div style="display:flex;align-items:flex-end;gap:3px;height:120px;margin:10px 0 6px;">';
+                chartHtml += '<div class="it-bars">';
                 weeks.forEach(function(w) {
-                    var h = Math.max(2, Math.round((w.count / max) * 110));
+                    var h = Math.max(4, Math.round((w.count / max) * 110));
                     var label = w.week_start ? w.week_start.slice(5) : '';
-                    chartHtml += '<div style="flex:1;min-width:8px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="' + esc(w.week_start) + ': ' + w.count + '">';
-                    chartHtml += '<div style="font-size:10px;color:#888;margin-bottom:2px;">' + w.count + '</div>';
-                    chartHtml += '<div style="width:100%;max-width:18px;height:' + h + 'px;background:#17a2b8;border-radius:2px 2px 0 0;"></div>';
-                    chartHtml += '<div style="font-size:9px;color:#888;margin-top:3px;transform:rotate(-45deg);transform-origin:top left;white-space:nowrap;">' + esc(label) + '</div>';
+                    chartHtml += '<div class="it-bar" title="' + esc(w.week_start) + ': ' + w.count + '">';
+                    chartHtml += '<div style="font-size:11px;color:#555;margin-bottom:3px;">' + w.count + '</div>';
+                    chartHtml += '<div style="width:18px;height:' + h + 'px;background:#17a2b8;border-radius:3px 3px 0 0;"></div>';
+                    chartHtml += '<div style="font-size:10px;color:#777;margin-top:4px;">' + esc(label) + '</div>';
                     chartHtml += '</div>';
                 });
                 chartHtml += '</div>';
@@ -2667,13 +2676,13 @@
             if (!(data.states || []).length) {
                 statesHtml += '<div class="card-detail">No matching tickets in this window.</div>';
             } else {
+                statesHtml += '<div class="it-state-grid">';
                 data.states.forEach(function(s) {
                     var arrow = s.trend === 'up' ? '<span style="color:#c62828;">▲ rising</span>' : (s.trend === 'down' ? '<span style="color:#2e7d32;">▼ cooling</span>' : '<span style="color:#888;">▬ steady</span>');
-                    statesHtml += '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid #eee;font-size:13px;">' +
-                        '<div><strong>' + esc(s.state) + '</strong> · ' + s.count + ' tickets</div>' +
-                        '<div class="card-detail" style="margin:0;">' + s.prior + ' → ' + s.recent + ' · ' + arrow + '</div>' +
-                        '</div>';
+                    statesHtml += '<div class="it-state"><div><strong>' + esc(s.state) + '</strong> · ' + s.count + ' tickets</div>' +
+                        '<div class="card-detail" style="margin:2px 0 0;">' + s.prior + ' → ' + s.recent + ' · ' + arrow + '</div></div>';
                 });
+                statesHtml += '</div>';
             }
             statesHtml += '</div>';
             statesEl.innerHTML = statesHtml;
