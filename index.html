@@ -198,8 +198,25 @@
            for genuinely-detected desktop viewports -- that's a progressive
            enhancement layered on top, not a requirement for columns to
            exist at all anymore. */
-        .tech-cards-grid { columns: 280px; column-gap: 14px; }
-        .tech-cards-grid .tech-card { break-inside: avoid; margin-bottom: 14px; }
+        /* Grid, not CSS columns. Columns let a card's buttons paint into the
+           next card when the column is narrower than the button row. */
+        .tech-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 14px;
+            align-items: start;
+            columns: unset;
+        }
+        .tech-cards-grid .tech-card {
+            break-inside: avoid;
+            margin-bottom: 0;
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .tech-cards-grid .os-stop-actions { flex-wrap: wrap; max-width: 100%; }
 
         /* ── ROUTE MAP VISUALIZER ──────────────────────────────────────
            The panel deliberately lives outside #results: renderReviewBoard()
@@ -381,7 +398,7 @@
             .desktop-layout { display: flex; align-items: flex-start; gap: 28px; }
             .input-panel { flex: 0 0 320px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; transition: flex-basis 0.25s ease, opacity 0.2s ease; }
             .results-panel { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
-            .tech-cards-grid .tech-card { overflow: visible; }
+            .tech-cards-grid .tech-card { overflow: hidden; }
             #dispatchMap { height: 560px; }
             .desktop-layout.controls-collapsed .input-panel {
                 flex: 0 0 0;
@@ -399,7 +416,7 @@
         /* Extra-wide monitors: a bit more breathing room, same readable text size */
         @media (min-width: 1700px) {
             .container { max-width: none; }
-            .tech-cards-grid { columns: 360px; column-gap: 16px; }
+            .tech-cards-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
         }
     
         /* ── Fullscreen Boot/Splash Animation ── */
@@ -496,7 +513,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-194</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-195</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
