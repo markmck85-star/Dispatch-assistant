@@ -717,6 +717,10 @@
                             <input type="checkbox" id="mapShowAllSitesToggle" onchange="toggleMapShowAllSites(this.checked)">
                             Show all service locations (not just today's stops)
                         </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
+                            <input type="checkbox" id="hideReturnLegToggle" onchange="toggleHideReturnLeg(this.checked)">
+                            One-way mileage only (leave out the drive home, to compare with Google)
+                        </label>
                         <div style="font-size:11px;color:#777;margin:0 0 4px;">&#x1F4C5; dashed pin = pushed to a later date (not part of today's route/mileage)</div>
                         <div id="dispatchMapLegend"></div>
                         <div id="dispatchMapNote" class="map-note" style="display:none;"></div>
@@ -4654,6 +4658,21 @@ function distanceMatrixStatus(state) {
             return chip('TROUBLE', '#8b1a1a');
         }
 
+        // 2026-10-07: view-only switch that drops the drive home from each tech's
+        // total so the card's mileage can be compared directly with a one-way
+        // Google Maps route. Remembered per browser; doesn't touch saved data.
+        window._hideReturnLeg = false;
+        try { window._hideReturnLeg = localStorage.getItem('dispatchHideReturnLeg') === '1'; } catch (e) {}
+        function toggleHideReturnLeg(on) {
+            window._hideReturnLeg = !!on;
+            try { localStorage.setItem('dispatchHideReturnLeg', on ? '1' : '0'); } catch (e) {}
+            if (typeof renderReviewBoard === 'function') renderReviewBoard(true);
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            var cb = document.getElementById('hideReturnLegToggle');
+            if (cb) cb.checked = !!window._hideReturnLeg;
+        });
+
         function renderReviewBoard(preserveScroll) {
             const resultsDiv = document.getElementById('results');
             const assignments = window.currentAssignments;
@@ -4836,7 +4855,7 @@ function distanceMatrixStatus(state) {
                     lastIncludedCode = item.code;
                     includedCount++;
                 }
-                if (lastIncludedCode) {
+                if (lastIncludedCode && !window._hideReturnLeg) {
                     const returnLeg = getCachedLegInfo(tech, null, lastIncludedCode);
                     totalMi += returnLeg.distanceMi;
                     if (returnLeg.durationMin != null) { totalDurMin += returnLeg.durationMin; anyRealDuration = true; }
@@ -4846,7 +4865,7 @@ function distanceMatrixStatus(state) {
                     ? ` <span style="color:#888;">(${includedCount} of ${items.length} stops, ${wantTomorrow ? 'tomorrow' : 'today'})</span>`
                     : '';
                 const routeSummary = includedCount
-                    ? `${Math.round(totalMi * 10) / 10} mi round trip${anyRealDuration ? ' · ~' + formatDriveTime(totalDurMin) + ' drive' : ''}` +
+                    ? `${Math.round(totalMi * 10) / 10} mi ${window._hideReturnLeg ? 'one way (no return home)' : 'round trip'}${anyRealDuration ? ' · ~' + formatDriveTime(totalDurMin) + ' drive' : ''}` +
                       `${allLegsReal ? '' : ' <span title="Some legs are straight-line estimates -- real driving data not built for this state/pair yet" style="cursor:help;">(est.)</span>'}` +
                       scopeLabel
                     : '';
@@ -5843,7 +5862,9 @@ function distanceMatrixStatus(state) {
                     primaryTech: tech,
                     fallbackTech: loc.fallbackTech || '',
                     contractorOverride: false,
-                    contractorName: loc.contractorName || ''
+                    contractorName: loc.contractorName || '',
+                    machineType: loc.machineType || '',
+                    remote: !!loc.remote
                 })
             })
             .then(r => r.json())
@@ -5915,7 +5936,11 @@ function distanceMatrixStatus(state) {
                     name: loc.name || '',
                     address: loc.address || '',
                     contractorOverride: false,
-                    contractorName: loc.contractorName || ''
+                    contractorName: loc.contractorName || '',
+                    // save-location defaults a missing machineType to "SK" and
+                    // remote to false, so always send the site's real values.
+                    machineType: loc.machineType || '',
+                    remote: !!loc.remote
                 };
                 if (saveAsFallback) {
                     payload.primaryTech = loc.primaryTech || loc.defaultTech || fromTech;
@@ -8205,6 +8230,26 @@ ${content}</body></html>`;
                     statusEl.style.color = '#7edb8e';
                     statusEl.textContent = '✅ Moved to ' + shortNameJs(result.toTech) + ' (' + shortNameJs(result.fromTech) + ' ' + result.fromDelta + ', ' + shortNameJs(result.toTech) + ' ' + result.toDelta + ')';
                 }
+
+                // 2026-10-07: offer to save the new tech as the site's default or
+                // fallback (see default-tech-prompt.js). Only on Apply, not Revert.
+                try {
+                    if (window.DefaultTechPrompt) {
+                        if (wasApplied) {
+                            window.DefaultTechPrompt.remove(row);
+                        } else {
+                            window.DefaultTechPrompt.attach(row, {
+                                code: siteCode,
+                                toTech: toTech,
+                                loc: LOCATIONS[siteCode],
+                                distanceLabel: function (t, c) {
+                                    var d = getTechDistance(t, c, CURRENT_STATE);
+                                    return d && d.label ? d.label : null;
+                                }
+                            });
+                        }
+                    }
+                } catch (e) { /* prompt is optional */ }
             } catch (err) {
                 if (statusEl) { statusEl.style.color = '#ff8a80'; statusEl.textContent = 'Failed: ' + err.message; }
             } finally {
@@ -9514,5 +9559,6 @@ ${content}</body></html>`;
         </div>
     </div>
 <script src="/update-check.js"></script>
+<script src="/default-tech-prompt.js"></script>
 </body>
 </html>
