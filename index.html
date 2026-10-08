@@ -126,7 +126,7 @@
         .board-context select, .board-context input[type="date"] { min-height: 40px; font-size: 15px; }
         .board-context #dispatchTomorrowBtn, .board-context #watchdogLink, .board-context #locationLookupLink {
             min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
-            background: #181818; color: #f0a500; font-weight: 700; font-size: 13px; text-decoration: none;
+            background: #181818; color: #f0f0f0; font-weight: 700; font-size: 13px; text-decoration: none;
             display: inline-flex; align-items: center;
         }
         .tool-rail { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
@@ -134,7 +134,7 @@
         .tool-side-links a, .tool-side-links button {
             display: inline-flex; align-items: center; justify-content: center;
             min-height: 40px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
-            background: #181818; color: #f0a500; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer;
+            background: #181818; color: #f0f0f0; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer;
         }
         #sidebarToolSlot #boardToolStack .tool-rail,
         #sidebarToolSlot #boardToolStack .tool-side-links { flex-direction: column; }
@@ -575,7 +575,7 @@
     </div>
 
     <div class="container">
-        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-208</div>
+        <h1>MCR Dispatch Hub v10.00</h1><div style="color:#666; font-size:13px; margin-top:-8px;">Build: rail-205</div>
         <div id="boardUserChip"></div>
         <div id="bootStatus" role="status" aria-live="polite">
             <span class="boot-dot" aria-hidden="true"></span>
@@ -729,18 +729,23 @@
                     <button type="button" class="rail-btn" onclick="generateFinalMessages()">✅ Messages</button>
                     <a class="closing-email-link" href="/closing-email-reconstructor">✉️ Closing Notes</a>
                     <a href="/service-responses">⏱ Service responses</a>
-                    <a class="shipments-link" href="/shipments">📦 Shipping</a>
                 </div>
                 <div class="tool-side-links">
                     <a id="watchdogLink" href="/watchdog/GA">Watchdog</a>
                     <a id="locationLookupLink" href="/location-lookup">Location Lookup</a>
-                    <a class="admin-panel-link" href="/admin" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
-                    <a class="messages-link" href="/inbound-mail" id="inboundMailLink">✉ Inbound Mail</a>
-                    <a class="mileage-log-link" href="/mileage-log">🚗 Mileage log</a>
-                    <a class="restock-tracker-link" href="/restock-tracker?state=GA" id="restockLink">📊 Restock Tracker</a>
-                    <a href="/saturday-oncall">📞 Saturday On-Call</a>
-                    <a class="help-link" href="/help" target="_blank">❓ Help</a>
                 </div>
+<details class="tool-more">
+                    <summary>More tools</summary>
+                    <div class="tool-more-list">
+                        <a class="admin-panel-link" href="/admin" onclick="localStorage.setItem('dispatchReturnState', document.getElementById('stateSelector')?.value || '')">Admin Panel</a>
+                        <a class="shipments-link" href="/shipments">📦 RMA Shipments</a>
+                        <a class="messages-link" href="/inbound-mail" id="inboundMailLink">✉ Inbound Mail</a>
+                        <a class="mileage-log-link" href="/mileage-log">🚗 Mileage log</a>
+                        <a class="restock-tracker-link" href="/restock-tracker?state=GA" id="restockLink">📊 Restock Tracker</a>
+                        <a href="/saturday-oncall">📞 Saturday On-Call</a>
+                        <a class="help-link" href="/help" target="_blank">❓ Help</a>
+                    </div>
+                </details>
                 </div>
 <div class="more-ai-row">
 <div id="aiCommandBarHome"><div id="aiCommandBar" style="margin-top:10px; padding:8px 10px; background:#1b2430; border:1px solid #2a6496; border-radius:8px;">
