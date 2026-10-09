@@ -1,0 +1,1910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<title>Team Calendar – MCR Dispatch</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f5f8; color: #1f2933; padding: 15px; line-height: 1.5; font-size: 16px; }
+  :root { --cell-pad: 4px; --cell-bd: 2px; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  @media (min-width: 1100px) {
+    :root { --cell-pad: 6px; }
+    .container { max-width: 1320px; }
+    body { padding: 20px 28px 40px; }
+    .month-grid { min-width: 0; grid-template-columns: repeat(7, minmax(120px, 1fr)); }
+    .day-cell { min-height: 110px; padding: 6px; }
+    .cell-date { font-size: 13px; margin-bottom: 5px; }
+    .day-block {
+      font-size: 13px; font-weight: 600; line-height: 1.35;
+      padding: 4px 7px; margin-bottom: 4px;
+      white-space: nowrap;
+    }
+    .day-block .block-note { font-size: 12px; opacity: 1; }
+    .day-block .synced { font-size: 11px; }
+    .company-banner {
+      font-size: 13px; padding: 5px 7px; white-space: normal;
+    }
+    .dispatcher-banner { font-size: 13px; padding: 5px 7px; }
+    .dow-header { font-size: 13px; padding: 8px 2px; }
+  }
+  @media (min-width: 1500px) {
+    .container { max-width: 1600px; }
+    body { padding: 24px 36px 48px; }
+    .day-block { font-size: 14px; }
+    .company-banner { font-size: 14px; }
+  }
+
+  .back-link { display: inline-block; color: #1a56a8; text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .back-link:hover { text-decoration: underline; }
+
+  .console {
+    background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px; box-shadow: 0 1px 4px rgba(16,24,40,0.08);
+    padding: 18px; color: #1f2933;
+  }
+  .console h1 { color: #1f3a5f; font-size: 21px; margin-bottom: 2px; }
+  .console .subtitle { color: #6b7785; font-size: 12px; margin-bottom: 14px; }
+
+  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .month-nav { display: flex; align-items: center; gap: 4px; }
+  .nav-btn {
+    background: #ffffff; color: #1f3a5f; border: 1px solid #c5cdd8; border-radius: 6px;
+    width: 34px; height: 34px; font-size: 16px; cursor: pointer;
+  }
+  .nav-btn:hover { background: #f3f5f8; }
+  .nav-btn:active { background: #e6ebf2; }
+  .month-label { color: #1f3a5f; font-weight: 600; font-size: 15px; min-width: 132px; text-align: center; }
+
+  .btn-primary {
+    background: #1a56a8; color: #fff; border: none; border-radius: 6px;
+    padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary:hover { background: #144586; }
+  .btn-oncall { background: #1f6f78; }
+  .btn-oncall:hover { background: #185a62; }
+  .btn-company { background: #8a6a17; color: #fff; }
+  .btn-company:hover { background: #705512; }
+
+  .today-btn {
+    background: #ffffff; color: #1a56a8; border: 1px solid #1a56a8; border-radius: 6px;
+    padding: 7px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .today-btn:hover { background: #eef4fc; }
+  select#stateFilter {
+    margin-left: auto; background: #ffffff; color: #1f2933; border: 1px solid #c5cdd8;
+    border-radius: 6px; padding: 7px 8px; font-size: 13px;
+  }
+
+  /* Month grid -- modeled on BlueFolder's Month view so it's a familiar
+     layout for anyone (like TJ) used to that tool: a real week grid rather
+     than a flat chip list, so a whole month's coverage is scannable at a
+     glance. Horizontally scrollable below ~680px so it stays usable on a
+     phone without cramming 7 columns down to nothing. */
+  .grid-scroll { overflow-x: auto; }
+  .month-grid { display: grid; grid-template-columns: repeat(7, minmax(88px, 1fr)); min-width: 620px; border: 2px solid #8d99a8; border-radius: 6px; overflow: hidden; }
+  .dow-header {
+    background: #2b3644; color: #ffffff; font-size: 11px; font-weight: 700; text-align: center;
+    padding: 7px 2px; text-transform: uppercase; letter-spacing: 0.03em;
+    border-bottom: 1px solid #d5dbe3; border-right: 1px solid #435063;
+  }
+  .dow-header:last-child { border-right: none; }
+  .day-cell {
+    min-height: 76px; border-right: 2px solid #b4bfcc; border-bottom: 2px solid #b4bfcc;
+    padding: 4px; background: #ffffff; cursor: pointer;
+  }
+  .day-cell:hover { background: #f8fafc; }
+  .day-cell:active { background: #eef2f7; }
+  .month-grid .day-cell:nth-child(7n) { border-right: none; }
+  .day-cell.other-month { background: #f6f7f9; }
+  .day-cell.other-month .cell-date { color: #aab2bd; }
+  .day-cell.is-today { background: #f1f4f8; box-shadow: inset 0 0 0 2px #2b3644; }
+  .cell-date { font-size: 11.5px; color: #6b7785; text-align: right; margin-bottom: 3px; }
+  .day-cell.is-today .cell-date { color: #2b3644; font-weight: 700; }
+  .day-block {
+    display: block; border-radius: 4px; padding: 2px 5px; margin-bottom: 2px;
+    font-size: 10.5px; line-height: 1.3; color: #ffffff; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; cursor: default;
+    border-left: 4px solid rgba(0,0,0,0.4); background: #5f6b7a;
+  }
+  .day-block .synced { opacity: 0.85; font-size: 9px; margin-left: 2px; }
+  /* Notes stay on one line (ellipsis) so every block is the same height --
+     that is what lets one person's entries line up across a whole week.
+     The full note is in the hover title and the day detail popup. */
+  .day-block .block-note {
+    display: block; font-size: 9px; font-weight: 400; opacity: 0.9;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+  }
+  /* Invisible placeholder that holds a person's row open on days they are
+     not out, so their blocks stay in the same row all week. */
+  .day-block.lane-spacer { visibility: hidden; }
+  /* Consecutive days for the same person (same type and note) are drawn as
+     one continuous bar: the block reaches across the cell padding and grid
+     line to meet the next day's block, which drops its left stripe. */
+  .day-block.join-next {
+    position: relative; z-index: 1;
+    margin-right: calc(-2 * var(--cell-pad) - var(--cell-bd));
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+  }
+  .day-block.join-prev {
+    border-left: none; border-top-left-radius: 0; border-bottom-left-radius: 0;
+  }
+  .day-block.reason-vacation { background: #9b3b3b; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-personal { background: #a86f1a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-pto { background: #6b4c8a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-comp_day { background: #2f5f8f; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-manual, .day-block.reason-other { background: #5f6b7a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-last_day { background: #b45309; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-info { background: #2f7a68; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-site_survey { background: #8f3560; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-install { background: #3d7a4a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-block.reason-on_call { background: #1f6f78; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+
+  /* Company-wide events (holidays, closures) -- not tied to any one
+     technician, so rendered as a full-width banner above the per-tech
+     blocks instead of one more block in the stack, to visually separate
+     "the whole company" from "this one person". */
+  .company-banner {
+    display: block; border-radius: 4px; padding: 3px 5px; margin-bottom: 3px;
+    font-size: 10.5px; font-weight: 700; line-height: 1.3; color: #ffffff;
+    background: #8a6a17; border-left: 3px solid rgba(0,0,0,0.25); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: default;
+  }
+  /* On-call dispatcher for the Saturday -- one slim banner per Saturday,
+     above the technician rows, so it stays visible however crowded the day is. */
+  .dispatcher-banner {
+    display: block; border-radius: 4px; padding: 3px 5px; margin-bottom: 3px;
+    font-size: 10.5px; font-weight: 700; line-height: 1.3; color: #ffffff;
+    background: #3b4a6b; border-left: 4px solid rgba(0,0,0,0.4); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: default;
+  }
+  .day-detail-entry.dispatcher-entry { background: #3b4a6b; border-left: 4px solid rgba(0,0,0,0.4); color: #ffffff; }
+  .day-detail-entry.dispatcher-entry .entry-name,
+  .day-detail-entry.dispatcher-entry .entry-type { color: #ffffff; }
+  .day-detail-entry.company-event { background: #8a6a17; border-left: 4px solid rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.company-event .entry-name,
+  .day-detail-entry.company-event .entry-type { color: #ffffff; }
+
+  .empty-state, .loading, .error-state { font-size: 13.5px; text-align: center; padding: 30px 10px; color: #6b7785; }
+  .error-state { color: #c0392b; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e3e8ee; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #52606d; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  /* Modal Styling */
+  .modal-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(16,24,40,0.5); z-index: 1000; justify-content: center; align-items: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: #ffffff; border: 1px solid #dfe3e8; border-radius: 10px; box-shadow: 0 10px 30px rgba(16,24,40,0.25);
+    padding: 20px; width: 90%; max-width: 420px; color: #1f2933;
+  }
+  .modal h2 { font-size: 18px; color: #1f3a5f; margin-bottom: 14px; }
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 12px; color: #52606d; font-weight: 600; margin-bottom: 4px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; background: #ffffff; border: 1px solid #c5cdd8; border-radius: 6px;
+    padding: 8px; color: #1f2933; font-size: 14px;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: none; border-color: #1a56a8; box-shadow: 0 0 0 2px rgba(26,86,168,0.15);
+  }
+  .form-row { display: flex; gap: 10px; }
+  .form-group .check-label {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+    color: #52606d; margin-bottom: 8px; cursor: pointer;
+  }
+  .form-group .check-label input { width: auto; margin: 0; }
+  .role-row { display: flex; gap: 18px; }
+  .conflict-toast {
+    display: none; position: fixed; z-index: 2000; left: 50%; transform: translateX(-50%);
+    top: calc(env(safe-area-inset-top, 0px) + 10px); width: min(92vw, 440px);
+    background: #ffffff; color: #1f2933; border: 1px solid #dfe3e8; border-left: 6px solid #b45309;
+    border-radius: 10px; box-shadow: 0 10px 30px rgba(16,24,40,0.3); padding: 12px 14px; font-size: 13.5px;
+  }
+  .conflict-toast .conflict-title { font-weight: 700; color: #b45309; margin-bottom: 8px; }
+  .conflict-toast .conflict-item { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid #e3e8ee; }
+  .conflict-toast .conflict-item .btn-primary { align-self: flex-start; }
+  .conflict-toast .conflict-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .range-hint { font-size: 12px; color: #6b7785; margin: -4px 0 10px; min-height: 0; }
+  .range-hint:empty { display: none; }
+  .range-hint.warn { color: #c0392b; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .btn-cancel { background: #ffffff; border: 1px solid #c5cdd8; color: #3e4c59; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+  .btn-cancel:hover { background: #f3f5f8; }
+
+  .day-detail-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+  .day-detail-empty { font-size: 13.5px; color: #6b7785; padding: 6px 0; }
+  .day-detail-entry { border-radius: 8px; padding: 10px 12px; border-left: 4px solid rgba(0,0,0,0.25); background: #5f6b7a; color: #ffffff; }
+  .day-detail-entry .entry-name { font-size: 14.5px; font-weight: 700; color: inherit; display: flex; align-items: center; gap: 6px; }
+  .day-detail-entry .entry-type { font-size: 11.5px; opacity: 0.85; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .day-detail-entry .entry-note { font-size: 13px; color: #ffffff; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+  .day-detail-entry .synced { font-size: 12px; opacity: 0.85; align-self: center; }
+  .day-detail-entry .entry-remove {
+    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.55); color: #ffffff;
+    border-radius: 5px; padding: 4px 9px; font-size: 11.5px; margin-top: 8px; cursor: pointer;
+  }
+  .day-detail-entry .entry-remove:hover { background: rgba(255,255,255,0.28); }
+  .day-detail-entry .entry-remove:active { background: rgba(255,255,255,0.38); }
+  .day-detail-entry.reason-vacation { background: #9b3b3b; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-personal { background: #a86f1a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-pto { background: #6b4c8a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-comp_day { background: #2f5f8f; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-manual, .day-detail-entry.reason-other { background: #5f6b7a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-last_day { background: #b45309; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-info { background: #2f7a68; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-site_survey { background: #8f3560; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-install { background: #3d7a4a; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+  .day-detail-entry.reason-on_call { background: #1f6f78; border-left-color: rgba(0,0,0,0.25); color: #ffffff; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="index.html" class="back-link">&larr; Back to Dispatch</a>
+  <div class="console">
+    <h1>&#128197; Team Calendar</h1>
+    <div class="subtitle">Vacation, personal days, comp days &mdash; synced & managed locally</div>
+
+    <div class="toolbar">
+      <div class="month-nav">
+        <button class="nav-btn" id="prevBtn" aria-label="Previous month">&lsaquo;</button>
+        <div class="month-label" id="monthLabel">&nbsp;</div>
+        <button class="nav-btn" id="nextBtn" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <button class="today-btn" id="todayBtn">Today</button>
+      <button class="btn-primary" id="openAddModalBtn">+ Add Entry</button>
+      <button class="btn-primary btn-oncall" id="openOnCallModalBtn">+ Set On-Call</button>
+      <button class="btn-primary btn-company" id="openCompanyEventModalBtn">+ Company Event</button>
+      <a class="btn-primary" href="/time-off" style="text-decoration:none;display:inline-flex;align-items:center;">Days off by pay period</a>
+      <select id="stateFilter"><option value="">All states</option></select>
+    </div>
+
+    <div id="calendarBody"><div class="loading">Loading&hellip;</div></div>
+
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#9b3b3b"></span>Vacation</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#a86f1a"></span>Personal</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#6b4c8a"></span>PTO</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#2f5f8f"></span>Comp day</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#5f6b7a"></span>Other / Manual</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#b45309"></span>Last Day</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#2f7a68"></span>Info / Note</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#8f3560"></span>Site Survey</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#3d7a4a"></span>Install</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#1f6f78"></span>Saturday On-Call</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#3b4a6b"></span>On-Call Dispatcher</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#8a6a17"></span>Company Event</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <h2 id="addModalTitle">Schedule Time Off / Exception</h2>
+    <form id="addAvailabilityForm">
+      <div class="form-group">
+        <label for="techSelect">Technician</label>
+        <select id="techSelect" required></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1;">
+          <label for="eventDate">Date</label>
+          <input type="date" id="eventDate" required>
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label for="eventReason">Type</label>
+          <select id="eventReason">
+            <option value="vacation">Vacation</option>
+            <option value="personal">Personal</option>
+            <option value="pto">PTO</option>
+            <option value="comp_day">Comp Day</option>
+            <option value="manual">Other / Appt</option>
+            <option value="last_day">Last Day</option>
+            <option value="info">Info / Note (not time off)</option>
+            <option value="site_survey">Site Survey</option>
+            <option value="install">Install</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" id="rangeRow">
+        <div class="form-group" style="flex:1;">
+          <label for="eventEndDate">Through (optional)</label>
+          <input type="date" id="eventEndDate">
+        </div>
+        <div class="form-group" style="flex:1; display:flex; align-items:flex-end;">
+          <label class="check-label"><input type="checkbox" id="skipWeekends" checked> Skip weekends</label>
+        </div>
+      </div>
+      <div class="range-hint" id="rangeHint"></div>
+      <div class="form-group">
+        <label for="eventNote">Note / Details (Optional)</label>
+        <textarea id="eventNote" rows="2" placeholder="e.g. Dental Appt 9:00am - 11:30am"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="closeModalBtn">Cancel</button>
+        <button type="submit" class="btn-primary" id="addModalSubmitBtn">Save Entry</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="dayDetailModal">
+  <div class="modal">
+    <h2 id="dayDetailTitle">&nbsp;</h2>
+    <div class="day-detail-list" id="dayDetailList"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-cancel" id="closeDayDetailBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="onCallModal">
+  <div class="modal">
+    <h2 id="onCallModalTitle">Set Saturday On-Call</h2>
+    <form id="onCallForm">
+      <div class="form-group" id="onCallRoleRow">
+        <label>Who is it for?</label>
+        <div class="role-row">
+          <label class="check-label"><input type="radio" name="onCallRole" value="tech" checked> Technician</label>
+          <label class="check-label"><input type="radio" name="onCallRole" value="dispatcher"> Dispatcher</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="onCallDate">Saturday</label>
+        <input type="date" id="onCallDate" required>
+      </div>
+      <div id="onCallTechFields">
+        <div class="form-group">
+          <label for="onCallState">State</label>
+          <select id="onCallState" required></select>
+        </div>
+        <div class="form-group" id="onCallReplacingRow" style="display:none;">
+          <label for="onCallReplacing">Replacing</label>
+          <select id="onCallReplacing"></select>
+        </div>
+        <div class="form-group">
+          <label for="onCallTech">Technician</label>
+          <select id="onCallTech" required></select>
+        </div>
+      </div>
+      <div id="onCallDispatcherFields" style="display:none;">
+        <div class="form-group">
+          <label for="onCallDispatcher">Dispatcher (covers all Saturday states)</label>
+          <select id="onCallDispatcher"></select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="closeOnCallBtn">Cancel</button>
+        <button type="submit" class="btn-primary" id="onCallModalSubmitBtn">Save On-Call</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="companyEventModal">
+  <div class="modal">
+    <h2 id="companyEventModalTitle">Add Company Event</h2>
+    <form id="companyEventForm">
+      <div class="form-group">
+        <label for="companyEventDate">Date</label>
+        <input type="date" id="companyEventDate" required>
+      </div>
+      <div class="form-group">
+        <label for="companyEventLabel">Label</label>
+        <input type="text" id="companyEventLabel" required placeholder="e.g. Company Holiday, Office Closed" maxlength="100">
+      </div>
+      <div class="form-group">
+        <label for="companyEventNote">Note / Details (Optional)</label>
+        <textarea id="companyEventNote" rows="2" placeholder="e.g. Labor Day - no service"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="closeCompanyEventModalBtn">Cancel</button>
+        <button type="submit" class="btn-primary btn-company" id="companyEventModalSubmitBtn">Save Event</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="compDayModal">
+  <div class="modal">
+    <h2 id="compDayTitle">Comp Day</h2>
+    <div id="compDayBody" style="font-size:13.5px; color:#52606d; margin-bottom:12px;"></div>
+    <div class="form-group">
+      <label for="compDaySelect">Comp day</label>
+      <select id="compDaySelect"></select>
+      <label class="check-label" style="margin-top:8px;"><input type="checkbox" id="compDayThisWeekOnly" checked> This week only. Other on-call Saturdays keep the usual day.</label>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-cancel" id="compDaySkipBtn">Skip</button>
+      <button type="button" class="btn-primary" id="compDaySaveBtn">Add Comp Day</button>
+    </div>
+  </div>
+</div>
+
+<div class="conflict-toast" id="conflictToast" role="alert"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL = 'https://omehrfoqhljzymazemad.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tZWhyZm9xaGxqenltYXplbWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzEzMjEsImV4cCI6MjA5OTEwNzMyMX0.rSMvkmpf9rTT4seMKSNf4xlgPkbxcOvia-sP2ZhvOmE';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const REASON_LABEL = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last Day', info: 'Note', site_survey: 'Site Survey', install: 'Install' };
+const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Entry types that mean the person is actually unavailable (as opposed to
+// Info / Site Survey / Install notes). Only these trigger on-call conflict checks.
+const TIME_OFF_REASONS = new Set(['vacation', 'personal', 'pto', 'comp_day', 'manual', 'other', 'last_day']);
+const techNameById = new Map();
+let allTechs = [];            // [{id, name, home_state}]
+let allDispatchers = [];      // [{id, username}]
+let onCallPool = new Map();   // technician_id -> Set of states they are on the Saturday rotation for (today onward)
+let onCallReplaceMode = false;
+let onCallExisting = [];      // technician ids already on call for the form's selected state + Saturday
+
+let viewDate = new Date();
+viewDate.setDate(1);
+let currentByDay = new Map();
+let currentOnCallByDay = new Map();
+let currentCompanyByDay = new Map();
+let currentDispatcherByDay = new Map(); // 'YYYY-MM-DD' (Saturday) -> { id, name }
+let saturdayStates = [];
+
+function dispatcherDisplayName(username) {
+  const u = String(username || '').trim();
+  if (!u) return '';
+  return u.length <= 2 ? u.toUpperCase() : u.charAt(0).toUpperCase() + u.slice(1);
+}
+
+function monthLabel(d) {
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function isoLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+async function loadStatesAndTechs() {
+  const { data: techData, error } = await sb.from('technicians').select('id, name, home_state').order('name');
+  if (error || !techData) return;
+
+  // Populate States Dropdown
+  allTechs = techData;
+  const states = [...new Set(techData.map((r) => r.home_state).filter(Boolean))].sort();
+  const selState = document.getElementById('stateFilter');
+  selState.innerHTML = '<option value="">All states</option>';
+  for (const s of states) {
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    selState.appendChild(opt);
+  }
+
+  // Populate Tech Modal Dropdown
+  const selTech = document.getElementById('techSelect');
+  selTech.innerHTML = '';
+  for (const t of techData) {
+    const opt = document.createElement('option');
+    opt.value = t.id; 
+    opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+    selTech.appendChild(opt);
+    techNameById.set(String(t.id), t.name);
+  }
+
+  // Populate On-Call Tech Dropdown (same list -- any tech can be assigned to any state's rotation)
+  const selOnCallTech = document.getElementById('onCallTech');
+  selOnCallTech.innerHTML = '';
+  for (const t of techData) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+    opt.dataset.base = opt.textContent;
+    selOnCallTech.appendChild(opt);
+  }
+
+  // Saturday-coverage states -- only these get on-call chips/rotation entry
+  const { data: stateData } = await sb.from('states').select('code, name').eq('saturday_coverage', true).order('code');
+  saturdayStates = stateData || [];
+  const selOnCallState = document.getElementById('onCallState');
+  selOnCallState.innerHTML = '';
+  for (const s of saturdayStates) {
+    const opt = document.createElement('option');
+    opt.value = s.code;
+    opt.textContent = `${s.name} (${s.code})`;
+    selOnCallState.appendChild(opt);
+  }
+
+  // Dispatchers (same list the Saturday on-call page offers)
+  try {
+    const dRes = await fetch('/.netlify/functions/get-dispatchers');
+    const dData = await dRes.json();
+    const selDisp = document.getElementById('onCallDispatcher');
+    selDisp.innerHTML = '';
+    allDispatchers = dData.dispatchers || [];
+    for (const d of allDispatchers) {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = dispatcherDisplayName(d.username);
+      selDisp.appendChild(opt);
+    }
+  } catch (err) { /* dispatcher choice just stays empty */ }
+}
+
+async function loadMonth() {
+  const body = document.getElementById('calendarBody');
+  body.innerHTML = '<div class="loading">Loading&hellip;</div>';
+  document.getElementById('monthLabel').textContent = monthLabel(viewDate);
+
+  const year = viewDate.getFullYear(), month = viewDate.getMonth();
+  const monthStart = new Date(year, month, 1).toISOString().slice(0, 10);
+  const monthEnd = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+  const stateFilter = document.getElementById('stateFilter').value;
+
+  let query = sb
+    .from('technician_availability')
+    .select('day, technician_id, reason, note, bluefolder_appt_id, technicians!inner(name, home_state)')
+    .eq('available', false)
+    .gte('day', monthStart)
+    .lte('day', monthEnd)
+    .order('day', { ascending: true });
+  if (stateFilter) query = query.eq('technicians.home_state', stateFilter);
+
+  const { data, error } = await query;
+  if (error) {
+    body.innerHTML = `<div class="error-state">Couldn't load the calendar: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  const byDay = new Map();
+  for (const row of (data || [])) {
+    if (!byDay.has(row.day)) byDay.set(row.day, []);
+    byDay.get(row.day).push(row);
+  }
+
+  // Saturday on-call -- separate table (state, day, technician), only
+  // relevant for states with saturday_coverage=true.
+  let onCallQuery = sb
+    .from('on_call_schedule')
+    .select('state, day, technician_id, bluefolder_appt_id, technicians!inner(name, home_state)')
+    .gte('day', monthStart)
+    .lte('day', monthEnd)
+    .order('day', { ascending: true });
+  if (stateFilter) onCallQuery = onCallQuery.eq('state', stateFilter);
+
+  const { data: onCallData, error: onCallError } = await onCallQuery;
+  const onCallByDay = new Map();
+  if (!onCallError) {
+    for (const row of (onCallData || [])) {
+      if (!onCallByDay.has(row.day)) onCallByDay.set(row.day, []);
+      onCallByDay.get(row.day).push(row);
+    }
+  }
+
+  // Company-wide events -- not filtered by state, since they apply to
+  // everyone regardless of which state view is selected.
+  const { data: companyData, error: companyError } = await sb
+    .from('company_events')
+    .select('id, day, label, note, bluefolder_appt_id')
+    .gte('day', monthStart)
+    .lte('day', monthEnd)
+    .order('day', { ascending: true });
+  const companyByDay = new Map();
+  if (!companyError) {
+    for (const row of (companyData || [])) {
+      if (!companyByDay.has(row.day)) companyByDay.set(row.day, []);
+      companyByDay.get(row.day).push(row);
+    }
+  }
+
+  // On-call dispatcher per Saturday (one dispatcher covers every Saturday
+  // state, so it is not filtered by the state dropdown). Read through the
+  // same function the Saturday on-call page uses; if it fails, the calendar
+  // simply shows no dispatcher banners.
+  const dispatcherByDay = new Map();
+  try {
+    const dRes = await fetch(`/.netlify/functions/get-dispatcher-on-call?since=${monthStart}&until=${monthEnd}`);
+    if (dRes.ok) {
+      const dData = await dRes.json();
+      for (const e of (dData.entries || [])) {
+        if (e.day && e.dispatcher) dispatcherByDay.set(e.day, { id: e.dispatcherId, name: dispatcherDisplayName(e.dispatcher) });
+      }
+    }
+  } catch (err) { /* banners are optional */ }
+
+  currentByDay = byDay;
+  currentOnCallByDay = onCallByDay;
+  currentCompanyByDay = companyByDay;
+  currentDispatcherByDay = dispatcherByDay;
+  renderMonthGrid(year, month, byDay, onCallByDay, companyByDay);
+}
+
+function renderMonthGrid(year, month, byDay, onCallByDay, companyByDay) {
+  const body = document.getElementById('calendarBody');
+  const todayStr = isoLocal(new Date());
+
+  const firstOfMonth = new Date(year, month, 1);
+  const startOffset = firstOfMonth.getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  // Work out every cell's date first, so each week row can be laid out as a unit.
+  const cells = [];
+  for (let i = 0; i < totalCells; i++) {
+    let cellDate, otherMonth = false, dayNum;
+    if (i < startOffset) {
+      dayNum = daysInPrevMonth - startOffset + 1 + i;
+      cellDate = new Date(year, month - 1, dayNum);
+      otherMonth = true;
+    } else if (i < startOffset + daysInMonth) {
+      dayNum = i - startOffset + 1;
+      cellDate = new Date(year, month, dayNum);
+    } else {
+      dayNum = i - startOffset - daysInMonth + 1;
+      cellDate = new Date(year, month + 1, dayNum);
+      otherMonth = true;
+    }
+    cells.push({ dayStr: isoLocal(cellDate), dayNum, otherMonth });
+  }
+
+  // Each technician gets one fixed row ("lane") per week, so their entries
+  // line up across the days instead of jumping up and down with whoever else
+  // is out that day. Lanes are ordered by the day each person's first entry
+  // that week lands on, then by name.
+  const weekCount = totalCells / 7;
+  const weekLanes = [];    // per week: ordered technician ids
+  const weekRowMaps = [];  // per week: 7 Maps of technician id -> that day's entry
+  for (let w = 0; w < weekCount; w++) {
+    const maps = [];
+    const firstCol = new Map();
+    const names = new Map();
+    for (let c = 0; c < 7; c++) {
+      const rows = byDay.get(cells[w * 7 + c].dayStr) || [];
+      const m = new Map();
+      for (const r of rows) {
+        const k = String(r.technician_id);
+        m.set(k, r);
+        if (!firstCol.has(k)) { firstCol.set(k, c); names.set(k, (r.technicians && r.technicians.name) || ''); }
+      }
+      maps.push(m);
+    }
+    weekRowMaps.push(maps);
+    weekLanes.push([...firstCol.keys()].sort((x, y) => firstCol.get(x) - firstCol.get(y) || names.get(x).localeCompare(names.get(y))));
+  }
+
+  // Two consecutive days join into one bar only if it is the same person,
+  // the same type and the same note.
+  const sameRun = (x, y) => !!x && !!y && (x.reason || 'other') === (y.reason || 'other') && (x.note || '') === (y.note || '');
+
+  let html = '<div class="grid-scroll"><div class="month-grid">';
+  for (const label of DOW_LABELS) html += `<div class="dow-header">${label}</div>`;
+
+  for (let i = 0; i < totalCells; i++) {
+    const { dayStr, dayNum, otherMonth } = cells[i];
+    const w = Math.floor(i / 7), col = i % 7;
+    const isToday = dayStr === todayStr;
+
+    let cellClass = 'day-cell' + (otherMonth ? ' other-month' : '') + (isToday ? ' is-today' : '');
+    html += `<div class="${cellClass}" data-day="${dayStr}"><div class="cell-date">${dayNum}</div>`;
+    const companyRows = companyByDay.get(dayStr) || [];
+    for (const row of companyRows) {
+      const titleAttr = `${row.label}${row.note ? ': ' + row.note : ''}`;
+      html += `<span class="company-banner" title="${escapeHtml(titleAttr)}">&#9733; ${escapeHtml(row.label)}</span>`;
+    }
+
+    const dispatcherInfo = currentDispatcherByDay.get(dayStr);
+    const dispatcherName = dispatcherInfo ? dispatcherInfo.name : '';
+    if (dispatcherName) {
+      html += `<span class="dispatcher-banner" title="On-call dispatcher: ${escapeHtml(dispatcherName)}">On-Call Dispatch: ${escapeHtml(dispatcherName)}</span>`;
+    }
+
+    const lanes = weekLanes[w];
+    const maps = weekRowMaps[w];
+    let lastLane = -1;
+    lanes.forEach((k, idx) => { if (maps[col].has(k)) lastLane = idx; });
+    for (let idx = 0; idx <= lastLane; idx++) {
+      const k = lanes[idx];
+      const row = maps[col].get(k);
+      if (!row) {
+        html += `<span class="day-block lane-spacer" aria-hidden="true">&nbsp;<span class="block-note">&nbsp;</span></span>`;
+        continue;
+      }
+      const reason = row.reason || 'other';
+      const label = REASON_LABEL[reason] || REASON_LABEL.other;
+      const joinPrev = col > 0 && sameRun(maps[col - 1].get(k), row);
+      const joinNext = col < 6 && sameRun(row, maps[col + 1].get(k));
+      const synced = row.bluefolder_appt_id ? '<span class="synced" title="Synced from BlueFolder">&#128279;</span>' : '';
+      const titleAttr = `${row.technicians.name} — ${label}${row.note ? ': ' + row.note : ''}`;
+      const cls = `day-block reason-${reason}${joinPrev ? ' join-prev' : ''}${joinNext ? ' join-next' : ''}`;
+      if (joinPrev) {
+        // Continuation of the bar from the previous day: no repeated text.
+        html += `<span class="${cls}" title="${escapeHtml(titleAttr)}">&nbsp;<span class="block-note">&nbsp;</span></span>`;
+      } else {
+        const noteHtml = `<span class="block-note">${row.note ? escapeHtml(row.note) : '&nbsp;'}</span>`;
+        html += `<span class="${cls}" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}${synced}${noteHtml}</span>`;
+      }
+    }
+
+    const onCallRows = onCallByDay.get(dayStr) || [];
+    for (const row of onCallRows) {
+      const titleAttr = `${row.technicians.name} — On-Call (${row.state})`;
+      html += `<span class="day-block reason-on_call" title="${escapeHtml(titleAttr)}">${escapeHtml(row.technicians.name)}<span class="block-note">On-Call (${escapeHtml(row.state)})</span></span>`;
+    }
+    html += `</div>`;
+  }
+  html += '</div></div>';
+  body.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = String(s ?? '');
+  return div.innerHTML;
+}
+
+// Navigation Events
+document.getElementById('prevBtn').addEventListener('click', () => { viewDate.setMonth(viewDate.getMonth() - 1); loadMonth(); });
+document.getElementById('nextBtn').addEventListener('click', () => { viewDate.setMonth(viewDate.getMonth() + 1); loadMonth(); });
+document.getElementById('todayBtn').addEventListener('click', () => { viewDate = new Date(); viewDate.setDate(1); loadMonth(); });
+document.getElementById('stateFilter').addEventListener('change', loadMonth);
+
+// Modal Controls
+const modal = document.getElementById('addModal');
+const addModalTitle = document.getElementById('addModalTitle');
+const addModalSubmitBtn = document.getElementById('addModalSubmitBtn');
+let editingAvailKey = null; // { technician_id, day } when editing, null when adding fresh
+
+function openAddModal(prefill) {
+  if (prefill) {
+    editingAvailKey = { technician_id: prefill.technician_id, day: prefill.day };
+    addModalTitle.textContent = 'Edit Entry';
+    addModalSubmitBtn.textContent = 'Update Entry';
+    document.getElementById('techSelect').value = prefill.technician_id;
+    document.getElementById('eventDate').value = prefill.day;
+    document.getElementById('eventReason').value = prefill.reason || 'other';
+    document.getElementById('eventNote').value = prefill.note || '';
+    // Editing is always a single (technician, day) entry, so no range controls.
+    document.getElementById('rangeRow').style.display = 'none';
+    document.getElementById('eventEndDate').value = '';
+    document.getElementById('rangeHint').textContent = '';
+  } else {
+    editingAvailKey = null;
+    addModalTitle.textContent = 'Schedule Time Off / Exception';
+    addModalSubmitBtn.textContent = 'Save Entry';
+    document.getElementById('eventDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('eventReason').value = 'vacation';
+    document.getElementById('eventNote').value = '';
+    document.getElementById('rangeRow').style.display = '';
+    document.getElementById('eventEndDate').value = '';
+    document.getElementById('eventEndDate').min = document.getElementById('eventDate').value;
+    document.getElementById('rangeHint').textContent = '';
+  }
+  modal.classList.add('active');
+}
+document.getElementById('openAddModalBtn').addEventListener('click', () => openAddModal(null));
+document.getElementById('closeModalBtn').addEventListener('click', () => modal.classList.remove('active'));
+
+// On-Call Modal
+const onCallModal = document.getElementById('onCallModal');
+const onCallModalTitle = document.getElementById('onCallModalTitle');
+const onCallModalSubmitBtn = document.getElementById('onCallModalSubmitBtn');
+let editingOnCallKey = null; // { state, day, technician_id } when editing, null when adding fresh
+
+function nextSaturdayISO() {
+  const d = new Date();
+  const offset = (6 - d.getDay() + 7) % 7; // days until next Saturday (0 if today is Saturday)
+  d.setDate(d.getDate() + offset);
+  return isoLocal(d);
+}
+
+let editingDispatcherDay = null; // Saturday being edited when changing a dispatcher, else null
+
+function currentOnCallRole() {
+  const checked = document.querySelector('input[name="onCallRole"]:checked');
+  return checked ? checked.value : 'tech';
+}
+
+// Technician and dispatcher entries live in different tables, so the form
+// switches fields by role. Hidden fields must not stay "required" or the
+// browser blocks the submit.
+function setOnCallRole(role) {
+  const isDisp = role === 'dispatcher';
+  document.getElementById('onCallTechFields').style.display = isDisp ? 'none' : '';
+  document.getElementById('onCallDispatcherFields').style.display = isDisp ? '' : 'none';
+  document.getElementById('onCallState').required = !isDisp;
+  document.getElementById('onCallTech').required = !isDisp;
+  document.getElementById('onCallDispatcher').required = isDisp;
+  const radio = document.querySelector(`input[name="onCallRole"][value="${role}"]`);
+  if (radio) radio.checked = true;
+}
+
+// Who can be picked: only people already on the Saturday schedule from
+// today onward (people outside the rotation are not on it for a reason).
+// Technicians are grouped with the covered state's rotation first. If the
+// schedule is empty (nothing loaded yet) the full lists are used so the
+// form never ends up with nobody to pick.
+async function loadOnCallPool() {
+  try {
+    const { data } = await sb.from('on_call_schedule')
+      .select('technician_id, state').gte('day', isoLocal(new Date()));
+    const m = new Map();
+    for (const r of (data || [])) {
+      const k = String(r.technician_id);
+      if (!m.has(k)) m.set(k, new Set());
+      m.get(k).add(r.state);
+    }
+    onCallPool = m;
+  } catch (err) { /* falls back to the full list */ }
+}
+
+async function loadDispatcherPoolIds() {
+  const ids = new Set();
+  try {
+    const until = new Date();
+    until.setDate(until.getDate() + 730);
+    const res = await fetch(`/.netlify/functions/get-dispatcher-on-call?since=${isoLocal(new Date())}&until=${isoLocal(until)}`);
+    if (res.ok) {
+      const data = await res.json();
+      for (const e of (data.entries || [])) if (e.dispatcherId) ids.add(String(e.dispatcherId));
+    }
+  } catch (err) { /* falls back to the full list */ }
+  return ids;
+}
+
+function rebuildDispatcherOptions(poolIds, keepId) {
+  const sel = document.getElementById('onCallDispatcher');
+  const keep = keepId != null ? String(keepId) : sel.value;
+  let list = allDispatchers.filter((d) => poolIds.has(String(d.id)) || String(d.id) === keep);
+  if (list.length === 0) list = allDispatchers.slice();
+  sel.innerHTML = '';
+  for (const d of list) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = dispatcherDisplayName(d.username);
+    sel.appendChild(opt);
+  }
+  if (list.some((d) => String(d.id) === keep)) sel.value = keep;
+}
+
+// Technician choices are scoped to the state being covered: only people on
+// that state's Saturday rotation (from today onward). A fill-in from another
+// state is not offered, since the drive would not meet the SLA. If the state
+// has nobody scheduled yet, fall back to technicians whose home state matches.
+function rebuildOnCallTechOptions(opts) {
+  const { keepId = null, excludeId = null, placeholder = false } = opts || {};
+  const sel = document.getElementById('onCallTech');
+  const state = document.getElementById('onCallState').value;
+  const keep = keepId != null ? String(keepId) : sel.value;
+  const exclude = excludeId != null ? String(excludeId) : null;
+  const label = (t) => `${t.name}${t.home_state ? ' (' + t.home_state + ')' : ''}`;
+
+  let pool = allTechs.filter((t) => { const st = onCallPool.get(String(t.id)); return !!st && st.has(state); });
+  if (pool.length === 0) pool = allTechs.filter((t) => t.home_state === state);
+  // Editing an existing entry: always keep its current technician selectable.
+  if (keepId != null && !pool.some((t) => String(t.id) === keep)) {
+    const t = allTechs.find((x) => String(x.id) === keep);
+    if (t) pool.push(t);
+  }
+  if (exclude) pool = pool.filter((t) => String(t.id) !== exclude);
+  // Someone already on call for this state and Saturday is never offered
+  // again (the one being edited stays selectable).
+  pool = pool.filter((t) => !onCallExisting.includes(String(t.id)) || (keepId != null && String(t.id) === keep));
+
+  sel.innerHTML = '';
+  if (placeholder) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = pool.length ? 'Select a technician…' : 'No other technicians on this state\'s rotation';
+    sel.appendChild(o);
+  }
+  for (const t of pool) {
+    const o = document.createElement('option');
+    o.value = t.id;
+    o.textContent = label(t);
+    o.dataset.base = o.textContent;
+    sel.appendChild(o);
+  }
+  if (placeholder) sel.value = '';
+  else if (pool.some((t) => String(t.id) === keep)) sel.value = keep;
+}
+
+async function openOnCallModal(prefill) {
+  const roleRow = document.getElementById('onCallRoleRow');
+  editingOnCallKey = null;
+  editingDispatcherDay = null;
+  onCallReplaceMode = false;
+  let afterPools = null;
+  if (prefill && prefill.role === 'dispatcher') {
+    editingDispatcherDay = prefill.day;
+    roleRow.style.display = 'none';
+    setOnCallRole('dispatcher');
+    onCallModalTitle.textContent = 'Change On-Call Dispatcher';
+    onCallModalSubmitBtn.textContent = 'Update Dispatcher';
+    document.getElementById('onCallDate').value = prefill.day;
+    afterPools = (ids) => rebuildDispatcherOptions(ids, prefill.dispatcher_id);
+  } else if (prefill) {
+    editingOnCallKey = { state: prefill.state, day: prefill.day, technician_id: prefill.technician_id };
+    onCallReplaceMode = !!prefill.replace;
+    roleRow.style.display = 'none';
+    setOnCallRole('tech');
+    onCallModalTitle.textContent = prefill.replace ? 'Choose Replacement' : 'Edit On-Call';
+    onCallModalSubmitBtn.textContent = prefill.replace ? 'Save Replacement' : 'Update On-Call';
+    document.getElementById('onCallState').value = prefill.state;
+    document.getElementById('onCallDate').value = prefill.day;
+    afterPools = null;
+  } else {
+    roleRow.style.display = '';
+    setOnCallRole('tech');
+    onCallModalTitle.textContent = 'Set Saturday On-Call';
+    onCallModalSubmitBtn.textContent = 'Save On-Call';
+    document.getElementById('onCallDate').value = nextSaturdayISO();
+    afterPools = null;
+  }
+  onCallModal.classList.add('active');
+
+  // Load who is actually on the rotation, then fill the dropdowns.
+  const [, dispatcherIds] = await Promise.all([loadOnCallPool(), loadDispatcherPoolIds()]);
+  if (prefill && prefill.role === 'dispatcher') {
+    afterPools(dispatcherIds);
+  } else {
+    rebuildDispatcherOptions(dispatcherIds, null);
+    await refreshOnCallExisting();
+  }
+  refreshOnCallAvailabilityMarks();
+}
+
+// When the chosen state + Saturday already has people on call, a "Replacing"
+// dropdown appears (preselected when there is only one) and saving swaps them
+// out by default. Choosing "add as an additional technician" in that dropdown
+// adds the new person without removing anyone, so the headcount only grows on
+// purpose. An empty Saturday is simply filled.
+async function refreshOnCallExisting() {
+  const state = document.getElementById('onCallState').value;
+  const day = document.getElementById('onCallDate').value;
+  let ids = [];
+  if (state && day) {
+    try {
+      const { data } = await sb.from('on_call_schedule').select('technician_id').eq('state', state).eq('day', day);
+      ids = (data || []).map((r) => String(r.technician_id));
+    } catch (err) { ids = []; }
+  }
+  onCallExisting = ids;
+
+  const editingPlain = !!editingOnCallKey && !onCallReplaceMode;
+  rebuildOnCallTechOptions(editingPlain ? { keepId: editingOnCallKey.technician_id } : { placeholder: true });
+
+  const row = document.getElementById('onCallReplacingRow');
+  const rsel = document.getElementById('onCallReplacing');
+  if (!editingOnCallKey && ids.length > 0) {
+    rsel.innerHTML = '';
+    if (ids.length > 1) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = 'Who is being replaced?';
+      rsel.appendChild(ph);
+    }
+    for (const id of ids) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = techNameById.get(id) || 'Technician';
+      rsel.appendChild(o);
+    }
+    // Explicit opt-in to add another technician without removing anyone.
+    const addOpt = document.createElement('option');
+    addOpt.value = '__add__';
+    addOpt.textContent = '— Nobody: add as an additional technician —';
+    rsel.appendChild(addOpt);
+    rsel.value = ids.length === 1 ? ids[0] : '';
+    rsel.required = true;
+    row.style.display = '';
+  } else {
+    rsel.innerHTML = '';
+    rsel.required = false;
+    row.style.display = 'none';
+  }
+  refreshOnCallAvailabilityMarks();
+}
+
+document.getElementById('onCallState').addEventListener('change', refreshOnCallExisting);
+
+// Tag technicians who are marked out on the chosen Saturday, right in the
+// dropdown, so nobody picks a replacement who is also away.
+async function refreshOnCallAvailabilityMarks() {
+  const sel = document.getElementById('onCallTech');
+  const day = document.getElementById('onCallDate').value;
+  const outById = new Map();
+  if (day) {
+    try {
+      const { data } = await sb.from('technician_availability')
+        .select('technician_id, reason').eq('day', day).eq('available', false);
+      for (const r of (data || [])) {
+        const reason = r.reason || 'other';
+        if (TIME_OFF_REASONS.has(reason)) outById.set(String(r.technician_id), reason);
+      }
+    } catch (err) { /* marks are optional */ }
+  }
+  for (const opt of sel.options) {
+    const base = opt.dataset.base || opt.textContent;
+    const reason = outById.get(String(opt.value));
+    opt.textContent = reason ? `${base} [OUT: ${REASON_LABEL[reason] || 'Out'}]` : base;
+  }
+}
+
+async function getTimeOffReason(technician_id, day) {
+  try {
+    const { data } = await sb.from('technician_availability')
+      .select('reason').eq('technician_id', technician_id).eq('day', day).eq('available', false).limit(1);
+    const r = (data || [])[0];
+    const reason = r ? (r.reason || 'other') : null;
+    return reason && TIME_OFF_REASONS.has(reason) ? reason : null;
+  } catch (err) { return null; }
+}
+
+document.querySelectorAll('input[name="onCallRole"]').forEach((r) => {
+  r.addEventListener('change', () => { setOnCallRole(currentOnCallRole()); refreshOnCallAvailabilityMarks(); });
+});
+document.getElementById('onCallDate').addEventListener('change', refreshOnCallExisting);
+
+document.getElementById('openOnCallModalBtn').addEventListener('click', () => openOnCallModal(null));
+document.getElementById('closeOnCallBtn').addEventListener('click', () => { onCallModal.classList.remove('active'); onCallReplaceMode = false; reshowPendingConflicts(); });
+
+// Company Event Modal
+const companyEventModal = document.getElementById('companyEventModal');
+const companyEventModalTitle = document.getElementById('companyEventModalTitle');
+const companyEventModalSubmitBtn = document.getElementById('companyEventModalSubmitBtn');
+let editingCompanyEventId = null; // set when editing, null when adding fresh
+
+function openCompanyEventModal(prefill) {
+  if (prefill) {
+    editingCompanyEventId = prefill.id;
+    companyEventModalTitle.textContent = 'Edit Company Event';
+    companyEventModalSubmitBtn.textContent = 'Update Event';
+    document.getElementById('companyEventDate').value = prefill.day;
+    document.getElementById('companyEventLabel').value = prefill.label || '';
+    document.getElementById('companyEventNote').value = prefill.note || '';
+  } else {
+    editingCompanyEventId = null;
+    companyEventModalTitle.textContent = 'Add Company Event';
+    companyEventModalSubmitBtn.textContent = 'Save Event';
+    document.getElementById('companyEventDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('companyEventLabel').value = '';
+    document.getElementById('companyEventNote').value = '';
+  }
+  companyEventModal.classList.add('active');
+}
+document.getElementById('openCompanyEventModalBtn').addEventListener('click', () => openCompanyEventModal(null));
+document.getElementById('closeCompanyEventModalBtn').addEventListener('click', () => companyEventModal.classList.remove('active'));
+companyEventModal.addEventListener('click', (e) => { if (e.target === companyEventModal) companyEventModal.classList.remove('active'); });
+
+// On-call vs. time-off conflicts. When someone is marked out on a Saturday
+// they are scheduled on call, a toast lists the conflict(s) with a button
+// that opens the On-Call form to pick a replacement for that Saturday and
+// state. Conflicts waiting while the form is open are re-shown afterwards.
+let pendingConflicts = [];
+const conflictToast = document.getElementById('conflictToast');
+
+function fmtShortDay(dayStr) {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function renderConflictToast() {
+  if (!pendingConflicts.length) { conflictToast.style.display = 'none'; conflictToast.innerHTML = ''; return; }
+  const items = pendingConflicts.map((c, i) => `
+    <div class="conflict-item">
+      <div>${escapeHtml(c.name)} is out on ${escapeHtml(fmtShortDay(c.day))} but is on call for ${escapeHtml(c.state)}.</div>
+      <button type="button" class="btn-primary" data-conflict-idx="${i}">Choose replacement</button>
+    </div>`).join('');
+  conflictToast.innerHTML = `<div class="conflict-title">&#9888; On-call conflict</div>${items}
+    <div class="conflict-actions"><button type="button" class="btn-cancel" data-conflict-dismiss>Dismiss</button></div>`;
+  conflictToast.style.display = 'block';
+}
+
+function showConflictToast(conflicts) {
+  pendingConflicts = conflicts.slice();
+  renderConflictToast();
+}
+
+function reshowPendingConflicts() {
+  if (pendingConflicts.length) renderConflictToast();
+}
+
+conflictToast.addEventListener('click', (e) => {
+  if (e.target.closest('[data-conflict-dismiss]')) { pendingConflicts = []; renderConflictToast(); return; }
+  const btn = e.target.closest('[data-conflict-idx]');
+  if (!btn) return;
+  const c = pendingConflicts.splice(Number(btn.dataset.conflictIdx), 1)[0];
+  if (!c) return;
+  conflictToast.style.display = 'none';
+  openOnCallModal({ state: c.state, day: c.day, technician_id: c.technician_id, replace: true });
+});
+
+async function findOnCallConflicts(technician_id, days) {
+  if (!days || !days.length) return [];
+  try {
+    const { data, error } = await sb.from('on_call_schedule')
+      .select('state, day, technician_id').eq('technician_id', technician_id).in('day', days).order('day', { ascending: true });
+    if (error || !data) return [];
+    return data.map((r) => ({
+      technician_id: r.technician_id,
+      name: techNameById.get(String(r.technician_id)) || 'This technician',
+      state: r.state,
+      day: r.day
+    }));
+  } catch (err) { return []; }
+}
+
+async function maybeWarnOnCallConflicts(technician_id, reason, days) {
+  if (!TIME_OFF_REASONS.has(reason || 'other')) return;
+  const conflicts = await findOnCallConflicts(technician_id, days);
+  if (conflicts.length) showConflictToast(conflicts);
+}
+
+// Comp day for a replacement. Technicians covering a Saturday take a comp
+// day earlier in that same work week (Mon-Fri before it) so the week stays
+// at 40 hours. When a different technician takes over a Saturday, offer them
+// a comp day in that window, defaulting to the one the replaced technician
+// already had. Skipped if the new technician already has a comp day that week.
+// (Kept out of the visible text on purpose -- the reason lives here.)
+const compDayModal = document.getElementById('compDayModal');
+let compDayCtx = null;
+
+async function promptCompDay(newTechId, oldTechId, satDay, state) {
+  // Every state, including Georgia, records the comp day on the calendar.
+  // Monday before the on-call Saturday is only the suggestion. Robert Medley
+  // is suggested Thursday. Either can be changed, or skipped.
+  const [y, m, d] = satDay.split('-').map(Number);
+  if (new Date(y, m - 1, d).getDay() !== 6) return false;
+  const days = [];
+  for (let i = 5; i >= 1; i--) days.push(isoLocal(new Date(y, m - 1, d - i)));
+
+  let rows = [];
+  try {
+    const { data } = await sb.from('technician_availability')
+      .select('technician_id, day, reason')
+      .in('technician_id', [newTechId, oldTechId])
+      .gte('day', days[0]).lte('day', days[days.length - 1])
+      .eq('available', false);
+    rows = data || [];
+  } catch (err) { rows = []; }
+
+  const newRows = rows.filter((r) => String(r.technician_id) === String(newTechId));
+  if (newRows.some((r) => r.reason === 'comp_day')) return false;
+  const oldComp = rows.find((r) => String(r.technician_id) === String(oldTechId) && r.reason === 'comp_day');
+  const outByDay = new Map();
+  for (const r of newRows) if (TIME_OFF_REASONS.has(r.reason || 'other')) outByDay.set(r.day, r.reason || 'other');
+
+  const sel = document.getElementById('compDaySelect');
+  sel.innerHTML = '<option value="">Choose a day…</option>';
+  for (const day of days) {
+    const opt = document.createElement('option');
+    opt.value = day;
+    const out = outByDay.get(day);
+    opt.textContent = fmtShortDay(day) + (out ? ` [already out: ${REASON_LABEL[out] || 'Out'}]` : '');
+    if (out) opt.disabled = true;
+    sel.appendChild(opt);
+  }
+  const name = techNameById.get(String(newTechId)) || '';
+  const suggestedOffset = /robert medley/i.test(name) ? 2 : 5;
+  const usual = isoLocal(new Date(y, m - 1, d - suggestedOffset));
+  let suggested = oldComp && !outByDay.has(oldComp.day) ? oldComp.day : usual;
+  if (outByDay.has(suggested)) suggested = '';
+  sel.value = suggested;
+
+  const displayName = name || techNameById.get(String(newTechId)) || 'The new technician';
+  document.getElementById('compDayTitle').textContent = 'Comp Day';
+  document.getElementById('compDayBody').textContent =
+    `${displayName} is on call for ${state} on ${fmtShortDay(satDay)}. The usual day is already applied to every other week from the on-call row. Pick a day only if this week is different.` +
+    (suggested ? ` Suggested: ${fmtShortDay(suggested)}.` : '');
+  compDayCtx = { technician_id: newTechId };
+  compDayModal.classList.add('active');
+  return true;
+}
+
+document.getElementById('compDaySkipBtn').addEventListener('click', () => {
+  compDayModal.classList.remove('active');
+  compDayCtx = null;
+  reshowPendingConflicts();
+});
+document.getElementById('compDaySaveBtn').addEventListener('click', async () => {
+  const day = document.getElementById('compDaySelect').value;
+  const thisWeekOnly = document.getElementById('compDayThisWeekOnly');
+  if (!day) { alert('Choose a day, or press Skip.'); return; }
+  if (thisWeekOnly && !thisWeekOnly.checked) {
+    alert('Leave "This week only" checked. A different standing day is not saved from here — replace the Saturday on-call person to change every future week, or leave Robert Medley on the rotation for the Thursday rule.');
+    return;
+  }
+  const btn = document.getElementById('compDaySaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/.netlify/functions/save-tech-availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ technician_id: compDayCtx.technician_id, day, reason: 'comp_day', note: '' })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    compDayModal.classList.remove('active');
+    compDayCtx = null;
+    loadMonth();
+    reshowPendingConflicts();
+  } catch (err) {
+    alert('Error saving comp day: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Add Comp Day';
+  }
+});
+
+// Day Detail Modal -- clicking a day cell (not the "+ Add Entry" blocks
+// themselves) opens a bigger view of just that day, since the inline
+// cards on a busy day don't have room to show every note in full.
+const dayDetailModal = document.getElementById('dayDetailModal');
+const dayDetailTitle = document.getElementById('dayDetailTitle');
+const dayDetailList = document.getElementById('dayDetailList');
+
+function formatDayHeading(dayStr) {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function openDayDetail(dayStr) {
+  const rows = currentByDay.get(dayStr) || [];
+  const onCallRows = currentOnCallByDay.get(dayStr) || [];
+  const companyRows = currentCompanyByDay.get(dayStr) || [];
+  const dispatcherInfo = currentDispatcherByDay.get(dayStr) || null;
+  const dispatcherName = dispatcherInfo ? dispatcherInfo.name : '';
+  dayDetailTitle.textContent = formatDayHeading(dayStr);
+  dayDetailList.dataset.day = dayStr;
+
+  if (rows.length === 0 && onCallRows.length === 0 && companyRows.length === 0 && !dispatcherName) {
+    dayDetailList.innerHTML = '<div class="day-detail-empty">No entries for this day.</div>';
+  } else {
+    const companyHtml = companyRows.map((row) => {
+      const noteHtml = row.note ? `<div class="entry-note">${escapeHtml(row.note)}</div>` : '';
+      const pushControl = row.bluefolder_appt_id
+        ? `<span class="synced" title="Synced to BlueFolder (appt #${escapeHtml(row.bluefolder_appt_id)})">&#128279; Synced to BlueFolder</span>`
+        : `<button type="button" class="entry-remove" data-company-push data-id="${escapeHtml(row.id)}">
+            Push to BlueFolder
+          </button>`;
+      return `<div class="day-detail-entry company-event">
+        <div class="entry-name">&#9733; ${escapeHtml(row.label)}</div>
+        <div class="entry-type">Company Event</div>
+        ${noteHtml}
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          ${pushControl}
+          <button type="button" class="entry-remove" data-company-edit data-id="${escapeHtml(row.id)}">
+            Edit
+          </button>
+          <button type="button" class="entry-remove" data-company-remove data-id="${escapeHtml(row.id)}">
+            Remove
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+
+    const availabilityHtml = rows.map((row) => {
+      const reason = row.reason || 'other';
+      const label = REASON_LABEL[reason] || REASON_LABEL.other;
+      const noteHtml = row.note ? `<div class="entry-note">${escapeHtml(row.note)}</div>` : '';
+      const pushControl = row.bluefolder_appt_id
+        ? `<span class="synced" title="Synced to BlueFolder (appt #${escapeHtml(row.bluefolder_appt_id)})">&#128279; Synced to BlueFolder</span>`
+        : `<button type="button" class="entry-remove" data-avail-push
+            data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
+            Push to BlueFolder
+          </button>`;
+      return `<div class="day-detail-entry reason-${reason}">
+        <div class="entry-name">${escapeHtml(row.technicians.name)}</div>
+        <div class="entry-type">${escapeHtml(label)}</div>
+        ${noteHtml}
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          ${pushControl}
+          <button type="button" class="entry-remove" data-avail-edit
+            data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
+            Edit
+          </button>
+          <button type="button" class="entry-remove" data-avail-remove
+            data-tech="${escapeHtml(row.technician_id)}" data-day="${escapeHtml(row.day)}">
+            Remove
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+
+    const onCallHtml = onCallRows.map((row) => {
+      const pushControl = row.bluefolder_appt_id
+        ? `<span class="synced" title="Synced to BlueFolder (appt #${escapeHtml(row.bluefolder_appt_id)})">&#128279; Synced to BlueFolder</span>`
+        : `<button type="button" class="entry-remove" data-oncall-push
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+            Push to BlueFolder
+          </button>`;
+      return `<div class="day-detail-entry reason-on_call">
+        <div class="entry-name">${escapeHtml(row.technicians.name)}</div>
+        <div class="entry-type">On-Call (${escapeHtml(row.state)})</div>
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+          ${pushControl}
+          <button type="button" class="entry-remove" data-oncall-edit
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}">
+            Edit
+          </button>
+          <button type="button" class="entry-remove" data-oncall-remove
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}" data-name="${escapeHtml(row.technicians.name)}">
+            Remove
+          </button>
+          <button type="button" class="entry-remove" data-oncall-remove-future
+            data-state="${escapeHtml(row.state)}" data-day="${escapeHtml(row.day)}" data-tech="${escapeHtml(row.technician_id)}" data-name="${escapeHtml(row.technicians.name)}">
+            All future Saturdays
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+
+    const dispatcherHtml = dispatcherName
+      ? `<div class="day-detail-entry dispatcher-entry">
+          <div class="entry-name">${escapeHtml(dispatcherName)}</div>
+          <div class="entry-type">On-Call Dispatcher (all Saturday states)</div>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="entry-remove" data-disp-edit data-day="${escapeHtml(dayStr)}">Edit</button>
+            <button type="button" class="entry-remove" data-disp-remove data-day="${escapeHtml(dayStr)}">Remove</button>
+          </div>
+        </div>`
+      : '';
+
+    dayDetailList.innerHTML = companyHtml + dispatcherHtml + availabilityHtml + onCallHtml;
+  }
+  dayDetailModal.classList.add('active');
+}
+
+dayDetailList.addEventListener('click', async (e) => {
+  const dispEditBtn = e.target.closest('[data-disp-edit]');
+  if (dispEditBtn) {
+    const day = dispEditBtn.dataset.day;
+    const info = currentDispatcherByDay.get(day);
+    if (!info) { alert('Could not find that dispatcher entry.'); return; }
+    dayDetailModal.classList.remove('active');
+    openOnCallModal({ role: 'dispatcher', day, dispatcher_id: info.id });
+    return;
+  }
+
+  const dispRemoveBtn = e.target.closest('[data-disp-remove]');
+  if (dispRemoveBtn) {
+    const day = dispRemoveBtn.dataset.day;
+    if (!confirm('Remove the on-call dispatcher for this Saturday?')) return;
+    dispRemoveBtn.disabled = true;
+    dispRemoveBtn.textContent = 'Removing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-dispatcher-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day, action: 'delete' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error removing dispatcher: ' + err.message);
+      dispRemoveBtn.disabled = false;
+      dispRemoveBtn.textContent = 'Remove';
+    }
+    return;
+  }
+
+  const companyEditBtn = e.target.closest('[data-company-edit]');
+  if (companyEditBtn) {
+    const { id } = companyEditBtn.dataset;
+    let row = null;
+    for (const list of currentCompanyByDay.values()) {
+      const found = list.find(r => String(r.id) === id);
+      if (found) { row = found; break; }
+    }
+    if (!row) { alert('Could not find that entry to edit.'); return; }
+    dayDetailModal.classList.remove('active');
+    openCompanyEventModal(row);
+    return;
+  }
+
+  const companyPushBtn = e.target.closest('[data-company-push]');
+  if (companyPushBtn) {
+    const { id } = companyPushBtn.dataset;
+    companyPushBtn.disabled = true;
+    companyPushBtn.textContent = 'Pushing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-company-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'push' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      const day = dayDetailList.dataset.day;
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error pushing to BlueFolder: ' + err.message);
+      companyPushBtn.disabled = false;
+      companyPushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
+  const companyRemoveBtn = e.target.closest('[data-company-remove]');
+  if (companyRemoveBtn) {
+    const { id } = companyRemoveBtn.dataset;
+    if (!confirm('Remove this company event?')) return;
+    companyRemoveBtn.disabled = true;
+    companyRemoveBtn.textContent = 'Removing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-company-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'delete' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      const day = dayDetailList.dataset.day;
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error removing entry: ' + err.message);
+      companyRemoveBtn.disabled = false;
+      companyRemoveBtn.textContent = 'Remove';
+    }
+    return;
+  }
+
+  const availEditBtn = e.target.closest('[data-avail-edit]');
+  if (availEditBtn) {
+    const { tech, day } = availEditBtn.dataset;
+    const row = (currentByDay.get(day) || []).find(r => String(r.technician_id) === tech);
+    if (!row) { alert('Could not find that entry to edit.'); return; }
+    dayDetailModal.classList.remove('active');
+    openAddModal({ technician_id: row.technician_id, day: row.day, reason: row.reason, note: row.note });
+    return;
+  }
+
+  const onCallEditBtn = e.target.closest('[data-oncall-edit]');
+  if (onCallEditBtn) {
+    const { state, day, tech } = onCallEditBtn.dataset;
+    const row = (currentOnCallByDay.get(day) || []).find(r => r.state === state && String(r.technician_id) === tech);
+    if (!row) { alert('Could not find that on-call entry to edit.'); return; }
+    dayDetailModal.classList.remove('active');
+    openOnCallModal({ state: row.state, day: row.day, technician_id: row.technician_id });
+    return;
+  }
+
+  const availPushBtn = e.target.closest('[data-avail-push]');
+  if (availPushBtn) {
+    const { tech, day } = availPushBtn.dataset;
+    availPushBtn.disabled = true;
+    availPushBtn.textContent = 'Pushing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id: tech, day, action: 'push' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error pushing to BlueFolder: ' + err.message);
+      availPushBtn.disabled = false;
+      availPushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
+  const availRemoveBtn = e.target.closest('[data-avail-remove]');
+  if (availRemoveBtn) {
+    const { tech, day } = availRemoveBtn.dataset;
+    if (!confirm('Remove this entry?')) return;
+    availRemoveBtn.disabled = true;
+    availRemoveBtn.textContent = 'Removing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id: tech, day, action: 'delete' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error removing entry: ' + err.message);
+      availRemoveBtn.disabled = false;
+      availRemoveBtn.textContent = 'Remove';
+    }
+    return;
+  }
+
+  const pushBtn = e.target.closest('[data-oncall-push]');
+  if (pushBtn) {
+    const { state, day, tech } = pushBtn.dataset;
+    pushBtn.disabled = true;
+    pushBtn.textContent = 'Pushing…';
+    try {
+      const res = await fetch('/.netlify/functions/save-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, day, technician_id: tech, action: 'push' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      await loadMonth();
+      openDayDetail(day);
+    } catch (err) {
+      alert('Error pushing to BlueFolder: ' + err.message);
+      pushBtn.disabled = false;
+      pushBtn.textContent = 'Push to BlueFolder';
+    }
+    return;
+  }
+
+  const futureBtn = e.target.closest('[data-oncall-remove-future]');
+  if (futureBtn) {
+    const { state, day, tech, name } = futureBtn.dataset;
+    if (!confirm('Remove ' + (name || 'this technician') + ' from ' + day + ' and every later on-call Saturday? This week and future weeks only. A one-week comp day already on the calendar is left as-is.')) return;
+    futureBtn.disabled = true;
+    futureBtn.textContent = 'Removing…';
+    try {
+      const { data, error } = await sb.from('on_call_schedule')
+        .select('state, day, technician_id')
+        .eq('technician_id', tech)
+        .gte('day', day)
+        .order('day', { ascending: true });
+      if (error) throw new Error(error.message);
+      const rows = data || [];
+      if (!rows.length) throw new Error('No on-call rows from this Saturday forward.');
+      for (const row of rows) {
+        const res = await fetch('/.netlify/functions/save-on-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: row.state, day: row.day, technician_id: row.technician_id, action: 'delete' })
+        });
+        const body = await res.json();
+        if (!res.ok || !body.ok) throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      await loadMonth();
+      openDayDetail(day);
+      alert('Removed ' + rows.length + ' on-call assignment' + (rows.length === 1 ? '' : 's') + '.');
+    } catch (err) {
+      alert('Error removing future on-call entries: ' + err.message);
+      futureBtn.disabled = false;
+      futureBtn.textContent = 'Remove from all future Saturdays';
+    }
+    return;
+  }
+
+  const btn = e.target.closest('[data-oncall-remove]');
+  if (!btn) return;
+  const { state, day, tech } = btn.dataset;
+  if (!confirm('Remove this on-call assignment?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+  try {
+    const res = await fetch('/.netlify/functions/save-on-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, day, technician_id: tech, action: 'delete' })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    await loadMonth();
+    openDayDetail(day);
+  } catch (err) {
+    alert('Error removing on-call entry: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Remove';
+  }
+});
+
+document.getElementById('calendarBody').addEventListener('click', (e) => {
+  const cell = e.target.closest('.day-cell');
+  if (cell && cell.dataset.day) openDayDetail(cell.dataset.day);
+});
+document.getElementById('closeDayDetailBtn').addEventListener('click', () => dayDetailModal.classList.remove('active'));
+dayDetailModal.addEventListener('click', (e) => { if (e.target === dayDetailModal) dayDetailModal.classList.remove('active'); });
+
+// Date-range entry -- lets a vacation be entered once as "from / through"
+// instead of one day at a time. There is no bulk endpoint, so this simply
+// calls save-tech-availability once per day (the same call a single-day
+// entry makes). (technician_id, day) is the row's identity, so re-saving a
+// day that already exists just updates it, which makes a retry after a
+// partial failure safe.
+const MAX_RANGE_DAYS = 62;
+
+function buildDayList(startStr, endStr, skipWeekends) {
+  const [sy, sm, sd] = startStr.split('-').map(Number);
+  const [ey, em, ed] = endStr.split('-').map(Number);
+  const end = new Date(ey, em - 1, ed);
+  const days = [];
+  for (let d = new Date(sy, sm - 1, sd); d <= end; d.setDate(d.getDate() + 1)) {
+    if (skipWeekends && (d.getDay() === 0 || d.getDay() === 6)) continue;
+    days.push(isoLocal(d));
+  }
+  return days;
+}
+
+function rangeSpanDays(startStr, endStr) {
+  const [sy, sm, sd] = startStr.split('-').map(Number);
+  const [ey, em, ed] = endStr.split('-').map(Number);
+  return Math.round((new Date(ey, em - 1, ed) - new Date(sy, sm - 1, sd)) / 86400000) + 1;
+}
+
+function updateRangeHint() {
+  const hint = document.getElementById('rangeHint');
+  const start = document.getElementById('eventDate').value;
+  const end = document.getElementById('eventEndDate').value;
+  hint.classList.remove('warn');
+  if (editingAvailKey || !start || !end || end === start) { hint.textContent = ''; return; }
+  if (end < start) { hint.textContent = 'The end date is before the start date.'; hint.classList.add('warn'); return; }
+  if (rangeSpanDays(start, end) > MAX_RANGE_DAYS) {
+    hint.textContent = `Range is too long (${MAX_RANGE_DAYS} days max).`; hint.classList.add('warn'); return;
+  }
+  const n = buildDayList(start, end, document.getElementById('skipWeekends').checked).length;
+  hint.textContent = n === 0 ? 'No weekdays in that range.' : `${n} day${n === 1 ? '' : 's'} will be added.`;
+  if (n === 0) hint.classList.add('warn');
+}
+
+document.getElementById('eventDate').addEventListener('change', () => {
+  const start = document.getElementById('eventDate').value;
+  const endEl = document.getElementById('eventEndDate');
+  endEl.min = start;
+  if (endEl.value && endEl.value < start) endEl.value = '';
+  updateRangeHint();
+});
+document.getElementById('eventEndDate').addEventListener('change', updateRangeHint);
+document.getElementById('skipWeekends').addEventListener('change', updateRangeHint);
+
+async function saveAvailabilityRange(technician_id, startDay, endDay, reason, note) {
+  if (endDay < startDay) { alert('The end date is before the start date.'); return; }
+  if (rangeSpanDays(startDay, endDay) > MAX_RANGE_DAYS) {
+    alert(`Please pick a range of ${MAX_RANGE_DAYS} days or less.`); return;
+  }
+  const days = buildDayList(startDay, endDay, document.getElementById('skipWeekends').checked);
+  if (days.length === 0) { alert('There are no weekdays in that range.'); return; }
+
+  const techName = document.getElementById('techSelect').selectedOptions[0]?.textContent || 'this technician';
+  if (!confirm(`Add ${days.length} ${days.length === 1 ? 'entry' : 'entries'} for ${techName} (${startDay} through ${endDay})?`)) return;
+
+  const submitBtn = addModalSubmitBtn;
+  const originalLabel = submitBtn.textContent;
+  submitBtn.disabled = true;
+  const failed = [];
+  const failedDays = new Set();
+  for (let i = 0; i < days.length; i++) {
+    submitBtn.textContent = `Saving ${i + 1} of ${days.length}…`;
+    try {
+      const res = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id, day: days[i], reason, note })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    } catch (err) {
+      failed.push(`${days[i]}: ${err.message}`);
+      failedDays.add(days[i]);
+    }
+  }
+  submitBtn.disabled = false;
+  submitBtn.textContent = originalLabel;
+
+  const savedDays = days.filter((d) => !failedDays.has(d));
+  if (failed.length === 0) {
+    modal.classList.remove('active');
+    document.getElementById('eventNote').value = '';
+    document.getElementById('eventEndDate').value = '';
+    document.getElementById('rangeHint').textContent = '';
+    loadMonth();
+    maybeWarnOnCallConflicts(technician_id, reason, savedDays);
+  } else {
+    // Leave the form open so Save can simply be pressed again; days that
+    // already saved are just re-saved in place.
+    alert(`Saved ${days.length - failed.length} of ${days.length}. These failed:\n` + failed.join('\n'));
+    loadMonth();
+    maybeWarnOnCallConflicts(technician_id, reason, savedDays);
+  }
+}
+
+// Form Submission -- goes through save-tech-availability.js (service-role
+// key, server-side) rather than a direct client-side insert. The direct
+// insert can't work: technician_availability's write RLS policy requires
+// an authenticated admin/dispatcher session, and this page only ever has
+// the anon key with no login step -- every insert attempt would hit a
+// permissions error. Reads (loadMonth, loadStatesAndTechs) are unaffected
+// and stay as direct Supabase calls -- anon SELECT is explicitly allowed
+// by RLS on both tables, so there's nothing to fix there.
+document.getElementById('addAvailabilityForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const technician_id = document.getElementById('techSelect').value;
+  const day = document.getElementById('eventDate').value;
+  const reason = document.getElementById('eventReason').value;
+  const note = document.getElementById('eventNote').value;
+  const endDay = document.getElementById('eventEndDate').value;
+
+  if (!editingAvailKey && endDay && endDay !== day) {
+    await saveAvailabilityRange(technician_id, day, endDay, reason, note);
+    return;
+  }
+
+  try {
+    // Editing, and the technician or date changed -- (technician_id, day) is
+    // the row's identity, so this isn't an in-place update, it's a move.
+    // Delete the old row first (which also cancels its BlueFolder
+    // appointment if it had one) so nothing's left behind at the old slot,
+    // then create fresh at the new slot.
+    if (editingAvailKey && (String(editingAvailKey.technician_id) !== String(technician_id) || editingAvailKey.day !== day)) {
+      const delRes = await fetch('/.netlify/functions/save-tech-availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ technician_id: editingAvailKey.technician_id, day: editingAvailKey.day, action: 'delete' })
+      });
+      const delData = await delRes.json();
+      if (!delRes.ok || !delData.ok) throw new Error('Could not move old entry: ' + (delData.error || ('HTTP ' + delRes.status)));
+    }
+
+    const res = await fetch('/.netlify/functions/save-tech-availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ technician_id, day, reason, note })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    modal.classList.remove('active');
+    document.getElementById('eventNote').value = '';
+    editingAvailKey = null;
+    loadMonth();
+    maybeWarnOnCallConflicts(technician_id, reason, [day]);
+  } catch (err) {
+    alert('Error saving entry: ' + err.message);
+  }
+});
+
+// On-Call form submission -- technicians go through save-on-call.js,
+// dispatchers through save-dispatcher-on-call.js (both service-role,
+// server-side), same reasoning as save-tech-availability above: the write
+// RLS on those tables requires an authenticated admin/dispatcher session,
+// and this page only ever has the anon key.
+document.getElementById('onCallForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const role = currentOnCallRole();
+  const day = document.getElementById('onCallDate').value;
+
+  const [y, m, d] = day.split('-').map(Number);
+  if (new Date(y, m - 1, d).getDay() !== 6) {
+    if (!confirm(`${day} is not a Saturday. Save it anyway?`)) return;
+  }
+
+  if (role === 'dispatcher') {
+    const dispatcher_id = document.getElementById('onCallDispatcher').value;
+    if (!dispatcher_id) { alert('Pick a dispatcher.'); return; }
+    try {
+      // One dispatcher per day: setting a day replaces whoever was there.
+      const res = await fetch('/.netlify/functions/save-dispatcher-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ day, dispatcher_id })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      // Editing and the date changed: clear the old Saturday, only after the new one saved.
+      if (editingDispatcherDay && editingDispatcherDay !== day) {
+        const delRes = await fetch('/.netlify/functions/save-dispatcher-on-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: editingDispatcherDay, action: 'delete' })
+        });
+        const delData = await delRes.json();
+        if (!delRes.ok || !delData.ok) throw new Error('Saved, but could not clear the old Saturday: ' + (delData.error || ('HTTP ' + delRes.status)));
+      }
+      onCallModal.classList.remove('active');
+      editingDispatcherDay = null;
+      loadMonth();
+      reshowPendingConflicts();
+    } catch (err) {
+      alert('Error saving dispatcher: ' + err.message);
+    }
+    return;
+  }
+
+  const state = document.getElementById('onCallState').value;
+  const technician_id = document.getElementById('onCallTech').value;
+  if (!technician_id) { alert('Pick a technician.'); return; }
+  const replacingRaw = (!editingOnCallKey && document.getElementById('onCallReplacingRow').style.display !== 'none')
+    ? document.getElementById('onCallReplacing').value : '';
+  if (!editingOnCallKey && onCallExisting.length > 0 && !replacingRaw) { alert('Choose who is being replaced, or choose to add an additional technician.'); return; }
+  // '__add__' = add alongside the people already on call, nobody comes off.
+  const replacingId = replacingRaw === '__add__' ? '' : replacingRaw;
+  // Editing/replacing an entry, or a plain add onto an occupied Saturday: either way the old person comes off.
+  const oldKey = editingOnCallKey || (replacingId ? { state, day, technician_id: replacingId } : null);
+
+  try {
+    // On-call has no fields beyond its own identity (state/day/technician),
+    // so "editing" always means moving to a different key -- there's
+    // nothing to update in place. If nothing actually changed, skip the
+    // round-trip entirely rather than needlessly cancelling and re-pushing
+    // an already-synced BlueFolder appointment.
+    const keyUnchanged = oldKey
+      && oldKey.state === state
+      && oldKey.day === day
+      && String(oldKey.technician_id) === String(technician_id);
+
+    // Warn before putting someone on call on a day they are marked out.
+    if (!keyUnchanged) {
+      const outReason = await getTimeOffReason(technician_id, day);
+      if (outReason) {
+        const nm = techNameById.get(String(technician_id)) || 'This technician';
+        if (!confirm(`${nm} is marked out on ${day} (${REASON_LABEL[outReason] || 'Out'}). Set them on call anyway?`)) return;
+      }
+    }
+
+    if (oldKey && !keyUnchanged) {
+      const delRes = await fetch('/.netlify/functions/save-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: oldKey.state, day: oldKey.day, technician_id: oldKey.technician_id, action: 'delete' })
+      });
+      const delData = await delRes.json();
+      if (!delRes.ok || !delData.ok) throw new Error('Could not move old on-call entry: ' + (delData.error || ('HTTP ' + delRes.status)));
+    }
+
+    if (!keyUnchanged) {
+      const res = await fetch('/.netlify/functions/save-on-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, technician_id, day })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    }
+    onCallModal.classList.remove('active');
+    editingOnCallKey = null;
+    onCallReplaceMode = false;
+    loadMonth();
+    // A different technician took over this Saturday: offer a comp day for them.
+    let prompted = false;
+    if (!oldKey || String(oldKey.technician_id) !== String(technician_id)) {
+      prompted = await promptCompDay(technician_id, oldKey ? oldKey.technician_id : '', day, state);
+    }
+    if (!prompted) reshowPendingConflicts();
+  } catch (err) {
+    alert('Error saving on-call entry: ' + err.message);
+  }
+});
+
+// Company Event form submission -- goes through save-company-event.js
+// (service-role key, server-side), same reasoning as the other two forms:
+// company_events' write RLS requires an authenticated admin/dispatcher
+// session, and this page only ever has the anon key.
+document.getElementById('companyEventForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const day = document.getElementById('companyEventDate').value;
+  const label = document.getElementById('companyEventLabel').value;
+  const note = document.getElementById('companyEventNote').value;
+
+  try {
+    const res = await fetch('/.netlify/functions/save-company-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingCompanyEventId, day, label, note })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    companyEventModal.classList.remove('active');
+    editingCompanyEventId = null;
+    loadMonth();
+  } catch (err) {
+    alert('Error saving company event: ' + err.message);
+  }
+});
+
+loadStatesAndTechs().then(loadMonth);
+</script>
+</body>
+</html>
