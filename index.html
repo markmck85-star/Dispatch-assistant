@@ -7870,7 +7870,8 @@ ${content}</body></html>`;
             const rightFormItems = allItems.filter(i => i.hasRightForms);
 
             let body = '';
-            if (sameDayItems.length) body += `<div class="banner red"><b>SAME DAY, action required:</b> ${sameDayItems.map(i => esc(i.code)).join(', ')}</div>`;
+            // 2026-10-09: the SAME DAY banner was dropped from the compact view on
+            // purpose (everything on this list is being dragged onto that day's board).
             if (rightFormItems.length) body += `<div class="banner green"><b>Previous year Right Forms:</b> ${rightFormItems.map(i => esc(i.code)).join(', ')}</div>`;
 
             const techBlock = (techName) => {
