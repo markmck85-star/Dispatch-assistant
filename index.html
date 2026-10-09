@@ -7930,7 +7930,7 @@ ${content}</body></html>`;
                     // the date made the name wrap to a second line).
                     const counts = info.parts.map(esc).join(' · ');
                     const warns = info.warns.length ? `<span class="warn">${info.warns.map(esc).join(' ')}</span>` : '';
-                    h += `<div class="stop"><span class="n">${i + 1}</span><span class="code">${esc(code)}</span><span class="nm" title="${esc((loc.address || stop.address || ''))}">${esc(name)}</span><span class="wo">${wo}</span><span class="it">${esc(info.items)}${issue ? (info.items ? ' · ' : '') + issue : ''} ${due}</span><span class="ct">${counts} ${warns}</span><span class="tg">${badge}${rf}${cover}</span></div>`;
+                    h += `<div class="stop"><span class="n">${i + 1}</span><span class="code">${esc(code)}</span><span class="nm" title="${esc((loc.address || stop.address || ''))}">${esc(name)}</span><span class="wo">${wo}</span><span class="it"><span class="cons">${esc(info.items)}${issue && info.items ? ' · ' : ''}</span>${issue} ${due}</span><span class="ct">${counts} ${warns}</span><span class="tg">${badge}${rf}${cover}</span></div>`;
                 });
                 h += `</div>`;
                 return h;
@@ -7988,7 +7988,10 @@ ${content}</body></html>`;
     .stop .wo { grid-column: 4; }
     .stop .tg { grid-column: 5; grid-row: 1; }
     .stop .it, .stop .ct { grid-column: 3 / -1; }
-    .stop .it:empty, .stop .ct:empty { display: none; }
+    /* 2026-10-09: on small screens the consumables needed and the counts are
+       left out (not needed while dragging WOs onto the Gantt, and they add two
+       lines per stop). Ticket issue / due time on trouble stops still shows. */
+    .stop .cons, .stop .ct { display: none; }
     .th { flex-wrap: wrap; gap: 2px 8px; }
     .load { margin-left: 0; }
     .bar { flex-wrap: wrap; }
