@@ -7925,11 +7925,12 @@ ${content}</body></html>`;
                     if (stop.fromTicket && stop.ticketSlaEnd) {
                         try { due = `<b>Due ${esc(formatServerSlaTime(stop.ticketSlaEnd, code))}</b>`; } catch (e) { due = ''; }
                     }
-                    const by = stop.restockBy ? `<span class="by">by ${esc(stop.restockBy)}</span>` : '';
-                    const now = isNowStop(stop) ? '<span class="tag red">NOW</span>' : '';
+                    // 2026-10-09: the "by <date>" text and the NOW tag were dropped on
+                    // purpose (Mark: every stop on this list is already a today stop, and
+                    // the date made the name wrap to a second line).
                     const counts = info.parts.map(esc).join(' · ');
                     const warns = info.warns.length ? `<span class="warn">${info.warns.map(esc).join(' ')}</span>` : '';
-                    h += `<div class="stop"><span class="n">${i + 1}</span><span class="code">${esc(code)}</span><span class="nm" title="${esc((loc.address || stop.address || ''))}">${esc(name)} ${by}</span><span class="wo">${wo}</span><span class="it">${esc(info.items)}${issue ? (info.items ? ' · ' : '') + issue : ''} ${due}</span><span class="ct">${counts} ${warns}</span><span class="tg">${now}${badge}${rf}${cover}</span></div>`;
+                    h += `<div class="stop"><span class="n">${i + 1}</span><span class="code">${esc(code)}</span><span class="nm" title="${esc((loc.address || stop.address || ''))}">${esc(name)}</span><span class="wo">${wo}</span><span class="it">${esc(info.items)}${issue ? (info.items ? ' · ' : '') + issue : ''} ${due}</span><span class="ct">${counts} ${warns}</span><span class="tg">${badge}${rf}${cover}</span></div>`;
                 });
                 h += `</div>`;
                 return h;
@@ -7954,20 +7955,19 @@ ${content}</body></html>`;
   .banner { border-radius: 4px; padding: 3px 8px; margin-bottom: 4px; font-size: 11.5px; }
   .banner.red { background: #fdeaea; border: 1px solid #e24b4a; }
   .banner.green { background: #eaf3de; border: 1px solid #639922; }
-  .cols { column-count: 2; column-gap: 14px; }
-  body.one .cols { column-count: 1; }
-  @media (max-width: 1000px) { .cols { column-count: 1; } }
+  .cols { column-count: 1; column-gap: 14px; }
+  @media (min-width: 1000px) { body.two .cols { column-count: 2; } }
   .grp { break-after: avoid; font-weight: 700; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: #2b3644; padding: 2px 8px; margin: 6px 0 3px; border-radius: 3px; }
-  .tech { break-inside: avoid; border: 1px solid #ccd3dc; border-radius: 5px; margin-bottom: 4px; padding: 3px 6px 2px; }
+  .tech { break-inside: avoid; border: 1px solid #ccd3dc; border-radius: 5px; margin-bottom: 3px; padding: 2px 6px 1px; }
   .tech.empty { color: #8a94a0; background: #f8fafc; padding: 2px 6px; }
   .th { display: flex; gap: 8px; align-items: baseline; border-bottom: 1px solid #e3e8ee; padding-bottom: 1px; margin-bottom: 1px; }
   .tn { font-weight: 700; font-size: 13px; }
   .sub { color: #6b7785; font-size: 11px; }
   .load { margin-left: auto; background: #f0f4ff; color: #1a3a6b; font-weight: 600; font-size: 11px; padding: 0 6px; border-radius: 3px; white-space: nowrap; }
-  .stop { display: grid; grid-template-columns: 14px 54px minmax(90px, 1.2fr) 62px minmax(70px, 1fr) minmax(80px, 1.3fr) auto; gap: 6px; align-items: baseline; padding: 1px 0; border-bottom: 1px dotted #e9edf2; line-height: 1.3; }
+  .stop { display: grid; grid-template-columns: 14px 54px minmax(160px, 1.4fr) 62px minmax(110px, 1fr) minmax(120px, 1.4fr) auto; gap: 6px; align-items: baseline; padding: 0; border-bottom: 1px dotted #e9edf2; line-height: 1.3; }
   .stop:last-child { border-bottom: none; }
   .stop > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .stop .ct, .stop .it, .stop .nm { white-space: normal; }
+  .stop .ct, .stop .it { white-space: normal; }
   .n { color: #6b7785; text-align: right; }
   .code { font-weight: 700; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
   .wo { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #a32d2d; }
@@ -7980,7 +7980,7 @@ ${content}</body></html>`;
   .tag.red { background: #c0392b; } .tag.green { background: #2e7d32; } .tag.amber { background: #b7791f; }
   @media print { .bar button { display: none; } body { padding: 0; } }
 </style></head><body>
-<div class="bar"><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('one')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
+<div class="bar"><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('two')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
 <div class="cols">${body}</div>
 </body></html>`;
             w.document.open();
