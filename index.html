@@ -7978,6 +7978,21 @@ ${content}</body></html>`;
   .tg { white-space: nowrap; }
   .tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 3px; color: #fff; margin-left: 3px; }
   .tag.red { background: #c0392b; } .tag.green { background: #2e7d32; } .tag.amber { background: #b7791f; }
+  .stop > span, .th > span { min-width: 0; }
+  /* 2026-10-09: phone / tablet / small windows. Stop identity stays on the first
+     line; items and counts drop to their own lines under the name so nothing is
+     cut off at the right edge. */
+  @media (max-width: 1000px) {
+    .stop { grid-template-columns: 14px 54px minmax(0, 1fr) auto auto; gap: 0 6px; }
+    .stop .nm { grid-column: 3; }
+    .stop .wo { grid-column: 4; }
+    .stop .tg { grid-column: 5; grid-row: 1; }
+    .stop .it, .stop .ct { grid-column: 3 / -1; }
+    .stop .it:empty, .stop .ct:empty { display: none; }
+    .th { flex-wrap: wrap; gap: 2px 8px; }
+    .load { margin-left: 0; }
+    .bar { flex-wrap: wrap; }
+  }
   @media print { .bar button { display: none; } body { padding: 0; } }
 </style></head><body>
 <div class="bar"><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('two')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
