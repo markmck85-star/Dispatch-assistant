@@ -656,7 +656,10 @@
 
 
                 <div id="sidebarToolSlot"></div>
-                <div style="padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
+                <!-- 2026-10-10: Standard/URGENT paste-mode picker retired along with manual pasting. Kept hidden
+                     (always "standard") because parseInputs and the message builder read it. Urgency now
+                     comes from the tickets themselves. -->
+                <div style="display:none; padding: 8px; background: #e7f3ff; border-radius: 8px; border: 1px solid #007bff; margin-bottom: 10px;">
                     <div class="paste-row">
                         <select id="urgencySelector">
                             <option value="standard">Standard (Next Day)</option>
