@@ -128,7 +128,7 @@ async function authenticate(supabase, token) {
   if (tk.k === 's') {
     const { data: acct } = await supabase
       .from('staff_accounts')
-      .select('username, dispatcher_username, display_name, created_at, password_changed_at')
+      .select('username, dispatcher_username, display_name, default_state, created_at, password_changed_at')
       .eq('username', tk.t)
       .maybeSingle();
     if (!acct || pwVersion(acct) !== tk.p) return null;
@@ -138,7 +138,7 @@ async function authenticate(supabase, token) {
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return null;
-    return { kind: 's', name: acct.display_name, states: staffStates(d), key: acct.username };
+    return { kind: 's', name: acct.display_name, states: staffStates(d), key: acct.username, defaultState: acct.default_state || null };
   }
 
   const { data: acct } = await supabase
@@ -153,7 +153,7 @@ async function authenticate(supabase, token) {
     .eq('id', acct.technician_id)
     .maybeSingle();
   if (!eligible(tech)) return null;
-  return { kind: 't', name: tech.name, states: statesFor(tech), tech, key: acct.technician_id };
+  return { kind: 't', name: tech.name, states: statesFor(tech), tech, key: acct.technician_id, defaultState: tech.home_state ? String(tech.home_state).toUpperCase() : null };
 }
 
 function staffOk(d) {
@@ -168,6 +168,26 @@ function staffStates(d) {
 function cleanQuery(q) {
   // Keep only characters safe to embed in a PostgREST or() filter.
   return String(q || '').replace(/[^A-Za-z0-9 #&'.\-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+// What the page needs to draw itself: the account's states that actually have
+// locations (for the state dropdown) and which one to open first.
+async function buildMe(supabase, kind, name, states, defaultState) {
+  let list = states || [];
+  if (list.length > 1) {
+    const { data } = await supabase
+      .from('sites')
+      .select('state')
+      .in('state', list)
+      .eq('active', true)
+      .eq('is_placeholder', false)
+      .limit(5000);
+    const have = new Set((data || []).map((r) => String(r.state || '').toUpperCase()));
+    const filtered = list.filter((x) => have.has(x));
+    if (filtered.length) list = filtered;
+  }
+  const home = defaultState && list.includes(defaultState) ? defaultState : (list[0] || null);
+  return { name, states: list, home, kind };
 }
 
 // ---------- actions ----------
@@ -196,7 +216,7 @@ async function doLogin(supabase, body) {
   if (!tAcct) {
     const r = await supabase
       .from('staff_accounts')
-      .select('username, dispatcher_username, display_name, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
+      .select('username, dispatcher_username, display_name, default_state, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
       .eq('username', username)
       .maybeSingle();
     sAcct = r.data;
@@ -234,7 +254,7 @@ async function doLogin(supabase, body) {
       .eq('id', acct.technician_id)
       .maybeSingle();
     if (!eligible(tech)) return json(403, { ok: false, error: 'This account is not active.' });
-    me = { name: tech.name, states: statesFor(tech), kind: 't' };
+    me = await buildMe(supabase, 't', tech.name, statesFor(tech), tech.home_state ? String(tech.home_state).toUpperCase() : null);
   } else {
     const { data: d } = await supabase
       .from('dispatchers')
@@ -242,7 +262,7 @@ async function doLogin(supabase, body) {
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return json(403, { ok: false, error: 'This account is not active.' });
-    me = { name: acct.display_name, states: staffStates(d), kind: 's' };
+    me = await buildMe(supabase, 's', acct.display_name, staffStates(d), acct.default_state || null);
   }
 
   await supabase
@@ -264,8 +284,12 @@ async function doSearch(supabase, ctx, body) {
   let sq = supabase
     .from('sites')
     .select('site_code, name, address, state, county, machine_type');
-  if (ctx.states && !ctx.states.length) return json(200, { ok: true, sites: [] });
-  if (ctx.states) sq = sq.in('state', ctx.states);
+  if (!ctx.states.length) return json(200, { ok: true, sites: [] });
+  // One state at a time. The page sends the chosen state; it must be one the
+  // account covers, otherwise fall back to the account's first state.
+  const want = String(body.state || '').toUpperCase();
+  const useState = ctx.states.includes(want) ? want : ctx.states[0];
+  sq = sq.eq('state', useState);
   sq = sq.eq('active', true).eq('is_placeholder', false);
   if (q.length >= 2) {
     const pat = '%' + q + '%';
@@ -366,7 +390,7 @@ async function doSite(supabase, ctx, body) {
   });
 }
 
-async function doShipments(supabase, ctx) {
+async function doShipments(supabase, ctx, body) {
   let rmaQ = supabase
     .from('rma_shipments')
     .select('account_name, wo_number, case_number, warehouse_name, request_details, outbound_tracking, inbound_tracking, return_broken_part, returned_at, received_at, technician_id, state')
@@ -380,10 +404,12 @@ async function doShipments(supabase, ctx) {
   if (ctx.kind === 't') {
     rmaQ = rmaQ.eq('technician_id', ctx.tech.id);
     conQ = conQ.eq('technician_id', ctx.tech.id);
-  } else if (ctx.states) {
+  } else {
     if (!ctx.states.length) return json(200, { ok: true, rma: [], consumables: [] });
-    rmaQ = rmaQ.in('state', ctx.states);
-    conQ = conQ.in('state', ctx.states);
+    const want = String((body && body.state) || '').toUpperCase();
+    const useState = ctx.states.includes(want) ? want : ctx.states[0];
+    rmaQ = rmaQ.eq('state', useState);
+    conQ = conQ.eq('state', useState);
   }
   const [rmaR, conR] = await Promise.all([rmaQ, conQ]);
   if (rmaR.error || conR.error) return json(500, { ok: false, error: 'Could not load shipments.' });
@@ -494,10 +520,10 @@ exports.handler = async (event) => {
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
 
-    if (action === 'me') return json(200, { ok: true, me: { name: ctx.name, states: ctx.states, kind: ctx.kind } });
+    if (action === 'me') return json(200, { ok: true, me: await buildMe(supabase, ctx.kind, ctx.name, ctx.states, ctx.defaultState) });
     if (action === 'search') return await doSearch(supabase, ctx, body);
     if (action === 'site') return await doSite(supabase, ctx, body);
-    if (action === 'shipments') return await doShipments(supabase, ctx);
+    if (action === 'shipments') return await doShipments(supabase, ctx, body);
     if (action === 'change_password') return await doChangePassword(supabase, ctx, body);
     return json(400, { ok: false, error: 'Unknown action.' });
   } catch (e) {
