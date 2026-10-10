@@ -46,6 +46,9 @@
   h3 { font-size:15px; margin:14px 0 6px; }
   a { color:var(--brand); }
   .hidden { display:none; }
+  .statebar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .statebar label { margin:0; }
+  .statebar select { flex:1; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
   .back { margin-bottom:10px; }
 </style>
 </head>
@@ -73,6 +76,7 @@
     <div class="who"><span id="whoName"></span><br><span id="whoStates"></span> <button id="logoutBtn">Sign out</button></div>
   </header>
   <main>
+    <div class="statebar hidden" id="stateBar"><label for="stateSel">State</label><select id="stateSel"></select></div>
     <div class="tabs">
       <button id="tabSites" class="on">Locations</button>
       <button id="tabShip">My shipments</button>
@@ -107,7 +111,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null, KIND = 't';
+  var TOKEN = null, KIND = 't', STATE = null;
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -147,7 +151,15 @@
     $('appView').classList.remove('hidden');
     $('whoName').textContent = me.name;
     KIND = me.kind || 't';
-    $('whoStates').textContent = me.states ? me.states.join(', ') : 'All states';
+    var sts = me.states || [];
+    STATE = null;
+    try { var saved = localStorage.getItem('mcr_portal_state'); if (saved && sts.indexOf(saved) !== -1) STATE = saved; } catch (e) {}
+    if (!STATE) STATE = me.home || sts[0] || null;
+    $('whoStates').textContent = sts.length === 1 ? sts[0] : '';
+    var sel = $('stateSel');
+    sel.innerHTML = sts.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+    if (STATE) sel.value = STATE;
+    $('stateBar').classList.toggle('hidden', sts.length < 2);
     $('tabShip').textContent = KIND === 's' ? 'Shipments' : 'My shipments';
     loadSites();
   }
@@ -176,8 +188,17 @@
       $('tab' + n).classList.toggle('on', n === name);
       $((n === 'Sites' ? 'sites' : n === 'Ship' ? 'ship' : 'acct') + 'Pane').classList.toggle('hidden', n !== name);
     });
+    $('stateBar').classList.toggle('hidden', name === 'Acct' || $('stateSel').options.length < 2);
     if (name === 'Ship') loadShipments();
   }
+  $('stateSel').onchange = function () {
+    STATE = $('stateSel').value;
+    try { localStorage.setItem('mcr_portal_state', STATE); } catch (e) {}
+    $('q').value = '';
+    closeSite();
+    loadSites();
+    if (!$('shipPane').classList.contains('hidden')) loadShipments();
+  };
   $('tabSites').onclick = function () { tab('Sites'); };
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabAcct').onclick = function () { tab('Acct'); };
@@ -189,7 +210,7 @@
   function haystack(s) { return (s.name + ' ' + s.site_code + ' ' + (s.address || '') + ' ' + (s.county || '')).toLowerCase(); }
   async function loadSites() {
     $('results').innerHTML = '<p class="muted">Loading locations...</p>';
-    var j = await call('search', { q: '' });
+    var j = await call('search', { q: '', state: STATE });
     if (!j.ok) { $('results').innerHTML = '<div class="err">' + esc(j.error || 'Could not load locations.') + '</div>'; return; }
     ALL = (j.sites || []).map(function (s) { s._h = haystack(s); return s; });
     renderList();
@@ -267,7 +288,7 @@
   async function loadShipments() {
     var p = $('shipPane');
     p.innerHTML = '<p class="muted">Loading...</p>';
-    var j = await call('shipments');
+    var j = await call('shipments', { state: STATE });
     if (!j.ok) { p.innerHTML = '<div class="err">' + esc(j.error || 'Could not load.') + '</div>'; return; }
     var html = '<div class="card"><h2>RMA parts</h2>';
     if (!j.rma.length) html += '<p class="muted">No RMA shipments found.</p>';
