@@ -1,16 +1,20 @@
-// reset-saturday-alerts.js — scheduled, runs every 15 minutes (see the
-// netlify.toml addition below).
+// reset-saturday-alerts.js -- scheduled hourly (see netlify.toml).
 //
 // Complements the Saturday on-call page's alerts toggle: that toggle sets
-// hoursEnd: "17:00" on each timezone-group recipient row it creates, which
-// already stops texts going out after 5pm local (mailgun-inbound.js's
-// existing hoursStart/hoursEnd check handles that). What it does NOT do
-// is flip enabled back to false -- so a forgotten toggle stays armed and
-// would fire again the next time that row's state/hours window is active
+// hoursEnd: "17:00" on each recipient row it creates, which already stops
+// texts going out after 5pm local (mailgun-inbound.js's existing
+// hoursStart/hoursEnd check handles that). What it does NOT do is flip
+// enabled back to false -- so a forgotten toggle stays armed and would
+// fire again the next time that row's state/hours window is active
 // (e.g. the following weekday). This job finds every recipient tagged
 // source:'saturday-oncall' that is still enabled and past its own day's
 // 5pm-local cutoff, and disables it -- so it's genuinely reset, and the
 // Saturday page correctly shows alerts as off if anyone checks back.
+//
+// 2026-10-10: (1) now actually scheduled in netlify.toml -- it had no
+// schedule, so Oct 3 rows stayed active on weekdays. (2) disabled
+// saturday-oncall rows 7+ days old are removed so they stop piling up on
+// the Notifications tab.
 //
 // Reuses get-settings.js/save-settings.js (rather than touching the Blobs
 // store directly) so this stays correct if that storage shape ever
@@ -34,14 +38,13 @@ function tzOffsetMinutes(tz, atDate) {
 }
 
 // UTC epoch ms for `hour`:00 local time on `dayStr` (YYYY-MM-DD) in `tz`.
-// Two-pass isn't needed at 15-minute granularity -- the offset barely
-// shifts hour to hour except right at a DST transition, an edge case not
-// worth the extra complexity for a once-a-week 5pm cutoff.
 function localCutoffUtcMs(dayStr, hour, tz) {
   const approx = new Date(`${dayStr}T${String(hour).padStart(2, '0')}:00:00Z`);
   const offsetMin = tzOffsetMinutes(tz, approx);
   return approx.getTime() - offsetMin * 60000;
 }
+
+const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 exports.handler = async () => {
   const base = process.env.URL || process.env.DEPLOY_URL;
@@ -51,10 +54,11 @@ exports.handler = async () => {
     const res = await fetch(`${base}/.netlify/functions/get-settings?state=NOTIFICATIONS`, { cache: 'no-store' });
     const data = await res.json();
     const s = data.settings || {};
-    const recipients = (s.settings && s.settings.recipients) || s.recipients || [];
+    let recipients = (s.settings && s.settings.recipients) || s.recipients || [];
 
     const now = Date.now();
     let changed = false;
+    let disabled = 0;
     for (const r of recipients) {
       if (r.source !== 'saturday-oncall') continue;
       if (r.enabled === false) continue;
@@ -63,8 +67,21 @@ exports.handler = async () => {
       if (now >= cutoff) {
         r.enabled = false;
         changed = true;
+        disabled++;
       }
     }
+
+    // Remove saturday-oncall rows that are disabled and a week or more past
+    // their own day's cutoff.
+    const before = recipients.length;
+    recipients = recipients.filter(r => {
+      if (r.source !== 'saturday-oncall') return true;
+      if (r.enabled !== false) return true;
+      if (!r.day || !r.timezone) return true;
+      return now < localCutoffUtcMs(r.day, 17, r.timezone) + PRUNE_AFTER_MS;
+    });
+    const pruned = before - recipients.length;
+    if (pruned > 0) changed = true;
 
     if (changed) {
       await fetch(`${base}/.netlify/functions/save-settings`, {
@@ -74,7 +91,7 @@ exports.handler = async () => {
       });
     }
 
-    return json(200, { ok: true, changed });
+    return json(200, { ok: true, changed, disabled, pruned });
   } catch (err) {
     return json(500, { error: err.message });
   }
