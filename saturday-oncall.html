@@ -514,7 +514,13 @@ const CLOSED_SATURDAY_SITES = [
   { name: 'Detroit - Livernois Ave', match: '17500 Livernois' },
 ];
 
-function isoDate(d) { return d.toISOString().slice(0, 10); }
+// Uses the LOCAL calendar date. toISOString() converts to UTC, which after
+// 8 PM Eastern is already the next day and made this page show Sunday.
+function isoDate(d) {
+  return d.getFullYear() + '-'
+    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0');
+}
 
 function targetSaturday() {
   const d = new Date();
