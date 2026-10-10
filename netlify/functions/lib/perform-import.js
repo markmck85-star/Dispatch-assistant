@@ -54,17 +54,33 @@ function matchSite(accountName, state, sitesForState, aliasMap) {
 
   const nameOnly = stripStatePrefix(accountName);
   const targetTokens = tokenize(nameOnly);
-  let best = null;
+  const targetSet = new Set(targetTokens);
   let bestScore = 0;
+  let tied = [];
   for (const site of sitesForState) {
-    const score = overlapScore(targetTokens, tokenize(site.name));
-    if (score > bestScore) {
+    const siteTokens = tokenize(site.name);
+    const score = overlapScore(targetTokens, siteTokens);
+    if (score > bestScore + 1e-9) {
       bestScore = score;
-      best = site;
+      tied = [{ site, tokenCount: new Set(siteTokens).size }];
+    } else if (score > 0 && Math.abs(score - bestScore) <= 1e-9) {
+      tied.push({ site, tokenCount: new Set(siteTokens).size });
     }
   }
-  if (best && bestScore >= 0.65) return { siteId: best.id, matched: true, matchSource: 'text' };
-  return { siteId: null, matched: false, matchSource: null };
+  if (!tied.length || bestScore < 0.65) return { siteId: null, matched: false, matchSource: null };
+  if (tied.length === 1) return { siteId: tied[0].site.id, matched: true, matchSource: 'text' };
+
+  // 2026-10-09: tie-break. The score divides by the SMALLER name, so a
+  // generic account name like "Hillsborough County Publix" scores 100% against
+  // every Hillsborough store, and the old code silently kept whichever site it
+  // saw first -- that is what filed visits under the wrong store. Now: if
+  // exactly one tied site has the same word set as the account name, it is a
+  // true exact match and wins. Otherwise the name is ambiguous, so leave the
+  // visit unlinked (needs_review) for the Unmatched Sites tool instead of
+  // guessing.
+  const exact = tied.filter((t) => t.tokenCount === targetSet.size);
+  if (exact.length === 1) return { siteId: exact[0].site.id, matched: true, matchSource: 'text' };
+  return { siteId: null, matched: false, matchSource: 'ambiguous' };
 }
 
 // Neumo's closed-ticket report gives Actual Start/End as plain
@@ -680,3 +696,4 @@ async function performImport(supabase, rows) {
 }
 
 module.exports = { performImport, matchSite, tokenize, stripStatePrefix, parseSalesforceDate, easternDateOnly, oneDayEarlier };
+
