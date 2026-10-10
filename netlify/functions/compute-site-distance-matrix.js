@@ -118,7 +118,9 @@ function sleep(ms) {
 // refreshMovedPins drops every blob key touching these codes so additive
 // treats them as new (~6×N elements) instead of a full-state rebuild.
 const MOVED_PINS = {
-  FL: ["FL1001", "FL1004", "FL1005", "FL1006", "FL1012", "FL1020", "FL1021", "FL1039", "FL1130"],
+  // 2026-10-10: reduced to FL1012 only (address corrected to Lehigh Acres). The other
+  // codes were already refreshed in earlier runs, so listing them again would re-bill them.
+  FL: ["FL1012"],
 };
 
 function stripRefreshCodes(matrix, codes) {
