@@ -9729,17 +9729,15 @@ ${content}</body></html>`;
     #boardToolBar .tool-hint { display: none; font-size: 12px; color: #888; margin: 0 0 8px; }
     #boardToolBar.editing .tool-hint { display: block; }
     #boardToolBar .tool-hint button { background: none; border: none; color: #6cb2ff; text-decoration: underline; cursor: pointer; font-size: 12px; padding: 0 0 0 6px; }
-    #toolMain { display: flex; flex-wrap: wrap; gap: 6px; }
-    .tool-item { display: inline-flex; align-items: stretch; gap: 4px; max-width: 100%; }
+    #toolMain { display: flex; flex-direction: column; gap: 6px; }
+    .tool-item { display: flex; align-items: stretch; gap: 4px; width: 100%; max-width: 100%; }
+    @media (min-width: 960px) { #boardToolBar { max-width: 360px; } }
     .tool-item > a, .tool-item > button.rail-btn, .tool-item > button.tool-proxy {
-        display: flex; align-items: center; justify-content: center; gap: 4px;
+        flex: 1 1 auto; display: flex; align-items: center; justify-content: flex-start; gap: 6px;
         min-height: 44px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
         background: #181818; color: #f0a500; font-weight: 700; font-size: 13px;
-        text-decoration: none; text-align: center; cursor: pointer; line-height: 1.2; box-sizing: border-box;
+        text-decoration: none; text-align: left; cursor: pointer; line-height: 1.2; box-sizing: border-box;
     }
-    .tool-item > button.big-btn { width: auto; margin: 0; min-height: 44px; padding: 8px 12px; font-size: 13px; border-radius: 8px;
-        background: #181818 !important; color: #f0a500 !important; border: 1px solid #333; }
-    .tool-item > button#dcoToggleBtn, .tool-item > button#troubleOnlyToggleBtn { flex: 0 0 auto !important; min-width: 0 !important; min-height: 44px; padding: 8px 12px !important; border-radius: 8px !important; }
     .tool-star { display: none; align-items: center; justify-content: center; width: 44px; min-height: 44px; border-radius: 8px; border: 1px solid #333; background: #141414; color: #f0a500; font-size: 20px; cursor: pointer; padding: 0; }
     #boardToolBar.editing #toolMain .tool-star { display: flex; }
     #toolMore .tool-star { display: flex; color: #888; }
@@ -9749,9 +9747,10 @@ ${content}</body></html>`;
     #toolMore[open] > summary { border-bottom: 1px solid #2a2a2a; }
     #toolMoreList { padding: 6px 8px 10px; }
     #toolMoreList .tool-group { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; }
-    #toolMoreList .tool-item { display: flex; margin: 0 0 4px; }
-    #toolMoreList .tool-item > a, #toolMoreList .tool-item > button:not(.tool-star) { flex: 1 1 auto; justify-content: flex-start; text-align: left; }
+    #toolMoreList .tool-item { margin: 0 0 4px; }
     #toolMoreEmpty { padding: 10px 12px; font-size: 13px; color: #888; }
+    #aiCommandBarHome.ai-no-chat #aiCommandBar > div:first-child > :not(#aiAnalyzeRoutesBtn) { display: none !important; }
+    #aiCommandBarHome.ai-no-analyze #aiAnalyzeRoutesBtn { display: none !important; }
     #boardSettings { margin: 0 0 10px; border: 1px solid #444; border-radius: 8px; background: #1e1e1e; }
     #boardSettings > summary { list-style: none; cursor: pointer; min-height: 40px; padding: 10px 12px; font-weight: 700; font-size: 13px; color: #ccc; }
     #boardSettings > summary::-webkit-details-marker { display: none; }
@@ -9775,12 +9774,9 @@ ${content}</body></html>`;
     // non-admin logins. virtual: has a stand-in chip instead of moving a node.
     var TOOLS = [
         { id: 'state',     sel: '#stateConsoleLink',                                  group: 'today', simple: true },
-        { id: 'messages',  sel: '.tool-rail button.rail-btn[onclick*="generateFinalMessages"]',  group: 'today', simple: true },
-        { id: 'compact',   sel: '.action-btns button[onclick*="openCompactSummary"]',              group: 'today', simple: true },
-        { id: 'print',     sel: '.action-btns button[onclick*="printReport"]',                   group: 'today' },
-        { id: 'trouble',   sel: '#troubleOnlyToggleBtn',                              group: 'today' },
-        { id: 'dco',       sel: '#dcoToggleBtn',                                      group: 'today' },
-        { id: 'assistant', virtual: true, label: '🤖 Assistant', hostSel: '#aiCommandBarHome', group: 'today' },
+        { id: 'messages',  sel: '.tool-rail button.rail-btn[onclick*="generateFinalMessages"]', group: 'today', simple: true },
+        { id: 'assistant', virtual: true, label: '\uD83E\uDD16 Assistant bar', reveal: 'chat',    group: 'today' },
+        { id: 'analyze',   virtual: true, label: '\uD83E\uDDED Analyze Routes', reveal: 'analyze', group: 'today' },
         { id: 'lookup',    sel: '#locationLookupLink',                                group: 'look',  simple: true },
         { id: 'watchdog',  sel: '#watchdogLink',                                      group: 'look',  simple: true },
         { id: 'closing',   sel: 'a.closing-email-link',                               group: 'look',  simple: true },
@@ -9798,7 +9794,7 @@ ${content}</body></html>`;
     var wrappers = {};          // tool id -> .tool-item node
     var prefs = null;           // { preset, pinned: [], unpinned: [] }
     var editing = false;
-    var assistantRevealed = false;
+    var revealed = { chat: false, analyze: false };   // tucked-away parts of the assistant bar shown for this visit
     var serverChecked = {};     // username -> true once the server copy was fetched
     var saveTimer = null;
     var built = false;
@@ -9898,13 +9894,11 @@ ${content}</body></html>`;
             el.className = 'tool-proxy';
             el.textContent = t.label;
             el.addEventListener('click', function () {
-                var host = document.querySelector(t.hostSel);
-                if (!host) return;
                 var u = user();
                 var inMain = u && resolve(u).main.some(function (x) { return x.id === t.id; });
-                if (!inMain) { assistantRevealed = true; host.style.display = ''; }
-                var input = document.getElementById('aiCommandInput');
-                if (input) { try { input.scrollIntoView({ block: 'center' }); input.focus(); } catch (e) {} }
+                if (!inMain) { revealed[t.reveal] = true; refresh(); }
+                var target = document.getElementById(t.reveal === 'chat' ? 'aiCommandInput' : 'aiAnalyzeRoutesBtn');
+                if (target) { try { target.scrollIntoView({ block: 'center' }); if (t.reveal === 'chat') target.focus(); } catch (e) {} }
             });
         } else {
             el = document.querySelector(t.sel);
@@ -10067,11 +10061,15 @@ ${content}</body></html>`;
         }
         document.getElementById('toolMoreSummary').textContent = 'More tools' + (count ? ' (' + count + ')' : '');
 
-        // Assistant bar: shown in place when it is in the main row, tucked away otherwise.
-        var host = document.querySelector('#aiCommandBarHome');
+        // Assistant bar: the chat box and the Analyze Routes button switch on and off separately.
+        var host = document.getElementById('aiCommandBarHome');
         if (host) {
-            var assistantMain = r.main.some(function (t) { return t.id === 'assistant'; });
-            host.style.display = (assistantMain || assistantRevealed) ? '' : 'none';
+            var inMainIds = r.main.map(function (t) { return t.id; });
+            var chatOn = inMainIds.indexOf('assistant') >= 0 || revealed.chat;
+            var analyzeOn = inMainIds.indexOf('analyze') >= 0 || revealed.analyze;
+            host.classList.toggle('ai-no-chat', !chatOn);
+            host.classList.toggle('ai-no-analyze', !analyzeOn);
+            host.style.display = (chatOn || analyzeOn) ? '' : 'none';
         }
 
         // Source containers are now empty.
