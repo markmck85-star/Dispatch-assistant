@@ -9774,7 +9774,8 @@ ${content}</body></html>`;
     // non-admin logins. virtual: has a stand-in chip instead of moving a node.
     var TOOLS = [
         { id: 'state',     sel: '#stateConsoleLink',                                  group: 'today', simple: true },
-        { id: 'messages',  sel: '.tool-rail button.rail-btn[onclick*="generateFinalMessages"]', group: 'today', simple: true },
+        { id: 'dco',       sel: '#dcoToggleBtn', group: 'today', simple: true },
+        { id: 'trouble',   sel: '#troubleOnlyToggleBtn', group: 'today', simple: true },
         { id: 'assistant', virtual: true, label: '\uD83E\uDD16 Assistant bar', reveal: 'chat',    group: 'today' },
         { id: 'analyze',   virtual: true, label: '\uD83E\uDDED Analyze Routes', reveal: 'analyze', group: 'today' },
         { id: 'lookup',    sel: '#locationLookupLink',                                group: 'look',  simple: true },
