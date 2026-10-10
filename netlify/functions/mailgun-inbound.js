@@ -2086,6 +2086,10 @@ exports.handler = async (event) => {
               technician_id: null, // not matched here -- TechWeb-era techs (e.g. Sean Reich) may not all be on the current roster; left for a future pass if needed
               remediation: sv.remediation,
               remediation_detail: sv.remediationDetail,
+              // The email's "Resolution and Notes" text is the closing note for these visits
+              // (they never exist in Salesforce, so the scraper can't capture one).
+              closing_note: (sv.remediationDetail && String(sv.remediationDetail).trim()) || null,
+              closing_note_captured_at: (sv.remediationDetail && String(sv.remediationDetail).trim()) ? new Date().toISOString() : null,
               source: 'closing_note_email',
               needs_review: !siteId,
               imported_at: new Date().toISOString(),
