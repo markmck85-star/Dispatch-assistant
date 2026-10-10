@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>MCR Technician Portal</title>
+<style>
+  :root { --bg:#f4f6f9; --card:#fff; --ink:#1b2430; --muted:#66707d; --line:#dde2e9; --brand:#1d4f91; --brand2:#163d70; --bad:#b3261e; --ok:#1b7a3d; --warn:#9a6700; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161c; --card:#1b2129; --ink:#e8ecf1; --muted:#9aa5b3; --line:#2c3541; --brand:#5b9bf0; --brand2:#4a87d8; --bad:#ff8a80; --ok:#6fd08c; --warn:#e3b341; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  header { background:var(--brand2); color:#fff; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  header h1 { font-size:18px; margin:0; }
+  header .who { font-size:13px; opacity:.9; text-align:right; }
+  header button { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); border-radius:6px; padding:5px 10px; font-size:13px; cursor:pointer; }
+  main { max-width:820px; margin:0 auto; padding:14px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input[type=text], input[type=password], input[type=search] { width:100%; padding:11px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
+  button.primary { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:11px 16px; font-size:16px; cursor:pointer; margin-top:12px; }
+  button.link { background:none; border:0; color:var(--brand); cursor:pointer; padding:0; font-size:inherit; text-decoration:underline; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .tabs button { flex:1; padding:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; font-size:15px; cursor:pointer; }
+  .tabs button.on { background:var(--brand); color:#fff; border-color:var(--brand); }
+  .err { color:var(--bad); font-size:14px; margin-top:8px; }
+  .okmsg { color:var(--ok); font-size:14px; margin-top:8px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .row { display:block; width:100%; text-align:left; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:8px; cursor:pointer; color:var(--ink); font:inherit; }
+  .row b { display:block; }
+  .tag { display:inline-block; font-size:12px; padding:1px 7px; border-radius:20px; border:1px solid var(--line); color:var(--muted); margin-right:4px; }
+  .tag.restock { color:var(--ok); border-color:var(--ok); }
+  .visit { border-top:1px solid var(--line); padding:10px 0; }
+  .visit:first-child { border-top:0; }
+  .visit .top { display:flex; justify-content:space-between; gap:8px; font-size:14px; }
+  .note { white-space:pre-wrap; background:var(--bg); border-radius:8px; padding:8px 10px; margin-top:6px; font-size:14px; }
+  h2 { font-size:17px; margin:4px 0 8px; }
+  h3 { font-size:15px; margin:14px 0 6px; }
+  a { color:var(--brand); }
+  .hidden { display:none; }
+  .back { margin-bottom:10px; }
+</style>
+</head>
+<body>
+
+<div id="loginView">
+  <header><h1>MCR Technician Portal</h1></header>
+  <main>
+    <div class="card">
+      <h2>Sign in</h2>
+      <label for="u">Username</label>
+      <input id="u" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <label for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button class="primary" id="loginBtn">Sign in</button>
+      <div class="err" id="loginErr"></div>
+      <p class="muted">Your username is the first part of your MCR email address. Passwords are not case sensitive.</p>
+    </div>
+  </main>
+</div>
+
+<div id="appView" class="hidden">
+  <header>
+    <div><h1>MCR Technician Portal</h1></div>
+    <div class="who"><span id="whoName"></span><br><span id="whoStates"></span> <button id="logoutBtn">Sign out</button></div>
+  </header>
+  <main>
+    <div class="tabs">
+      <button id="tabSites" class="on">Locations</button>
+      <button id="tabShip">My shipments</button>
+      <button id="tabAcct">Account</button>
+    </div>
+
+    <section id="sitesPane">
+      <div id="searchBox">
+        <input id="q" type="search" placeholder="Search by store name, site code, address or county" autocomplete="off">
+        <p class="muted" id="searchHint">Type at least 2 letters. You can search locations in your home state and the states you cover.</p>
+        <div id="results"></div>
+      </div>
+      <div id="siteDetail" class="hidden"></div>
+    </section>
+
+    <section id="shipPane" class="hidden"></section>
+
+    <section id="acctPane" class="hidden">
+      <div class="card">
+        <h2>Change password</h2>
+        <label for="cur">Current password</label>
+        <input id="cur" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false">
+        <label for="nw">New password (at least 8 characters)</label>
+        <input id="nw" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false">
+        <button class="primary" id="pwBtn">Save new password</button>
+        <div id="pwMsg"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  var API = '/.netlify/functions/tech-api';
+  var TOKEN = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmtDate(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d)) return String(v);
+    return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  async function call(action, extra) {
+    var body = Object.assign({ action: action, token: TOKEN }, extra || {});
+    var r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var j = {};
+    try { j = await r.json(); } catch (e) {}
+    if (j && j.expired) { signOut(); }
+    return j;
+  }
+
+  function signOut() {
+    TOKEN = null; store('mcr_tech_token', null);
+    $('appView').classList.add('hidden');
+    $('loginView').classList.remove('hidden');
+    $('p').value = '';
+  }
+
+  function showApp(me) {
+    $('loginView').classList.add('hidden');
+    $('appView').classList.remove('hidden');
+    $('whoName').textContent = me.name;
+    $('whoStates').textContent = (me.states || []).join(', ');
+    $('q').focus();
+  }
+
+  // ----- login -----
+  async function doLogin() {
+    $('loginErr').textContent = '';
+    $('loginBtn').disabled = true;
+    try {
+      var j = await call('login', { username: $('u').value, password: $('p').value });
+      if (!j.ok) { $('loginErr').textContent = j.error || 'Could not sign in.'; return; }
+      TOKEN = j.token; store('mcr_tech_token', TOKEN);
+      showApp(j.me);
+    } catch (e) {
+      $('loginErr').textContent = 'Connection problem. Try again.';
+    } finally { $('loginBtn').disabled = false; }
+  }
+  $('loginBtn').onclick = doLogin;
+  $('p').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+  $('u').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('p').focus(); });
+  $('logoutBtn').onclick = signOut;
+
+  // ----- tabs -----
+  function tab(name) {
+    ['Sites', 'Ship', 'Acct'].forEach(function (n) {
+      $('tab' + n).classList.toggle('on', n === name);
+      $((n === 'Sites' ? 'sites' : n === 'Ship' ? 'ship' : 'acct') + 'Pane').classList.toggle('hidden', n !== name);
+    });
+    if (name === 'Ship') loadShipments();
+  }
+  $('tabSites').onclick = function () { tab('Sites'); };
+  $('tabShip').onclick = function () { tab('Ship'); };
+  $('tabAcct').onclick = function () { tab('Acct'); };
+
+  // ----- search -----
+  var timer = null, seq = 0;
+  $('q').addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(runSearch, 300);
+  });
+  async function runSearch() {
+    var q = $('q').value.trim();
+    var my = ++seq;
+    if (q.length < 2) { $('results').innerHTML = ''; $('searchHint').classList.remove('hidden'); return; }
+    var j = await call('search', { q: q });
+    if (my !== seq) return;
+    $('searchHint').classList.add('hidden');
+    if (!j.ok) { $('results').innerHTML = '<div class="err">' + esc(j.error || 'Search failed.') + '</div>'; return; }
+    if (!j.sites.length) { $('results').innerHTML = '<p class="muted">No locations found.</p>'; return; }
+    $('results').innerHTML = j.sites.map(function (s) {
+      return '<button class="row" data-code="' + esc(s.site_code) + '"><b>' + esc(s.name) + '</b>' +
+        '<span class="muted">' + esc(s.address || '') + '</span><br>' +
+        '<span class="tag">' + esc(s.site_code) + '</span>' +
+        (s.machine_type ? '<span class="tag">' + esc(s.machine_type) + '</span>' : '') + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('results').querySelectorAll('.row'), function (b) {
+      b.onclick = function () { openSite(b.getAttribute('data-code')); };
+    });
+  }
+
+  async function openSite(code) {
+    $('searchBox').classList.add('hidden');
+    var d = $('siteDetail');
+    d.classList.remove('hidden');
+    d.innerHTML = '<p class="muted">Loading...</p>';
+    var j = await call('site', { code: code });
+    if (!j.ok) {
+      d.innerHTML = '<button class="link back" id="bk">&larr; Back</button><div class="err">' + esc(j.error || 'Could not load.') + '</div>';
+      $('bk').onclick = closeSite; return;
+    }
+    var s = j.site;
+    var html = '<button class="link back" id="bk">&larr; Back to search</button>' +
+      '<div class="card"><h2>' + esc(s.name) + '</h2>' +
+      '<div>' + esc(s.address || '') + '</div>' +
+      '<div class="muted">' + esc([s.county ? s.county + ' County' : '', s.state, s.machine_type].filter(Boolean).join(' | ')) +
+      ' | Site code ' + esc(s.code) + '</div>' +
+      (s.address ? '<div style="margin-top:8px"><a target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(s.address) + '">Open in Maps</a></div>' : '') +
+      '</div><div class="card"><h2>Visit history (' + j.visits.length + ')</h2>';
+    if (!j.visits.length) html += '<p class="muted">No visits on record.</p>';
+    j.visits.forEach(function (v) {
+      html += '<div class="visit"><div class="top"><b>' + esc(v.type) + '</b><span class="muted">' + esc(fmtDate(v.when)) + '</span></div>' +
+        '<div class="muted">' + (v.restock ? '<span class="tag restock">Restock</span>' : '') +
+        (v.tech ? esc(v.tech) : '') + (v.wo ? ' | WO ' + esc(v.wo) : '') + (v.status ? ' | ' + esc(v.status) : '') + '</div>' +
+        (v.detail ? '<div style="margin-top:4px">' + esc(v.detail) + '</div>' : '') +
+        (v.note ? '<div class="note"><b>Closing note</b>\n' + esc(v.note) + '</div>' : '') + '</div>';
+    });
+    html += '</div>';
+    d.innerHTML = html;
+    $('bk').onclick = closeSite;
+    window.scrollTo(0, 0);
+  }
+  function closeSite() {
+    $('siteDetail').classList.add('hidden');
+    $('searchBox').classList.remove('hidden');
+  }
+
+  // ----- shipments -----
+  function trackLink(n) {
+    if (!n) return '';
+    var url = /^1Z/i.test(n) ? 'https://www.ups.com/track?tracknum=' + encodeURIComponent(n)
+      : 'https://www.fedex.com/fedextrack/?trknbr=' + encodeURIComponent(n);
+    return '<a target="_blank" rel="noopener" href="' + url + '">' + esc(n) + '</a>';
+  }
+  function stat(s) {
+    if (!s) return '';
+    if (s.delivered_at) return ' <span class="tag restock">Delivered ' + esc(fmtDate(s.delivered_at)) + '</span>';
+    return s.status ? ' <span class="tag">' + esc(String(s.status).replace(/_/g, ' ')) + '</span>' : '';
+  }
+  async function loadShipments() {
+    var p = $('shipPane');
+    p.innerHTML = '<p class="muted">Loading...</p>';
+    var j = await call('shipments');
+    if (!j.ok) { p.innerHTML = '<div class="err">' + esc(j.error || 'Could not load.') + '</div>'; return; }
+    var html = '<div class="card"><h2>RMA parts</h2>';
+    if (!j.rma.length) html += '<p class="muted">No RMA shipments are linked to you.</p>';
+    j.rma.forEach(function (r) {
+      html += '<div class="visit"><div class="top"><b>' + esc(r.location || 'RMA') + '</b><span class="muted">' + esc(fmtDate(r.received_at)) + '</span></div>' +
+        '<div class="muted">' + (r.wo ? 'WO ' + esc(r.wo) : '') + (r.case_number ? ' | Case ' + esc(r.case_number) : '') + '</div>' +
+        (r.details ? '<div>' + esc(r.details) + '</div>' : '') +
+        (r.outbound ? '<div>Sent to you: ' + trackLink(r.outbound) + stat(r.outbound_status) + '</div>' : '') +
+        (r.inbound ? '<div>Return: ' + trackLink(r.inbound) + stat(r.inbound_status) + '</div>' : '') +
+        (r.return_broken_part ? '<div class="muted">Broken part must be returned' + (r.returned_at ? ' (returned ' + esc(fmtDate(r.returned_at)) + ')' : '') + '</div>' : '') +
+        '</div>';
+    });
+    html += '</div><div class="card"><h2>Consumable shipments</h2>';
+    if (!j.consumables.length) html += '<p class="muted">No consumable shipments on record.</p>';
+    j.consumables.forEach(function (c) {
+      html += '<div class="visit"><div class="top"><b>Requested ' + esc(fmtDate(c.requested)) + '</b><span class="muted">' + esc(c.status || '') + '</span></div>' +
+        '<div class="muted">' + esc(c.method || '') + (c.boxes ? ' | ' + esc(c.boxes) + ' box(es)' : '') + (c.shipped ? ' | shipped ' + esc(fmtDate(c.shipped)) : '') + '</div>' +
+        c.items.map(function (i) { return '<div>' + esc(i.description || i.sku) + ' <span class="muted">' + esc(i.units || '') + ' ' + esc(i.unit || '') + '</span></div>'; }).join('') +
+        c.tracking.map(function (t) { return '<div>' + trackLink(t.number) + stat(t.status) + '</div>'; }).join('') +
+        (c.delivered_at ? '<div class="muted">Delivered ' + esc(fmtDate(c.delivered_at)) + '</div>' : '') + '</div>';
+    });
+    html += '</div><p class="muted">Only shipments linked to you are shown. Some RMA shipments are not linked to a technician yet; check your email if one is missing.</p>';
+    p.innerHTML = html;
+  }
+
+  // ----- password -----
+  $('pwBtn').onclick = async function () {
+    var m = $('pwMsg'); m.className = ''; m.textContent = '';
+    var j = await call('change_password', { current: $('cur').value, next: $('nw').value });
+    if (!j.ok) { m.className = 'err'; m.textContent = j.error || 'Could not change password.'; return; }
+    TOKEN = j.token; store('mcr_tech_token', TOKEN);
+    $('cur').value = ''; $('nw').value = '';
+    m.className = 'okmsg'; m.textContent = 'Password changed.';
+  };
+
+  // ----- restore session -----
+  (async function init() {
+    var t = load('mcr_tech_token');
+    if (!t) return;
+    TOKEN = t;
+    try {
+      var j = await call('me');
+      if (j.ok) showApp(j.me); else signOut();
+    } catch (e) { signOut(); }
+  })();
+})();
+</script>
+</body>
+</html>
