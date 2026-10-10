@@ -80,12 +80,12 @@
 <body>
 <header>
   <h1>MCR Dispatch — Help</h1>
-  <span>30 Sep 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>10 Oct 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
 <nav>
-  <a href="#start">First day</a>
+  <a href="#start">Quick start</a>
   <a href="#whats-new">What's New</a>
   <a href="#quickref">Quick Reference</a>
   <a href="#login">Login</a>
@@ -93,6 +93,7 @@
   <a href="#card-controls">Card Controls</a>
   <a href="#map-view">Map View</a>
   <a href="#state-console">State Console</a>
+  <a href="#site-history">Site History</a>
   <a href="#ai-assistant">AI Assistant</a>
   <a href="#session-actions">Session Actions</a>
   <a href="#text-stop">Text this stop</a>
@@ -108,14 +109,15 @@
 <main>
 
   <section id="start">
-    <h2>First day on the app</h2>
+    <h2>Quick start</h2>
     <p>Blue Folder is closed. It was only the <strong>calendar</strong> and the log for <strong>OTC / testing-station</strong> tickets. Those two now live in this app. Everyday kiosk dispatch was never in Blue Folder — that was still Salesforce after you decided who goes where. The board is that decision step, not a Salesforce replacement.</p>
     <div class="step"><strong>1. Open</strong> <a href="https://mcrdispatch.net">mcrdispatch.net</a>. Use the username and PIN an admin gave you. Same login works on the board and Admin. If the page asks for a login and you do not have a PIN, ask an admin — the public site will not guess it.</div>
     <div class="step"><strong>2. Confirm Region and Dispatch Date.</strong> The board opens on your home state. Next to the date is a <strong>Tomorrow</strong> button (it says <strong>Monday</strong> on Saturday or Sunday). Tap it once to jump to the next workday; the button then shows that weekday (Wed, Thu…).</div>
     <div class="step"><strong>3. Generate Dispatches</strong> if a list is already pasted, or paste today’s Salesforce / Neumo list and generate. Review the cards. Reassign if the map looks wrong.</div>
     <div class="step"><strong>4. Send the day</strong> with <strong>✅ Messages</strong> then <strong>Send</strong> on each tech, or <strong>📱 Text this stop</strong> on a trouble WO. If a carrier sheet pops up, pick Verizon / T-Mobile / AT&amp;T / Sprint. That saves on their card so the next text just goes.</div>
-    <div class="step"><strong>5. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter because that is what gets billed. Click a column header to sort — Arrival starts newest first.</div>
-    <p>Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
+    <div class="step"><strong>5. Look up any site.</strong> Tap a <strong>site name</strong> on a stop card (on the board, the State Console or Saturday On-Call) to open its history: recent visits, ticket emails, closing notes, and shipments. It looks the same on every page. See <a href="#site-history">Site History</a>.</div>
+    <div class="step"><strong>6. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter because that is what gets billed. Click a column header to sort — Arrival starts newest first.</div>
+    <p>Want a different view of the same day? <strong>Compact Summary</strong> (next to Messages) lists the stops in a short form you can work from while dragging work orders onto the Salesforce console. <strong>📍 State Console</strong> shows any state and date without running a dispatch. Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
     <div class="note"><strong>This is not Salesforce and it was not Blue Folder for kiosk calls.</strong> The app helps you decide who goes where and texts the tech. Official kiosk assignments still get dragged onto the Salesforce console.</div>
   </section>
 
@@ -136,6 +138,8 @@
       <tr><td>Check if today's routes are efficient</td><td><strong>🧭 Analyze Routes</strong> (dispatch board or State Console) -- suggests specific stop swaps with the mileage each one saves. See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
       <tr><td>Move a stop with a typed/spoken command</td><td>Type or dictate into the AI command bar, e.g. "move stop 2 from Robert to Sean." See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
       <tr><td>Work a state I don't normally cover</td><td>Open that state's <strong>📍 State Console</strong> first -- shows who's out, recent tickets, and restock status without needing the full dispatch workflow.</td></tr>
+      <tr><td>See a site's past visits, notes, or ticket emails</td><td>Tap the <strong>site name</strong> on any stop card. Same popup on the board, State Console and Saturday On-Call. See <a href="#site-history">Site History</a>.</td></tr>
+      <tr><td>Record that a site was restocked (outside a normal ticket)</td><td>Open the site's history popup and tap <strong>✅ Mark Restocked</strong>. Add an optional note. See <a href="#site-history">Site History</a>.</td></tr>
       <tr><td>Check for stale/unaddressed trouble tickets</td><td><strong>Watchdog Log</strong> (button next to the state selector, or <code>/watchdog/:state</code>) -- every open trouble/install/site-survey ticket for a state, sorted by urgency.</td></tr>
       <tr><td>Undo something I just did</td><td><strong>↩ Undo</strong> in the Session Actions list at the bottom -- only works until you refresh the page. See <a href="#session-actions">Session Actions</a>.</td></tr>
       <tr><td>Add/edit a location or technician</td><td><strong>Admin Panel</strong> → Locations or Technicians tab. See <a href="#admin">Admin Panel</a>.</td></tr>
@@ -149,7 +153,13 @@
   <section id="whats-new">
     <h2>🆕 What's New</h2>
 
-    <p style="color:var(--muted);font-size:13px;">Updated 30 September 2026. Print this page (button top right) if you want a paper copy.</p>
+    <p style="color:var(--muted);font-size:13px;">Updated 10 October 2026. Print this page (button top right) if you want a paper copy.</p>
+
+    <h3>Site history is the same everywhere</h3>
+    <p>Tapping a site name now opens the same history popup on the dispatch board, the State Console and Saturday On-Call. It shows past visits with their closing notes, the emails behind tickets, shipments with tracking links, and has <strong>✅ Mark Restocked</strong>, <strong>Load more</strong> and <strong>Print</strong>. See <a href="#site-history">Site History</a>.</p>
+
+    <h3>Visit history cleanup</h3>
+    <p>Hundreds of past visits that had been filed under the wrong store were moved to the right one (Palm Beach, Broward and Lee County in Florida; several Michigan, Indiana, Colorado, Georgia, Minnesota and Nevada stores). A few site names were corrected so look-alike stores no longer get mixed up. If a store's history still looks wrong, tell an admin which site and visit.</p>
 
     <h3>Blue Folder is closed</h3>
     <p>OTC / testing-station close-outs and those calendar entries now live in the app. Use <strong>⏱ Service responses</strong> for ITI times and miles (default filter: Michigan testing). Click any column header to sort; Arrival defaults to newest first. Ordinary kiosk restocks and trouble tickets were never Blue Folder — still planned here, still dropped in Salesforce.</p>
@@ -321,9 +331,25 @@
       <li><strong>AI command bar + Analyze Routes</strong> -- same assistant as the dispatch board. See <a href="#ai-assistant">AI Assistant</a>.</li>
       <li><strong>Restock Status</strong> -- current restock schedule for the state.</li>
       <li><strong>Recent Trouble/Maintenance Tickets</strong> -- last 3 days by when a ticket was added to the system (not by due date), with a <strong>Trouble tickets only</strong> filter and a <strong>Hide closed tickets</strong> toggle.</li>
+      <li><strong>Site names are tappable</strong> -- opens the same <a href="#site-history">Site History</a> popup as the dispatch board.</li>
       <li><strong>Update Closed-Ticket Data</strong> -- trigger the Salesforce closed-ticket sync on demand, or upload a manual export, without going through Admin Panel.</li>
     </ul>
     <div class="note"><strong>Note:</strong> if you land on the wrong state or date without navigating from the dispatch board's link, it's likely an already-open tab or browser back/forward reloading an old URL rather than a fresh page load -- click through from the dispatch board to guarantee both carry over correctly.</div>
+  </section>
+
+  <!-- SITE HISTORY -->
+  <section id="site-history">
+    <h2>Site History</h2>
+    <p>Tap a <strong>site name</strong> on a stop card to open that site's history. The popup is the same on the dispatch board, the State Console and Saturday On-Call.</p>
+    <ul>
+      <li><strong>Visits</strong> -- newest first, with the date, technician and what was done. Restocks and preventative maintenance show in green, trouble calls in red. <strong>Load more</strong> goes further back.</li>
+      <li><strong>View Note</strong> -- opens the technician's closing note for that visit. Visits that came in by email (testing-station / OTC close-outs) show the note from the email.</li>
+      <li><strong>View ticket email</strong> -- opens the Neumo email behind a ticket. From there you can forward it.</li>
+      <li><strong>Shipments</strong> -- parts and consumables sent to the site, with a tracking link when there is one.</li>
+      <li><strong>✅ Mark Restocked</strong> -- records that someone restocked the site (for example, while already there for another reason). It adds a record to the history and takes an optional note. It does not change the restock schedule or the overdue calculation.</li>
+      <li><strong>Print</strong> -- a printable copy of the history. Press <strong>Esc</strong> to close the popup.</li>
+    </ul>
+    <div class="note"><strong>Good to know:</strong> some locations have several kiosks at one address (for example, locations with more than one printer station). Salesforce reports them under one account name, so their visits can show together under one site code. Trouble tickets still carry the specific kiosk.</div>
   </section>
 
   <!-- AI ASSISTANT -->
@@ -659,10 +685,11 @@ Tap the link in the text to confirm you got this.</div>
       <li>Undo is session-only — refreshing the page clears session action history (though the board itself now reloads correctly on refresh).</li>
       <li>Map View / route-sorting shows real driving distance only where the site-to-site matrix has been built for that state -- a handful of smaller states are still pending; elsewhere, and for any specific pairs a build didn't resolve, distances fall back to straight-line, marked "(est.)".</li>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
-      <li>Closing notes exist for visits after we started capturing them. Older visits still need Salesforce if the notes box says none are on file (the SA number is copied for that search).</li>
+      <li>Closing notes are captured from roughly mid-August 2026 forward. Older visits show no note even if one exists in Salesforce; look it up there if the notes box says none are on file (the SA number is copied for that search).</li>
+      <li>Brand-new locations, and testing-station / OTC stores that have not had a ticket yet, may not appear in Site History until their first ticket creates the site.</li>
       <li>Mail to @mcrtechservice.com from the app is accepted by the host; if someone does not see it, check Junk before assuming it never sent.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: September 30, 2026</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: October 10, 2026</p>
   </section>
 
 </main>
