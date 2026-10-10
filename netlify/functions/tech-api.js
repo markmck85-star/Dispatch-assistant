@@ -13,8 +13,8 @@
 //    page never decides what a tech may see.
 //  - Technician scope = home_state + additional_states on the technicians row.
 //  - Staff (staff_accounts) have their own portal passwords, separate from their
-//    dispatcher PINs. Scope is read live from the dispatchers row: admins see all
-//    states, dispatchers see the states on their dispatcher login. Staff get the
+//    dispatcher PINs. Scope is read live from the dispatchers row: everyone sees
+//    only the states on their dispatcher login. Staff get the
 //    shipments for their states instead of "my" shipments.
 //  - Fields returned are trimmed: no site notes, no contractor info, no
 //    internal flags, no home addresses.
@@ -160,8 +160,8 @@ function staffOk(d) {
   return !!d && d.active === true && (d.role === 'admin' || d.role === 'dispatcher');
 }
 
+// Admins and dispatchers alike are limited to the states on their dispatcher login.
 function staffStates(d) {
-  if (d.role === 'admin') return null; // all states
   return (d.states || []).map((x) => String(x).toUpperCase());
 }
 
@@ -259,18 +259,24 @@ async function doLogin(supabase, body) {
 
 async function doSearch(supabase, ctx, body) {
   const q = cleanQuery(body.q);
-  if (q.length < 2) return json(200, { ok: true, sites: [] });
-  const pat = '%' + q + '%';
+  // Empty query returns every site in the caller's scope (the page loads this
+  // once and filters on the phone). A typed query is filtered here.
   let sq = supabase
     .from('sites')
     .select('site_code, name, address, state, county, machine_type');
+  if (ctx.states && !ctx.states.length) return json(200, { ok: true, sites: [] });
   if (ctx.states) sq = sq.in('state', ctx.states);
+  sq = sq.eq('active', true).eq('is_placeholder', false);
+  if (q.length >= 2) {
+    const pat = '%' + q + '%';
+    sq = sq.or('name.ilike.' + pat + ',site_code.ilike.' + pat + ',address.ilike.' + pat + ',county.ilike.' + pat);
+  } else if (q.length) {
+    return json(200, { ok: true, sites: [] });
+  }
   const { data, error } = await sq
-    .eq('active', true)
-    .eq('is_placeholder', false)
-    .or('name.ilike.' + pat + ',site_code.ilike.' + pat + ',address.ilike.' + pat + ',county.ilike.' + pat)
+    .order('state', { ascending: true })
     .order('name', { ascending: true })
-    .limit(30);
+    .limit(q.length ? 60 : 1500);
   if (error) return json(500, { ok: false, error: 'Search failed.' });
   return json(200, { ok: true, sites: data || [] });
 }
@@ -375,6 +381,7 @@ async function doShipments(supabase, ctx) {
     rmaQ = rmaQ.eq('technician_id', ctx.tech.id);
     conQ = conQ.eq('technician_id', ctx.tech.id);
   } else if (ctx.states) {
+    if (!ctx.states.length) return json(200, { ok: true, rma: [], consumables: [] });
     rmaQ = rmaQ.in('state', ctx.states);
     conQ = conQ.in('state', ctx.states);
   }
