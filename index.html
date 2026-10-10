@@ -2764,6 +2764,7 @@ function distanceMatrixStatus(state) {
                 || allowed[0];
             sel.value = allowed.indexOf(preferred) >= 0 ? preferred : allowed[0];
             if (sel.value !== current) { /* dropdown rewritten */ }
+            try { if (window.refreshBoardTools) window.refreshBoardTools(); } catch (e) { console.warn('[tools] refresh failed:', e.message); }
         }
 
         function switchBoardUser() {
@@ -3628,6 +3629,7 @@ function distanceMatrixStatus(state) {
             });
 
             CURRENT_STATE = selector.value;
+            try { if (window.refreshBoardTools) window.refreshBoardTools(); } catch (e) {}
             window._dispatchMapUserView = null;
             window._dispatchMapForceRefit = true;
             localStorage.setItem('lastSelectedState', CURRENT_STATE);
@@ -9711,5 +9713,390 @@ ${content}</body></html>`;
 <script src="/site-history.js"></script>
 <script src="/update-check.js"></script>
 <script src="/default-tech-prompt.js"></script>
+<!-- ── BOARD TOOLS: chips, star to pin, More tools drawer (2026-10-10) ──
+     Moves the REAL tool buttons and links (nothing is cloned or rebuilt) into a
+     short main row and a More tools drawer. Per-login picks are saved through
+     /.netlify/functions/tool-prefs with a browser copy as a fallback. Layers,
+     lowest to highest: company default, region default, role, personal picks. -->
+<style>
+    #boardToolBar { margin: 0 0 10px; }
+    #boardToolBar .tool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+    #boardToolBar .tool-seg { display: inline-flex; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
+    #boardToolBar .tool-seg button { min-height: 36px; padding: 6px 14px; border: none; background: #181818; color: #aaa; font-weight: 700; font-size: 13px; cursor: pointer; }
+    #boardToolBar .tool-seg button[aria-pressed="true"] { background: #f0a500; color: #111; }
+    #boardToolBar .tool-edit { min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1px solid #333; background: #181818; color: #ccc; font-weight: 700; font-size: 13px; cursor: pointer; }
+    #boardToolBar.editing .tool-edit { background: #2a2a3e; border-color: #f0a500; color: #f0a500; }
+    #boardToolBar .tool-hint { display: none; font-size: 12px; color: #888; margin: 0 0 8px; }
+    #boardToolBar.editing .tool-hint { display: block; }
+    #boardToolBar .tool-hint button { background: none; border: none; color: #6cb2ff; text-decoration: underline; cursor: pointer; font-size: 12px; padding: 0 0 0 6px; }
+    #toolMain { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tool-item { display: inline-flex; align-items: stretch; gap: 4px; max-width: 100%; }
+    .tool-item > a, .tool-item > button.rail-btn, .tool-item > button.tool-proxy {
+        display: flex; align-items: center; justify-content: center; gap: 4px;
+        min-height: 44px; padding: 8px 12px; border-radius: 8px; border: 1px solid #333;
+        background: #181818; color: #f0a500; font-weight: 700; font-size: 13px;
+        text-decoration: none; text-align: center; cursor: pointer; line-height: 1.2; box-sizing: border-box;
+    }
+    .tool-item > button.big-btn { width: auto; margin: 0; min-height: 44px; padding: 8px 12px; font-size: 13px; border-radius: 8px;
+        background: #181818 !important; color: #f0a500 !important; border: 1px solid #333; }
+    .tool-item > button#dcoToggleBtn, .tool-item > button#troubleOnlyToggleBtn { flex: 0 0 auto !important; min-width: 0 !important; min-height: 44px; padding: 8px 12px !important; border-radius: 8px !important; }
+    .tool-star { display: none; align-items: center; justify-content: center; width: 44px; min-height: 44px; border-radius: 8px; border: 1px solid #333; background: #141414; color: #f0a500; font-size: 20px; cursor: pointer; padding: 0; }
+    #boardToolBar.editing #toolMain .tool-star { display: flex; }
+    #toolMore .tool-star { display: flex; color: #888; }
+    #toolMore { margin: 8px 0 0; border: 1px solid #333; border-radius: 8px; background: #141414; }
+    #toolMore > summary { list-style: none; cursor: pointer; min-height: 44px; padding: 12px; font-weight: 700; font-size: 13px; color: #ccc; }
+    #toolMore > summary::-webkit-details-marker { display: none; }
+    #toolMore[open] > summary { border-bottom: 1px solid #2a2a2a; }
+    #toolMoreList { padding: 6px 8px 10px; }
+    #toolMoreList .tool-group { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; }
+    #toolMoreList .tool-item { display: flex; margin: 0 0 4px; }
+    #toolMoreList .tool-item > a, #toolMoreList .tool-item > button:not(.tool-star) { flex: 1 1 auto; justify-content: flex-start; text-align: left; }
+    #toolMoreEmpty { padding: 10px 12px; font-size: 13px; color: #888; }
+    #boardSettings { margin: 0 0 10px; border: 1px solid #444; border-radius: 8px; background: #1e1e1e; }
+    #boardSettings > summary { list-style: none; cursor: pointer; min-height: 40px; padding: 10px 12px; font-weight: 700; font-size: 13px; color: #ccc; }
+    #boardSettings > summary::-webkit-details-marker { display: none; }
+    #boardSettings .top-row { padding: 0 10px; }
+    #boardSettings .top-row label { color: #ccc; }
+</style>
+<script>
+(function () {
+    'use strict';
+
+    var GROUPS = [
+        { id: 'today', title: "Today's dispatch" },
+        { id: 'look', title: 'Look something up' },
+        { id: 'plan', title: 'Calendar and shipping' },
+        { id: 'admin', title: 'Admin' }
+    ];
+
+    // Registry order is the default order in the main row.
+    // simple: in the Simple view for everyone. simpleStates: in the Simple view
+    // only when the selected region is in the list. adminOnly: hidden for
+    // non-admin logins. virtual: has a stand-in chip instead of moving a node.
+    var TOOLS = [
+        { id: 'state',     sel: '#stateConsoleLink',                                  group: 'today', simple: true },
+        { id: 'messages',  sel: '.tool-rail button.rail-btn[onclick*="generateFinalMessages"]',  group: 'today', simple: true },
+        { id: 'compact',   sel: '.action-btns button[onclick*="openCompactSummary"]',              group: 'today', simple: true },
+        { id: 'print',     sel: '.action-btns button[onclick*="printReport"]',                   group: 'today' },
+        { id: 'trouble',   sel: '#troubleOnlyToggleBtn',                              group: 'today' },
+        { id: 'dco',       sel: '#dcoToggleBtn',                                      group: 'today' },
+        { id: 'assistant', virtual: true, label: '🤖 Assistant', hostSel: '#aiCommandBarHome', group: 'today' },
+        { id: 'lookup',    sel: '#locationLookupLink',                                group: 'look',  simple: true },
+        { id: 'watchdog',  sel: '#watchdogLink',                                      group: 'look',  simple: true },
+        { id: 'closing',   sel: 'a.closing-email-link',                               group: 'look',  simple: true },
+        { id: 'service',   sel: 'a[href="/service-responses"]',                       group: 'look',  simpleStates: ['MI', 'NV', 'OH', 'CO'] },
+        { id: 'restock',   sel: '#restockLink',                                       group: 'look' },
+        { id: 'help',      sel: 'a.help-link',                                        group: 'look',  simple: true },
+        { id: 'shipping',  sel: 'a.shipments-link',                                   group: 'plan',  simple: true },
+        { id: 'calendar',  sel: 'a.team-calendar-link',                               group: 'plan',  simple: true },
+        { id: 'saturday',  sel: 'a[href="/saturday-oncall"]',                         group: 'plan' },
+        { id: 'admin',     sel: 'a.admin-panel-link',                                 group: 'admin', adminOnly: true },
+        { id: 'inbound',   sel: '#inboundMailLink',                                   group: 'admin', adminOnly: true },
+        { id: 'mileage',   sel: 'a.mileage-log-link',                                 group: 'admin', adminOnly: true }
+    ];
+
+    var wrappers = {};          // tool id -> .tool-item node
+    var prefs = null;           // { preset, pinned: [], unpinned: [] }
+    var editing = false;
+    var assistantRevealed = false;
+    var serverChecked = {};     // username -> true once the server copy was fetched
+    var saveTimer = null;
+    var built = false;
+    var origParents = [];       // where moved nodes used to live
+
+    function user() {
+        if (window.CURRENT_USER && window.CURRENT_USER.username) return window.CURRENT_USER;
+        try { var raw = sessionStorage.getItem('dispatchUser'); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+    }
+    function isAdmin(u) { return !!(u && u.role === 'admin'); }
+    function region() { var s = document.getElementById('stateSelector'); return s ? s.value : ''; }
+    function cacheKey(u) { return 'mcr_tool_prefs_v1:' + String(u.username || '').toLowerCase(); }
+
+    function clean(p) {
+        var out = { preset: null, pinned: [], unpinned: [] };
+        if (!p || typeof p !== 'object') return out;
+        if (p.preset === 'simple' || p.preset === 'everything') out.preset = p.preset;
+        var known = {};
+        TOOLS.forEach(function (t) { known[t.id] = true; });
+        ['pinned', 'unpinned'].forEach(function (k) {
+            if (!Array.isArray(p[k])) return;
+            p[k].forEach(function (id) { if (known[id] && out[k].indexOf(id) < 0) out[k].push(id); });
+        });
+        return out;
+    }
+    function loadLocal(u) {
+        try { return clean(JSON.parse(localStorage.getItem(cacheKey(u)) || 'null')); } catch (e) { return clean(null); }
+    }
+    function saveLocal(u) {
+        try { localStorage.setItem(cacheKey(u), JSON.stringify(prefs)); } catch (e) {}
+    }
+
+    function callServer(u, action, body) {
+        var pin = '';
+        try { pin = sessionStorage.getItem('dispatchAdminPin') || ''; } catch (e) {}
+        if (!pin) return Promise.resolve(null);
+        var payload = { username: u.username, pin: pin, action: action };
+        if (body) payload.prefs = body;
+        return fetch('/.netlify/functions/tool-prefs', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        }).then(function (r) { return r.json().catch(function () { return null; }); }).catch(function () { return null; });
+    }
+    function scheduleServerSave(u) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () { callServer(u, 'save', prefs); }, 600);
+    }
+    function persist(u) {
+        saveLocal(u);
+        scheduleServerSave(u);
+    }
+    function fetchServerOnce(u) {
+        var key = String(u.username || '').toLowerCase();
+        if (serverChecked[key]) return;
+        serverChecked[key] = true;
+        callServer(u, 'get').then(function (res) {
+            if (!res || !res.ok) return;
+            if (res.prefs) {
+                prefs = clean(res.prefs);
+                saveLocal(u);
+                refresh();
+            } else if (res.persisted !== false && (prefs.preset || prefs.pinned.length || prefs.unpinned.length)) {
+                callServer(u, 'save', prefs);
+            }
+        });
+    }
+
+    function presetFor(u) { return (prefs && prefs.preset) || (isAdmin(u) ? 'everything' : 'simple'); }
+
+    function defaultMain(t, preset, reg) {
+        if (preset === 'everything') return true;
+        if (t.adminOnly) return false;
+        if (t.simple) return true;
+        return !!(t.simpleStates && t.simpleStates.indexOf(reg) >= 0);
+    }
+
+    // Returns { main: [tool], more: [tool] } for this login and region.
+    function resolve(u) {
+        var preset = presetFor(u), reg = region();
+        var allowed = TOOLS.filter(function (t) { return !t.adminOnly || isAdmin(u); });
+        var main = allowed.filter(function (t) {
+            return defaultMain(t, preset, reg) && prefs.unpinned.indexOf(t.id) < 0;
+        });
+        prefs.pinned.forEach(function (id) {
+            var t = allowed.filter(function (x) { return x.id === id; })[0];
+            if (t && main.indexOf(t) < 0) main.push(t);
+        });
+        var more = allowed.filter(function (t) { return main.indexOf(t) < 0; });
+        return { main: main, more: more, allowed: allowed };
+    }
+
+    function ensureWrapper(t) {
+        if (wrappers[t.id]) return wrappers[t.id];
+        var el = null;
+        if (t.virtual) {
+            el = document.createElement('button');
+            el.type = 'button';
+            el.className = 'tool-proxy';
+            el.textContent = t.label;
+            el.addEventListener('click', function () {
+                var host = document.querySelector(t.hostSel);
+                if (!host) return;
+                var u = user();
+                var inMain = u && resolve(u).main.some(function (x) { return x.id === t.id; });
+                if (!inMain) { assistantRevealed = true; host.style.display = ''; }
+                var input = document.getElementById('aiCommandInput');
+                if (input) { try { input.scrollIntoView({ block: 'center' }); input.focus(); } catch (e) {} }
+            });
+        } else {
+            el = document.querySelector(t.sel);
+            if (!el) return null;
+        }
+        if (el.parentNode) origParents.push(el.parentNode);
+        var w = document.createElement('span');
+        w.className = 'tool-item';
+        w.setAttribute('data-tool', t.id);
+        if (el.parentNode) el.parentNode.insertBefore(w, el);
+        w.appendChild(el);
+        var star = document.createElement('button');
+        star.type = 'button';
+        star.className = 'tool-star';
+        star.setAttribute('data-star', t.id);
+        w.appendChild(star);
+        wrappers[t.id] = w;
+        return w;
+    }
+
+    function setStar(w, inMain) {
+        var s = w.querySelector('.tool-star');
+        if (!s) return;
+        s.textContent = inMain ? '★' : '☆';
+        s.setAttribute('aria-label', inMain ? 'Move to More tools' : 'Add to main row');
+        s.title = inMain ? 'Move to More tools' : 'Add to main row';
+    }
+
+    function togglePin(id) {
+        var u = user(); if (!u) return;
+        var r = resolve(u);
+        var inMain = r.main.some(function (t) { return t.id === id; });
+        var t = TOOLS.filter(function (x) { return x.id === id; })[0];
+        var preset = presetFor(u), reg = region();
+        var isDefault = defaultMain(t, preset, reg);
+        prefs.pinned = prefs.pinned.filter(function (x) { return x !== id; });
+        prefs.unpinned = prefs.unpinned.filter(function (x) { return x !== id; });
+        if (inMain) {
+            if (isDefault) prefs.unpinned.push(id);
+        } else {
+            prefs.pinned.push(id);
+        }
+        persist(u);
+        refresh();
+    }
+
+    function build() {
+        if (built) return true;
+        var stack = document.getElementById('boardToolStack');
+        if (!stack) return false;
+        var bar = document.createElement('div');
+        bar.id = 'boardToolBar';
+        bar.innerHTML =
+            '<div class="tool-head">' +
+              '<div class="tool-seg" role="group" aria-label="Tool view">' +
+                '<button type="button" data-preset="simple">Simple</button>' +
+                '<button type="button" data-preset="everything">Everything</button>' +
+              '</div>' +
+              '<button type="button" class="tool-edit" aria-pressed="false">Edit</button>' +
+            '</div>' +
+            '<div class="tool-hint">Tap a star to move a tool between the main row and More tools.' +
+              '<button type="button" data-reset>Reset to default</button></div>' +
+            '<div id="toolMain"></div>' +
+            '<details id="toolMore"><summary id="toolMoreSummary">More tools</summary><div id="toolMoreList"></div></details>';
+        stack.insertBefore(bar, stack.firstChild);
+
+        bar.addEventListener('click', function (e) {
+            var t = e.target;
+            var u = user(); if (!u) return;
+            var starBtn = t.closest ? t.closest('.tool-star') : null;
+            if (starBtn) { e.preventDefault(); e.stopPropagation(); togglePin(starBtn.getAttribute('data-star')); return; }
+            var presetBtn = t.closest ? t.closest('[data-preset]') : null;
+            if (presetBtn) { prefs.preset = presetBtn.getAttribute('data-preset'); persist(u); refresh(); return; }
+            if (t.classList && t.classList.contains('tool-edit')) {
+                editing = !editing;
+                bar.classList.toggle('editing', editing);
+                t.setAttribute('aria-pressed', editing ? 'true' : 'false');
+                t.textContent = editing ? 'Done' : 'Edit';
+                return;
+            }
+            if (t.hasAttribute && t.hasAttribute('data-reset')) {
+                prefs = clean(null);
+                persist(u);
+                refresh();
+            }
+        });
+
+        var sel = document.getElementById('stateSelector');
+        if (sel) sel.addEventListener('change', function () { refresh(); });
+        built = true;
+        return true;
+    }
+
+    function moveSettings(u) {
+        var row = document.querySelector('.top-row');
+        if (!row) return;
+        var details = document.getElementById('boardSettings');
+        if (!isAdmin(u)) { row.style.display = 'none'; return; }
+        if (!details) {
+            details = document.createElement('details');
+            details.id = 'boardSettings';
+            var sum = document.createElement('summary');
+            sum.textContent = 'Settings';
+            details.appendChild(sum);
+            row.parentNode.insertBefore(details, row);
+            details.appendChild(row);
+        }
+        row.style.display = '';
+    }
+
+    function refresh() {
+        var u = user();
+        if (!u || u.role === 'tech') return;
+        if (!build()) return;
+        if (!prefs) prefs = loadLocal(u);
+        var r = resolve(u);
+        var preset = presetFor(u);
+
+        // Hide admin-only tools for everyone else.
+        TOOLS.forEach(function (t) {
+            if (t.adminOnly && !isAdmin(u)) {
+                var el = t.sel ? document.querySelector(t.sel) : null;
+                if (el) el.style.display = 'none';
+            }
+        });
+
+        var mainBox = document.getElementById('toolMain');
+        var moreList = document.getElementById('toolMoreList');
+        var seen = {};
+        r.main.forEach(function (t) {
+            var w = ensureWrapper(t); if (!w) return;
+            setStar(w, true);
+            mainBox.appendChild(w);
+            seen[t.id] = true;
+        });
+
+        moreList.innerHTML = '';
+        var count = 0;
+        GROUPS.forEach(function (g) {
+            var items = r.more.filter(function (t) { return t.group === g.id; });
+            var nodes = [];
+            items.forEach(function (t) {
+                var w = ensureWrapper(t); if (!w) return;
+                setStar(w, false);
+                nodes.push(w);
+                seen[t.id] = true;
+            });
+            if (!nodes.length) return;
+            var h = document.createElement('div');
+            h.className = 'tool-group';
+            h.textContent = g.title;
+            moreList.appendChild(h);
+            nodes.forEach(function (n) { moreList.appendChild(n); count++; });
+        });
+        if (!count) {
+            var empty = document.createElement('div');
+            empty.id = 'toolMoreEmpty';
+            empty.textContent = 'Everything is in the main row.';
+            moreList.appendChild(empty);
+        }
+        document.getElementById('toolMoreSummary').textContent = 'More tools' + (count ? ' (' + count + ')' : '');
+
+        // Assistant bar: shown in place when it is in the main row, tucked away otherwise.
+        var host = document.querySelector('#aiCommandBarHome');
+        if (host) {
+            var assistantMain = r.main.some(function (t) { return t.id === 'assistant'; });
+            host.style.display = (assistantMain || assistantRevealed) ? '' : 'none';
+        }
+
+        // Source containers are now empty.
+        ['.tool-rail', '.tool-side-links'].forEach(function (s) {
+            var c = document.querySelector('#boardToolStack > ' + s);
+            if (c) c.style.display = 'none';
+        });
+        // Hide any old row that is empty now that its tools moved out (the DCO and Trouble Only row).
+        origParents.forEach(function (p) {
+            if (!p || p.classList.contains('tool-item')) return;
+            var hasKids = false;
+            for (var i = 0; i < p.children.length; i++) { if (p.children[i].style.display !== 'none') { hasKids = true; break; } }
+            if (!hasKids) p.style.display = 'none';
+        });
+
+        document.querySelectorAll('#boardToolBar [data-preset]').forEach(function (b) {
+            b.setAttribute('aria-pressed', b.getAttribute('data-preset') === preset ? 'true' : 'false');
+        });
+        moveSettings(u);
+        fetchServerOnce(u);
+    }
+
+    window.refreshBoardTools = refresh;
+})();
+</script>
+
 </body>
 </html>
