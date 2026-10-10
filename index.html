@@ -685,12 +685,18 @@
                     </button>
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <label>Location Codes:</label>
-                    <button id="clearBtn" class="clear-btn">❌ Clear Text</button>
+                <!-- 2026-10-10: dispatch lists and tickets now arrive by email and load via the
+                     inbound banner, so manual pasting is retired. The textarea stays in the DOM
+                     (hidden, read-only) because Load, Generate, the freshness check and
+                     processDispatch all read/write it. Remove display:none to bring it back. -->
+                <div id="locationCodesWrap" style="display:none;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <label>Location Codes:</label>
+                        <button id="clearBtn" class="clear-btn">❌ Clear Text</button>
+                    </div>
                 </div>
                 <div id="dispatchListStatus" style="font-size:12px; color:#888; margin-bottom:4px; min-height:16px;"></div>
-                <textarea id="locationCodes" placeholder="Paste emails here..."></textarea>
+                <textarea id="locationCodes" readonly style="display:none;" placeholder="Paste emails here..."></textarea>
 
                 <div class="action-btns">
                     <button class="big-btn" onclick="processDispatch(false, true)">Generate Dispatches</button>
