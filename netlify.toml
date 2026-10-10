@@ -43,3 +43,10 @@
 # This wrapper is the 10-minute check. It does nothing until the board switch is on.
 [functions."run-inventory-date-text"]
   schedule = "*/10 * * * *"
+
+# 2026-10-10: reset-saturday-alerts was written to switch off Saturday on-call alert
+# rows after their day's 5pm cutoff, but it was never given a schedule, so rows from
+# Oct 3 stayed active. Hourly is enough: the rows' own 08:00-17:00 window already
+# blocks texts after 5pm, this just turns them off before the next weekday.
+[functions."reset-saturday-alerts"]
+  schedule = "7 * * * *"
