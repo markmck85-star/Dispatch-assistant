@@ -110,15 +110,13 @@
 
   <section id="start">
     <h2>Quick start</h2>
-    <p>Blue Folder is closed. It was only the <strong>calendar</strong> and the log for <strong>OTC / testing-station</strong> tickets. Those two now live in this app. Everyday kiosk dispatch was never in Blue Folder — that was still Salesforce after you decided who goes where. The board is that decision step, not a Salesforce replacement.</p>
     <div class="step"><strong>1. Open</strong> <a href="https://mcrdispatch.net">mcrdispatch.net</a>. Use the username and PIN an admin gave you. Same login works on the board and Admin. If the page asks for a login and you do not have a PIN, ask an admin — the public site will not guess it.</div>
     <div class="step"><strong>2. Confirm Region and Dispatch Date.</strong> The board opens on your home state. Next to the date is a <strong>Tomorrow</strong> button (it says <strong>Monday</strong> on Saturday or Sunday). Tap it once to jump to the next workday; the button then shows that weekday (Wed, Thu…).</div>
-    <div class="step"><strong>3. Generate Dispatches</strong> if a list is already pasted, or paste today’s Salesforce / Neumo list and generate. Review the cards. Reassign if the map looks wrong.</div>
-    <div class="step"><strong>4. Send the day</strong> with <strong>✅ Messages</strong> then <strong>Send</strong> on each tech, or <strong>📱 Text this stop</strong> on a trouble WO. If a carrier sheet pops up, pick Verizon / T-Mobile / AT&amp;T / Sprint. That saves on their card so the next text just goes.</div>
+    <div class="step"><strong>3. Load the day’s list.</strong> Dispatch lists arrive automatically by email. When a new one is in, a gold <strong>📬 New dispatch received</strong> banner appears at the top of the board — tap <strong>Load</strong>, then <strong>Generate Dispatches</strong>. Review the cards. Reassign if the map looks wrong.</div>
+    <div class="step"><strong>4. Send the day</strong> with <strong>✅ Messages</strong> then <strong>Copy Message</strong> on each tech and send it from your own phone. <strong>📤 Send</strong> and <strong>📱 Text this stop</strong> still email the technician, but text delivery to Verizon phones is currently blocked by the carrier, so do not rely on the text part. Use Copy Message for anything urgent.</div>
     <div class="step"><strong>5. Look up any site.</strong> Tap a <strong>site name</strong> on a stop card (on the board, the State Console or Saturday On-Call) to open its history: recent visits, ticket emails, closing notes, and shipments. It looks the same on every page. See <a href="#site-history">Site History</a>.</div>
     <div class="step"><strong>6. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter because that is what gets billed. Click a column header to sort — Arrival starts newest first.</div>
     <p>Want a different view of the same day? <strong>Compact Summary</strong> (next to Messages) lists the stops in a short form you can work from while dragging work orders onto the Salesforce console. <strong>📍 State Console</strong> shows any state and date without running a dispatch. Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
-    <div class="note"><strong>This is not Salesforce and it was not Blue Folder for kiosk calls.</strong> The app helps you decide who goes where and texts the tech. Official kiosk assignments still get dragged onto the Salesforce console.</div>
   </section>
 
   <!-- QUICK REFERENCE -->
@@ -128,7 +126,7 @@
     <table>
       <tr><th>I want to...</th><th>Do this</th></tr>
       <tr><td>Run today's normal dispatch</td><td><strong>Generate Dispatches</strong> → review/reassign → <strong>✅ Messages</strong> or <strong>📤 Send</strong>. See <a href="#daily">Daily Dispatch</a>.</td></tr>
-      <tr><td>Handle a trouble ticket right now</td><td>Set Paste Mode to <strong>⚡ URGENT</strong>, paste the ticket email, generate. SLA deadline is calculated automatically. See <a href="#urgent">Urgent Dispatch</a>.</td></tr>
+      <tr><td>Handle a trouble ticket right now</td><td>Trouble tickets arrive by email and are added to the site’s board entry automatically. SLA deadline is calculated automatically. See <a href="#urgent">Urgent Dispatch</a>.</td></tr>
       <tr><td>Text one trouble stop to the assigned tech</td><td>On that stop card tap <strong>📱 Text this stop</strong>. Edit the draft, Confirm Send. See <a href="#text-stop">Text this stop</a>.</td></tr>
       <tr><td>See a second ticket at a site already on the board</td><td>Amber chip <strong>⚠ Another ticket today — tap for WO / notes</strong>. Red SLA line sits under the restock. Do not assign a second tech.</td></tr>
       <tr><td>Collect a technician's cell carrier</td><td>Admin → Technicians → Carrier dropdown, or pick the carrier on the Text this stop sheet. Both save number@vtext.com on their card.</td></tr>
@@ -237,12 +235,12 @@
     <p>Forward any dispatch list or trouble/maintenance ticket email to <strong>dispatch@mcrdispatch.net</strong>. What happens next depends on the type:</p>
     <ul>
       <li><strong>Trouble, maintenance, install, and site-survey tickets</strong> are added to that site's board entry automatically -- no action needed.</li>
-      <li><strong>The daily bulk restock dispatch list is not auto-processed onto the board.</strong> It's received and cached for the app to pick up. A gold banner appears at the top of the dispatch board saying a new list has been received -- tap <strong>Load</strong> to pull it into the Location Codes box, then <strong>Generate Dispatches</strong> as usual to actually create the day's stops.</li>
+      <li><strong>The daily bulk restock dispatch list is not auto-processed onto the board.</strong> It's received and cached for the app to pick up. A gold banner appears at the top of the dispatch board saying a new list has been received -- tap <strong>Load</strong>, then <strong>Generate Dispatches</strong> to actually create the day's stops.</li>
     </ul>
     <div class="note"><strong>Note:</strong> the banner checks whether the cached list's own date has already passed before showing it as "new." If it looks like an already-handled list (e.g. opening the app for the first time in a few days), you'll get a confirmation prompt before it reloads, since reprocessing an old list unnecessarily is easy to do by mistake. Reloading is safe either way -- any stop still open for a site gets updated in place rather than duplicated.</div>
 
     <h3>Trouble Ticket SMS Alerts</h3>
-    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an SMS alert fires automatically to configured recipients (set per-state, per-person, with active-hours windows in Admin → Notifications) with the WO number, site name, issue, and SLA deadline.</p>
+    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an alert is sent automatically to configured recipients (set per-state, per-person, with active-hours windows in Admin → Notifications) with the WO number, site name, issue, and SLA deadline. Text alerts to Verizon phones are currently blocked by the carrier, so check the Watchdog page for new troubles until that is restored.</p>
 
     <h3>Technician Availability Board</h3>
     <p>The availability panel shows all techs with real-time status. Comp days and Saturday on-call rules apply automatically. Tap <strong>Mark Out</strong> to manually mark a tech unavailable for unscheduled absences — the dispatch engine routes around them immediately.</p>
@@ -276,7 +274,7 @@
       If a location has no fallback and the primary is out, a queue prompt cycles through each affected location asking who should cover.
     </div>
     <div class="step"><strong>Step 5 — Send messages.</strong><br>
-      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send manually -- or tap <strong>📤 Send</strong> on a tech's card to have the app email and text them directly, no copy-paste needed. Set each tech's carrier and SMS address in Admin → Technicians first.
+      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send manually -- or tap <strong>📤 Send</strong> on a tech's card to email them directly. The text part of Send is currently blocked for Verizon phones, so Copy Message is the reliable way to reach a tech by text. Set each tech's carrier and SMS address in Admin → Technicians for when text delivery is restored.
     </div>
     <div class="step"><strong>Step 6 — Print or open Restock Tracker.</strong><br>
       Tap <strong>Print Dispatch Summary</strong> at the top to open a printable summary in a new tab.<br>
@@ -383,16 +381,16 @@
     <div class="step"><strong>1.</strong> Assign the trouble ticket on the board (Reassign if needed).</div>
     <div class="step"><strong>2.</strong> On that card tap <strong>📱 Text this stop</strong>. Only real trouble WOs show the button.</div>
     <div class="step"><strong>3.</strong> If the carrier sheet appears, pick Verizon / T-Mobile / AT&amp;T / Sprint (or type the full address). That choice is saved on their technician card. Email only sends this message without saving a carrier.</div>
-    <div class="step"><strong>4.</strong> Edit the draft if you want. Confirm Send. They get SMS (short ping + ack link) and email with the full text.</div>
+    <div class="step"><strong>4.</strong> Edit the draft if you want. Confirm Send. They get an email with the full text. The text message (short ping + ack link) is currently blocked for Verizon phones, so for an urgent stop also copy the draft and text it yourself.</div>
     <div class="note"><strong>Do not</strong> use this to assign Salesforce. Drop the ticket on the Gantt yourself. This only tells the technician.</div>
   </section>
 
   <section id="urgent">
     <h2>Urgent / Trouble Ticket Dispatch</h2>
-    <div class="step"><strong>Step 1.</strong> Select <strong>⚡ URGENT (Same Day)</strong> from the Paste Mode dropdown. On Saturdays this is selected automatically.</div>
-    <div class="step"><strong>Step 2.</strong> Paste the full trouble ticket email into the Location Codes field.</div>
-    <div class="step"><strong>Step 3.</strong> Tap <strong>Generate Dispatches</strong>. The SLA end time is calculated automatically from the ticket's Earliest Start Permitted field.</div>
-    <div class="step"><strong>Step 4.</strong> Tap <strong>✅ Messages</strong>. The tech message reads:</div>
+    <div class="step"><strong>Step 1.</strong> The trouble ticket email arrives automatically and is added to that site’s entry on the board. Nothing to paste.</div>
+    <div class="step"><strong>Step 2.</strong> Open the site’s entry (or the banner, if a dispatch list came with it) and check the details.</div>
+    <div class="step"><strong>Step 3.</strong> The SLA end time is calculated automatically from the ticket's Earliest Start Permitted field.</div>
+    <div class="step"><strong>Step 4.</strong> Tap <strong>✅ Messages</strong> (or <strong>📱 Text this stop</strong>). The tech message reads:</div>
     <div class="msg-box">⚡ URGENT - Hey Randy, a trouble ticket for
 Cobb County Kroger Whitlock #455 just came in:
 
