@@ -173,16 +173,25 @@ function cleanQuery(q) {
 // ---------- actions ----------
 
 async function doLogin(supabase, body) {
-  const username = String(body.username || '').trim().toLowerCase();
+  let username = String(body.username || '').trim().toLowerCase();
   const password = String(body.password || '');
   const fail = () => json(401, { ok: false, error: 'Incorrect username or password.' });
   if (!username || !password) return fail();
 
-  const { data: tAcct } = await supabase
-    .from('tech_accounts')
-    .select('technician_id, username, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
-    .eq('username', username)
-    .maybeSingle();
+  // Staff sign in as "<name>.portal" so browsers keep that saved login separate
+  // from the main app's (same site, same username otherwise). Plain names still work.
+  let staffOnly = false;
+  if (username.endsWith('.portal')) { username = username.slice(0, -7); staffOnly = true; }
+
+  let tAcct = null;
+  if (!staffOnly) {
+    const r = await supabase
+      .from('tech_accounts')
+      .select('technician_id, username, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
+      .eq('username', username)
+      .maybeSingle();
+    tAcct = r.data;
+  }
   let sAcct = null;
   if (!tAcct) {
     const r = await supabase
