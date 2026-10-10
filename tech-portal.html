@@ -81,8 +81,8 @@
 
     <section id="sitesPane">
       <div id="searchBox">
-        <input id="q" type="search" placeholder="Search by store name, site code, address or county" autocomplete="off">
-        <p class="muted" id="searchHint">Type at least 2 letters. You can search locations in the states on your account.</p>
+        <input id="q" type="search" placeholder="Filter by store name, site code, address or county" autocomplete="off">
+        
         <div id="results"></div>
       </div>
       <div id="siteDetail" class="hidden"></div>
@@ -149,7 +149,7 @@
     KIND = me.kind || 't';
     $('whoStates').textContent = me.states ? me.states.join(', ') : 'All states';
     $('tabShip').textContent = KIND === 's' ? 'Shipments' : 'My shipments';
-    $('q').focus();
+    loadSites();
   }
 
   // ----- login -----
@@ -183,30 +183,38 @@
   $('tabAcct').onclick = function () { tab('Acct'); };
 
   // ----- search -----
-  var timer = null, seq = 0;
-  $('q').addEventListener('input', function () {
-    clearTimeout(timer);
-    timer = setTimeout(runSearch, 300);
-  });
-  async function runSearch() {
-    var q = $('q').value.trim();
-    var my = ++seq;
-    if (q.length < 2) { $('results').innerHTML = ''; $('searchHint').classList.remove('hidden'); return; }
-    var j = await call('search', { q: q });
-    if (my !== seq) return;
-    $('searchHint').classList.add('hidden');
-    if (!j.ok) { $('results').innerHTML = '<div class="err">' + esc(j.error || 'Search failed.') + '</div>'; return; }
-    if (!j.sites.length) { $('results').innerHTML = '<p class="muted">No locations found.</p>'; return; }
-    $('results').innerHTML = j.sites.map(function (s) {
-      return '<button class="row" data-code="' + esc(s.site_code) + '"><b>' + esc(s.name) + '</b>' +
+  // The full list for the account's states loads once after sign-in; typing
+  // filters it on the phone.
+  var ALL = [];
+  function haystack(s) { return (s.name + ' ' + s.site_code + ' ' + (s.address || '') + ' ' + (s.county || '')).toLowerCase(); }
+  async function loadSites() {
+    $('results').innerHTML = '<p class="muted">Loading locations...</p>';
+    var j = await call('search', { q: '' });
+    if (!j.ok) { $('results').innerHTML = '<div class="err">' + esc(j.error || 'Could not load locations.') + '</div>'; return; }
+    ALL = (j.sites || []).map(function (s) { s._h = haystack(s); return s; });
+    renderList();
+  }
+  function renderList() {
+    var q = $('q').value.trim().toLowerCase();
+    var list = q ? ALL.filter(function (s) { return q.split(/\s+/).every(function (w) { return s._h.indexOf(w) !== -1; }); }) : ALL;
+    if (!list.length) { $('results').innerHTML = '<p class="muted">No locations found.</p>'; return; }
+    var multi = {};
+    ALL.forEach(function (s) { multi[s.state] = 1; });
+    var showStates = Object.keys(multi).length > 1;
+    var html = '', last = null;
+    list.forEach(function (s) {
+      if (showStates && s.state !== last) { html += '<h3>' + esc(s.state) + '</h3>'; last = s.state; }
+      html += '<button class="row" data-code="' + esc(s.site_code) + '"><b>' + esc(s.name) + '</b>' +
         '<span class="muted">' + esc(s.address || '') + '</span><br>' +
         '<span class="tag">' + esc(s.site_code) + '</span>' +
         (s.machine_type ? '<span class="tag">' + esc(s.machine_type) + '</span>' : '') + '</button>';
-    }).join('');
+    });
+    $('results').innerHTML = '<p class="muted">' + list.length + ' location' + (list.length === 1 ? '' : 's') + '</p>' + html;
     Array.prototype.forEach.call($('results').querySelectorAll('.row'), function (b) {
       b.onclick = function () { openSite(b.getAttribute('data-code')); };
     });
   }
+  $('q').addEventListener('input', renderList);
 
   async function openSite(code) {
     $('searchBox').classList.add('hidden');
