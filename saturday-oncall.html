@@ -1736,7 +1736,10 @@ function renderTechPanels() {
     const entries = onCallByState[code] || [];
     const rows = entries.length
       ? entries.map(e => `<div class="tech-row"><span>${escapeHtml(e.technician || 'Unassigned')}</span>
-          <button class="btn btn-grey" style="padding:4px 8px;font-size:12px;" data-state="${code}" data-tech="${escapeHtml(e.technician || '')}">Change</button></div>`).join('')
+          <span style="display:flex;gap:6px;">
+          <button class="btn btn-grey" style="padding:4px 8px;font-size:12px;" data-state="${code}" data-tech="${escapeHtml(e.technician || '')}">Change</button>
+          <button class="btn" style="padding:4px 8px;font-size:12px;background:#6b1a1a;" data-remove-state="${code}" data-remove-tech="${escapeHtml(e.technician || '')}">Remove</button>
+          </span></div>`).join('')
       : `<div class="tech-row"><span style="color:#888;">No on-call tech set</span>
           <button class="btn btn-grey" style="padding:4px 8px;font-size:12px;" data-state="${code}" data-tech="">Set</button></div>`;
     return `<div class="tech-panel"><div class="state-hdr">${code}</div>${rows}</div>`;
@@ -1745,6 +1748,50 @@ function renderTechPanels() {
   el.querySelectorAll('button[data-state]').forEach(btn => {
     btn.onclick = () => openTechModal(btn.dataset.state, btn.dataset.tech);
   });
+  el.querySelectorAll('button[data-remove-state]').forEach(btn => {
+    btn.onclick = () => removeOnCallTech(btn.dataset.removeState, btn.dataset.removeTech);
+  });
+}
+
+// Removes one technician from this Saturday's on-call list for a state and
+// does NOT add a replacement (e.g. someone is pulled to avoid overtime and
+// the remaining tech covers alone). Only the displayed Saturday (TARGET_DAY)
+// is touched; future Saturdays are not affected. Uses save-on-call.js's
+// existing action:'delete'.
+async function removeOnCallTech(state, techName) {
+  if (!techName) return;
+  const slug = techName.toLowerCase().replace(/\s+/g, '-');
+  const tech = (TECHS_BY_STATE[state] || {})[slug];
+  if (!tech) { alert('Could not find that technician.'); return; }
+
+  const assignedCount = (ticketsByState[state] || []).filter(t => {
+    const loc = resolveSiteLoc(t);
+    const key = ticketKey(t, loc ? loc.code : null);
+    const a = key && assignmentsByKey[key];
+    return a && a.status !== 'removed' && a.techName === techName;
+  }).length;
+  const others = (onCallByState[state] || []).filter(e => e.technician && e.technician !== techName).length;
+  let msg = `Remove ${techName} from ${state} on-call for ${TARGET_DAY} only? No replacement will be added.`;
+  msg += others ? '' : `\n\nThis leaves ${state} with NO on-call technician.`;
+  if (assignedCount) msg += `\n\n${techName} still has ${assignedCount} ticket(s) assigned. Reassign them after removing.`;
+  if (!confirm(msg)) return;
+  if (previewGuard('Remove on-call technician')) return;
+
+  try {
+    const res = await fetch('/.netlify/functions/save-on-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, day: TARGET_DAY, technician_id: tech.id, action: 'delete' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    await loadOnCallTechs();
+    renderTechPanels();
+    renderMap();
+    renderTicketList();
+  } catch (e) {
+    alert('Could not remove: ' + e.message);
+  }
 }
 
 function openTechModal(state, currentTechName) {
