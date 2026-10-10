@@ -1,6 +1,7 @@
 // tech-api.js
 //
-// Backend for tech-portal.html (MCR employee technicians only).
+// Backend for tech-portal.html (MCR employee technicians, plus dispatchers/admins
+// who have a staff_accounts login).
 //
 // Security model:
 //  - Accounts live in tech_accounts (RLS on, no policies: only this function,
@@ -11,6 +12,10 @@
 //  - All scoping (states, own shipments) is enforced here on the server. The
 //    page never decides what a tech may see.
 //  - Technician scope = home_state + additional_states on the technicians row.
+//  - Staff (staff_accounts) have their own portal passwords, separate from their
+//    dispatcher PINs. Scope is read live from the dispatchers row: admins see all
+//    states, dispatchers see the states on their dispatcher login. Staff get the
+//    shipments for their states instead of "my" shipments.
 //  - Fields returned are trimmed: no site notes, no contractor info, no
 //    internal flags, no home addresses.
 //
@@ -25,7 +30,8 @@
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
-const TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
+const TECH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const STAFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_FAILS = 5;
 const LOCK_MS = 15 * 60 * 1000;
 
@@ -72,8 +78,11 @@ function b64u(buf) {
   return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function makeToken(tid, pv) {
-  const payload = b64u(JSON.stringify({ t: tid, p: pv, e: Date.now() + TOKEN_TTL_MS }));
+// kind: 't' (technician, id = technician_id) or 's' (staff, id = staff username)
+function makeToken(id, pv, kind) {
+  kind = kind || 't';
+  const ttl = kind === 's' ? STAFF_TTL_MS : TECH_TTL_MS;
+  const payload = b64u(JSON.stringify({ t: id, p: pv, k: kind, e: Date.now() + ttl }));
   const sig = b64u(crypto.createHmac('sha256', signingKey()).update(payload).digest());
   return payload + '.' + sig;
 }
@@ -111,9 +120,27 @@ function eligible(tech) {
   return !!tech && tech.active !== false && tech.is_contractor === false;
 }
 
+// ctx = { kind, name, states (array, or null = all states), tech?, key }
 async function authenticate(supabase, token) {
   const tk = readToken(token);
   if (!tk) return null;
+
+  if (tk.k === 's') {
+    const { data: acct } = await supabase
+      .from('staff_accounts')
+      .select('username, dispatcher_username, display_name, created_at, password_changed_at')
+      .eq('username', tk.t)
+      .maybeSingle();
+    if (!acct || pwVersion(acct) !== tk.p) return null;
+    const { data: d } = await supabase
+      .from('dispatchers')
+      .select('username, role, states, active')
+      .eq('username', acct.dispatcher_username)
+      .maybeSingle();
+    if (!staffOk(d)) return null;
+    return { kind: 's', name: acct.display_name, states: staffStates(d), key: acct.username };
+  }
+
   const { data: acct } = await supabase
     .from('tech_accounts')
     .select('technician_id, username, created_at, password_changed_at')
@@ -126,7 +153,16 @@ async function authenticate(supabase, token) {
     .eq('id', acct.technician_id)
     .maybeSingle();
   if (!eligible(tech)) return null;
-  return { acct, tech, states: statesFor(tech) };
+  return { kind: 't', name: tech.name, states: statesFor(tech), tech, key: acct.technician_id };
+}
+
+function staffOk(d) {
+  return !!d && d.active === true && (d.role === 'admin' || d.role === 'dispatcher');
+}
+
+function staffStates(d) {
+  if (d.role === 'admin') return null; // all states
+  return (d.states || []).map((x) => String(x).toUpperCase());
 }
 
 function cleanQuery(q) {
@@ -142,16 +178,29 @@ async function doLogin(supabase, body) {
   const fail = () => json(401, { ok: false, error: 'Incorrect username or password.' });
   if (!username || !password) return fail();
 
-  const { data: acct } = await supabase
+  const { data: tAcct } = await supabase
     .from('tech_accounts')
     .select('technician_id, username, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
     .eq('username', username)
     .maybeSingle();
-
+  let sAcct = null;
+  if (!tAcct) {
+    const r = await supabase
+      .from('staff_accounts')
+      .select('username, dispatcher_username, display_name, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
+      .eq('username', username)
+      .maybeSingle();
+    sAcct = r.data;
+  }
+  const acct = tAcct || sAcct;
   if (!acct) {
     verifyPw(password, DUMMY_HASH); // keep timing similar
     return fail();
   }
+  const table = tAcct ? 'tech_accounts' : 'staff_accounts';
+  const keyCol = tAcct ? 'technician_id' : 'username';
+  const keyVal = tAcct ? acct.technician_id : acct.username;
+
   if (acct.locked_until && new Date(acct.locked_until).getTime() > Date.now()) {
     return json(429, { ok: false, error: 'Too many attempts. Try again in a few minutes.' });
   }
@@ -164,26 +213,38 @@ async function doLogin(supabase, body) {
       patch.locked_until = new Date(Date.now() + LOCK_MS).toISOString();
       patch.failed_attempts = 0;
     }
-    await supabase.from('tech_accounts').update(patch).eq('technician_id', acct.technician_id);
+    await supabase.from(table).update(patch).eq(keyCol, keyVal);
     return fail();
   }
 
-  const { data: tech } = await supabase
-    .from('technicians')
-    .select('id, name, home_state, additional_states, is_contractor, active')
-    .eq('id', acct.technician_id)
-    .maybeSingle();
-  if (!eligible(tech)) return json(403, { ok: false, error: 'This account is not active.' });
+  let me;
+  if (tAcct) {
+    const { data: tech } = await supabase
+      .from('technicians')
+      .select('id, name, home_state, additional_states, is_contractor, active')
+      .eq('id', acct.technician_id)
+      .maybeSingle();
+    if (!eligible(tech)) return json(403, { ok: false, error: 'This account is not active.' });
+    me = { name: tech.name, states: statesFor(tech), kind: 't' };
+  } else {
+    const { data: d } = await supabase
+      .from('dispatchers')
+      .select('username, role, states, active')
+      .eq('username', acct.dispatcher_username)
+      .maybeSingle();
+    if (!staffOk(d)) return json(403, { ok: false, error: 'This account is not active.' });
+    me = { name: acct.display_name, states: staffStates(d), kind: 's' };
+  }
 
   await supabase
-    .from('tech_accounts')
+    .from(table)
     .update({ failed_attempts: 0, locked_until: null, last_login_at: new Date().toISOString() })
-    .eq('technician_id', acct.technician_id);
+    .eq(keyCol, keyVal);
 
   return json(200, {
     ok: true,
-    token: makeToken(acct.technician_id, pwVersion(acct)),
-    me: { name: tech.name, states: statesFor(tech) },
+    token: makeToken(keyVal, pwVersion(acct), me.kind),
+    me,
   });
 }
 
@@ -191,10 +252,11 @@ async function doSearch(supabase, ctx, body) {
   const q = cleanQuery(body.q);
   if (q.length < 2) return json(200, { ok: true, sites: [] });
   const pat = '%' + q + '%';
-  const { data, error } = await supabase
+  let sq = supabase
     .from('sites')
-    .select('site_code, name, address, state, county, machine_type')
-    .in('state', ctx.states)
+    .select('site_code, name, address, state, county, machine_type');
+  if (ctx.states) sq = sq.in('state', ctx.states);
+  const { data, error } = await sq
     .eq('active', true)
     .eq('is_placeholder', false)
     .or('name.ilike.' + pat + ',site_code.ilike.' + pat + ',address.ilike.' + pat + ',county.ilike.' + pat)
@@ -213,7 +275,7 @@ async function doSite(supabase, ctx, body) {
     .eq('site_code', code)
     .maybeSingle();
   // Out-of-scope sites look exactly like missing ones.
-  if (!site || !ctx.states.includes(String(site.state || '').toUpperCase())) {
+  if (!site || (ctx.states && !ctx.states.includes(String(site.state || '').toUpperCase()))) {
     return json(404, { ok: false, error: 'Site not found.' });
   }
 
@@ -290,22 +352,37 @@ async function doSite(supabase, ctx, body) {
 }
 
 async function doShipments(supabase, ctx) {
-  const tid = ctx.tech.id;
-  const [rmaR, conR] = await Promise.all([
-    supabase
-      .from('rma_shipments')
-      .select('account_name, wo_number, case_number, warehouse_name, request_details, outbound_tracking, inbound_tracking, return_broken_part, returned_at, received_at')
-      .eq('technician_id', tid)
-      .order('received_at', { ascending: false, nullsFirst: false })
-      .limit(40),
-    supabase
-      .from('consumable_shipments')
-      .select('request_date, shipped_at, ship_method, boxes_shipped, items, tracking, status, delivered_at')
-      .eq('technician_id', tid)
-      .order('request_date', { ascending: false, nullsFirst: false })
-      .limit(25),
-  ]);
+  let rmaQ = supabase
+    .from('rma_shipments')
+    .select('account_name, wo_number, case_number, warehouse_name, request_details, outbound_tracking, inbound_tracking, return_broken_part, returned_at, received_at, technician_id, state')
+    .order('received_at', { ascending: false, nullsFirst: false })
+    .limit(ctx.kind === 's' ? 80 : 40);
+  let conQ = supabase
+    .from('consumable_shipments')
+    .select('request_date, shipped_at, ship_method, boxes_shipped, items, tracking, status, delivered_at, technician_id, tech_name_raw, state')
+    .order('request_date', { ascending: false, nullsFirst: false })
+    .limit(ctx.kind === 's' ? 50 : 25);
+  if (ctx.kind === 't') {
+    rmaQ = rmaQ.eq('technician_id', ctx.tech.id);
+    conQ = conQ.eq('technician_id', ctx.tech.id);
+  } else if (ctx.states) {
+    rmaQ = rmaQ.in('state', ctx.states);
+    conQ = conQ.in('state', ctx.states);
+  }
+  const [rmaR, conR] = await Promise.all([rmaQ, conQ]);
   if (rmaR.error || conR.error) return json(500, { ok: false, error: 'Could not load shipments.' });
+
+  // Staff view labels each shipment with the technician it belongs to.
+  const techIds = new Set();
+  if (ctx.kind === 's') {
+    (rmaR.data || []).forEach((r) => r.technician_id && techIds.add(r.technician_id));
+    (conR.data || []).forEach((c) => c.technician_id && techIds.add(c.technician_id));
+  }
+  const techName = {};
+  if (techIds.size) {
+    const { data: ts } = await supabase.from('technicians').select('id, name').in('id', [...techIds]);
+    (ts || []).forEach((t) => { techName[t.id] = t.name; });
+  }
 
   const rma = rmaR.data || [];
   const con = conR.data || [];
@@ -338,6 +415,8 @@ async function doShipments(supabase, ctx) {
       return_broken_part: !!r.return_broken_part,
       returned_at: r.returned_at,
       received_at: r.received_at,
+      tech: ctx.kind === 's' ? (techName[r.technician_id] || null) : undefined,
+      state: ctx.kind === 's' ? r.state : undefined,
     })),
     consumables: con.map((c) => {
       const tr = Array.isArray(c.tracking) ? c.tracking : [];
@@ -350,6 +429,8 @@ async function doShipments(supabase, ctx) {
         tracking: tr.map((n) => ({ number: n, status: statusByNum[n] || null })),
         status: c.status,
         delivered_at: c.delivered_at,
+        tech: ctx.kind === 's' ? (techName[c.technician_id] || c.tech_name_raw || null) : undefined,
+        state: ctx.kind === 's' ? c.state : undefined,
       };
     }),
   });
@@ -361,23 +442,25 @@ async function doChangePassword(supabase, ctx, body) {
   if (normPw(next).length < 8) return json(400, { ok: false, error: 'New password must be at least 8 characters.' });
   if (normPw(next) === normPw(current)) return json(400, { ok: false, error: 'New password must be different.' });
 
+  const table = ctx.kind === 's' ? 'staff_accounts' : 'tech_accounts';
+  const keyCol = ctx.kind === 's' ? 'username' : 'technician_id';
   const { data: acct } = await supabase
-    .from('tech_accounts')
+    .from(table)
     .select('password_hash')
-    .eq('technician_id', ctx.tech.id)
+    .eq(keyCol, ctx.key)
     .maybeSingle();
   if (!acct || !verifyPw(current, acct.password_hash)) {
     return json(401, { ok: false, error: 'Current password is incorrect.' });
   }
   const changedAt = new Date().toISOString();
   const { error } = await supabase
-    .from('tech_accounts')
+    .from(table)
     .update({ password_hash: hashPw(next), password_changed_at: changedAt, failed_attempts: 0, locked_until: null })
-    .eq('technician_id', ctx.tech.id);
+    .eq(keyCol, ctx.key);
   if (error) return json(500, { ok: false, error: 'Could not save the new password.' });
   return json(200, {
     ok: true,
-    token: makeToken(ctx.tech.id, String(new Date(changedAt).getTime())),
+    token: makeToken(ctx.key, String(new Date(changedAt).getTime()), ctx.kind),
   });
 }
 
@@ -395,7 +478,7 @@ exports.handler = async (event) => {
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
 
-    if (action === 'me') return json(200, { ok: true, me: { name: ctx.tech.name, states: ctx.states } });
+    if (action === 'me') return json(200, { ok: true, me: { name: ctx.name, states: ctx.states, kind: ctx.kind } });
     if (action === 'search') return await doSearch(supabase, ctx, body);
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx);
