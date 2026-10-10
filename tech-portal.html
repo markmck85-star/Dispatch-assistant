@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>MCR Technician Portal</title>
+<meta name="theme-color" content="#163d70">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MCR Tech">
+<link rel="manifest" href="tech-portal.webmanifest">
+<link rel="apple-touch-icon" href="tech-portal-icon-180.png">
+<title>MCR Field Portal</title>
 <style>
   :root { --bg:#f4f6f9; --card:#fff; --ink:#1b2430; --muted:#66707d; --line:#dde2e9; --brand:#1d4f91; --brand2:#163d70; --bad:#b3261e; --ok:#1b7a3d; --warn:#9a6700; }
   @media (prefers-color-scheme: dark) {
@@ -46,7 +52,7 @@
 <body>
 
 <div id="loginView">
-  <header><h1>MCR Technician Portal</h1></header>
+  <header><h1>MCR Field Portal</h1></header>
   <main>
     <div class="card">
       <h2>Sign in</h2>
@@ -56,14 +62,14 @@
       <input id="p" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
       <button class="primary" id="loginBtn">Sign in</button>
       <div class="err" id="loginErr"></div>
-      <p class="muted">Your username is the first part of your MCR email address. Passwords are not case sensitive.</p>
+      <p class="muted">Technicians: your username is the first part of your MCR email address. Passwords are not case sensitive. After you sign in once, your phone can remember it.</p>
     </div>
   </main>
 </div>
 
 <div id="appView" class="hidden">
   <header>
-    <div><h1>MCR Technician Portal</h1></div>
+    <div><h1>MCR Field Portal</h1></div>
     <div class="who"><span id="whoName"></span><br><span id="whoStates"></span> <button id="logoutBtn">Sign out</button></div>
   </header>
   <main>
@@ -76,7 +82,7 @@
     <section id="sitesPane">
       <div id="searchBox">
         <input id="q" type="search" placeholder="Search by store name, site code, address or county" autocomplete="off">
-        <p class="muted" id="searchHint">Type at least 2 letters. You can search locations in your home state and the states you cover.</p>
+        <p class="muted" id="searchHint">Type at least 2 letters. You can search locations in the states on your account.</p>
         <div id="results"></div>
       </div>
       <div id="siteDetail" class="hidden"></div>
@@ -101,7 +107,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null;
+  var TOKEN = null, KIND = 't';
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -140,7 +146,9 @@
     $('loginView').classList.add('hidden');
     $('appView').classList.remove('hidden');
     $('whoName').textContent = me.name;
-    $('whoStates').textContent = (me.states || []).join(', ');
+    KIND = me.kind || 't';
+    $('whoStates').textContent = me.states ? me.states.join(', ') : 'All states';
+    $('tabShip').textContent = KIND === 's' ? 'Shipments' : 'My shipments';
     $('q').focus();
   }
 
@@ -254,12 +262,12 @@
     var j = await call('shipments');
     if (!j.ok) { p.innerHTML = '<div class="err">' + esc(j.error || 'Could not load.') + '</div>'; return; }
     var html = '<div class="card"><h2>RMA parts</h2>';
-    if (!j.rma.length) html += '<p class="muted">No RMA shipments are linked to you.</p>';
+    if (!j.rma.length) html += '<p class="muted">No RMA shipments found.</p>';
     j.rma.forEach(function (r) {
       html += '<div class="visit"><div class="top"><b>' + esc(r.location || 'RMA') + '</b><span class="muted">' + esc(fmtDate(r.received_at)) + '</span></div>' +
-        '<div class="muted">' + (r.wo ? 'WO ' + esc(r.wo) : '') + (r.case_number ? ' | Case ' + esc(r.case_number) : '') + '</div>' +
+        '<div class="muted">' + (r.wo ? 'WO ' + esc(r.wo) : '') + (r.case_number ? ' | Case ' + esc(r.case_number) : '') + (r.tech ? ' | ' + esc(r.tech) : '') + (r.state ? ' | ' + esc(r.state) : '') + '</div>' +
         (r.details ? '<div>' + esc(r.details) + '</div>' : '') +
-        (r.outbound ? '<div>Sent to you: ' + trackLink(r.outbound) + stat(r.outbound_status) + '</div>' : '') +
+        (r.outbound ? '<div>' + (KIND === 's' ? 'Outbound: ' : 'Sent to you: ') + '' + trackLink(r.outbound) + stat(r.outbound_status) + '</div>' : '') +
         (r.inbound ? '<div>Return: ' + trackLink(r.inbound) + stat(r.inbound_status) + '</div>' : '') +
         (r.return_broken_part ? '<div class="muted">Broken part must be returned' + (r.returned_at ? ' (returned ' + esc(fmtDate(r.returned_at)) + ')' : '') + '</div>' : '') +
         '</div>';
@@ -268,12 +276,12 @@
     if (!j.consumables.length) html += '<p class="muted">No consumable shipments on record.</p>';
     j.consumables.forEach(function (c) {
       html += '<div class="visit"><div class="top"><b>Requested ' + esc(fmtDate(c.requested)) + '</b><span class="muted">' + esc(c.status || '') + '</span></div>' +
-        '<div class="muted">' + esc(c.method || '') + (c.boxes ? ' | ' + esc(c.boxes) + ' box(es)' : '') + (c.shipped ? ' | shipped ' + esc(fmtDate(c.shipped)) : '') + '</div>' +
+        '<div class="muted">' + (c.tech ? esc(c.tech) + ' | ' : '') + (c.state ? esc(c.state) + ' | ' : '') + esc(c.method || '') + (c.boxes ? ' | ' + esc(c.boxes) + ' box(es)' : '') + (c.shipped ? ' | shipped ' + esc(fmtDate(c.shipped)) : '') + '</div>' +
         c.items.map(function (i) { return '<div>' + esc(i.description || i.sku) + ' <span class="muted">' + esc(i.units || '') + ' ' + esc(i.unit || '') + '</span></div>'; }).join('') +
         c.tracking.map(function (t) { return '<div>' + trackLink(t.number) + stat(t.status) + '</div>'; }).join('') +
         (c.delivered_at ? '<div class="muted">Delivered ' + esc(fmtDate(c.delivered_at)) + '</div>' : '') + '</div>';
     });
-    html += '</div><p class="muted">Only shipments linked to you are shown. Some RMA shipments are not linked to a technician yet; check your email if one is missing.</p>';
+    html += '</div><p class="muted">' + (KIND === 's' ? 'Showing the most recent shipments for your states.' : 'Only shipments linked to you are shown. Some RMA shipments are not linked to a technician yet; check your email if one is missing.') + '</p>';
     p.innerHTML = html;
   }
 
