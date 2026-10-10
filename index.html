@@ -149,6 +149,8 @@
         #sidebarToolSlot #boardToolStack .tool-side-links a,
         #sidebarToolSlot #boardToolStack .tool-side-links button { flex: 0 0 auto; width: 100%; box-sizing: border-box; }
         #sidebarToolSlot { margin: 4px 0 10px; }
+        /* Hide Controls hides the tool menu too (it used to float to the top of the results) */
+        .desktop-layout.controls-collapsed #boardToolStack { display: none !important; }
         .results-panel > .tool-rail a, .results-panel > .tool-rail button.rail-btn { flex: 1 1 140px; }
         .results-panel > .tool-more { margin-bottom: 10px; }
         .tool-rail a, .tool-rail button.rail-btn {
