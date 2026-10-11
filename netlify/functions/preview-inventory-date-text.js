@@ -117,9 +117,13 @@ async function mailText(to, text) {
   const domain = process.env.MAILGUN_DOMAIN || "mcrdispatch.net";
   if (!apiKey) throw new Error("MAILGUN_API_KEY not set");
   const params = new URLSearchParams({
-    from: "MCR Dispatch <dispatch@" + domain + ">",
+    // Shown as MCR Inventory and replies point to the inventory mailbox. The
+    // sending address stays on our own Mailgun domain (mail "from" the company
+    // domain would need that domain authorized with Mailgun first).
+    from: "MCR Inventory <dispatch@" + domain + ">",
+    "h:Reply-To": "inventory@mcrtechservice.com",
     to,
-    subject: "MCR Dispatch",
+    subject: "MCR Inventory",
     text,
   });
   const resp = await fetch("https://api.mailgun.net/v3/" + domain + "/messages", {
