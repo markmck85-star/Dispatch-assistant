@@ -44,6 +44,32 @@ function overlapScore(tokensA, tokensB) {
   return smaller > 0 ? intersection / smaller : 0;
 }
 
+// 2026-10-11: words that appear in dozens of site names and say nothing about
+// WHICH store it is (county, brand, office type). A text match used to pass on
+// those alone: "Columbia County Publix - Washington #1286" scored 67% against
+// "Barrow County Publix" on the words "county" and "publix", and a survey at a
+// brand-new store was filed under the wrong site. A text match now needs at
+// least one distinctive word (a place name or a store number) in common.
+// Alias matches (above) are untouched and still handle known renames.
+const GENERIC_TOKENS = new Set([
+  'county', 'publix', 'kroger', 'walmart', 'meijer', 'safeway', 'albertsons', 'fred', 'meyer',
+  'king', 'soopers', 'smiths', 'ralphs', 'vons', 'target', 'costco', 'sams', 'club',
+  'dmv', 'bmv', 'sos', 'dds', 'tag', 'tc', 'office', 'dept', 'department', 'market', 'store',
+  'plaza', 'mall', 'center', 'centre', 'shopping', 'the', 'of', 'and', 'at', 'on', 'in',
+  'north', 'south', 'east', 'west', 'sst', 'mv', 'kiosk',
+  'avenue', 'boulevard', 'drive', 'road', 'street', 'highway', 'parkway', 'mount',
+]);
+function hasDistinctiveOverlap(tokensA, tokensB) {
+  const setB = new Set(tokensB);
+  for (const t of new Set(tokensA)) {
+    if (!setB.has(t)) continue;
+    if (GENERIC_TOKENS.has(t)) continue;
+    if (/^[a-z]{2}$/.test(t)) continue;      // state abbreviations like "ga"
+    return true;
+  }
+  return false;
+}
+
 function matchSite(accountName, state, sitesForState, aliasMap) {
   // Exact alias match first (built from confirmed corrections -- see
   // site_aliases table) -- these are known-correct mappings for account
@@ -59,6 +85,7 @@ function matchSite(accountName, state, sitesForState, aliasMap) {
   let tied = [];
   for (const site of sitesForState) {
     const siteTokens = tokenize(site.name);
+    if (!hasDistinctiveOverlap(targetTokens, siteTokens)) continue;
     const score = overlapScore(targetTokens, siteTokens);
     if (score > bestScore + 1e-9) {
       bestScore = score;
