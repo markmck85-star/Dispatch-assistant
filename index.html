@@ -9722,6 +9722,8 @@ ${content}</body></html>`;
      lowest to highest: company default, region default, role, personal picks. -->
 <style>
     #boardToolBar { margin: 0 0 10px; }
+    #toolAiOutput { margin-top: 10px; }
+    #toolAiOutput #aiCommandStatus { font-size: 12px !important; }
     #boardToolBar .tool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 0; flex-wrap: wrap; }
     #boardToolBar .tool-seg { display: inline-flex; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
     #boardToolBar .tool-seg button { min-height: 36px; padding: 6px 14px; border: none; background: #181818; color: #aaa; font-weight: 700; font-size: 13px; cursor: pointer; }
@@ -9909,6 +9911,14 @@ ${content}</body></html>`;
                 var u = user();
                 var inMain = u && resolve(u).main.some(function (x) { return x.id === t.id; });
                 if (!inMain) { revealed[t.reveal] = true; refresh(); }
+                if (t.reveal === 'analyze') {
+                    // Tapping the Analyze Routes tool runs it; the suggestions show at the bottom of this panel.
+                    var ab = document.getElementById('aiAnalyzeRoutesBtn');
+                    if (ab && !ab.disabled) { ab.click(); return; }
+                    var st = document.getElementById('aiCommandStatus');
+                    if (st) st.textContent = 'Load a dispatch board first, then analyze routes.';
+                    return;
+                }
                 var target = document.getElementById(t.reveal === 'chat' ? 'aiCommandInput' : (t.reveal === 'strip' ? 'availabilityStrip' : 'aiAnalyzeRoutesBtn'));
                 if (target) { try { target.scrollIntoView({ block: 'center' }); if (t.reveal === 'chat') target.focus(); } catch (e) {} }
             });
@@ -9977,6 +9987,27 @@ ${content}</body></html>`;
             '</div>';
         stack.insertBefore(bar, stack.firstChild);
 
+        // Assistant / Analyze Routes messages and suggested swaps show at the bottom of this panel.
+        var out = document.createElement('div');
+        out.id = 'toolAiOutput';
+        var aiStatus = document.getElementById('aiCommandStatus');
+        var aiDiff = document.getElementById('aiCommandDiff');
+        if (aiStatus) out.appendChild(aiStatus);
+        if (aiDiff) out.appendChild(aiDiff);
+        bar.appendChild(out);
+        if (window.MutationObserver) {
+            var seeOutput = function () {
+                var has = (aiStatus && aiStatus.textContent.trim()) || (aiDiff && aiDiff.innerHTML.trim());
+                if (!has) return;
+                var layout = document.querySelector('.desktop-layout');
+                if (layout && layout.classList.contains('controls-collapsed') && window.toggleControls) { try { window.toggleControls(); } catch (e) {} }
+                try { out.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+            };
+            var mo = new MutationObserver(seeOutput);
+            if (aiStatus) mo.observe(aiStatus, { childList: true, characterData: true });
+            if (aiDiff) mo.observe(aiDiff, { childList: true });
+        }
+
         bar.addEventListener('click', function (e) {
             var t = e.target;
             var u = user(); if (!u) return;
@@ -9989,6 +10020,7 @@ ${content}</body></html>`;
                 bar.classList.toggle('editing', editing);
                 t.setAttribute('aria-pressed', editing ? 'true' : 'false');
                 t.textContent = editing ? 'Done' : 'Edit';
+                if (!editing) { var more = document.getElementById('toolMore'); if (more) more.open = false; }
                 return;
             }
             if (t.hasAttribute && t.hasAttribute('data-reset')) {
