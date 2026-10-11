@@ -29,7 +29,7 @@
   button.primary { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:11px 16px; font-size:16px; cursor:pointer; margin-top:12px; }
   button.link { background:none; border:0; color:var(--brand); cursor:pointer; padding:0; font-size:inherit; text-decoration:underline; }
   .tabs { display:flex; gap:6px; margin-bottom:12px; }
-  .tabs button { flex:1; padding:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; font-size:15px; cursor:pointer; }
+  .tabs button { flex:1; padding:10px 4px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; font-size:14px; cursor:pointer; }
   .tabs button.on { background:var(--brand); color:#fff; border-color:var(--brand); }
   .err { color:var(--bad); font-size:14px; margin-top:8px; }
   .okmsg { color:var(--ok); font-size:14px; margin-top:8px; }
@@ -38,6 +38,8 @@
   .row b { display:block; }
   .tag { display:inline-block; font-size:12px; padding:1px 7px; border-radius:20px; border:1px solid var(--line); color:var(--muted); margin-right:4px; }
   .tag.restock { color:var(--ok); border-color:var(--ok); }
+  .tag.alert { color:var(--bad); border-color:var(--bad); }
+  .tag.warn { color:var(--warn); border-color:var(--warn); }
   .visit { border-top:1px solid var(--line); padding:10px 0; }
   .visit:first-child { border-top:0; }
   .visit .top { display:flex; justify-content:space-between; gap:8px; font-size:14px; }
@@ -45,11 +47,20 @@
   h2 { font-size:17px; margin:4px 0 8px; }
   h3 { font-size:15px; margin:14px 0 6px; }
   a { color:var(--brand); }
-  .hidden { display:none; }
+  .hidden { display:none !important; }
   .statebar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .statebar label { margin:0; }
   .statebar select { flex:1; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
   .back { margin-bottom:10px; }
+  .wdbar { display:flex; gap:8px; margin-bottom:8px; }
+  .wdbar select { flex:1; min-width:0; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  .wdbar button { padding:10px 14px; font-size:15px; border:1px solid var(--brand); background:var(--brand); color:#fff; border-radius:8px; cursor:pointer; }
+  .wd { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:10px; padding:12px; margin-bottom:8px; }
+  .wd.trouble { border-left-color:var(--bad); }
+  .wd.maintenance { border-left-color:var(--brand); }
+  .wd.install, .wd.site_survey { border-left-color:var(--warn); }
+  .wd .site { margin:4px 0; }
+  .wd .desc { white-space:pre-wrap; font-size:14px; margin-top:6px; }
 </style>
 </head>
 <body>
@@ -80,19 +91,29 @@
     <div class="tabs">
       <button id="tabSites" class="on">Locations</button>
       <button id="tabShip">My shipments</button>
+      <button id="tabWatch" class="hidden">Watchdog</button>
       <button id="tabAcct">Account</button>
     </div>
 
     <section id="sitesPane">
       <div id="searchBox">
         <input id="q" type="search" placeholder="Filter by store name, site code, address or county" autocomplete="off">
-        
+
         <div id="results"></div>
       </div>
       <div id="siteDetail" class="hidden"></div>
     </section>
 
     <section id="shipPane" class="hidden"></section>
+
+    <section id="watchPane" class="hidden">
+      <div class="wdbar">
+        <select id="watchSel" aria-label="Watchdog state"></select>
+        <button id="watchRefresh">Refresh</button>
+      </div>
+      <div class="muted" id="watchStatus"></div>
+      <div id="watchList"></div>
+    </section>
 
     <section id="acctPane" class="hidden">
       <div class="card">
@@ -111,7 +132,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null, KIND = 't', STATE = null;
+  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0;
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -128,6 +149,16 @@
     var d = new Date(v);
     if (isNaN(d)) return String(v);
     return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // Watchdog times show in the viewer's own time zone (with its abbreviation),
+  // same as the dispatch app's watchdog page, since dispatchers work from
+  // different states.
+  function fmtDT(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d)) return '';
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
   }
 
   async function call(action, extra) {
@@ -161,6 +192,20 @@
     if (STATE) sel.value = STATE;
     $('stateBar').classList.toggle('hidden', sts.length < 2);
     $('tabShip').textContent = KIND === 's' ? 'Shipments' : 'My shipments';
+
+    // Watchdog tab: staff only. It always opens on the account's home state
+    // (the server sends the options and the default); the choice is not saved.
+    var w = me.watch;
+    WATCH_OK = KIND === 's' && !!w && !!w.options && w.options.length > 0;
+    $('tabWatch').classList.toggle('hidden', !WATCH_OK);
+    if (WATCH_OK) {
+      var ws = $('watchSel');
+      ws.innerHTML = w.options.map(function (o) { return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>'; }).join('');
+      ws.value = w.home;
+      $('watchList').innerHTML = '';
+      $('watchStatus').textContent = '';
+    }
+    tab('Sites');
     loadSites();
   }
 
@@ -183,13 +228,17 @@
   $('logoutBtn').onclick = signOut;
 
   // ----- tabs -----
+  var PANES = { Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Acct: 'acctPane' };
   function tab(name) {
-    ['Sites', 'Ship', 'Acct'].forEach(function (n) {
+    Object.keys(PANES).forEach(function (n) {
       $('tab' + n).classList.toggle('on', n === name);
-      $((n === 'Sites' ? 'sites' : n === 'Ship' ? 'ship' : 'acct') + 'Pane').classList.toggle('hidden', n !== name);
+      $(PANES[n]).classList.toggle('hidden', n !== name);
     });
-    $('stateBar').classList.toggle('hidden', name === 'Acct' || $('stateSel').options.length < 2);
+    // The portal state bar does not apply to the account or watchdog tabs
+    // (the watchdog tab has its own selector).
+    $('stateBar').classList.toggle('hidden', name === 'Acct' || name === 'Watch' || $('stateSel').options.length < 2);
     if (name === 'Ship') loadShipments();
+    if (name === 'Watch') loadWatch();
   }
   $('stateSel').onchange = function () {
     STATE = $('stateSel').value;
@@ -201,6 +250,7 @@
   };
   $('tabSites').onclick = function () { tab('Sites'); };
   $('tabShip').onclick = function () { tab('Ship'); };
+  $('tabWatch').onclick = function () { tab('Watch'); };
   $('tabAcct').onclick = function () { tab('Acct'); };
 
   // ----- search -----
@@ -313,6 +363,55 @@
     html += '</div><p class="muted">' + (KIND === 's' ? 'Showing the most recent shipments for your states.' : 'Only shipments linked to you are shown. Some RMA shipments are not linked to a technician yet; check your email if one is missing.') + '</p>';
     p.innerHTML = html;
   }
+
+  // ----- watchdog (staff only) -----
+  function wdDeadline(e) {
+    // An armored truck meet has no response-time clock, so show its real
+    // scheduling status instead of the email deadline.
+    if (e.loomisMeetStatus) {
+      if (e.loomisMeetStatus === 'confirmed') return e.loomisMeetConfirmedAt ? 'Confirmed: ' + fmtDT(e.loomisMeetConfirmedAt) : 'Confirmed (see thread for time)';
+      if (e.loomisMeetStatus === 'needs_reschedule') return 'Needs reschedule';
+      if (e.loomisMeetStatus === 'proposed') return 'Date proposed';
+      return 'Awaiting carrier response';
+    }
+    if (e.slaEndsAt) return 'SLA: ' + fmtDT(e.slaEndsAt);
+    if (e.dueAt) return 'Due: ' + fmtDT(e.dueAt);
+    return '';
+  }
+  function wdCard(e) {
+    var kind = String(e.ticketKind || 'trouble').toLowerCase();
+    var cls = kind.replace(/[^a-z_]/g, '');
+    var issue = [e.issueCategory, e.issueDetail].filter(Boolean).join(' - ') || 'No issue category';
+    var dl = wdDeadline(e);
+    return '<div class="wd ' + esc(cls) + '">' +
+      '<div><b>WO ' + esc(e.woNumber || '-') + '</b> <span class="tag">' + esc(kind.replace(/_/g, ' ')) + '</span>' +
+      (e.needsReview ? '<span class="tag warn">review: line item added</span>' : '') +
+      (!e.matched ? '<span class="tag alert">unmatched site</span>' : '') + '</div>' +
+      '<div class="site">' + esc(e.siteText || '(no site text)') + '</div>' +
+      '<div class="muted">' + esc(issue) + (dl ? ' | ' + esc(dl) : '') + ' | Received ' + esc(fmtDT(e.receivedAt)) + '</div>' +
+      (e.address ? '<div class="muted"><a target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(e.address) + '">' + esc(e.address) + '</a></div>' : '') +
+      (e.description ? '<div class="desc">' + esc(e.description) + '</div>' : '') +
+      '</div>';
+  }
+  async function loadWatch() {
+    if (!WATCH_OK) return;
+    var seq = ++WATCH_SEQ;
+    var sel = $('watchSel').value;
+    $('watchStatus').textContent = 'Loading...';
+    $('watchList').innerHTML = '';
+    var j;
+    try { j = await call('watchdog', { state: sel }); }
+    catch (e) { j = { ok: false, error: 'Connection problem. Try again.' }; }
+    if (seq !== WATCH_SEQ) return; // a newer request superseded this one
+    if (!j.ok) { $('watchStatus').innerHTML = '<span class="err">' + esc(j.error || 'Could not load.') + '</span>'; return; }
+    var entries = j.entries || [];
+    var unmatched = entries.filter(function (e) { return !e.matched; }).length;
+    $('watchStatus').textContent = entries.length + ' open ticket' + (entries.length === 1 ? '' : 's') + ' for ' + j.label +
+      (unmatched ? ' (' + unmatched + ' unmatched)' : '') + ' | Updated ' + fmtDT(new Date().toISOString());
+    $('watchList').innerHTML = entries.length ? entries.map(wdCard).join('') : '<p class="muted">Nothing outstanding.</p>';
+  }
+  $('watchSel').onchange = loadWatch;
+  $('watchRefresh').onclick = loadWatch;
 
   // ----- password -----
   $('pwBtn').onclick = async function () {
