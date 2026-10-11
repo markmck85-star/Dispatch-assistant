@@ -20,6 +20,7 @@ const {
   createPlaceholderSite,
   findPlaceholderByAddress,
   flagPlaceholderForPromotion,
+  flagInactiveSiteForActivation,
 } = require("./lib/placeholder-sites");
 const { parseMileageWorkbookBuffer, evaluateMileageReport } = require("./lib/mileage-check.js");
 const { parseInventoryWorkbookBuffer } = require("./lib/inventory-sheet.js");
@@ -2188,16 +2189,39 @@ exports.handler = async (event) => {
         if (['install', 'site_survey'].includes(parsed.ticketKind) && !siteId && parsed.address && parsed.state) {
           try {
             let placeholder = await findPlaceholderByAddress(supabase, parsed.address, parsed.state);
+            if (placeholder && rawSiteCode) {
+              // 2026-10-11: install email already carries the permanent
+              // code and its address matches an existing placeholder.
+              await flagPlaceholderForPromotion(supabase, placeholder.id, {
+                realCode: rawSiteCode,
+                woNumber: parsed.woNum,
+              });
+            }
             if (!placeholder) {
+              // 2026-10-11: if the install email carries a real code that
+              // no site holds yet (the code lookup above already came up
+              // empty), create the site under that code directly instead
+              // of a TMP stand-in.
               placeholder = await createPlaceholderSite(supabase, {
                 state: parsed.state,
                 rawName: parsed.site,
                 address: parsed.address,
+                realCode: rawSiteCode || undefined,
               });
             }
             if (placeholder) siteId = placeholder.id;
           } catch (phEx) {
             console.error('[mailgun-inbound] Placeholder site handling failed (non-fatal):', phEx.message);
+          }
+        }
+
+        // 2026-10-11: ticket landed on a site marked inactive -> flag it so
+        // the board can offer "mark active?" (see lib/placeholder-sites.js).
+        if (siteId) {
+          try {
+            await flagInactiveSiteForActivation(supabase, siteId, parsed.woNum);
+          } catch (actEx) {
+            console.error('[mailgun-inbound] Activation flag failed (non-fatal):', actEx.message);
           }
         }
 
