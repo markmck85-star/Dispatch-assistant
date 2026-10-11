@@ -1,5 +1,5 @@
 /**
- * recover-inventory-mail.js  (v2, 2026-10-11)
+ * recover-inventory-mail.js  (v3, 2026-10-11)
  * SAVE AS: netlify/functions/recover-inventory-mail.js
  *
  * Finds recent inventory emails in Mailgun's own stored copy of the mail, opens
@@ -45,7 +45,13 @@ async function mg(url, apiKey, accept) {
   const t = setTimeout(() => ctl.abort(), 7000);
   try {
     const resp = await fetch(url, { headers, signal: ctl.signal });
-    if (!resp.ok) throw new Error("Mailgun " + resp.status + " for " + String(url).replace(/^https?:\/\/[^/]+/, "").slice(0, 80));
+    if (!resp.ok) {
+      let snip = "";
+      try { snip = (await resp.text()).replace(/\s+/g, " ").slice(0, 120); } catch (e) {}
+      let host = "";
+      try { host = new URL(url).hostname; } catch (e) {}
+      throw new Error("Mailgun " + resp.status + " at " + host + (snip ? " (" + snip + ")" : ""));
+    }
     return resp;
   } catch (e) {
     if (e.name === "AbortError") throw new Error("Mailgun was too slow to answer");
@@ -91,10 +97,18 @@ async function listStoredEvents(base, domain, apiKey, cutoffSec, match) {
   return out;
 }
 
-async function processOne(supabase, apiKey, c, save) {
+async function processOne(supabase, apiKey, base, c, save) {
   const res = { receivedAt: new Date(c.ts * 1000).toISOString(), from: c.from, subject: c.subject, emailRow: false, attachments: [] };
   try {
-    const msgResp = await mg(c.storageUrl, apiKey);
+    let msgResp;
+    try {
+      msgResp = await mg(c.storageUrl, apiKey);
+    } catch (e1) {
+      // second try: the same stored message through the main API address
+      const path = String(c.storageUrl).replace(/^https?:\/\/[^/]+/, "");
+      try { msgResp = await mg(base + path, apiKey); }
+      catch (e2) { throw new Error(e1.message + " | retry: " + e2.message); }
+    }
     const msg = await msgResp.json();
     const atts = (msg.attachments || []).filter((a) => KEEP_EXT.test(a.name || a.filename || ""));
 
@@ -178,7 +192,7 @@ exports.handler = async (event) => {
   if (body.step === "one") {
     const c = body.item || {};
     if (!mailgunHostOk(c.storageUrl) || c.storageUrl.indexOf("/domains/" + domain + "/messages/") < 0) return json(400, { error: "Bad message address" });
-    const r = await processOne(supabase, apiKey, { ts: Number(c.ts) || Date.now() / 1000, storageUrl: c.storageUrl, from: String(c.from || ""), subject: String(c.subject || ""), messageId: String(c.messageId || "") }, body.save === true);
+    const r = await processOne(supabase, apiKey, base, { ts: Number(c.ts) || Date.now() / 1000, storageUrl: c.storageUrl, from: String(c.from || ""), subject: String(c.subject || ""), messageId: String(c.messageId || "") }, body.save === true);
     return json(200, { ok: true, message: r });
   }
 
