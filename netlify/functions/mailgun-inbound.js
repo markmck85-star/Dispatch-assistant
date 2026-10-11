@@ -1184,8 +1184,9 @@ function parseEmailBody(text, receivedAt, subject) {
     const issueDetail = getField('Line Item Issue Detail');
     const description = getField('Line Item Description');
     const siteStr = [sstName, pcName].filter(Boolean).join(' / ') || account;
-    const siteCodeM = (pcName + ' ' + account).match(/\b([A-Z]{2}\d{3,5})(?![A-Z\d])/);
-    const siteCode = siteCodeM ? siteCodeM[1] : '';
+    // 2026-10-11: case-insensitive ("oh1047" in some emails), uppercased.
+    const siteCodeM = (pcName + ' ' + account).match(/\b([A-Za-z]{2}\d{3,5})(?![A-Za-z\d])/);
+    const siteCode = siteCodeM ? siteCodeM[1].toUpperCase() : '';
 
     // Try to extract a requested completion date from the free-text
     // description ("Please dispatch a technician by 7/22 to restock...").
@@ -1346,10 +1347,16 @@ function parseEmailBody(text, receivedAt, subject) {
     // brand-new location that doesn't have one yet) -- feeds the existing
     // parsed.state fallback slot already checked near the SMS-send logic.
     const locationStateM = locationField.match(/^([A-Z]{2})\s*[-–]/);
-    const locationState = locationStateM ? locationStateM[1] : null;
+    // 2026-10-11: some site-survey Location fields have no "XX - " prefix at
+    // all ("Montgomery Publix - 9515 Vaughn Rd #1756"), so no state and no
+    // placeholder got made. Fall back to the state in the street address.
+    const addrStateM = address.match(/,\s*([A-Z]{2})\s+\d{5}/) || address.match(/\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\b/);
+    const locationState = locationStateM ? locationStateM[1] : (addrStateM ? addrStateM[1] : null);
     // Extract clean site code (ignore trailing letters from word boundaries)
-    const siteCodeM = (pcName + ' ' + account).match(/\b([A-Z]{2}\d{3,5})(?![A-Z\d])/);
-    const siteCode = siteCodeM ? siteCodeM[1] : '';
+    // 2026-10-11: case-insensitive -- some emails write the code in lowercase
+    // ("oh1047"), which used to leave the ticket with no site link at all.
+    const siteCodeM = (pcName + ' ' + account).match(/\b([A-Za-z]{2}\d{3,5})(?![A-Za-z\d])/);
+    const siteCode = siteCodeM ? siteCodeM[1].toUpperCase() : '';
     // Strip leading "GA - ", "FL - " etc from account name since site code already has state
     const accountClean = account.replace(/^[A-Z]{2}\s*[-–]\s*/i, '').trim();
     const site = siteCode
@@ -2108,7 +2115,7 @@ exports.handler = async (event) => {
       // in this block, is declared above the surrounding try -- see the
       // 2026-08-29 comment there.)
       if ((dispatchType === 'trouble' || dispatchType === 'maintenance') && parsed && parsed.woNum) {
-        const rawSiteCode = parsed.siteCode || (parsed.site && (parsed.site.match(/\b([A-Z]{2}\d{3,5})\b/) || [])[1]) || null;
+        const rawSiteCode = ((parsed.siteCode || (parsed.site && (parsed.site.match(/\b([A-Za-z]{2}\d{3,5})\b/) || [])[1]) || '') + '').toUpperCase() || null;
         let siteId = null;
         if (rawSiteCode) {
           const { data: siteRow, error: siteErr } = await supabase
