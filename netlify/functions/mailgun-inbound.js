@@ -23,7 +23,7 @@ const {
   flagInactiveSiteForActivation,
 } = require("./lib/placeholder-sites");
 const { parseMileageWorkbookBuffer, evaluateMileageReport } = require("./lib/mileage-check.js");
-const { parseInventoryWorkbookBuffer } = require("./lib/inventory-sheet.js");
+const { parseInventoryWorkbookBuffer, isInventorySheet, inspectInventoryAttachment } = require("./lib/inventory-sheet.js");
 
 // 2026-09-20: extracts file attachments from a raw multipart/form-data
 // body, byte-accurately -- added for the technician mileage sanity-check
@@ -1653,7 +1653,7 @@ exports.handler = async (event) => {
       if (timesheetAttachments.includes(a)) continue;
       try {
         const ps = parseInventoryWorkbookBuffer(a.content);
-        if (ps && ps.techName && ps.items.length >= 5 && ps.summary && ps.summary.forms.length > 0) inventorySheetAtts.push({ att: a, parsed: ps });
+        if (ps && isInventorySheet(ps)) inventorySheetAtts.push({ att: a, parsed: ps });
       } catch (invParseEx) { /* not an inventory sheet */ }
     }
 
@@ -2021,6 +2021,54 @@ exports.handler = async (event) => {
         }
       } catch (invSheetEx) {
         console.error('[mailgun-inbound] Inventory sheet capture failed (non-fatal):', invSheetEx.message);
+      }
+
+      // 2026-10-11: keep attachments the sheet reader did NOT accept. Four real
+      // count sheets (Medley, Smelley, Levinsky, Todd) arrived and were dropped
+      // without a trace because the reader rejected them. For mail that looks like
+      // an inventory submission, every attachment that is not a readable sheet is
+      // now saved to the same private bucket, with the reason, so nothing is lost
+      // and the board can list it. These rows have parsed = null, which every
+      // existing inventory report already skips, so they change no counts or checks.
+      // Non-fatal, like the block above.
+      try {
+        const hayInv = payrollHay;
+        const looksInventory = /inventory@mcrtechservice\.com/.test(hayInv) || /inventory/i.test(subject || '') ||
+          INVENTORY_SHEET_SUBJECT_RE.test(subject || '') ||
+          attachments.some((a) => /inventory|SST\s*-\s*MCR/i.test(a.filename || ''));
+        if (looksInventory && inboundEmailId) {
+          const accepted = new Set(inventorySheetAtts.map((x) => x.att));
+          const KEEP_EXT = /\.(xlsx|xlsm|xls|csv|pdf|docx?|png|jpe?g|heic|gif)$/i;
+          for (const a of attachments) {
+            if (accepted.has(a) || timesheetAttachments.includes(a)) continue;
+            if (!a.filename || !a.content || !a.content.length) continue;
+            if (!KEEP_EXT.test(a.filename)) continue;
+            if (a.content.length > 15 * 1024 * 1024) continue;
+            // small pictures are email-signature logos, not a count sheet
+            if (/\.(png|jpe?g|gif)$/i.test(a.filename) && a.content.length < 30 * 1024) continue;
+            const verdict = inspectInventoryAttachment(a.filename, a.content);
+            const safeName = String(a.filename).replace(/[^A-Za-z0-9._-]+/g, '_');
+            const storagePath = `${inboundEmailId}/${safeName}`;
+            const { error: upErr } = await supabase.storage
+              .from('inventory-sheets')
+              .upload(storagePath, a.content, { contentType: a.contentType || 'application/octet-stream', upsert: true });
+            if (upErr) { console.error(`[mailgun-inbound] unreadable inventory attachment upload failed (${a.filename}):`, upErr.message); continue; }
+            const { error: rowErr } = await supabase.from('inventory_sheets').upsert({
+              inbound_email_id: inboundEmailId,
+              filename: a.filename,
+              content_type: a.contentType || null,
+              size_bytes: a.content.length,
+              storage_path: storagePath,
+              received_at: receivedAt.toISOString(),
+              parsed: null,
+              parse_error: verdict.reason || 'Not recognized as a count sheet',
+            }, { onConflict: 'inbound_email_id,filename' });
+            if (rowErr) console.error(`[mailgun-inbound] unreadable inventory attachment row failed (${a.filename}):`, rowErr.message);
+            else console.log(`[mailgun-inbound] Kept unreadable inventory attachment: ${a.filename} -- ${verdict.reason}`);
+          }
+        }
+      } catch (invKeepEx) {
+        console.error('[mailgun-inbound] Keeping unreadable inventory attachments failed (non-fatal):', invKeepEx.message);
       }
 
       // ITI/TechWeb closing emails go straight into site_visits, not

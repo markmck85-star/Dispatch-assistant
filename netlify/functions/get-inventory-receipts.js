@@ -356,6 +356,31 @@ exports.handler = async (event) => {
     });
   }
 
+  // 2026-10-11: attachments that arrived with an inventory email but could not be
+  // read as a count sheet. The file is kept (see mailgun-inbound.js); this lists
+  // them so a person can open the file instead of the email silently vanishing.
+  const unreadable = [];
+  try {
+    const { data: badRows } = await supabase
+      .from("inventory_sheets")
+      .select("id, inbound_email_id, filename, received_at, parse_error")
+      .gte("received_at", sinceIso)
+      .is("parsed", null)
+      .order("received_at", { ascending: false })
+      .limit(200);
+    for (const b of badRows || []) {
+      const mail = mailById.get(b.inbound_email_id);
+      unreadable.push({
+        id: b.id,
+        filename: b.filename,
+        receivedAt: b.received_at,
+        reason: b.parse_error || "Not recognized as a count sheet",
+        sender: mail ? mail.sender : null,
+        subject: mail ? mail.subject : null,
+      });
+    }
+  } catch (e) { /* the list is a convenience; never break the board */ }
+
   return json(200, {
     ok: true,
     since,
@@ -364,6 +389,7 @@ exports.handler = async (event) => {
     received,
     missing,
     unmatched,
+    unreadable,
   });
 };
 
