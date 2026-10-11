@@ -69,6 +69,17 @@
   .alerts .btns { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   .alerts .btns button { padding:9px 12px; font-size:14px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; cursor:pointer; }
   .alerts .btns button.main { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .wd { cursor:pointer; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
+  .modal .sheet { background:var(--card); color:var(--ink); width:100%; max-width:640px; max-height:92vh; overflow-y:auto; border-radius:16px 16px 0 0; padding:18px 18px 24px; border-top:5px solid var(--bad); }
+  .modal .sheet.install, .modal .sheet.site_survey { border-top-color:var(--warn); }
+  .modal .sheet.maintenance { border-top-color:var(--brand); }
+  .modal .big { font-size:26px; font-weight:700; margin:0 0 6px; }
+  .modal .lbl { font-size:13px; color:var(--muted); margin-top:14px; text-transform:uppercase; letter-spacing:.04em; }
+  .modal .val { font-size:20px; line-height:1.35; }
+  .modal .val.desc { font-size:18px; white-space:pre-wrap; }
+  .modal .go { display:block; text-align:center; margin-top:16px; padding:16px; font-size:20px; background:var(--brand); color:#fff; border-radius:12px; text-decoration:none; }
+  .modal .close { display:block; width:100%; margin-top:12px; padding:16px; font-size:20px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:12px; cursor:pointer; }
   .wd { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:10px; padding:12px; margin-bottom:8px; }
   .wd.trouble { border-left-color:var(--bad); }
   .wd.maintenance { border-left-color:var(--brand); }
@@ -154,6 +165,7 @@
   </main>
 </div>
 
+<div id="wdModal" class="modal hidden"><div class="sheet" id="wdSheet"></div></div>
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
@@ -235,6 +247,7 @@
     }
     tab('Sites');
     loadSites();
+    if (PENDING_WD && WATCH_OK) handleWdOpen(PENDING_WD.wo, PENDING_WD.st);
   }
 
   // ----- login -----
@@ -439,12 +452,13 @@
     if (e.dueAt) return 'Due: ' + fmtDT(e.dueAt);
     return '';
   }
-  function wdCard(e) {
+  var WATCH_ENTRIES = [];
+  function wdCard(e, idx) {
     var kind = String(e.ticketKind || 'trouble').toLowerCase();
     var cls = kind.replace(/[^a-z_]/g, '');
     var issue = [e.issueCategory, e.issueDetail].filter(Boolean).join(' - ') || 'No issue category';
     var dl = wdDeadline(e);
-    return '<div class="wd ' + esc(cls) + '">' +
+    return '<div class="wd ' + esc(cls) + '" data-i="' + idx + '">' +
       '<div><b>WO ' + esc(e.woNumber || '-') + '</b> <span class="tag">' + esc(kind.replace(/_/g, ' ')) + '</span>' +
       (e.needsReview ? '<span class="tag warn">review: line item added</span>' : '') +
       (!e.matched ? '<span class="tag alert">unmatched site</span>' : '') + '</div>' +
@@ -466,10 +480,79 @@
     if (seq !== WATCH_SEQ) return; // a newer request superseded this one
     if (!j.ok) { $('watchStatus').innerHTML = '<span class="err">' + esc(j.error || 'Could not load.') + '</span>'; return; }
     var entries = j.entries || [];
+    WATCH_ENTRIES = entries;
     var unmatched = entries.filter(function (e) { return !e.matched; }).length;
     $('watchStatus').textContent = entries.length + ' open ticket' + (entries.length === 1 ? '' : 's') + ' for ' + j.label +
       (unmatched ? ' (' + unmatched + ' unmatched)' : '') + ' | Updated ' + fmtDT(new Date().toISOString());
-    $('watchList').innerHTML = entries.length ? entries.map(wdCard).join('') : '<p class="muted">Nothing outstanding.</p>';
+    $('watchList').innerHTML = entries.length ? entries.map(function (e, i) { return wdCard(e, i); }).join('') : '<p class="muted">Nothing outstanding.</p>';
+    if (PENDING_WD) { var pw = PENDING_WD; PENDING_WD = null; openPendingWd(pw); }
+  }
+
+  // ----- ticket detail pop-up (tap a card, or tap a phone alert) -----
+  var PENDING_WD = null;
+  function woKey(v) { return String(v || '').replace(/\D/g, '').replace(/^0+/, ''); }
+  function wdModal(e) {
+    var kind = String(e.ticketKind || 'trouble').toLowerCase();
+    var issue = [e.issueCategory, e.issueDetail].filter(Boolean).join(' - ') || 'No issue category';
+    var dl = wdDeadline(e);
+    var h = '<div class="big">WO ' + esc(e.woNumber || '-') + '</div>' +
+      '<div><span class="tag">' + esc(kind.replace(/_/g, ' ')) + '</span>' +
+      (e.needsReview ? '<span class="tag warn">review: line item added</span>' : '') +
+      (!e.matched ? '<span class="tag alert">unmatched site</span>' : '') + '</div>' +
+      '<div class="lbl">Site</div><div class="val"><b>' + esc(e.siteText || '(no site text)') + '</b></div>' +
+      '<div class="lbl">Issue</div><div class="val">' + esc(issue) + '</div>' +
+      (dl ? '<div class="lbl">Deadline</div><div class="val"><b>' + esc(dl) + '</b></div>' : '') +
+      '<div class="lbl">Received</div><div class="val">' + esc(fmtDT(e.receivedAt)) + '</div>' +
+      (e.address ? '<div class="lbl">Address</div><div class="val">' + esc(e.address) + '</div>' : '') +
+      (e.description ? '<div class="lbl">Details</div><div class="val desc">' + esc(e.description) + '</div>' : '') +
+      (e.address ? '<a class="go" target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(e.address) + '">Navigate</a>' : '') +
+      '<button class="close" id="wdClose">Close</button>';
+    var sheet = $('wdSheet');
+    sheet.className = 'sheet ' + kind.replace(/[^a-z_]/g, '');
+    sheet.innerHTML = h;
+    $('wdModal').classList.remove('hidden');
+    $('wdClose').onclick = closeWdModal;
+  }
+  function closeWdModal() { $('wdModal').classList.add('hidden'); }
+  $('wdModal').onclick = function (ev) { if (ev.target === $('wdModal')) closeWdModal(); };
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeWdModal(); });
+  $('watchList').onclick = function (ev) {
+    if (ev.target.closest && ev.target.closest('a')) return; // the address link keeps working
+    var card = ev.target.closest ? ev.target.closest('.wd') : null;
+    if (!card) return;
+    var e = WATCH_ENTRIES[Number(card.getAttribute('data-i'))];
+    if (e) wdModal(e);
+  };
+  // A phone alert was tapped: show the Watchdog tab on that ticket's area, then pop it up.
+  function openPendingWd(p) {
+    var k = woKey(p.wo);
+    for (var i = 0; i < WATCH_ENTRIES.length; i++) {
+      if (woKey(WATCH_ENTRIES[i].woNumber) === k) { wdModal(WATCH_ENTRIES[i]); return; }
+    }
+    $('watchStatus').textContent = 'That ticket is no longer on the list (it may have been closed).';
+  }
+  function handleWdOpen(wo, st) {
+    if (!WATCH_OK || !wo) { PENDING_WD = { wo: wo, st: st }; return; }
+    var opts = (ME_WATCH_DATA && ME_WATCH_DATA.options || []).map(function (o) { return o.value; });
+    var region = (st === 'NC' || st === 'SC') ? 'GA' : st;
+    var pick = opts.indexOf(region) !== -1 ? region : (ME_WATCH_DATA && ME_WATCH_DATA.home);
+    if (pick) $('watchSel').value = pick;
+    PENDING_WD = { wo: wo, st: st };
+    tab('Watch');
+  }
+  function readWdParams() {
+    try {
+      var q = new URLSearchParams(location.search);
+      var wo = q.get('wd');
+      if (wo) { PENDING_WD = { wo: wo, st: (q.get('st') || '').toUpperCase() }; history.replaceState(null, '', location.pathname); }
+    } catch (e) {}
+  }
+  readWdParams();
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (ev) {
+      var d = ev.data || {};
+      if (d.type === 'wd-open') handleWdOpen(d.wo, String(d.st || '').toUpperCase());
+    });
   }
 
   // ----- phone alerts (staff only; web push) -----

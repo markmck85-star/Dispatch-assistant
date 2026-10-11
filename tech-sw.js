@@ -17,16 +17,21 @@ self.addEventListener('push', function (event) {
     badge: 'tech-portal-icon-192.png',
     vibrate: [300, 150, 300, 150, 300],
     requireInteraction: true,
-    data: { url: data.url || '/tech-portal.html' },
+    data: { url: data.url || '/tech-portal.html', wo: data.wo || '', st: data.st || '' },
   }));
 });
 
 self.addEventListener('notificationclick', function (event) {
   event.notification.close();
-  var url = (event.notification.data && event.notification.data.url) || '/tech-portal.html';
+  var d = event.notification.data || {};
+  var url = d.url || '/tech-portal.html';
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
     for (var i = 0; i < list.length; i++) {
-      if (list[i].url.indexOf('tech') !== -1 && 'focus' in list[i]) return list[i].focus();
+      if (list[i].url.indexOf('tech') !== -1 && 'focus' in list[i]) {
+        // The portal is already open: bring it forward and tell it which ticket to show.
+        list[i].postMessage({ type: 'wd-open', wo: d.wo || '', st: d.st || '' });
+        return list[i].focus();
+      }
     }
     return self.clients.openWindow(url);
   }));
