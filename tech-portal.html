@@ -48,6 +48,13 @@
   h3 { font-size:15px; margin:14px 0 6px; }
   a { color:var(--brand); }
   .hidden { display:none !important; }
+  .shiprow { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .shiprow select { flex:1 1 0; min-width:0; padding:9px 8px; font-size:15px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  .seg { display:flex; flex:none; }
+  .seg button { padding:9px 12px; font-size:14px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  .seg button:first-child { border-radius:8px 0 0 8px; }
+  .seg button:last-child { border-radius:0 8px 8px 0; border-left:0; }
+  .seg button.on { background:var(--brand); color:#fff; border-color:var(--brand); }
   .statebar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .statebar label { margin:0; }
   .statebar select { flex:1; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
@@ -104,7 +111,7 @@
       <div id="siteDetail" class="hidden"></div>
     </section>
 
-    <section id="shipPane" class="hidden"><div class="statebar hidden" id="shipFilterBar"><label for="shipTech">Employee</label><select id="shipTech"></select></div><div id="shipBody"></div></section>
+    <section id="shipPane" class="hidden"><div class="shiprow"><select id="shipTech" class="hidden" aria-label="Employee"></select><div class="seg"><button id="segRma" class="on">RMA</button><button id="segCon">Consumables</button></div></div><div id="shipBody"></div></section>
 
     <section id="watchPane" class="hidden">
       <div class="wdbar">
@@ -132,7 +139,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '';
+  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null;
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -250,6 +257,8 @@
     loadSites();
     if (!$('shipPane').classList.contains('hidden')) loadShipments();
   };
+  $('segRma').onclick = function () { SHIP_VIEW = 'rma'; renderShipments(); };
+  $('segCon').onclick = function () { SHIP_VIEW = 'con'; renderShipments(); };
   $('shipTech').onchange = function () { SHIP_TECH = $('shipTech').value; loadShipments(); };
   $('tabSites').onclick = function () { tab('Sites'); };
   $('tabShip').onclick = function () { tab('Ship'); };
@@ -347,21 +356,33 @@
       ts.innerHTML = '<option value="">All employees</option>' + j.techs.map(function (t) { return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>'; }).join('');
       ts.value = SHIP_TECH;
       if (ts.value !== SHIP_TECH) { SHIP_TECH = ''; ts.value = ''; }
-      $('shipFilterBar').classList.toggle('hidden', !j.techs.length);
-    } else { $('shipFilterBar').classList.add('hidden'); }
+      $('shipTech').classList.toggle('hidden', !j.techs.length);
+    } else { $('shipTech').classList.add('hidden'); }
     if (!j.ok) { p.innerHTML = '<div class="err">' + esc(j.error || 'Could not load.') + '</div>'; return; }
-    var html = '<div class="card"><h2>RMA parts</h2>';
+    SHIP_DATA = j;
+    renderShipments();
+  }
+  function renderShipments() {
+    var p = $('shipBody'), j = SHIP_DATA;
+    if (!j) return;
+    $('segRma').classList.toggle('on', SHIP_VIEW === 'rma');
+    $('segCon').classList.toggle('on', SHIP_VIEW === 'con');
+    var html = '';
+    if (SHIP_VIEW === 'rma') {
+    html += '<div class="card"><h2>RMA parts</h2>';
     if (!j.rma.length) html += '<p class="muted">No RMA shipments found.</p>';
     j.rma.forEach(function (r) {
       html += '<div class="visit"><div class="top"><b>' + esc(r.location || 'RMA') + '</b><span class="muted">' + esc(fmtDate(r.received_at)) + '</span></div>' +
-        '<div class="muted">' + (r.wo ? 'WO ' + esc(r.wo) : '') + (r.case_number ? ' | Case ' + esc(r.case_number) : '') + (r.tech ? ' | ' + esc(r.tech) : '') + (r.state ? ' | ' + esc(r.state) : '') + '</div>' +
-        (r.details ? '<div>' + esc(r.details) + '</div>' : '') +
+        '<div class="muted">' + (r.wo ? 'WO ' + esc(r.wo) : '') + (r.case_number ? ' | Case ' + esc(String(r.case_number).replace(/<br\s*\/?>/gi, ' ').trim()) : '') + (r.tech ? ' | ' + esc(r.tech) : '') + (r.state ? ' | ' + esc(r.state) : '') + '</div>' +
+        (r.details ? '<div>' + esc(String(r.details).replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim()) + '</div>' : '') +
         (r.outbound ? '<div>' + (KIND === 's' ? 'Outbound: ' : 'Sent to you: ') + '' + trackLink(r.outbound) + stat(r.outbound_status) + '</div>' : '') +
         (r.inbound ? '<div>Return: ' + trackLink(r.inbound) + stat(r.inbound_status) + '</div>' : '') +
         (r.return_broken_part ? '<div class="muted">Broken part must be returned' + (r.returned_at ? ' (returned ' + esc(fmtDate(r.returned_at)) + ')' : '') + '</div>' : '') +
         '</div>';
     });
-    html += '</div><div class="card"><h2>Consumable shipments</h2>';
+    html += '</div>';
+    } else {
+    html += '<div class="card"><h2>Consumable shipments</h2>';
     if (!j.consumables.length) html += '<p class="muted">No consumable shipments on record.</p>';
     j.consumables.forEach(function (c) {
       html += '<div class="visit"><div class="top"><b>Requested ' + esc(fmtDate(c.requested)) + '</b><span class="muted">' + esc(c.status || '') + '</span></div>' +
@@ -370,7 +391,9 @@
         c.tracking.map(function (t) { return '<div>' + trackLink(t.number) + stat(t.status) + '</div>'; }).join('') +
         (c.delivered_at ? '<div class="muted">Delivered ' + esc(fmtDate(c.delivered_at)) + '</div>' : '') + '</div>';
     });
-    html += '</div><p class="muted">' + (KIND === 's' ? 'Showing the most recent shipments for your states.' : 'Only shipments linked to you are shown. Some RMA shipments are not linked to a technician yet; check your email if one is missing.') + '</p>';
+    html += '</div>';
+    }
+    html += '<p class="muted">' + (KIND === 's' ? 'Showing the most recent shipments for your states.' : 'Only shipments linked to you are shown. Some RMA shipments are not linked to a technician yet; check your email if one is missing.') + '</p>';
     p.innerHTML = html;
   }
 
