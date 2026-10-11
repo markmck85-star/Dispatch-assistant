@@ -85,12 +85,23 @@ function render(data) {
     return;
   }
   out.innerHTML = '<div class="card"><p>' + data.messages.length + " message" + (data.messages.length === 1 ? "" : "s") + " shown" +
-    (data.truncated ? " (" + data.found + " found, showing the newest-first limit)" : "") + (data.save ? ". Save was on." : ". Look only, nothing saved.") + "</p>" +
+    (data.truncated ? " (" + data.found + " found, showing the newest)" : "") + (data.save ? ". Save was on." : ". Look only, nothing saved.") + "</p>" +
     data.messages.map((m) => '<div class="msg"><b>' + esc(m.subject || "(no subject)") + "</b><div class=\"hint\">" + esc(m.from || "") + " &middot; " + esc(when(m.receivedAt)) +
       (m.emailRow ? "" : ' &middot; <span class="tag warn">no matching email record</span>') + "</div>" +
       (m.error ? '<div class="att"><span class="tag bad">Error</span>' + esc(m.error) + "</div>" : "") +
       (m.note ? '<div class="hint">' + esc(m.note) + "</div>" : "") +
       (m.attachments || []).map(attHtml).join("") + "</div>").join("") + "</div>";
+}
+async function call(payload) {
+  const res = await fetch("/.netlify/functions/recover-inventory-mail", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { throw new Error("The server gave no usable answer (HTTP " + res.status + (res.status === 404 ? ", the recovery function is not deployed yet" : res.status >= 500 ? ", it probably timed out" : "") + ")."); }
+  if (!res.ok || data.error) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
 }
 async function run(save) {
   const u = document.getElementById("u").value.trim();
@@ -98,18 +109,23 @@ async function run(save) {
   if (!u || !p) { alert("Enter the admin username and PIN."); return; }
   if (save && !confirm("Save the missing attachments to the inventory board now?")) return;
   const out = document.getElementById("out");
-  out.innerHTML = '<div class="card"><p>' + (save ? "Saving" : "Looking") + "... this can take a few seconds.</p></div>";
+  out.innerHTML = '<div class="card"><p>Finding stored messages...</p></div>';
   document.getElementById("look").disabled = true; document.getElementById("save").disabled = true;
+  const messages = [];
   try {
-    const res = await fetch("/.netlify/functions/recover-inventory-mail", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: u, pin: p, hours: Number(document.getElementById("h").value), match: document.getElementById("m").value.trim(), save }),
-    });
-    let data = {};
-    try { data = await res.json(); } catch (e) { data = { error: "The server did not answer in time. Try a shorter look-back or a name in the filter." }; }
-    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
-    render(data);
+    const list = await call({ username: u, pin: p, step: "list", hours: Number(document.getElementById("h").value), match: document.getElementById("m").value.trim() });
+    const items = list.items || [];
+    for (let i = 0; i < items.length; i++) {
+      out.innerHTML = '<div class="card"><p>Opening message ' + (i + 1) + " of " + items.length + "...</p></div>" + (messages.length ? "" : "");
+      try {
+        const r = await call({ username: u, pin: p, step: "one", save, item: items[i] });
+        messages.push(r.message);
+      } catch (e) {
+        messages.push({ receivedAt: new Date(items[i].ts * 1000).toISOString(), from: items[i].from, subject: items[i].subject, emailRow: true, attachments: [], error: e.message });
+      }
+    }
+    messages.sort((a, b) => String(a.receivedAt).localeCompare(String(b.receivedAt)));
+    render({ messages, found: list.found, truncated: list.truncated, save });
   } catch (err) {
     out.innerHTML = '<div class="card"><p style="color:var(--bad)">' + esc(err.message) + "</p></div>";
   }
