@@ -9722,13 +9722,13 @@ ${content}</body></html>`;
      lowest to highest: company default, region default, role, personal picks. -->
 <style>
     #boardToolBar { margin: 0 0 10px; }
-    #boardToolBar .tool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+    #boardToolBar .tool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 0; flex-wrap: wrap; }
     #boardToolBar .tool-seg { display: inline-flex; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
     #boardToolBar .tool-seg button { min-height: 36px; padding: 6px 14px; border: none; background: #181818; color: #aaa; font-weight: 700; font-size: 13px; cursor: pointer; }
     #boardToolBar .tool-seg button[aria-pressed="true"] { background: #f0a500; color: #111; }
     #boardToolBar .tool-edit { min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1px solid #333; background: #181818; color: #ccc; font-weight: 700; font-size: 13px; cursor: pointer; }
     #boardToolBar.editing .tool-edit { background: #2a2a3e; border-color: #f0a500; color: #f0a500; }
-    #boardToolBar .tool-hint { display: none; font-size: 12px; color: #888; margin: 0 0 8px; }
+    #boardToolBar .tool-hint { display: none; font-size: 12px; color: #888; margin: 8px 0 0; }
     #boardToolBar.editing .tool-hint { display: block; }
     #boardToolBar .tool-hint button { background: none; border: none; color: #6cb2ff; text-decoration: underline; cursor: pointer; font-size: 12px; padding: 0 0 0 6px; }
     #toolMain { display: flex; flex-direction: column; gap: 6px; }
@@ -9758,6 +9758,10 @@ ${content}</body></html>`;
     #boardSettings > summary::-webkit-details-marker { display: none; }
     #boardSettings .top-row { padding: 0 10px; }
     #boardSettings .top-row label { color: #ccc; }
+    .tool-item > #boardSettings, .tool-item > #availabilityPanel { flex: 1 1 auto; min-width: 0; margin: 0 !important; box-sizing: border-box; }
+    body.tools-no-strip #availabilityStrip { display: none !important; }
+    /* Generate Dispatches, Print and Compact Summary live on the main panel; not repeated on the left. */
+    .input-panel > .action-btns { display: none !important; }
 </style>
 <script>
 (function () {
@@ -9778,6 +9782,8 @@ ${content}</body></html>`;
         { id: 'state',     sel: '#stateConsoleLink',                                  group: 'today', simple: true },
         { id: 'dco',       sel: '#dcoToggleBtn', group: 'today', simple: true },
         { id: 'trouble',   sel: '#troubleOnlyToggleBtn', group: 'today', simple: true },
+        { id: 'avail',     sel: '#availabilityPanel', noHide: true,                   group: 'today', simple: true },
+        { id: 'outstrip',  virtual: true, label: '\uD83D\uDC65 Technician out bar (main screen)', reveal: 'strip', group: 'today', simple: true },
         { id: 'assistant', virtual: true, label: '\uD83E\uDD16 Assistant bar', reveal: 'chat',    group: 'today' },
         { id: 'analyze',   virtual: true, label: '\uD83E\uDDED Analyze Routes', reveal: 'analyze', group: 'today' },
         { id: 'lookup',    sel: '#locationLookupLink',                                group: 'look',  simple: true },
@@ -9791,13 +9797,14 @@ ${content}</body></html>`;
         { id: 'saturday',  sel: 'a[href="/saturday-oncall"]',                         group: 'plan' },
         { id: 'admin',     sel: 'a.admin-panel-link',                                 group: 'admin', adminOnly: true },
         { id: 'inbound',   sel: '#inboundMailLink',                                   group: 'admin', adminOnly: true },
-        { id: 'mileage',   sel: 'a.mileage-log-link',                                 group: 'admin', adminOnly: true }
+        { id: 'mileage',   sel: 'a.mileage-log-link',                                 group: 'admin', adminOnly: true },
+        { id: 'settings',  sel: '#boardSettings', noHide: true,                       group: 'admin', adminOnly: true }
     ];
 
     var wrappers = {};          // tool id -> .tool-item node
     var prefs = null;           // { preset, pinned: [], unpinned: [] }
     var editing = false;
-    var revealed = { chat: false, analyze: false };   // tucked-away parts of the assistant bar shown for this visit
+    var revealed = { chat: false, analyze: false, strip: false };   // tucked-away parts of the assistant bar shown for this visit
     var serverChecked = {};     // username -> true once the server copy was fetched
     var saveTimer = null;
     var built = false;
@@ -9877,8 +9884,10 @@ ${content}</body></html>`;
     function resolve(u) {
         var preset = presetFor(u), reg = region();
         var allowed = TOOLS.filter(function (t) { return !t.adminOnly || isAdmin(u); });
+        // Untouched defaults first (registry order), then the tools the person starred, in the
+        // order they starred them, so each new star lands underneath the previous one.
         var main = allowed.filter(function (t) {
-            return defaultMain(t, preset, reg) && prefs.unpinned.indexOf(t.id) < 0;
+            return defaultMain(t, preset, reg) && prefs.unpinned.indexOf(t.id) < 0 && prefs.pinned.indexOf(t.id) < 0;
         });
         prefs.pinned.forEach(function (id) {
             var t = allowed.filter(function (x) { return x.id === id; })[0];
@@ -9900,14 +9909,14 @@ ${content}</body></html>`;
                 var u = user();
                 var inMain = u && resolve(u).main.some(function (x) { return x.id === t.id; });
                 if (!inMain) { revealed[t.reveal] = true; refresh(); }
-                var target = document.getElementById(t.reveal === 'chat' ? 'aiCommandInput' : 'aiAnalyzeRoutesBtn');
+                var target = document.getElementById(t.reveal === 'chat' ? 'aiCommandInput' : (t.reveal === 'strip' ? 'availabilityStrip' : 'aiAnalyzeRoutesBtn'));
                 if (target) { try { target.scrollIntoView({ block: 'center' }); if (t.reveal === 'chat') target.focus(); } catch (e) {} }
             });
         } else {
             el = document.querySelector(t.sel);
             if (!el) return null;
         }
-        if (el.parentNode) origParents.push(el.parentNode);
+        if (el.parentNode && !t.noHide) origParents.push(el.parentNode);
         var w = document.createElement('span');
         w.className = 'tool-item';
         w.setAttribute('data-tool', t.id);
@@ -9955,17 +9964,17 @@ ${content}</body></html>`;
         var bar = document.createElement('div');
         bar.id = 'boardToolBar';
         bar.innerHTML =
+            '<div id="toolMain"></div>' +
+            '<details id="toolMore"><summary id="toolMoreSummary">More tools</summary><div id="toolMoreList"></div></details>' +
+            '<div class="tool-hint">Tap a star to move a tool between the main row and More tools. New stars land at the bottom of the main row, so star them in the order you want them.' +
+              '<button type="button" data-reset>Reset to default</button></div>' +
             '<div class="tool-head">' +
               '<div class="tool-seg" role="group" aria-label="Tool view">' +
                 '<button type="button" data-preset="simple">Simple</button>' +
                 '<button type="button" data-preset="everything">Everything</button>' +
               '</div>' +
               '<button type="button" class="tool-edit" aria-pressed="false">Edit</button>' +
-            '</div>' +
-            '<div class="tool-hint">Tap a star to move a tool between the main row and More tools.' +
-              '<button type="button" data-reset>Reset to default</button></div>' +
-            '<div id="toolMain"></div>' +
-            '<details id="toolMore"><summary id="toolMoreSummary">More tools</summary><div id="toolMoreList"></div></details>';
+            '</div>';
         stack.insertBefore(bar, stack.firstChild);
 
         bar.addEventListener('click', function (e) {
@@ -10028,6 +10037,7 @@ ${content}</body></html>`;
             }
         });
 
+        moveSettings(u);
         var mainBox = document.getElementById('toolMain');
         var moreList = document.getElementById('toolMoreList');
         var seen = {};
@@ -10073,6 +10083,8 @@ ${content}</body></html>`;
             host.classList.toggle('ai-no-chat', !chatOn);
             host.classList.toggle('ai-no-analyze', !analyzeOn);
             host.style.display = (chatOn || analyzeOn) ? '' : 'none';
+            var stripOn = inMainIds.indexOf('outstrip') >= 0 || revealed.strip;
+            document.body.classList.toggle('tools-no-strip', !stripOn);
         }
 
         // Source containers are now empty.
@@ -10091,9 +10103,32 @@ ${content}</body></html>`;
         document.querySelectorAll('#boardToolBar [data-preset]').forEach(function (b) {
             b.setAttribute('aria-pressed', b.getAttribute('data-preset') === preset ? 'true' : 'false');
         });
-        moveSettings(u);
         fetchServerOnce(u);
+        alignWithMap();
     }
+
+    // Desktop: line the top of the first tool up with the top of the map.
+    function alignWithMap() {
+        var slot = document.getElementById('sidebarToolSlot');
+        var map = document.getElementById('dispatchMapPanel');
+        if (!slot) return;
+        var stack = document.getElementById('boardToolStack');
+        var inSlot = stack && stack.parentElement === slot;
+        var mapShown = map && map.offsetParent !== null;
+        if (!inSlot || !mapShown || !window.matchMedia('(min-width: 960px)').matches) { slot.style.paddingTop = ''; return; }
+        slot.style.paddingTop = '0px';
+        var firstTool = slot.querySelector('.tool-item') || slot;
+        var delta = Math.round(map.getBoundingClientRect().top - firstTool.getBoundingClientRect().top);
+        slot.style.paddingTop = (delta > 0 ? delta : 0) + 'px';
+    }
+    window.addEventListener('resize', function () { setTimeout(alignWithMap, 50); });
+    if (window.ResizeObserver) {
+        try {
+            var rp = document.querySelector('.results-panel');
+            if (rp) new ResizeObserver(function () { alignWithMap(); }).observe(rp);
+        } catch (e) {}
+    }
+    document.addEventListener('click', function () { setTimeout(alignWithMap, 80); });
 
     window.refreshBoardTools = refresh;
 })();
