@@ -14,6 +14,7 @@
  */
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
+const { latestAllowedDate } = require("./lib/inventory-dates.js");
 
 const NAME_FORMAT = /^[A-Z]{2}(?:\s*,\s*[A-Z]{2})*\s*SST\s*-\s*MCR\s+[A-Za-z.'_ ]+?\s*-\s*\d{8}\.(xlsx|xls)$/i;
 const STALE_DAYS = 7;
@@ -48,7 +49,7 @@ function issuesFor(filename, sheetIso, arrived) {
     for (const [label, iso] of [["File name", fd.iso], ["Sheet", sheetIso]]) {
       if (!iso) continue;
       if (Number(iso.slice(0, 4)) !== Number(arrived.slice(0, 4)) && Math.abs(dayDiff(iso, arrived)) > 40) issues.push(label + " date is the wrong year");
-      else if (dayDiff(iso, arrived) > 1) issues.push(label + " date is in the future");
+      else if (iso > latestAllowedDate(arrived)) issues.push(label + " date is in the future");
       else if (dayDiff(arrived, iso) > STALE_DAYS) issues.push(label + " date is more than " + STALE_DAYS + " days old");
     }
   }

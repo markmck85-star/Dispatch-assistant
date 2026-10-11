@@ -16,7 +16,8 @@
  *   fix   no readable date in the sheet
  *   fix   file name has no YYYYMMDD date
  *   fix   file name and sheet disagree (both dates shown)
- *   fix   a date is in the future, or in the wrong year
+ *   fix   a date is in the future (later than the next due day, see
+ *         lib/inventory-dates.js; v3 2026-10-11), or in the wrong year
  *   fix   a date is more than 7 days before the day the sheet arrived
  *   fix   In Transit left empty for an item already requested/shipped to them
  *         (see lib/inventory-transit.js; added 2026-10-06)
@@ -28,6 +29,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
 const { transitProblems, shipmentsForTech } = require("./lib/inventory-transit.js");
+const { latestAllowedDate } = require("./lib/inventory-dates.js");
 
 const STALE_DAYS = 7;
 // The name part may not contain " - " (that is how extras like "- MASTER SHEET -" sneak in).
@@ -58,7 +60,7 @@ function dateProblems(label, iso, arrived) {
   if (!iso) return out;
   if (Number(iso.slice(0, 4)) !== Number(arrived.slice(0, 4)) && Math.abs(dayDiff(iso, arrived)) > 40) {
     out.push({ kind: "fix", code: "wrong_year", text: `${label} date ${iso} is the wrong year` });
-  } else if (dayDiff(iso, arrived) > 1) {
+  } else if (iso > latestAllowedDate(arrived)) {
     out.push({ kind: "fix", code: "future", text: `${label} date ${iso} is in the future` });
   } else if (dayDiff(arrived, iso) > STALE_DAYS) {
     out.push({ kind: "fix", code: "old", text: `${label} date ${iso} is more than ${STALE_DAYS} days before it was sent` });

@@ -20,6 +20,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
 const { transitProblems, shipmentsForTech } = require("./lib/inventory-transit.js");
+const { latestAllowedDate } = require("./lib/inventory-dates.js");
 
 const STALE_DAYS = 7;
 const AUTO_CAP = 3;
@@ -47,7 +48,7 @@ function dateProblems(label, iso, arrived) {
   const out = [];
   if (!iso) return out;
   if (Number(iso.slice(0, 4)) !== Number(arrived.slice(0, 4)) && Math.abs(dayDiff(iso, arrived)) > 40) out.push(`${label} date ${iso} is the wrong year`);
-  else if (dayDiff(iso, arrived) > 1) out.push(`${label} date ${iso} is in the future`);
+  else if (iso > latestAllowedDate(arrived)) out.push(`${label} date ${iso} is in the future`);
   else if (dayDiff(arrived, iso) > STALE_DAYS) out.push(`${label} date ${iso} is more than ${STALE_DAYS} days before it was sent`);
   return out;
 }
