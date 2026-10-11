@@ -28,7 +28,8 @@
 //   me               {}
 //   search           { q }
 //   site             { code }
-//   shipments        {}
+//   shipments        { state, technician_id? }   technician_id (staff only) filters to one
+//                    employee from the returned techs list for that state
 //   watchdog         { state }   staff only; state is a value from me.watch.options
 //   change_password  { current, next }
 
@@ -456,7 +457,21 @@ async function doSite(supabase, ctx, body) {
   });
 }
 
+// Active technicians whose home or additional states include the given state:
+// the employee drop-down on the staff shipments view.
+async function rosterForState(supabase, state) {
+  const { data } = await supabase
+    .from('technicians')
+    .select('id, name, home_state, additional_states, active')
+    .limit(2000);
+  return (data || [])
+    .filter((t) => t.active !== false && t.name && statesFor(t).includes(state))
+    .map((t) => ({ id: t.id, name: t.name }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 async function doShipments(supabase, ctx, body) {
+  let roster = null;
   let rmaQ = supabase
     .from('rma_shipments')
     .select('account_name, wo_number, case_number, warehouse_name, request_details, outbound_tracking, inbound_tracking, return_broken_part, returned_at, received_at, technician_id, state')
@@ -476,6 +491,15 @@ async function doShipments(supabase, ctx, body) {
     const useState = ctx.states.includes(want) ? want : ctx.states[0];
     rmaQ = rmaQ.eq('state', useState);
     conQ = conQ.eq('state', useState);
+    // Employee filter (staff view). Applied in the query, not on the phone, so
+    // the row limits above apply to that one employee's shipments.
+    roster = await rosterForState(supabase, useState);
+    const wantTech = String((body && body.technician_id) || '').trim();
+    if (wantTech) {
+      if (!roster.some((t) => String(t.id) === wantTech)) return json(400, { ok: false, error: 'Unknown employee.' });
+      rmaQ = rmaQ.eq('technician_id', wantTech);
+      conQ = conQ.eq('technician_id', wantTech);
+    }
   }
   const [rmaR, conR] = await Promise.all([rmaQ, conQ]);
   if (rmaR.error || conR.error) return json(500, { ok: false, error: 'Could not load shipments.' });
@@ -510,6 +534,7 @@ async function doShipments(supabase, ctx, body) {
 
   return json(200, {
     ok: true,
+    techs: roster || undefined,
     rma: rma.map((r) => ({
       location: r.account_name,
       wo: r.wo_number,
