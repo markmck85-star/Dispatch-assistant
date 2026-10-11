@@ -113,11 +113,23 @@ async function nextPlaceholderCode(supabase, state) {
 // that matched nothing existing, by code or by address. rawName is
 // typically the ticket's own Location field text (e.g. "GA - Mundy Mill
 // Kroger") -- stripped of its state prefix for a cleaner board label.
-async function createPlaceholderSite(supabase, { state, rawName, address }) {
-  const code = await nextPlaceholderCode(supabase, state);
+//
+// 2026-10-11: optional realCode. An install email for a brand-new site can
+// already carry the permanent Neumo code in its PC Name field. When it does
+// (and no site holds that code yet), create the site directly under the
+// real code, as a normal non-placeholder site, instead of a TMP stand-in
+// that would only be renamed later. Still assigned to the per-state
+// Unassigned tech so it lands on the board for a dispatcher to reassign.
+async function createPlaceholderSite(supabase, { state, rawName, address, realCode }) {
+  const useReal = !!(realCode && /^[A-Z]{2}\d{3,5}$/.test(realCode));
+  const code = useReal ? realCode : await nextPlaceholderCode(supabase, state);
   const techId = await getOrCreateUnassignedTech(supabase, state);
   const cleanName = (rawName || '').replace(/^[A-Z]{2}\s*[-\u2013]\s*/, '').trim();
-  const name = ('SURVEY/INSTALL: ' + (cleanName || 'new site pending install')).slice(0, 120);
+  // Strip a leading "GA1144 / " or "GA1144 - " style code from the name.
+  const tidyName = cleanName.replace(/^[A-Z]{2}\d{3,5}\s*[\/\-\u2013]\s*/, '').trim();
+  const name = useReal
+    ? (tidyName || cleanName || code).slice(0, 120)
+    : ('SURVEY/INSTALL: ' + (cleanName || 'new site pending install')).slice(0, 120);
 
   // 2026-09-21: best-effort geocode right now -- see file header. Never
   // blocks/fails the placeholder creation itself; a missing API key, a
@@ -146,7 +158,7 @@ async function createPlaceholderSite(supabase, { state, rawName, address }) {
       state,
       name,
       address: address || null,
-      is_placeholder: true,
+      is_placeholder: !useReal,
       primary_tech_id: techId,
       lat,
       lng,
@@ -175,6 +187,29 @@ async function findPlaceholderByAddress(supabase, address, state) {
   return null;
 }
 
+// 2026-10-11: a ticket landed on a site marked inactive. Nothing else in
+// the system ever flips sites.active, so a hand-coded site that was added
+// inactive (or deactivated and later reinstalled) stayed hidden from the
+// portal's Locations list forever. Flag it so the board can ask a
+// dispatcher "mark active?" -- confirm-site-activation.js does the flip.
+// Placeholders are skipped (they have their own promotion toast).
+async function flagInactiveSiteForActivation(supabase, siteId, woNumber) {
+  if (!siteId) return;
+  const { data: site, error } = await supabase
+    .from('sites')
+    .select('id, site_code, active, is_placeholder')
+    .eq('id', siteId)
+    .maybeSingle();
+  if (error || !site) return;
+  if (site.active !== false || site.is_placeholder) return;
+  const { error: upErr } = await supabase
+    .from('sites')
+    .update({ activation_candidate_wo_number: woNumber || 'ticket' })
+    .eq('id', siteId);
+  if (upErr) console.error('[placeholder-sites] Failed to flag activation candidate:', upErr.message);
+  else console.log(`[placeholder-sites] Flagged inactive site ${site.site_code} for activation (WO ${woNumber})`);
+}
+
 // Flags a placeholder as ready to promote once a real-coded ticket lands
 // at its address. Doesn't rename anything yet -- see file header. A
 // second real ticket flagging the same placeholder just overwrites the
@@ -196,4 +231,5 @@ module.exports = {
   createPlaceholderSite,
   findPlaceholderByAddress,
   flagPlaceholderForPromotion,
+  flagInactiveSiteForActivation,
 };
