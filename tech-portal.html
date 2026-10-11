@@ -104,7 +104,7 @@
       <div id="siteDetail" class="hidden"></div>
     </section>
 
-    <section id="shipPane" class="hidden"></section>
+    <section id="shipPane" class="hidden"><div class="statebar hidden" id="shipFilterBar"><label for="shipTech">Employee</label><select id="shipTech"></select></div><div id="shipBody"></div></section>
 
     <section id="watchPane" class="hidden">
       <div class="wdbar">
@@ -132,7 +132,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0;
+  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '';
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -184,6 +184,7 @@
     KIND = me.kind || 't';
     var sts = me.states || [];
     STATE = null;
+    SHIP_TECH = '';
     try { var saved = localStorage.getItem('mcr_portal_state'); if (saved && sts.indexOf(saved) !== -1) STATE = saved; } catch (e) {}
     if (!STATE) STATE = me.home || sts[0] || null;
     $('whoStates').textContent = sts.length === 1 ? sts[0] : '';
@@ -242,12 +243,14 @@
   }
   $('stateSel').onchange = function () {
     STATE = $('stateSel').value;
+    SHIP_TECH = '';
     try { localStorage.setItem('mcr_portal_state', STATE); } catch (e) {}
     $('q').value = '';
     closeSite();
     loadSites();
     if (!$('shipPane').classList.contains('hidden')) loadShipments();
   };
+  $('shipTech').onchange = function () { SHIP_TECH = $('shipTech').value; loadShipments(); };
   $('tabSites').onclick = function () { tab('Sites'); };
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabWatch').onclick = function () { tab('Watch'); };
@@ -336,9 +339,16 @@
     return s.status ? ' <span class="tag">' + esc(String(s.status).replace(/_/g, ' ')) + '</span>' : '';
   }
   async function loadShipments() {
-    var p = $('shipPane');
+    var p = $('shipBody');
     p.innerHTML = '<p class="muted">Loading...</p>';
-    var j = await call('shipments', { state: STATE });
+    var j = await call('shipments', { state: STATE, technician_id: KIND === 's' ? SHIP_TECH : '' });
+    if (j.ok && KIND === 's' && j.techs) {
+      var ts = $('shipTech');
+      ts.innerHTML = '<option value="">All employees</option>' + j.techs.map(function (t) { return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>'; }).join('');
+      ts.value = SHIP_TECH;
+      if (ts.value !== SHIP_TECH) { SHIP_TECH = ''; ts.value = ''; }
+      $('shipFilterBar').classList.toggle('hidden', !j.techs.length);
+    } else { $('shipFilterBar').classList.add('hidden'); }
     if (!j.ok) { p.innerHTML = '<div class="err">' + esc(j.error || 'Could not load.') + '</div>'; return; }
     var html = '<div class="card"><h2>RMA parts</h2>';
     if (!j.rma.length) html += '<p class="muted">No RMA shipments found.</p>';
