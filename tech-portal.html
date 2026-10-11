@@ -62,6 +62,13 @@
   .wdbar { display:flex; gap:8px; margin-bottom:8px; }
   .wdbar select { flex:1; min-width:0; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
   .wdbar button { padding:10px 14px; font-size:15px; border:1px solid var(--brand); background:var(--brand); color:#fff; border-radius:8px; cursor:pointer; }
+  .alerts { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
+  .alerts summary { cursor:pointer; font-size:15px; }
+  .alerts .row { display:flex; align-items:center; gap:8px; padding:6px 0; font-size:15px; }
+  .alerts .row input { width:20px; height:20px; flex:none; }
+  .alerts .btns { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .alerts .btns button { padding:9px 12px; font-size:14px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; cursor:pointer; }
+  .alerts .btns button.main { background:var(--brand); border-color:var(--brand); color:#fff; }
   .wd { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:10px; padding:12px; margin-bottom:8px; }
   .wd.trouble { border-left-color:var(--bad); }
   .wd.maintenance { border-left-color:var(--brand); }
@@ -114,6 +121,17 @@
     <section id="shipPane" class="hidden"><div class="shiprow"><select id="shipTech" class="hidden" aria-label="Employee"></select><div class="seg"><button id="segRma" class="on">RMA</button><button id="segCon">Consumables</button></div></div><div id="shipBody"></div></section>
 
     <section id="watchPane" class="hidden">
+      <details class="alerts" id="alertBox">
+        <summary id="alertSum">Alerts on this phone: checking...</summary>
+        <p class="muted" id="alertHelp"></p>
+        <div id="alertOpts"></div>
+        <div class="btns">
+          <button id="alertOn" class="main">Turn on alerts</button>
+          <button id="alertTest" class="hidden">Send test</button>
+          <button id="alertOff" class="hidden">Turn off</button>
+        </div>
+        <div class="muted" id="alertMsg"></div>
+      </details>
       <div class="wdbar">
         <select id="watchSel" aria-label="Watchdog state"></select>
         <button id="watchRefresh">Refresh</button>
@@ -139,7 +157,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null;
+  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null, ME_WATCH_DATA = null;
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -212,6 +230,8 @@
       ws.value = w.home;
       $('watchList').innerHTML = '';
       $('watchStatus').textContent = '';
+      ME_WATCH_DATA = w;
+      alertsInit();
     }
     tab('Sites');
     loadSites();
@@ -233,7 +253,15 @@
   $('loginBtn').onclick = doLogin;
   $('p').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
   $('u').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('p').focus(); });
-  $('logoutBtn').onclick = signOut;
+  $('logoutBtn').onclick = async function () {
+    // Signing out also switches phone alerts off for this phone.
+    if (ALERT_SUB) {
+      try { await call('push_unsubscribe', { endpoint: ALERT_SUB.endpoint }); } catch (e) {}
+      try { await ALERT_SUB.unsubscribe(); } catch (e) {}
+      ALERT_SUB = null;
+    }
+    signOut();
+  };
 
   // ----- tabs -----
   var PANES = { Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Acct: 'acctPane' };
@@ -443,6 +471,108 @@
       (unmatched ? ' (' + unmatched + ' unmatched)' : '') + ' | Updated ' + fmtDT(new Date().toISOString());
     $('watchList').innerHTML = entries.length ? entries.map(wdCard).join('') : '<p class="muted">Nothing outstanding.</p>';
   }
+
+  // ----- phone alerts (staff only; web push) -----
+  var ALERT_SUB = null, ALERT_REG = null;
+  function alertsSupported() {
+    return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+  }
+  function b64ToBytes(b64) {
+    var pad = '='.repeat((4 - b64.length % 4) % 4);
+    var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function alertMsg(t, bad) { $('alertMsg').innerHTML = t ? (bad ? '<span class="err">' + esc(t) + '</span>' : esc(t)) : ''; }
+  function alertOptions(selected) {
+    var w = (window.ME_WATCH || {});
+    var opts = w.options || [];
+    $('alertOpts').innerHTML = opts.map(function (o) {
+      var on = selected.indexOf(o.value) !== -1;
+      return '<label class="row"><input type="checkbox" value="' + esc(o.value) + '"' + (on ? ' checked' : '') + '> ' + esc(o.label) + '</label>';
+    }).join('');
+  }
+  function alertChosen() {
+    return Array.prototype.slice.call($('alertOpts').querySelectorAll('input:checked')).map(function (i) { return i.value; });
+  }
+  function alertRender(subscribed, selections) {
+    var labels = {};
+    ((window.ME_WATCH || {}).options || []).forEach(function (o) { labels[o.value] = o.label; });
+    $('alertSum').textContent = subscribed
+      ? 'Alerts on this phone: ON (' + (selections || []).map(function (v) { return labels[v] || v; }).join(', ') + ')'
+      : 'Alerts on this phone: off';
+    $('alertOn').textContent = subscribed ? 'Save choices' : 'Turn on alerts';
+    $('alertTest').classList.toggle('hidden', !subscribed);
+    $('alertOff').classList.toggle('hidden', !subscribed);
+    alertOptions(subscribed ? (selections || []) : [(window.ME_WATCH || {}).home].filter(Boolean));
+  }
+  async function alertsInit() {
+    if (!WATCH_OK) return;
+    window.ME_WATCH = ME_WATCH_DATA;
+    $('alertMsg').textContent = '';
+    if (!alertsSupported()) {
+      $('alertSum').textContent = 'Alerts on this phone: not available here';
+      $('alertHelp').textContent = /iPhone|iPad/.test(navigator.userAgent)
+        ? 'On iPhone, alerts only work from the home screen app. Add this page to your Home Screen, open it from there, and come back to this tab.'
+        : 'This browser does not support phone alerts. Try Chrome on Android.';
+      $('alertOn').classList.add('hidden');
+      $('alertOpts').innerHTML = '';
+      return;
+    }
+    $('alertOn').classList.remove('hidden');
+    $('alertHelp').textContent = 'Get a notification with sound when a new trouble ticket arrives for the areas you choose, even when this page is closed.';
+    try {
+      ALERT_REG = await navigator.serviceWorker.register('tech-sw.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      ALERT_SUB = await ALERT_REG.pushManager.getSubscription();
+    } catch (e) { ALERT_SUB = null; }
+    if (ALERT_SUB && Notification.permission === 'granted') {
+      var st = {};
+      try { st = await call('push_status', { endpoint: ALERT_SUB.endpoint }); } catch (e) { st = {}; }
+      alertRender(!!(st && st.subscribed), (st && st.selections) || []);
+    } else {
+      alertRender(false, []);
+    }
+  }
+  $('alertOn').onclick = async function () {
+    var chosen = alertChosen();
+    if (!chosen.length) { alertMsg('Pick at least one area.', true); return; }
+    $('alertOn').disabled = true; alertMsg('Working...');
+    try {
+      var perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+      if (perm !== 'granted') { alertMsg('Notifications are blocked for this app. Allow them in your phone settings, then try again.', true); return; }
+      var cfg = await call('push_config');
+      if (!cfg.ok || !cfg.configured || !cfg.publicKey) { alertMsg('Alerts are not switched on at the server yet.', true); return; }
+      var reg = ALERT_REG || await navigator.serviceWorker.ready;
+      var sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        try { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(cfg.publicKey) }); }
+        catch (e1) { alertMsg('Could not subscribe this phone.', true); return; }
+      }
+      var j = await call('push_subscribe', { subscription: sub.toJSON(), selections: chosen, ua: navigator.userAgent });
+      if (!j.ok) { alertMsg(j.error || 'Could not save.', true); return; }
+      ALERT_SUB = sub;
+      alertRender(true, j.selections || chosen);
+      alertMsg('Saved. Tap "Send test" to check it.');
+    } catch (e) { alertMsg('Something went wrong. Try again.', true); }
+    finally { $('alertOn').disabled = false; }
+  };
+  $('alertTest').onclick = async function () {
+    if (!ALERT_SUB) return;
+    alertMsg('Sending test...');
+    var j = await call('push_test', { endpoint: ALERT_SUB.endpoint });
+    alertMsg(j.ok ? 'Test sent. You should see it in a few seconds.' : (j.error || 'The test failed.'), !j.ok);
+  };
+  $('alertOff').onclick = async function () {
+    if (!ALERT_SUB) return;
+    alertMsg('Working...');
+    try { await call('push_unsubscribe', { endpoint: ALERT_SUB.endpoint }); } catch (e) {}
+    try { await ALERT_SUB.unsubscribe(); } catch (e) {}
+    ALERT_SUB = null;
+    alertRender(false, []);
+    alertMsg('Alerts are off for this phone.');
+  };
   $('watchSel').onchange = loadWatch;
   $('watchRefresh').onclick = loadWatch;
 
