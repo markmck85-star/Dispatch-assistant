@@ -2309,6 +2309,7 @@ exports.handler = async (event) => {
                   const pl = alertBody.split('\n');
                   await require('./lib/push.js').notifyState(supabase, appendedTicketState, {
                     title: pl[0], body: pl.slice(1).join('\n'), tag: 'li-' + (parsed.woNum || ''),
+                    wo: parsed.woNum || '',
                   });
                 } catch (pushEx) {
                   console.error('[mailgun-inbound] Line-item push error (non-fatal):', pushEx.message);
@@ -3002,6 +3003,7 @@ exports.handler = async (event) => {
         const pl = String(parsed.alertBody).split('\n');
         await require('./lib/push.js').notifyState(supabase, ticketState, {
           title: pl[0], body: pl.slice(1).join('\n'), tag: 'wo-' + (parsed.woNum || ''),
+          wo: parsed.woNum || '',
         });
       } catch (pushEx) {
         console.error('[mailgun-inbound] Push error (non-fatal):', pushEx.message);
