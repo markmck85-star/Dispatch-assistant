@@ -9723,6 +9723,7 @@ ${content}</body></html>`;
 <style>
     #boardToolBar { margin: 0 0 10px; }
     #toolAiOutput { margin-top: 10px; }
+    #toolAiDismiss { display: block; margin: 0 0 6px auto; min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid #333; background: #181818; color: #ccc; font-weight: 700; font-size: 12px; cursor: pointer; }
     #toolAiOutput #aiCommandStatus { font-size: 12px !important; }
     #boardToolBar .tool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 0; flex-wrap: wrap; }
     #boardToolBar .tool-seg { display: inline-flex; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
@@ -9781,30 +9782,30 @@ ${content}</body></html>`;
     // only when the selected region is in the list. adminOnly: hidden for
     // non-admin logins. virtual: has a stand-in chip instead of moving a node.
     var TOOLS = [
-        { id: 'state',     sel: '#stateConsoleLink',                                  group: 'today', simple: true },
-        { id: 'dco',       sel: '#dcoToggleBtn', group: 'today', simple: true },
-        { id: 'trouble',   sel: '#troubleOnlyToggleBtn', group: 'today', simple: true },
         { id: 'avail',     sel: '#availabilityPanel', noHide: true,                   group: 'today', simple: true },
-        { id: 'outstrip',  virtual: true, label: '\uD83D\uDC65 Technician out bar (main screen)', reveal: 'strip', group: 'today', simple: true },
-        { id: 'assistant', virtual: true, label: '\uD83E\uDD16 Assistant bar', reveal: 'chat',    group: 'today' },
-        { id: 'analyze',   virtual: true, label: '\uD83E\uDDED Analyze Routes', reveal: 'analyze', group: 'today' },
-        { id: 'lookup',    sel: '#locationLookupLink',                                group: 'look',  simple: true },
         { id: 'watchdog',  sel: '#watchdogLink',                                      group: 'look',  simple: true },
-        { id: 'closing',   sel: 'a.closing-email-link',                               group: 'look',  simple: true },
-        { id: 'service',   sel: 'a[href="/service-responses"]',                       group: 'look',  simpleStates: ['MI', 'NV', 'OH', 'CO'] },
-        { id: 'restock',   sel: '#restockLink',                                       group: 'look' },
-        { id: 'help',      sel: 'a.help-link',                                        group: 'look',  simple: true },
-        { id: 'shipping',  sel: 'a.shipments-link',                                   group: 'plan',  simple: true },
         { id: 'calendar',  sel: 'a.team-calendar-link',                               group: 'plan',  simple: true },
-        { id: 'saturday',  sel: 'a[href="/saturday-oncall"]',                         group: 'plan' },
-        { id: 'admin',     sel: 'a.admin-panel-link',                                 group: 'admin', adminOnly: true },
+        { id: 'closing',   sel: 'a.closing-email-link',                               group: 'look',  simple: true },
+        { id: 'lookup',    sel: '#locationLookupLink',                                group: 'look',  simple: true },
+        { id: 'shipping',  sel: 'a.shipments-link',                                   group: 'plan',  simple: true },
+        { id: 'restock',   sel: '#restockLink',                                       group: 'look',  simple: true },
+        { id: 'state',     sel: '#stateConsoleLink',                                  group: 'today', simple: true },
+        { id: 'admin',     sel: 'a.admin-panel-link',                                 group: 'admin', simple: true },
+        { id: 'saturday',  sel: 'a[href="/saturday-oncall"]',                         group: 'plan',  simple: true },
+        { id: 'analyze',   virtual: true, label: '\uD83E\uDDED Analyze Routes', reveal: 'analyze', group: 'today', simple: true },
+        { id: 'help',      sel: 'a.help-link',                                        group: 'look',  simple: true },
+        { id: 'dco',       sel: '#dcoToggleBtn',                                      group: 'today' },
+        { id: 'trouble',   sel: '#troubleOnlyToggleBtn',                              group: 'today' },
+        { id: 'outstrip',  virtual: true, label: '\uD83D\uDC65 Technician out bar (main screen)', reveal: 'strip', group: 'today' },
+        { id: 'assistant', virtual: true, label: '\uD83E\uDD16 Assistant bar', reveal: 'chat',    group: 'today' },
+        { id: 'service',   sel: 'a[href="/service-responses"]',                       group: 'look',  simpleStates: ['MI', 'NV', 'OH', 'CO'] },
         { id: 'inbound',   sel: '#inboundMailLink',                                   group: 'admin', adminOnly: true },
         { id: 'mileage',   sel: 'a.mileage-log-link',                                 group: 'admin', adminOnly: true },
         { id: 'settings',  sel: '#boardSettings', noHide: true,                       group: 'admin', adminOnly: true }
     ];
 
     var wrappers = {};          // tool id -> .tool-item node
-    var prefs = null;           // { preset, pinned: [], unpinned: [] }
+    var prefs = null;           // { preset, layouts: { simple: {pinned, unpinned}, everything: {pinned, unpinned} } }
     var editing = false;
     var revealed = { chat: false, analyze: false, strip: false };   // tucked-away parts of the assistant bar shown for this visit
     var serverChecked = {};     // username -> true once the server copy was fetched
@@ -9820,20 +9821,38 @@ ${content}</body></html>`;
     function region() { var s = document.getElementById('stateSelector'); return s ? s.value : ''; }
     function cacheKey(u) { return 'mcr_tool_prefs_v1:' + String(u.username || '').toLowerCase(); }
 
-    function clean(p) {
-        var out = { preset: null, pinned: [], unpinned: [] };
+    function emptyLayout() { return { pinned: [], unpinned: [] }; }
+    function cleanList(list, known) {
+        var out = [];
+        if (!Array.isArray(list)) return out;
+        list.forEach(function (id) { if (known[id] && out.indexOf(id) < 0) out.push(id); });
+        return out;
+    }
+    // Each view (Simple, Everything) keeps its own stars. Older saves had a single
+    // pinned/unpinned pair; it moves into the view that person was using.
+    function clean(p, u) {
+        var out = { preset: null, layouts: { simple: emptyLayout(), everything: emptyLayout() } };
         if (!p || typeof p !== 'object') return out;
         if (p.preset === 'simple' || p.preset === 'everything') out.preset = p.preset;
         var known = {};
         TOOLS.forEach(function (t) { known[t.id] = true; });
-        ['pinned', 'unpinned'].forEach(function (k) {
-            if (!Array.isArray(p[k])) return;
-            p[k].forEach(function (id) { if (known[id] && out[k].indexOf(id) < 0) out[k].push(id); });
-        });
+        if (p.layouts && typeof p.layouts === 'object') {
+            ['simple', 'everything'].forEach(function (k) {
+                var l = p.layouts[k] || {};
+                out.layouts[k] = { pinned: cleanList(l.pinned, known), unpinned: cleanList(l.unpinned, known) };
+            });
+        } else if (Array.isArray(p.pinned) || Array.isArray(p.unpinned)) {
+            var target = p.preset || (u && isAdmin(u) ? 'everything' : 'simple');
+            out.layouts[target] = { pinned: cleanList(p.pinned, known), unpinned: cleanList(p.unpinned, known) };
+        }
         return out;
     }
+    function hasPicks(p) {
+        return !!(p && (p.preset || ['simple', 'everything'].some(function (k) { return p.layouts[k].pinned.length || p.layouts[k].unpinned.length; })));
+    }
+    function lay() { return prefs.layouts[presetFor(user())]; }
     function loadLocal(u) {
-        try { return clean(JSON.parse(localStorage.getItem(cacheKey(u)) || 'null')); } catch (e) { return clean(null); }
+        try { return clean(JSON.parse(localStorage.getItem(cacheKey(u)) || 'null'), u); } catch (e) { return clean(null, u); }
     }
     function saveLocal(u) {
         try { localStorage.setItem(cacheKey(u), JSON.stringify(prefs)); } catch (e) {}
@@ -9864,16 +9883,22 @@ ${content}</body></html>`;
         callServer(u, 'get').then(function (res) {
             if (!res || !res.ok) return;
             if (res.prefs) {
-                prefs = clean(res.prefs);
+                var fromServer = clean(res.prefs, u);
+                // A server copy without per-view layouts is an older save; keep this browser's picks and send them up.
+                if (!(res.prefs.layouts) && hasPicks(prefs) && prefs.layouts && (prefs.layouts.simple.pinned.length + prefs.layouts.simple.unpinned.length + prefs.layouts.everything.pinned.length + prefs.layouts.everything.unpinned.length)) {
+                    callServer(u, 'save', prefs);
+                    return;
+                }
+                prefs = fromServer;
                 saveLocal(u);
                 refresh();
-            } else if (res.persisted !== false && (prefs.preset || prefs.pinned.length || prefs.unpinned.length)) {
+            } else if (res.persisted !== false && hasPicks(prefs)) {
                 callServer(u, 'save', prefs);
             }
         });
     }
 
-    function presetFor(u) { return (prefs && prefs.preset) || (isAdmin(u) ? 'everything' : 'simple'); }
+    function presetFor(u) { return (prefs && prefs.preset) || 'simple'; }
 
     function defaultMain(t, preset, reg) {
         if (preset === 'everything') return true;
@@ -9888,10 +9913,11 @@ ${content}</body></html>`;
         var allowed = TOOLS.filter(function (t) { return !t.adminOnly || isAdmin(u); });
         // Untouched defaults first (registry order), then the tools the person starred, in the
         // order they starred them, so each new star lands underneath the previous one.
+        var L = prefs.layouts[preset];
         var main = allowed.filter(function (t) {
-            return defaultMain(t, preset, reg) && prefs.unpinned.indexOf(t.id) < 0 && prefs.pinned.indexOf(t.id) < 0;
+            return defaultMain(t, preset, reg) && L.unpinned.indexOf(t.id) < 0 && L.pinned.indexOf(t.id) < 0;
         });
-        prefs.pinned.forEach(function (id) {
+        L.pinned.forEach(function (id) {
             var t = allowed.filter(function (x) { return x.id === id; })[0];
             if (t && main.indexOf(t) < 0) main.push(t);
         });
@@ -9956,12 +9982,13 @@ ${content}</body></html>`;
         var t = TOOLS.filter(function (x) { return x.id === id; })[0];
         var preset = presetFor(u), reg = region();
         var isDefault = defaultMain(t, preset, reg);
-        prefs.pinned = prefs.pinned.filter(function (x) { return x !== id; });
-        prefs.unpinned = prefs.unpinned.filter(function (x) { return x !== id; });
+        var L = prefs.layouts[preset];
+        L.pinned = L.pinned.filter(function (x) { return x !== id; });
+        L.unpinned = L.unpinned.filter(function (x) { return x !== id; });
         if (inMain) {
-            if (isDefault) prefs.unpinned.push(id);
+            if (isDefault) L.unpinned.push(id);
         } else {
-            prefs.pinned.push(id);
+            L.pinned.push(id);
         }
         persist(u);
         refresh();
@@ -9977,7 +10004,7 @@ ${content}</body></html>`;
             '<div id="toolMain"></div>' +
             '<details id="toolMore"><summary id="toolMoreSummary">More tools</summary><div id="toolMoreList"></div></details>' +
             '<div class="tool-hint">Tap a star to move a tool between the main row and More tools. New stars land at the bottom of the main row, so star them in the order you want them.' +
-              '<button type="button" data-reset>Reset to default</button></div>' +
+              '<button type="button" data-reset>Reset this view to default</button></div>' +
             '<div class="tool-head">' +
               '<div class="tool-seg" role="group" aria-label="Tool view">' +
                 '<button type="button" data-preset="simple">Simple</button>' +
@@ -9992,12 +10019,24 @@ ${content}</body></html>`;
         out.id = 'toolAiOutput';
         var aiStatus = document.getElementById('aiCommandStatus');
         var aiDiff = document.getElementById('aiCommandDiff');
+        var dismiss = document.createElement('button');
+        dismiss.type = 'button';
+        dismiss.id = 'toolAiDismiss';
+        dismiss.textContent = '\u2715 Dismiss';
+        dismiss.style.display = 'none';
+        dismiss.addEventListener('click', function () {
+            if (aiStatus) aiStatus.textContent = '';
+            if (aiDiff) aiDiff.innerHTML = '';
+            dismiss.style.display = 'none';
+        });
+        out.appendChild(dismiss);
         if (aiStatus) out.appendChild(aiStatus);
         if (aiDiff) out.appendChild(aiDiff);
         bar.appendChild(out);
         if (window.MutationObserver) {
             var seeOutput = function () {
                 var has = (aiStatus && aiStatus.textContent.trim()) || (aiDiff && aiDiff.innerHTML.trim());
+                dismiss.style.display = has ? '' : 'none';
                 if (!has) return;
                 var layout = document.querySelector('.desktop-layout');
                 if (layout && layout.classList.contains('controls-collapsed') && window.toggleControls) { try { window.toggleControls(); } catch (e) {} }
@@ -10024,7 +10063,7 @@ ${content}</body></html>`;
                 return;
             }
             if (t.hasAttribute && t.hasAttribute('data-reset')) {
-                prefs = clean(null);
+                prefs.layouts[presetFor(u)] = emptyLayout();
                 persist(u);
                 refresh();
             }
