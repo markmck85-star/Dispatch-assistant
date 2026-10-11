@@ -4340,6 +4340,18 @@ function distanceMatrixStatus(state) {
                 })
                 .catch(e => console.warn('[dispatch] get-pending-promotions check failed (non-fatal):', e.message));
 
+            // 2026-10-11: inactive-site activation check -- a ticket arrived
+            // for a site marked inactive; offer to mark it active. Same
+            // fire-and-forget pattern as the promotion check above.
+            fetch('/.netlify/functions/get-pending-activations?state=' + CURRENT_STATE, { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data && data.pending && data.pending.length > 0) {
+                        setTimeout(() => showActivationPromptQueue(data.pending), 1600);
+                    }
+                })
+                .catch(e => console.warn('[dispatch] get-pending-activations check failed (non-fatal):', e.message));
+
             // Now that real DB-backed tickets have had a chance to auto-surface
             // above, this is the real "genuinely nothing to show" check --
             // previously this ran before the auto-surface step and could bail
@@ -7051,6 +7063,69 @@ function distanceMatrixStatus(state) {
                     status.textContent = 'Network error: ' + e.message;
                 });
             };
+        }
+
+        // 2026-10-11: "mark site active?" toast. Backed by
+        // get-pending-activations.js / confirm-site-activation.js.
+        window._handledActivationSiteIds = window._handledActivationSiteIds || {};
+
+        function showActivationPromptQueue(pending) {
+            if (!pending || !pending.length) return;
+            const seen = {};
+            const filtered = pending.filter((item) => {
+                const id = item && item.siteId;
+                if (!id || window._handledActivationSiteIds[id] || seen[id]) return false;
+                seen[id] = true;
+                return true;
+            });
+            if (!filtered.length) return;
+            if (document.getElementById('activation-prompt')) return;
+            const [first, ...rest] = filtered;
+            showActivationPrompt(first, () => {
+                if (rest.length > 0) setTimeout(() => showActivationPromptQueue(rest), 300);
+            });
+        }
+
+        function showActivationPrompt(item, onComplete) {
+            if (document.getElementById('activation-prompt')) { if (onComplete) onComplete(); return; }
+            var esc = function(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
+            var div = document.createElement('div');
+            div.id = 'activation-prompt';
+            div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #28a745;border-radius:8px;padding:16px 18px;z-index:9999;width:min(92vw,400px);box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
+            div.innerHTML = `
+                <div style="font-weight:bold;color:#28a745;margin-bottom:4px;">Inactive site has a ticket</div>
+                <div style="font-size:12px;color:#aaa;margin-bottom:12px;">WO ${esc(item.woNumber)} came in for a site currently marked inactive</div>
+                <div style="font-size:13px;margin-bottom:12px;background:#2a2a3e;border-radius:5px;padding:8px 9px;">
+                    <div style="color:#8ab;font-size:11px;">${esc(item.siteCode)}</div>
+                    <div>${esc(item.name)}</div>
+                    <div style="color:#aaa;font-size:12px;">${esc(item.address)}</div>
+                </div>
+                <div style="display:flex;gap:10px;">
+                    <button id="ap-confirm" style="flex:1;padding:8px;background:#28a745;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Mark ${esc(item.siteCode)} active</button>
+                    <button id="ap-dismiss" style="flex:1;padding:8px;background:#6c757d;color:white;border:none;border-radius:5px;font-size:13px;cursor:pointer;">Leave inactive</button>
+                </div>
+                <div id="ap-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
+            document.body.appendChild(div);
+            var send = function(action) {
+                var status = document.getElementById('ap-status');
+                status.textContent = action === 'confirm' ? 'Activating…' : 'Dismissing…';
+                fetch('/.netlify/functions/confirm-site-activation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ siteId: item.siteId, action: action })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) { status.textContent = 'Failed: ' + (data.error || 'unknown error'); return; }
+                    window._handledActivationSiteIds[item.siteId] = true;
+                    div.remove();
+                    if (action === 'confirm') loadRemoteLocations().catch(() => {});
+                    if (onComplete) onComplete();
+                })
+                .catch(e => { status.textContent = 'Network error: ' + e.message; });
+            };
+            document.getElementById('ap-confirm').onclick = function() { send('confirm'); };
+            document.getElementById('ap-dismiss').onclick = function() { send('dismiss'); };
         }
 
         function generateFinalMessages() {
