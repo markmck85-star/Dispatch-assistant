@@ -69,16 +69,20 @@
   .alerts .btns { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   .alerts .btns button { padding:9px 12px; font-size:14px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; cursor:pointer; }
   .alerts .btns button.main { background:var(--brand); border-color:var(--brand); color:#fff; }
+  /* Boot splash: the same spinning MCR logo the dispatch board uses (no caption). */
+  #splash { position:fixed; inset:0; z-index:99999; background:#000; display:flex; align-items:center; justify-content:center; opacity:1; transition:opacity .45s ease; }
+  #splash.fade { opacity:0; pointer-events:none; }
+  #splash video { width:100%; height:100%; max-width:100vw; max-height:100vh; object-fit:contain; display:block; }
   .wd { cursor:pointer; }
-  .modal { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
-  .modal .sheet { background:var(--card); color:var(--ink); width:100%; max-width:640px; max-height:92vh; overflow-y:auto; border-radius:16px 16px 0 0; padding:18px 18px 24px; border-top:5px solid var(--bad); }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .modal .sheet { background:var(--card); color:var(--ink); width:100%; max-width:640px; max-height:90vh; overflow-y:auto; border-radius:16px; padding:18px 18px 20px; border-top:5px solid var(--bad); }
   .modal .sheet.install, .modal .sheet.site_survey { border-top-color:var(--warn); }
   .modal .sheet.maintenance { border-top-color:var(--brand); }
   .modal .big { font-size:26px; font-weight:700; margin:0 0 6px; }
   .modal .lbl { font-size:13px; color:var(--muted); margin-top:14px; text-transform:uppercase; letter-spacing:.04em; }
   .modal .val { font-size:20px; line-height:1.35; }
   .modal .val.desc { font-size:18px; white-space:pre-wrap; }
-  .modal .go { display:block; text-align:center; margin-top:16px; padding:16px; font-size:20px; background:var(--brand); color:#fff; border-radius:12px; text-decoration:none; }
+  .modal .go { display:block; width:100%; text-align:center; margin-top:16px; padding:16px; font-size:20px; background:var(--brand); color:#fff; border:0; border-radius:12px; cursor:pointer; }
   .modal .close { display:block; width:100%; margin-top:12px; padding:16px; font-size:20px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:12px; cursor:pointer; }
   .wd { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:10px; padding:12px; margin-bottom:8px; }
   .wd.trouble { border-left-color:var(--bad); }
@@ -89,6 +93,11 @@
 </style>
 </head>
 <body>
+<div id="splash" aria-hidden="true"><video autoplay muted loop playsinline preload="auto"><source src="/logo-loading.mp4" type="video/mp4"></video></div>
+<script>
+  // Play the splash once per app start (not on every in-app reload).
+  try { if (sessionStorage.getItem('mcrTechSplash')) document.getElementById('splash').style.display = 'none'; } catch (e) {}
+</script>
 
 <div id="loginView">
   <header><h1>MCR Field Portal</h1></header>
@@ -505,13 +514,31 @@
       '<div class="lbl">Received</div><div class="val">' + esc(fmtDT(e.receivedAt)) + '</div>' +
       (e.address ? '<div class="lbl">Address</div><div class="val">' + esc(e.address) + '</div>' : '') +
       (e.description ? '<div class="lbl">Details</div><div class="val desc">' + esc(e.description) + '</div>' : '') +
-      (e.address ? '<a class="go" target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(e.address) + '">Navigate</a>' : '') +
+      '<button class="go" id="wdCopy">Copy details</button>' +
       '<button class="close" id="wdClose">Close</button>';
     var sheet = $('wdSheet');
     sheet.className = 'sheet ' + kind.replace(/[^a-z_]/g, '');
     sheet.innerHTML = h;
     $('wdModal').classList.remove('hidden');
     $('wdClose').onclick = closeWdModal;
+    $('wdCopy').onclick = function () { copyText(wdPlain(e, issue, dl), $('wdCopy')); };
+  }
+  function wdPlain(e, issue, dl) {
+    return ['WO ' + (e.woNumber || ''), e.siteText || '', issue, dl, e.address || '', e.description || '']
+      .filter(Boolean).join('\n');
+  }
+  function copyText(t, btn) {
+    var done = function () { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1500); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, function () { fallbackCopy(t); done(); }); return; }
+    } catch (e) {}
+    fallbackCopy(t); done();
+  }
+  function fallbackCopy(t) {
+    var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
   }
   function closeWdModal() { $('wdModal').classList.add('hidden'); }
   $('wdModal').onclick = function (ev) { if (ev.target === $('wdModal')) closeWdModal(); };
@@ -670,14 +697,29 @@
   };
 
   // ----- restore session -----
+  var SPLASH_T0 = Date.now();
+  function hideSplash() {
+    var el = $('splash');
+    if (!el || el.style.display === 'none') return;
+    // Let the animation be seen for a moment even when the session restores fast.
+    var wait = Math.max(0, 1800 - (Date.now() - SPLASH_T0));
+    setTimeout(function () {
+      el.classList.add('fade');
+      try { sessionStorage.setItem('mcrTechSplash', '1'); } catch (e) {}
+      setTimeout(function () { el.style.display = 'none'; var v = el.querySelector('video'); if (v) v.pause(); }, 500);
+    }, wait);
+  }
+  setTimeout(hideSplash, 9000); // never trap the screen if something stalls
   (async function init() {
-    var t = load('mcr_tech_token');
-    if (!t) return;
-    TOKEN = t;
     try {
-      var j = await call('me');
-      if (j.ok) showApp(j.me); else signOut();
-    } catch (e) { signOut(); }
+      var t = load('mcr_tech_token');
+      if (!t) return;
+      TOKEN = t;
+      try {
+        var j = await call('me');
+        if (j.ok) showApp(j.me); else signOut();
+      } catch (e) { signOut(); }
+    } finally { hideSplash(); }
   })();
 })();
 </script>
