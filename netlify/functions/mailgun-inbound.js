@@ -2303,6 +2303,16 @@ exports.handler = async (event) => {
                   const ok = await sendSms(addr.trim(), alertBody, 'MCR Dispatch');
                   console.log(`[mailgun-inbound] Line-item review SMS to ${addr.trim()}: ${ok ? 'sent' : 'failed'}`);
                 }
+                // 2026-10-11: also push to phones subscribed in the staff portal
+                // (lib/push.js). Failure here must never affect intake.
+                try {
+                  const pl = alertBody.split('\n');
+                  await require('./lib/push.js').notifyState(supabase, appendedTicketState, {
+                    title: pl[0], body: pl.slice(1).join('\n'), tag: 'li-' + (parsed.woNum || ''),
+                  });
+                } catch (pushEx) {
+                  console.error('[mailgun-inbound] Line-item push error (non-fatal):', pushEx.message);
+                }
                 await queuePendingDigest(store, lineItemHoursExcluded, {
                   ticketId: parsed.woNum || null,
                   siteCode: existingTicket.site_text || null,
@@ -2983,6 +2993,18 @@ exports.handler = async (event) => {
         console.log(`[mailgun-inbound] Sending SMS to ${addr.trim()}...`);
         const ok = await sendSms(addr.trim(), parsed.alertBody, 'MCR Dispatch');
         console.log(`[mailgun-inbound] SMS result: ${ok ? 'sent' : 'failed'}`);
+      }
+
+      // 2026-10-11: also push to phones subscribed in the staff portal
+      // (lib/push.js), same ticket state as the texts above. Failure here
+      // must never affect intake.
+      try {
+        const pl = String(parsed.alertBody).split('\n');
+        await require('./lib/push.js').notifyState(supabase, ticketState, {
+          title: pl[0], body: pl.slice(1).join('\n'), tag: 'wo-' + (parsed.woNum || ''),
+        });
+      } catch (pushEx) {
+        console.error('[mailgun-inbound] Push error (non-fatal):', pushEx.message);
       }
 
       // Queue for a digest instead of individually resending -- avoids the
