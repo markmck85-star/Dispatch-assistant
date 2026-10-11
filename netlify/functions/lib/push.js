@@ -79,8 +79,15 @@ async function activeStaffKeys(supabase) {
   } catch (e) { return null; }
 }
 
+// Where tapping the alert goes: the portal opens on the ticket's pop-up.
+function ticketUrl(wo, state) {
+  if (!wo) return '/tech-portal.html';
+  return '/tech-portal.html?wd=' + encodeURIComponent(String(wo).slice(0, 40)) +
+    (state ? '&st=' + encodeURIComponent(String(state).toUpperCase().slice(0, 2)) : '');
+}
+
 // Notify every subscription that covers ticketState.
-// message = { title, body, tag?, url? }
+// message = { title, body, tag?, wo?, url? }
 async function notifyState(supabase, ticketState, message) {
   const out = { sent: 0, failed: 0, skipped: 0 };
   try {
@@ -101,7 +108,9 @@ async function notifyState(supabase, ticketState, message) {
       title: String(message.title || 'MCR Watchdog').slice(0, 80),
       body: String(message.body || '').slice(0, 240),
       tag: message.tag || undefined,
-      url: message.url || '/tech-portal.html',
+      url: message.url || ticketUrl(message.wo, ticketState),
+      wo: message.wo ? String(message.wo).slice(0, 40) : undefined,
+      st: ticketState ? String(ticketState).toUpperCase().slice(0, 2) : undefined,
     });
     const results = await Promise.all(rows.map((r) => sendOne(webpush, supabase, r, payload)));
     results.forEach((ok) => { if (ok) out.sent++; else out.failed++; });
