@@ -16,6 +16,10 @@
 //    dispatcher PINs. Scope is read live from the dispatchers row: everyone sees
 //    only the states on their dispatcher login. Staff get the
 //    shipments for their states instead of "my" shipments.
+//  - Watchdog tab (staff only): dispatchers see their own state(s) plus the
+//    Saturday On-Call group; admins see the full list the dispatch app's
+//    watchdog page offers. This is a deliberate exception to the profile-states
+//    rule above and applies to the watchdog action only.
 //  - Fields returned are trimmed: no site notes, no contractor info, no
 //    internal flags, no home addresses.
 //
@@ -25,6 +29,7 @@
 //   search           { q }
 //   site             { code }
 //   shipments        {}
+//   watchdog         { state }   staff only; state is a value from me.watch.options
 //   change_password  { current, next }
 
 const crypto = require('crypto');
@@ -34,6 +39,57 @@ const TECH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const STAFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_FAILS = 5;
 const LOCK_MS = 15 * 60 * 1000;
+
+// ---------- watchdog lists ----------
+// Mirrors the state dropdown in watchdog-log.html. Keep in sync if a state is
+// added there. GA is the umbrella region for GA + NC + SC (get-watchdog-log.js
+// expands it), so NC and SC are not separate options.
+const WATCH_REAL_STATES = ['CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'NV', 'OH', 'OR', 'WV'];
+// Mirrors SAT_ONCALL_STATES in watchdog-log.html (and SAT_COVERAGE_STATES in
+// admin.html / index.html). Keep in sync if a state is added there.
+const SAT_ONCALL_STATES = ['GA', 'IN', 'MI', 'NV'];
+const WATCH_LABELS = {
+  ALL: 'All States',
+  SAT_ONCALL: 'Saturday On-Call (GA/IN/MI/NV)',
+  CA: 'California',
+  CO: 'Colorado',
+  FL: 'Florida',
+  GA: 'Georgia / NC / SC',
+  ID: 'Idaho',
+  IL: 'Illinois',
+  IN: 'Indiana',
+  MI: 'Michigan',
+  MN: 'Minnesota',
+  NV: 'Nevada',
+  OH: 'Ohio',
+  OR: 'Oregon',
+  WV: 'West Virginia',
+};
+
+function watchRegion(st) {
+  const s = String(st || '').toUpperCase();
+  return (s === 'NC' || s === 'SC') ? 'GA' : s;
+}
+
+// The selections a staff account may request on the watchdog tab.
+// admin: everything. dispatcher: their own profile state(s), mapped to the
+// watchdog's regions, plus Saturday On-Call.
+function watchdogOptionsFor(role, states) {
+  const opt = (v) => ({ value: v, label: WATCH_LABELS[v] || v });
+  if (role === 'admin') return ['ALL', 'SAT_ONCALL'].concat(WATCH_REAL_STATES).map(opt);
+  const own = [];
+  (states || []).forEach((s) => {
+    const r = watchRegion(s);
+    if (r && own.indexOf(r) === -1) own.push(r);
+  });
+  return own.concat(['SAT_ONCALL']).map(opt);
+}
+
+function expandWatchSelection(sel) {
+  if (sel === 'ALL') return WATCH_REAL_STATES;
+  if (sel === 'SAT_ONCALL') return SAT_ONCALL_STATES;
+  return [sel];
+}
 
 function json(statusCode, obj) {
   return {
@@ -120,7 +176,7 @@ function eligible(tech) {
   return !!tech && tech.active !== false && tech.is_contractor === false;
 }
 
-// ctx = { kind, name, states (array, or null = all states), tech?, key }
+// ctx = { kind, name, states (array, or null = all states), tech?, key, role? }
 async function authenticate(supabase, token) {
   const tk = readToken(token);
   if (!tk) return null;
@@ -138,7 +194,7 @@ async function authenticate(supabase, token) {
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return null;
-    return { kind: 's', name: acct.display_name, states: staffStates(d), key: acct.username, defaultState: acct.default_state || null };
+    return { kind: 's', name: acct.display_name, states: staffStates(d), role: d.role, key: acct.username, defaultState: acct.default_state || null };
   }
 
   const { data: acct } = await supabase
@@ -171,8 +227,9 @@ function cleanQuery(q) {
 }
 
 // What the page needs to draw itself: the account's states that actually have
-// locations (for the state dropdown) and which one to open first.
-async function buildMe(supabase, kind, name, states, defaultState) {
+// locations (for the state dropdown) and which one to open first. Staff also get
+// the watchdog tab's options and default selection.
+async function buildMe(supabase, kind, name, states, defaultState, role) {
   let list = states || [];
   if (list.length > 1) {
     const { data } = await supabase
@@ -187,7 +244,16 @@ async function buildMe(supabase, kind, name, states, defaultState) {
     if (filtered.length) list = filtered;
   }
   const home = defaultState && list.includes(defaultState) ? defaultState : (list[0] || null);
-  return { name, states: list, home, kind };
+  const me = { name, states: list, home, kind };
+  if (kind === 's') {
+    // Options come from the account's full profile states, not the filtered
+    // list above, so a state with no locations loaded still has a watchdog view.
+    const options = watchdogOptionsFor(role, states || []);
+    const homeRegion = watchRegion(home);
+    const watchHome = options.some((o) => o.value === homeRegion) ? homeRegion : options[0].value;
+    me.watch = { options, home: watchHome };
+  }
+  return me;
 }
 
 // ---------- actions ----------
@@ -262,7 +328,7 @@ async function doLogin(supabase, body) {
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return json(403, { ok: false, error: 'This account is not active.' });
-    me = await buildMe(supabase, 's', acct.display_name, staffStates(d), acct.default_state || null);
+    me = await buildMe(supabase, 's', acct.display_name, staffStates(d), acct.default_state || null, d.role);
   }
 
   await supabase
@@ -478,6 +544,56 @@ async function doShipments(supabase, ctx, body) {
   });
 }
 
+// Runs get-watchdog-log.js's own handler in-process for one state code, so the
+// ticket selection, staleness cutoff and region expansion stay defined in one
+// place. (Lazy require keeps unit tests of this file light.)
+async function fetchWatchdogState(state) {
+  const watchdog = require('./get-watchdog-log.js');
+  const resp = await watchdog.handler({ httpMethod: 'GET', queryStringParameters: { state } });
+  let data = {};
+  try { data = JSON.parse(resp.body || '{}'); } catch (e) { data = {}; }
+  if (resp.statusCode !== 200) throw new Error(data.error || ('watchdog ' + state + ' failed'));
+  return data.entries || [];
+}
+
+async function doWatchdog(ctx, body) {
+  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Not available for this account.' });
+  const options = watchdogOptionsFor(ctx.role, ctx.states);
+  const want = String((body && body.state) || '').trim().toUpperCase();
+  const picked = options.find((o) => o.value === want);
+  if (!picked) return json(403, { ok: false, error: 'Not available for this account.' });
+
+  // Each state is its own call because get-watchdog-log.js takes one state at a time.
+  const results = await Promise.all(expandWatchSelection(picked.value).map((s) => fetchWatchdogState(s)));
+  const seen = new Set();
+  const entries = [];
+  results.forEach((list) => list.forEach((e) => {
+    const k = e.ticketId || (e.woNumber + '|' + e.siteText);
+    if (seen.has(k)) return;
+    seen.add(k);
+    entries.push({
+      woNumber: e.woNumber,
+      siteText: e.siteText,
+      siteCode: e.siteCode,
+      siteName: e.siteName,
+      ticketKind: e.ticketKind,
+      needsReview: !!e.needsReview,
+      matched: !!e.matched,
+      issueCategory: e.issueCategory,
+      issueDetail: e.issueDetail,
+      description: e.description,
+      address: e.address,
+      dueAt: e.dueAt,
+      slaEndsAt: e.slaEndsAt,
+      receivedAt: e.receivedAt,
+      loomisMeetStatus: e.loomisMeetStatus,
+      loomisMeetConfirmedAt: e.loomisMeetConfirmedAt,
+    });
+  }));
+  entries.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+  return json(200, { ok: true, state: picked.value, label: picked.label, entries });
+}
+
 async function doChangePassword(supabase, ctx, body) {
   const current = String(body.current || '');
   const next = String(body.next || '');
@@ -520,10 +636,11 @@ exports.handler = async (event) => {
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
 
-    if (action === 'me') return json(200, { ok: true, me: await buildMe(supabase, ctx.kind, ctx.name, ctx.states, ctx.defaultState) });
+    if (action === 'me') return json(200, { ok: true, me: await buildMe(supabase, ctx.kind, ctx.name, ctx.states, ctx.defaultState, ctx.role) });
     if (action === 'search') return await doSearch(supabase, ctx, body);
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx, body);
+    if (action === 'watchdog') return await doWatchdog(ctx, body);
     if (action === 'change_password') return await doChangePassword(supabase, ctx, body);
     return json(400, { ok: false, error: 'Unknown action.' });
   } catch (e) {
@@ -531,4 +648,4 @@ exports.handler = async (event) => {
   }
 };
 
-exports._test = { normPw, hashPw, verifyPw, makeToken, readToken, statesFor, eligible, cleanQuery };
+exports._test = { normPw, hashPw, verifyPw, makeToken, readToken, statesFor, eligible, cleanQuery, watchdogOptionsFor, watchRegion, expandWatchSelection };
