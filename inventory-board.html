@@ -263,6 +263,10 @@
         <summary>Sheet check <span class="count bad" id="cntChecks">&ndash;</span><span class="hint">Expand to see sheets that need a fix before they go out</span></summary>
         <div id="chkBody"><div class="note">Loading&hellip;</div></div>
       </details>
+      <details class="grp" id="grpUnreadable">
+        <summary>Not readable <span class="count warn" id="cntUnreadable">&ndash;</span><span class="hint">Expand for files that arrived but could not be read as a count sheet</span></summary>
+        <div id="unrBody"><div class="note">Loading&hellip;</div></div>
+      </details>
       <details class="grp" id="grpUnmatched">
         <summary>Unmatched mail <span class="count warn" id="cntUnmatched">&ndash;</span><span class="hint">Expand to see inventory mail that could not be matched to a technician</span></summary>
         <div id="unmBody"><div class="note">Loading&hellip;</div></div>
@@ -457,7 +461,7 @@ function esc(s) {
 }
 // Remember which groups are open, so a Refresh does not snap them shut.
 const GRP_KEY = "inventory-board-open-groups";
-const GRP_IDS = ["grpMissing", "grpReceived", "grpChecks", "grpUnmatched"];
+const GRP_IDS = ["grpMissing", "grpReceived", "grpChecks", "grpUnreadable", "grpUnmatched"];
 function restoreGroups() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(GRP_KEY) || "null"); } catch (e) {}
@@ -561,6 +565,32 @@ function unmatchedHtml(list) {
     (t.reason ? '<div class="hint">' + esc(t.reason) + "</div>" : "") + "</div>").join("");
 }
 
+// Files that came with an inventory email but could not be read as a count sheet.
+// The original file is kept, so it can be opened and checked by hand.
+function unreadableHtml(list) {
+  if (!list.length) return '<div class="note">Nothing unreadable. Every attachment was read as a count sheet.</div>';
+  return list.map((u) => {
+    const day = u.receivedAt ? new Date(u.receivedAt).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
+    return '<div class="note" style="border-top:1px solid var(--line);"><b>' + esc(u.filename || "(file)") + "</b> &middot; " + esc(u.sender || "") + " &middot; " + esc(day) +
+      '<div class="hint">' + esc(u.reason || "") + "</div>" +
+      '<div><button class="mini" type="button" onclick="openKeptFile(\'' + esc(u.id) + '\', this)">Open file</button></div></div>';
+  }).join("");
+}
+async function openKeptFile(id, btn) {
+  const old = btn ? btn.textContent : "";
+  if (btn) btn.textContent = "Opening...";
+  try {
+    const res = await fetch("/.netlify/functions/get-inventory-history?id=" + encodeURIComponent(id));
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || String(res.status));
+    if (!data.downloadUrl) throw new Error("No file is stored for this one");
+    window.open(data.downloadUrl, "_blank");
+  } catch (err) {
+    alert("Could not open that file: " + err.message);
+  }
+  if (btn) btn.textContent = old;
+}
+
 function applyBoardFilter() {
   const q = (document.getElementById("nameFilter").value || "").trim().toLowerCase();
   const hit = (t) => !q || [t.name, t.email, t.state, t.subject].some((v) => String(v || "").toLowerCase().includes(q));
@@ -588,6 +618,11 @@ async function loadBoard() {
   document.getElementById("cntMissing").textContent = miss.length;
   document.getElementById("cntReceived").textContent = rec.length;
   document.getElementById("cntUnmatched").textContent = unm.length;
+  const unr = data.unreadable || [];
+  const cu = document.getElementById("cntUnreadable");
+  if (cu) cu.textContent = unr.length;
+  const ub = document.getElementById("unrBody");
+  if (ub) ub.innerHTML = unreadableHtml(unr);
   window.RECEIVED = rec;
   window.BOARD_MISS = miss;
   window.BOARD_REC = rec;
