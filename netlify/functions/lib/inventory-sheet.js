@@ -94,7 +94,13 @@ function parseInventoryGrid(grid) {
     const row = grid[r] || [];
     for (let c = 0; c < row.length; c++) {
       const t = cellText(row[c]);
-      if (/^tech name:?$/i.test(t)) out.techName = cellText(row[c + 1]) || null;
+      // "Tech Name:" in one cell and the name in the next; also accepts
+      // "Technician Name", a space before the colon, and label+name in ONE cell
+      // ("Tech Name: Pat Smith"), or the name a couple of cells over (merged cells).
+      const nm = /^tech(?:nician)?\.?\s*name\s*:?\s*(.*)$/i.exec(t);
+      if (nm && !out.techName) {
+        out.techName = nm[1].trim() || cellText(row[c + 1]) || cellText(row[c + 2]) || cellText(row[c + 3]) || null;
+      }
       // The date label varies ("Inv Date:", "Inventory Date", "Date:", or label and
       // value in one cell), so accept any "date" label and look in the same cell
       // and the next few cells to the right.
@@ -236,11 +242,58 @@ function parseInventoryGrid(grid) {
   return out;
 }
 
+// Why a parsed workbook is NOT treated as a count sheet (null = it is one).
+// This is the single acceptance rule; mailgun-inbound.js and the diagnostic
+// tool both use it so they can never disagree.
+function rejectReason(ps) {
+  if (!ps) return 'The workbook could not be read';
+  if (!ps.techName) return 'No "Tech Name:" cell was found in the top rows';
+  if (!ps.items || ps.items.length < 5) {
+    const n = ps.items ? ps.items.length : 0;
+    const hdr = (ps.warnings || []).find((w) => /Item table header/.test(w));
+    return hdr ? 'No item table found (needs "Product Code" and "Inventory Count" column headings)'
+      : 'Only ' + n + ' item row' + (n === 1 ? '' : 's') + ' read (needs at least 5)';
+  }
+  if (!ps.summary || !ps.summary.forms || ps.summary.forms.length === 0) return 'No registration-form rows were recognized in the item list';
+  return null;
+}
+function isInventorySheet(ps) { return rejectReason(ps) === null; }
+
+// Reads the workbook. The count sheet is normally the first tab; if the first
+// tab is not a count sheet but another tab is, that tab is used (2026-10-11).
 function parseInventoryWorkbookBuffer(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  return parseInventoryGrid(grid);
+  let first = null;
+  for (let i = 0; i < wb.SheetNames.length; i++) {
+    const ws = wb.Sheets[wb.SheetNames[i]];
+    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    const ps = parseInventoryGrid(grid);
+    ps.sheetName = wb.SheetNames[i];
+    if (i === 0) first = ps;
+    if (isInventorySheet(ps)) return ps;
+  }
+  return first;
 }
 
-module.exports = { parseInventoryWorkbookBuffer, parseInventoryGrid, normCode };
+const EXCEL_EXT = /\.(xlsx|xlsm|xls)$/i;
+// Full verdict for one attachment: { accepted, parsed, reason, sheetNames }.
+// Never throws. Used by the saver (to record why a file was kept but not read)
+// and by the recovery tool.
+function inspectInventoryAttachment(filename, buffer) {
+  if (!EXCEL_EXT.test(String(filename || ''))) {
+    const ext = (String(filename || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
+    return { accepted: false, parsed: null, reason: 'Not an Excel file' + (ext ? ' (.' + ext.toLowerCase() + ')' : ''), sheetNames: [] };
+  }
+  if (!buffer || !buffer.length) return { accepted: false, parsed: null, reason: 'The attachment was empty', sheetNames: [] };
+  let sheetNames = [];
+  try {
+    sheetNames = XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames || [];
+    const ps = parseInventoryWorkbookBuffer(buffer);
+    const reason = rejectReason(ps);
+    return { accepted: reason === null, parsed: ps, reason, sheetNames };
+  } catch (e) {
+    return { accepted: false, parsed: null, reason: 'Could not open the workbook: ' + String(e && e.message || e).slice(0, 120), sheetNames };
+  }
+}
+
+module.exports = { parseInventoryWorkbookBuffer, parseInventoryGrid, normCode, rejectReason, isInventorySheet, inspectInventoryAttachment };
