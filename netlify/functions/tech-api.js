@@ -31,6 +31,12 @@
 //   shipments        { state, technician_id? }   technician_id (staff only) filters to one
 //                    employee from the returned techs list for that state
 //   watchdog         { state }   staff only; state is a value from me.watch.options
+//   push_config      {}   staff only; { configured, publicKey } for subscribing this phone
+//   push_status      { endpoint }   staff only; the choices saved for this phone
+//   push_subscribe   { subscription, selections }   staff only; selections are values
+//                    from me.watch.options, expanded to states here
+//   push_unsubscribe { endpoint }   staff only
+//   push_test        { endpoint }   staff only; sends one test notification
 //   change_password  { current, next }
 
 const crypto = require('crypto');
@@ -619,6 +625,76 @@ async function doWatchdog(ctx, body) {
   return json(200, { ok: true, state: picked.value, label: picked.label, entries });
 }
 
+// ---------- push alerts (staff only) ----------
+// A phone subscribes with the choices it picked on the Watchdog tab. Choices are
+// checked against the same options list the tab itself uses, so a dispatcher can
+// never subscribe to a state the Watchdog tab would not show them.
+function cleanEndpoint(v) {
+  const e = String(v || '').trim();
+  return /^https:\/\/[^\s]{10,1000}$/.test(e) ? e : '';
+}
+
+async function doPush(supabase, ctx, action, body) {
+  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Not available for this account.' });
+  const push = require('./lib/push.js');
+
+  if (action === 'push_config') {
+    return json(200, { ok: true, configured: push.pushConfigured(), publicKey: process.env.VAPID_PUBLIC_KEY || null });
+  }
+
+  if (action === 'push_status') {
+    const endpoint = cleanEndpoint(body.endpoint);
+    if (!endpoint) return json(200, { ok: true, subscribed: false, selections: [] });
+    const { data } = await supabase
+      .from('push_subscriptions').select('selections, account_key').eq('endpoint', endpoint).maybeSingle();
+    if (!data || data.account_key !== ctx.key) return json(200, { ok: true, subscribed: false, selections: [] });
+    return json(200, { ok: true, subscribed: true, selections: data.selections || [] });
+  }
+
+  if (action === 'push_subscribe') {
+    if (!push.pushConfigured()) return json(503, { ok: false, error: 'Alerts are not set up on the server yet.' });
+    const sub = body.subscription || {};
+    const endpoint = cleanEndpoint(sub.endpoint);
+    const keys = sub.keys || {};
+    if (!endpoint || !keys.p256dh || !keys.auth) return json(400, { ok: false, error: 'Bad subscription.' });
+    const allowed = watchdogOptionsFor(ctx.role, ctx.states).map((o) => o.value);
+    const picked = (Array.isArray(body.selections) ? body.selections : [])
+      .map((x) => String(x).toUpperCase())
+      .filter((x, i, a) => allowed.indexOf(x) !== -1 && a.indexOf(x) === i);
+    if (!picked.length) return json(400, { ok: false, error: 'Pick at least one area.' });
+    const states = [];
+    picked.forEach((v) => expandWatchSelection(v).forEach((s) => { if (states.indexOf(s) === -1) states.push(s); }));
+    const { error } = await supabase.from('push_subscriptions').upsert({
+      endpoint,
+      p256dh: String(keys.p256dh).slice(0, 200),
+      auth: String(keys.auth).slice(0, 100),
+      account_key: ctx.key,
+      states,
+      selections: picked,
+      user_agent: String(body.ua || '').slice(0, 200) || null,
+      updated_at: new Date().toISOString(),
+      fail_count: 0,
+    }, { onConflict: 'endpoint' });
+    if (error) return json(500, { ok: false, error: 'Could not save alerts.' });
+    return json(200, { ok: true, selections: picked });
+  }
+
+  const endpoint = cleanEndpoint(body.endpoint);
+  if (!endpoint) return json(400, { ok: false, error: 'Bad request.' });
+  const { data: mine } = await supabase
+    .from('push_subscriptions').select('id').eq('endpoint', endpoint).eq('account_key', ctx.key).maybeSingle();
+
+  if (action === 'push_unsubscribe') {
+    if (mine) await supabase.from('push_subscriptions').delete().eq('id', mine.id);
+    return json(200, { ok: true });
+  }
+
+  // push_test
+  if (!mine) return json(404, { ok: false, error: 'This phone is not subscribed yet.' });
+  const r = await push.notifyEndpoint(supabase, endpoint, { title: 'MCR Watchdog', body: 'Test alert. Alerts are working on this phone.' });
+  return json(r.ok ? 200 : 502, r.ok ? { ok: true } : { ok: false, error: r.error || 'The test could not be delivered.' });
+}
+
 async function doChangePassword(supabase, ctx, body) {
   const current = String(body.current || '');
   const next = String(body.next || '');
@@ -653,7 +729,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch (e) { return json(400, { ok: false, error: 'Bad request.' }); }
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const action = body.action;
+  const action = String(body.action || '');
 
   try {
     if (action === 'login') return await doLogin(supabase, body);
@@ -666,6 +742,7 @@ exports.handler = async (event) => {
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx, body);
     if (action === 'watchdog') return await doWatchdog(ctx, body);
+    if (action.indexOf('push_') === 0) return await doPush(supabase, ctx, action, body);
     if (action === 'change_password') return await doChangePassword(supabase, ctx, body);
     return json(400, { ok: false, error: 'Unknown action.' });
   } catch (e) {
