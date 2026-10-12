@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+[Resource from Github at repo://markmck85-star/Dispatch-assistant/sha/6b0afb27784a09c08a2fb0acb4e2105b447e8a60/contents/admin.html] <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -116,9 +116,10 @@
 
     <!-- ADMIN PANEL (hidden until login) -->
     <div class="container" id="adminPanel" style="display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <!-- Sticky so Back to App stays reachable on long sections (Locations, Technicians). Links straight to the dispatch app; history.back() returned to whatever page you came from (e.g. Inventory). -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;position:sticky;top:0;z-index:50;background:white;padding:6px 0;">
             <h1>Admin Panel</h1>
-            <a href="#" onclick="history.back(); return false;" style="text-decoration:none;">
+            <a href="/" style="text-decoration:none;">
                 <button type="button" style="padding:8px 16px;background:#6c757d;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">← Back to App</button>
             </a>
         </div>
@@ -1616,7 +1617,7 @@
         </div>
 
         <a href="/" style="text-decoration:none;">
-            <button class="big-btn back-btn" type="button" style="margin-top:20px;" onclick="history.back()">Back to Dispatch Tool</button>
+            <button class="big-btn back-btn" type="button" style="margin-top:20px;">Back to Dispatch Tool</button>
         </a>
     </div>
 
@@ -4776,3 +4777,4 @@ ${mergeCellsXml}
     </script>
 </body>
 </html>
+
