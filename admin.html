@@ -1487,6 +1487,11 @@
         <div id="sectionIssuetrends" class="section">
             <div class="form-section">
                 <h2>📈 Issue Trends</h2>
+                <div style="display:flex;gap:8px;margin:0 0 14px 0;flex-wrap:wrap;">
+                    <button type="button" id="itModeWeekly" onclick="itSetMode('weekly')" style="border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;background:#007bff;color:#fff;">Weekly trouble trend</button>
+                    <button type="button" id="itModeMonthly" onclick="itSetMode('monthly')" style="border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;background:#3a3f47;color:#ddd;">Monthly calls by state</button>
+                </div>
+                <div id="itWeeklyWrap">
                 <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
                     Weekly incoming trouble volume for a problem type, across one state or all states.
                     Catches fleet-wide patterns (a bad ribbon lot, a journal driver, Florida form stock)
@@ -1534,6 +1539,36 @@
                 </div>
                 <div id="itSites"></div>
                 <div id="itSamples"></div>
+                </div>
+                <div id="itMonthlyWrap" style="display:none;">
+                    <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
+                        Closed visits by state and month, split into restock and trouble / service calls.
+                        Counted from closed-visit reports (back to May 2025) by the month the visit started, Eastern time.
+                        This is a different source from the weekly trend, which is built from ticket emails, so the numbers will not match it exactly.
+                    </p>
+                    <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+                        <label style="flex:1; min-width:110px; margin:0;">
+                            <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Year</span>
+                            <select id="mcYear" onchange="loadMonthlyCalls()" style="margin:0;"></select>
+                        </label>
+                        <label style="flex:1; min-width:140px; margin:0;">
+                            <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Period</span>
+                            <select id="mcMonth" onchange="renderMonthlyCalls()" style="margin:0;"></select>
+                        </label>
+                        <label style="flex:1; min-width:140px; margin:0;">
+                            <span style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:400;">Chart state</span>
+                            <select id="mcState" onchange="renderMonthlyCalls()" style="margin:0;"><option value="">All states</option></select>
+                        </label>
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+                        <div id="mcStatus" style="flex:1; color:#ccc; font-size:12px; min-height:22px; padding:8px 10px; background:#111; border-radius:4px;">Loading…</div>
+                        <button type="button" onclick="downloadMonthlyCallsXlsx()" style="background:#28a745;color:#fff;border:none;border-radius:6px;padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">⬇ Download Excel</button>
+                    </div>
+                    <div id="mcSummary"></div>
+                    <div id="mcChart"></div>
+                    <div id="mcTable"></div>
+                    <div id="mcDetail"></div>
+                </div>
             </div>
         </div>
 
@@ -2050,7 +2085,7 @@
                 document.getElementById(tabId).className = (t === tab ? 'active' : '');
             }
             if (tab === 'repeatissues') loadRepeatIssues();
-            if (tab === 'issuetrends') loadIssueTrends();
+            if (tab === 'issuetrends') { if (window._itMode === 'monthly') loadMonthlyCalls(); else loadIssueTrends(); }
             if (tab === 'unmatchedsites') loadUnmatchedSites();
             if (tab === 'restockschedule') loadRestockSchedule();
             if (tab === 'users') { renderUserStateChecks([]); loadManagedUsers(); }
@@ -2618,6 +2653,315 @@
                 '<div style="font-weight:600;font-size:16px;margin-bottom:6px;padding-right:24px;">📝 Closing Note</div>' +
                 '<div style="font-size:12px;color:#666;margin-bottom:12px;">' + esc(date) + (t.tech_name_raw ? ' · ' + esc(t.tech_name_raw) : '') + (t.wo_number ? ' · WO ' + esc(t.wo_number) : '') + '</div>' +
                 '<div style="white-space:pre-wrap;font-size:14px;line-height:1.5;border-top:1px solid #eee;padding-top:12px;">' + esc(t.closing_note) + '</div>';
+        }
+
+        // ---- Issue Trends: Monthly calls by state (2026-10-12) ----
+        var MC_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        window._itMode = 'weekly';
+
+        function itSetMode(mode) {
+            window._itMode = mode;
+            var monthly = mode === 'monthly';
+            document.getElementById('itWeeklyWrap').style.display = monthly ? 'none' : '';
+            document.getElementById('itMonthlyWrap').style.display = monthly ? '' : 'none';
+            var wb = document.getElementById('itModeWeekly'), mb = document.getElementById('itModeMonthly');
+            wb.style.background = monthly ? '#3a3f47' : '#007bff'; wb.style.color = monthly ? '#ddd' : '#fff';
+            mb.style.background = monthly ? '#007bff' : '#3a3f47'; mb.style.color = monthly ? '#fff' : '#ddd';
+            if (monthly) loadMonthlyCalls(); else loadIssueTrends();
+        }
+
+        function mcInitYears() {
+            var ySel = document.getElementById('mcYear');
+            if (ySel.options.length) return;
+            var thisYear = new Date().getFullYear();
+            for (var y = thisYear; y >= 2025; y--) {
+                var o = document.createElement('option'); o.value = String(y); o.textContent = String(y); ySel.appendChild(o);
+            }
+        }
+
+        async function loadMonthlyCalls() {
+            mcInitYears();
+            var statusEl = document.getElementById('mcStatus');
+            var year = document.getElementById('mcYear').value;
+            statusEl.textContent = 'Loading…';
+            window._mcData = null;
+            try {
+                var res = await fetch('/.netlify/functions/get-monthly-calls?year=' + encodeURIComponent(year), { cache: 'no-store' });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                window._mcData = data;
+                // Period list: whole year, then each month that has started.
+                var mSel = document.getElementById('mcMonth');
+                var prevM = mSel.value;
+                mSel.innerHTML = '';
+                var all = document.createElement('option'); all.value = '0'; all.textContent = 'Whole year' + (data.partial_month ? ' to date' : ''); mSel.appendChild(all);
+                for (var m = 1; m <= data.last_month; m++) {
+                    var o = document.createElement('option'); o.value = String(m);
+                    o.textContent = MC_MONTHS[m - 1] + (m === data.partial_month ? ' (so far)' : '');
+                    mSel.appendChild(o);
+                }
+                if (prevM && mSel.querySelector('option[value="' + prevM + '"]')) mSel.value = prevM;
+                // State list for the chart
+                var stSel = document.getElementById('mcState');
+                var prevS = stSel.value;
+                var states = {};
+                data.rows.forEach(function(r) { states[r.state] = true; });
+                stSel.innerHTML = '<option value="">All states</option>';
+                Object.keys(states).sort().forEach(function(st) {
+                    var o = document.createElement('option'); o.value = st; o.textContent = st; stSel.appendChild(o);
+                });
+                if (prevS && states[prevS]) stSel.value = prevS;
+                renderMonthlyCalls();
+            } catch (e) {
+                statusEl.textContent = 'Error loading monthly calls: ' + e.message;
+            }
+        }
+
+        function mcPct(trouble, total) {
+            return total ? (Math.round(trouble * 1000 / total) / 10).toFixed(1) + '%' : '—';
+        }
+
+        function renderMonthlyCalls() {
+            var data = window._mcData;
+            if (!data) return;
+            var month = parseInt(document.getElementById('mcMonth').value || '0', 10) || 0;
+            var chartState = document.getElementById('mcState').value;
+            var periodLabel = month ? (MC_MONTHS[month - 1] + ' ' + data.year) : ('Whole year ' + data.year + (data.partial_month ? ' to date' : ''));
+
+            // State table for the chosen period
+            var byState = {};
+            var tot = { restock: 0, trouble: 0, other_pm: 0, unclassified: 0 };
+            data.rows.forEach(function(r) {
+                if (month && r.month !== month) return;
+                var s = byState[r.state] || (byState[r.state] = { state: r.state, restock: 0, trouble: 0, other_pm: 0, unclassified: 0 });
+                ['restock','trouble','other_pm','unclassified'].forEach(function(k) { s[k] += r[k]; tot[k] += r[k]; });
+            });
+            var list = Object.keys(byState).map(function(k) { var s = byState[k]; s.total = s.restock + s.trouble + s.other_pm + s.unclassified; return s; })
+                .sort(function(a, b) { return b.total - a.total; });
+            var grand = tot.restock + tot.trouble + tot.other_pm + tot.unclassified;
+            document.getElementById('mcStatus').textContent = grand.toLocaleString() + ' closed visits · ' + periodLabel + ' · ' + list.length + ' states';
+
+            var sumHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px;">';
+            [['Total visits', grand, '#007bff'], ['Restock', tot.restock, '#6c8ebf'], ['Trouble / service', tot.trouble, '#c62828'], ['Trouble share', mcPct(tot.trouble, grand), '#c62828']].forEach(function(c) {
+                sumHtml += '<div style="background:#fff;border-left:4px solid ' + c[2] + ';border-radius:6px;padding:8px 10px;"><div style="font-size:11px;color:#666;">' + c[0] + '</div><div style="font-size:20px;font-weight:700;color:#222;">' + (typeof c[1] === 'number' ? c[1].toLocaleString() : c[1]) + '</div></div>';
+            });
+            sumHtml += '</div>';
+            document.getElementById('mcSummary').innerHTML = sumHtml;
+
+            // Chart: stacked restock / trouble per month (all states or one state)
+            var perMonth = [];
+            for (var m = 1; m <= data.last_month; m++) perMonth.push({ m: m, restock: 0, trouble: 0, other: 0 });
+            data.rows.forEach(function(r) {
+                if (chartState && r.state !== chartState) return;
+                var pm = perMonth[r.month - 1]; if (!pm) return;
+                pm.restock += r.restock; pm.trouble += r.trouble; pm.other += r.other_pm + r.unclassified;
+            });
+            var max = 1;
+            perMonth.forEach(function(pm) { var t = pm.restock + pm.trouble + pm.other; if (t > max) max = t; });
+            var ch = '<div class="card" style="border-left-color:#17a2b8;"><div class="card-title">Calls per month · ' + esc(chartState || 'All states') + '</div>';
+            ch += '<div style="display:flex;gap:12px;font-size:11px;color:#555;margin:2px 0 6px;"><span><span style="display:inline-block;width:10px;height:10px;background:#6c8ebf;margin-right:4px;"></span>Restock</span><span><span style="display:inline-block;width:10px;height:10px;background:#c62828;margin-right:4px;"></span>Trouble / service</span><span><span style="display:inline-block;width:10px;height:10px;background:#bbb;margin-right:4px;"></span>Other PM / unclassified</span></div>';
+            ch += '<div style="display:flex;align-items:flex-end;gap:8px;height:170px;margin:8px 0 6px;overflow-x:auto;">';
+            perMonth.forEach(function(pm) {
+                var t = pm.restock + pm.trouble + pm.other;
+                var H = 130;
+                var hR = Math.round(pm.restock / max * H), hT = Math.round(pm.trouble / max * H), hO = Math.round(pm.other / max * H);
+                if (pm.trouble > 0 && hT < 2) hT = 2;
+                ch += '<div style="flex:0 0 34px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="' + MC_MONTHS[pm.m - 1] + ': ' + t + ' total, ' + pm.restock + ' restock, ' + pm.trouble + ' trouble">' +
+                    '<div style="font-size:10px;color:#555;margin-bottom:2px;">' + t.toLocaleString() + '</div>' +
+                    '<div style="width:22px;height:' + hO + 'px;background:#bbb;"></div>' +
+                    '<div style="width:22px;height:' + hT + 'px;background:#c62828;"></div>' +
+                    '<div style="width:22px;height:' + hR + 'px;background:#6c8ebf;border-radius:3px 3px 0 0;"></div>' +
+                    '<div style="font-size:10px;color:#777;margin-top:4px;">' + MC_MONTHS[pm.m - 1] + '</div></div>';
+            });
+            ch += '</div>';
+            if (data.partial_month) ch += '<div class="card-detail">' + MC_MONTHS[data.partial_month - 1] + ' is a partial month.</div>';
+            ch += '</div>';
+            document.getElementById('mcChart').innerHTML = ch;
+
+            // Table
+            var th = 'style="text-align:right;padding:5px 8px;border-bottom:2px solid #ccd3dc;font-size:12px;color:#333;"';
+            var tdr = 'style="text-align:right;padding:5px 8px;border-bottom:1px solid #eee;font-size:13px;"';
+            var tbl = '<div class="card" style="margin-top:12px;overflow-x:auto;"><div class="card-title">By state · ' + esc(periodLabel) + '</div>';
+            if (!list.length) {
+                tbl += '<div class="card-detail">No closed visits for this period.</div>';
+            } else {
+                tbl += '<table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;padding:5px 8px;border-bottom:2px solid #ccd3dc;font-size:12px;color:#333;">State</th>' +
+                    '<th ' + th + '>Total</th><th ' + th + '>Restock</th><th ' + th + '>Trouble / service</th><th ' + th + '>Trouble %</th><th ' + th + '>Other PM</th><th ' + th + '>Unclassified</th></tr></thead><tbody>';
+                list.forEach(function(s) {
+                    tbl += '<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:13px;font-weight:600;">' + esc(s.state) + '</td>' +
+                        '<td ' + tdr + '>' + s.total.toLocaleString() + '</td><td ' + tdr + '>' + s.restock.toLocaleString() + '</td><td ' + tdr + '>' + s.trouble.toLocaleString() + '</td>' +
+                        '<td ' + tdr + '>' + mcPct(s.trouble, s.total) + '</td><td ' + tdr + '>' + s.other_pm.toLocaleString() + '</td><td ' + tdr + '>' + s.unclassified.toLocaleString() + '</td></tr>';
+                });
+                tbl += '<tr style="font-weight:700;background:#f3f6fa;"><td style="padding:6px 8px;">All states</td>' +
+                    '<td ' + tdr + '>' + grand.toLocaleString() + '</td><td ' + tdr + '>' + tot.restock.toLocaleString() + '</td><td ' + tdr + '>' + tot.trouble.toLocaleString() + '</td>' +
+                    '<td ' + tdr + '>' + mcPct(tot.trouble, grand) + '</td><td ' + tdr + '>' + tot.other_pm.toLocaleString() + '</td><td ' + tdr + '>' + tot.unclassified.toLocaleString() + '</td></tr>';
+                tbl += '</tbody></table>';
+                tbl += '<div class="card-detail" style="margin-top:8px;">Trouble / service = hardware, connectivity or software troubleshooting, expected functionality, and service calls. Other PM = preventative maintenance that was not a restock. Unclassified = closed with no remediation recorded.</div>';
+            }
+            tbl += '</div>';
+            document.getElementById('mcTable').innerHTML = tbl;
+
+            // Trouble detail for the period
+            var d = { hardware: 0, connectivity: 0, software: 0, expected: 0, service_call: 0 };
+            (data.trouble_detail || []).forEach(function(r) {
+                if (month && r.month !== month) return;
+                Object.keys(d).forEach(function(k) { d[k] += r[k] || 0; });
+            });
+            document.getElementById('mcDetail').innerHTML = '<div class="card" style="margin-top:12px;"><div class="card-title">Trouble / service split (all states) · ' + esc(periodLabel) + '</div>' +
+                '<div class="card-detail">Hardware ' + d.hardware.toLocaleString() + ' · Connectivity ' + d.connectivity.toLocaleString() + ' · Software ' + d.software.toLocaleString() +
+                ' · Expected functionality ' + d.expected.toLocaleString() + ' · Service call ' + d.service_call.toLocaleString() + '</div></div>';
+        }
+
+        // Hand-built OOXML workbook (same approach as the roster export, so it opens on phones).
+        async function downloadMonthlyCallsXlsx() {
+            var data = window._mcData;
+            if (!data) { showToast('Load the monthly view first.', 'error'); return; }
+            try {
+                showToast('Building Excel file...', 'info');
+                var blob = await buildMonthlyCallsXlsx(data);
+                triggerFileDownload(blob, 'MCR_calls_by_state_' + data.year + '_' + new Date().toISOString().split('T')[0] + '.xlsx');
+                showToast('Excel file downloaded.', 'success');
+            } catch (e) {
+                console.error('[monthly calls xlsx]', e);
+                showToast('Export failed: ' + e.message, 'error');
+            }
+        }
+
+        async function buildMonthlyCallsXlsx(data) {
+            const JSZip = (await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')).default;
+            // styles: 0 plain, 1 header, 2 bold, 3 percent, 4 title, 5 note, 6 bold percent, 7 bold number w/ fill
+            const colL = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+            const X = (v) => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            const T = (v, s) => ({ t: 's', v: v, s: s || 0 });
+            const N = (v, s, f) => ({ t: 'n', v: v, s: s || 0, f: f });
+            const sheetXml = (rows, widths) => {
+                let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView showGridLines="0" workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>';
+                xml += '<cols>' + widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols><sheetData>';
+                rows.forEach((row, ri) => {
+                    if (!row || !row.length) return;
+                    xml += `<row r="${ri + 1}">`;
+                    row.forEach((c, ci) => {
+                        if (!c) return;
+                        const ref = colL(ci + 1) + (ri + 1);
+                        if (c.t === 's') xml += `<c r="${ref}" t="inlineStr" s="${c.s}"><is><t xml:space="preserve">${X(c.v)}</t></is></c>`;
+                        else xml += `<c r="${ref}" s="${c.s}">${c.f ? '<f>' + X(c.f) + '</f>' : ''}<v>${c.v}</v></c>`;
+                    });
+                    xml += '</row>';
+                });
+                return xml + '</sheetData></worksheet>';
+            };
+
+            const monthsN = data.last_month;
+            // ---- Data sheet ----
+            const rows = data.rows.slice().sort((a, b) => a.state.localeCompare(b.state) || a.month - b.month);
+            const dataRows = [[T('State', 1), T('Month #', 1), T('Restock', 1), T('Trouble / service', 1), T('Other PM', 1), T('Unclassified', 1), T('Total', 1)]];
+            rows.forEach((r, i) => {
+                const n = i + 2;
+                dataRows.push([T(r.state), N(r.month), N(r.restock), N(r.trouble), N(r.other_pm), N(r.unclassified), N(r.restock + r.trouble + r.other_pm + r.unclassified, 0, `SUM(C${n}:F${n})`)]);
+            });
+            const last = rows.length + 1;
+            dataRows.push([]);
+            dataRows.push([T('Source: closed visits in the dispatch database, counted by state and the month the visit started (Eastern time).' + (data.partial_month ? ' ' + MC_MONTHS[data.partial_month - 1] + ' is a partial month.' : ''), 5)]);
+            const rng = (col) => `Data!$${col}$2:$${col}$${last}`;
+
+            const states = Array.from(new Set(rows.map((r) => r.state)));
+            const stTot = (st) => rows.filter((r) => r.state === st).reduce((a, r) => ({ restock: a.restock + r.restock, trouble: a.trouble + r.trouble, other: a.other + r.other_pm, un: a.un + r.unclassified }), { restock: 0, trouble: 0, other: 0, un: 0 });
+            states.sort((a, b) => { const x = stTot(a), y = stTot(b); return (y.restock + y.trouble + y.other + y.un) - (x.restock + x.trouble + x.other + x.un); });
+
+            // ---- Overview sheet ----
+            const ov = [];
+            ov.push([T('MCR calls by state, ' + data.year, 4)]);
+            ov.push([T('Closed visits, split into restock and trouble / service. Figures are formulas over the Data tab.', 5)]);
+            ov.push([]);
+            ov.push([T('State', 1), T('Total', 1), T('Restock', 1), T('Trouble / service', 1), T('Trouble %', 1), T('Other PM', 1), T('Unclassified', 1)]);
+            const first = ov.length + 1;
+            let gR = 0, gT = 0, gO = 0, gU = 0;
+            states.forEach((st) => {
+                const n = ov.length + 1; const t = stTot(st);
+                gR += t.restock; gT += t.trouble; gO += t.other; gU += t.un;
+                const total = t.restock + t.trouble + t.other + t.un;
+                ov.push([T(st, 2),
+                    N(total, 0, `C${n}+D${n}+F${n}+G${n}`),
+                    N(t.restock, 0, `SUMIFS(${rng('C')},${rng('A')},$A${n})`),
+                    N(t.trouble, 0, `SUMIFS(${rng('D')},${rng('A')},$A${n})`),
+                    N(total ? t.trouble / total : 0, 3, `IF(B${n}=0,0,D${n}/B${n})`),
+                    N(t.other, 0, `SUMIFS(${rng('E')},${rng('A')},$A${n})`),
+                    N(t.un, 0, `SUMIFS(${rng('F')},${rng('A')},$A${n})`)]);
+            });
+            const lastSt = ov.length; const tn = ov.length + 1; const gTot = gR + gT + gO + gU;
+            ov.push([T('All states', 7),
+                N(gTot, 7, `SUM(B${first}:B${lastSt})`), N(gR, 7, `SUM(C${first}:C${lastSt})`), N(gT, 7, `SUM(D${first}:D${lastSt})`),
+                N(gTot ? gT / gTot : 0, 6, `IF(B${tn}=0,0,D${tn}/B${tn})`), N(gO, 7, `SUM(F${first}:F${lastSt})`), N(gU, 7, `SUM(G${first}:G${lastSt})`)]);
+            ov.push([]);
+            ov.push([T('Trouble / service = hardware, connectivity or software troubleshooting, expected functionality, and service calls. Other PM = preventative maintenance that was not a restock. Unclassified = closed with no remediation recorded.', 5)]);
+
+            // ---- By Month sheet ----
+            const bm = [];
+            bm.push([T('Calls by state and month, ' + data.year, 4)]);
+            bm.push([]);
+            const blocks = [['Total visits', 'tot'], ['Restock', 'C'], ['Trouble / service', 'D']];
+            const cellVal = (st, m, key) => rows.filter((r) => r.state === st && r.month === m).reduce((a, r) => a + (key === 'C' ? r.restock : key === 'D' ? r.trouble : r.restock + r.trouble + r.other_pm + r.unclassified), 0);
+            blocks.forEach(([label, key]) => {
+                bm.push([T(label, 2)]);
+                const hdr = [T('State', 1)]; for (let m = 1; m <= monthsN; m++) hdr.push(T(MC_MONTHS[m - 1], 1)); hdr.push(T('Total', 1));
+                bm.push(hdr);
+                const b0 = bm.length + 1;
+                states.forEach((st) => {
+                    const n = bm.length + 1; const line = [T(st, 2)]; let sum = 0;
+                    for (let m = 1; m <= monthsN; m++) {
+                        const v = cellVal(st, m, key); sum += v;
+                        const f = key === 'tot'
+                            ? `SUMIFS(${rng('G')},${rng('A')},$A${n},${rng('B')},${m})`
+                            : `SUMIFS(${rng(key)},${rng('A')},$A${n},${rng('B')},${m})`;
+                        line.push(N(v, 0, f));
+                    }
+                    line.push(N(sum, 2, `SUM(B${n}:${colL(monthsN + 1)}${n})`));
+                    bm.push(line);
+                });
+                const b1 = bm.length; const tr = bm.length + 1; const tl = [T('All states', 7)]; let gsum = 0;
+                for (let m = 1; m <= monthsN; m++) {
+                    const col = colL(m + 1); let v = 0; states.forEach((st) => { v += cellVal(st, m, key); }); gsum += v;
+                    tl.push(N(v, 7, `SUM(${col}${b0}:${col}${b1})`));
+                }
+                tl.push(N(gsum, 7, `SUM(B${tr}:${colL(monthsN + 1)}${tr})`));
+                bm.push(tl);
+                bm.push([]);
+            });
+
+            const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts>' +
+                '<fonts count="6"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="16"/><color rgb="FF1F3A5F"/><name val="Arial"/></font><font><i/><sz val="9"/><color rgb="FF666666"/><name val="Arial"/></font><font><sz val="10"/><name val="Arial"/></font></fonts>' +
+                '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F3A5F"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF0F7"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+                '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+                '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+                '<cellXfs count="8">' +
+                '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+                '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" wrapText="1"/></xf>' +
+                '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+                '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+                '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+                '<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+                '<xf numFmtId="164" fontId="2" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>' +
+                '<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+                '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+
+            const ws = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
+            const workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Overview" sheetId="1" r:id="rId1"/><sheet name="By Month" sheetId="2" r:id="rId2"/><sheet name="Data" sheetId="3" r:id="rId3"/></sheets><calcPr fullCalcOnLoad="1"/></workbook>';
+            const wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="' + ws + '" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="' + ws + '" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="' + ws + '" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+            const rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+            const sheetCT = 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
+            const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="' + sheetCT + '"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="' + sheetCT + '"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="' + sheetCT + '"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+
+            const zip = new JSZip();
+            zip.file('[Content_Types].xml', ct);
+            zip.file('_rels/.rels', rootRels);
+            zip.file('xl/workbook.xml', workbookXml);
+            zip.file('xl/_rels/workbook.xml.rels', wbRels);
+            zip.file('xl/styles.xml', stylesXml);
+            zip.file('xl/worksheets/sheet1.xml', sheetXml(ov, [16, 11, 11, 17, 11, 11, 14]));
+            zip.file('xl/worksheets/sheet2.xml', sheetXml(bm, [16].concat(new Array(monthsN + 1).fill(9))));
+            zip.file('xl/worksheets/sheet3.xml', sheetXml(dataRows, [8, 9, 11, 17, 11, 13, 10]));
+            return await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
         }
 
         async function loadIssueTrends() {
