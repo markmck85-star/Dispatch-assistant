@@ -1842,8 +1842,14 @@ exports.handler = async (event) => {
     // a reprocess (Mailgun retry, or Mark manually re-forwarding a stuck
     // email) rather than the ticket's first arrival.
     let ticketAlreadyExisted = false;
+    // 2026-10-12: the Supabase client used to be a `const` INSIDE this try, but the
+    // SMS and push step further down (after the try/catch closes) also uses it. It
+    // was out of scope there, so every trouble ticket died with "ReferenceError:
+    // supabase is not defined" right before texts, push alerts and the digest
+    // queue. Declared out here, assigned inside the try as before.
+    let supabase = null;
     try {
-      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
       const classifiedAsMap = { trouble: 'trouble', maintenance: 'maintenance', restock: 'dispatch_list', rma_shipping: 'rma_shipping', techweb_closing: 'closing_note_email' };
       const toHeaderEarly = fields['To'] || fields['to'] || '';
