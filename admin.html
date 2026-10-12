@@ -249,6 +249,10 @@
                 <input type="tel" id="techPhone" placeholder="Phone number" oninput="updateTechSmsAddress()">
                 <label for="techEmail">Email</label>
                 <input type="email" id="techEmail" placeholder="Email address">
+                <label for="techTitle">Job title <span style="color:#888;font-weight:400;font-size:12px;">(shows on the company roster, e.g. Field Technician, Lead Field Technician)</span></label>
+                <input type="text" id="techTitle" placeholder="Field Technician" autocomplete="off">
+                <label for="techCity">City <span style="color:#888;font-weight:400;font-size:12px;">(roster "Tech Location")</span></label>
+                <input type="text" id="techCity" placeholder="e.g. Temecula" autocomplete="off">
                 <label for="techCarrier">Carrier</label>
                 <select id="techCarrier" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;" onchange="updateTechSmsAddress()">
                     <option value="">-- Select carrier --</option>
@@ -3040,6 +3044,7 @@
                 html += '<div class="card" id="' + escAttr(techCardId) + '">' +
                     '<div class="card-title">' + esc(displayName) + (tech.active === false ? ' <span style="color:#dc3545;">(inactive)</span>' : '') + '</div>' +
                     '<div class="card-detail">Phone: ' + esc(tech.phone || '—') + ' | Email: ' + esc(tech.email || '—') + '</div>' +
+                    '<div class="card-detail">Title: ' + esc(tech.title || '—') + ' | City: ' + esc(tech.city || '—') + '</div>' +
                     '<div class="card-detail">Address: ' + esc(tech.homeAddress || 'not set') + '</div>' +
                     ((tech.additionalStates && tech.additionalStates.length)
                         ? '<div class="card-detail">Also covers: ' + esc(tech.additionalStates.join(', ')) + '</div>'
@@ -3066,6 +3071,8 @@
             document.getElementById('techName').disabled = false;
             document.getElementById('techPhone').value = '';
             document.getElementById('techEmail').value = '';
+            document.getElementById('techTitle').value = '';
+            document.getElementById('techCity').value = '';
             document.getElementById('techCarrier').value = '';
             document.getElementById('techSmsAddress').value = '';
             document.getElementById('techRegion').value = '';
@@ -3091,6 +3098,8 @@
             document.getElementById('techName').disabled = true;
             document.getElementById('techPhone').value = tech.phone || '';
             document.getElementById('techEmail').value = tech.email || '';
+            document.getElementById('techTitle').value = tech.title || '';
+            document.getElementById('techCity').value = tech.city || '';
             document.getElementById('techRegion').value = tech.region || '';
             document.getElementById('techStartLocation').value = tech.homeAddress || '';
             document.getElementById('techAdditionalStates').value = (tech.additionalStates || []).join(', ');
@@ -3127,6 +3136,8 @@
                 additionalStates: additionalStates,
                 phone: document.getElementById('techPhone').value.trim(),
                 email: document.getElementById('techEmail').value.trim(),
+                title: document.getElementById('techTitle').value.trim(),
+                city: document.getElementById('techCity').value.trim(),
                 region: document.getElementById('techRegion').value.trim(),
                 homeAddress: document.getElementById('techStartLocation').value.trim(),
                 smsAddress: document.getElementById('techSmsAddress').value.trim(),
