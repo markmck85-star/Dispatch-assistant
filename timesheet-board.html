@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Timesheet board</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --ink:#1c1916; --muted:#6b6258; --line:#e4dcd0; --paper:#f6f1e8; --card:#fffdf8; --bad:#9f1239; --ok:#3f6b4a; --warn:#b45309; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans", system-ui, sans-serif; line-height:1.45; }
+    header { padding:24px 20px 16px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fff 0%, var(--paper) 100%); }
+    .kicker { font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+    h1 { margin:6px 0 6px; font-size:26px; letter-spacing:-.03em; }
+    .sub { color:var(--muted); max-width:70ch; font-size:14px; }
+    .wrap { width:min(1100px, 100%); margin:0 auto; padding:16px 16px 64px; display:grid; gap:16px; }
+    .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .bar select, .bar button { font:inherit; font-size:14px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+    .bar button { cursor:pointer; font-weight:600; }
+    .bar button.dark { background:var(--ink); color:#fff; border-color:var(--ink); }
+    .bar label { font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+    .period { font-weight:600; }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+    .stat b { display:block; font-size:28px; letter-spacing:-.04em; }
+    .stat span { color:var(--muted); font-size:13px; }
+    .stat.miss b { color:var(--bad); }
+    .stat.ok b { color:var(--ok); }
+    .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+    .panel > h2 { margin:0; padding:12px 16px; font-size:15px; border-bottom:1px solid var(--line); background:#fbf8f2; display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }
+    .panel > h2 small { font-weight:400; color:var(--muted); font-size:12px; }
+    .st { padding:8px 16px 2px; font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:.1em; color:var(--muted); background:#faf6ee; border-top:1px solid var(--line); }
+    .st:first-of-type { border-top:0; }
+    .row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 12px; padding:10px 16px; border-bottom:1px solid var(--line); align-items:center; }
+    .row:last-child { border-bottom:0; }
+    .row .who { font-weight:600; }
+    .row .meta { color:var(--muted); font-size:12px; word-break:break-word; }
+    .tag { font-family:"IBM Plex Mono", monospace; font-size:11px; padding:2px 8px; border-radius:999px; background:#eee7db; white-space:nowrap; }
+    .tag.in { background:#e4f0e6; color:var(--ok); }
+    .tag.out { background:#fde8ee; color:var(--bad); }
+    .note { padding:12px 16px; color:var(--muted); font-size:13px; }
+    textarea { width:100%; min-height:96px; font:inherit; font-size:14px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+    .msgbox { padding:12px 16px; display:grid; gap:8px; }
+    .err { color:var(--bad); padding:12px 16px; }
+    @media (max-width:560px) { .stats { grid-template-columns:1fr 1fr 1fr; } .stat b { font-size:22px; } }
+  </style>
+</head>
+<body>
+<header>
+  <div class="kicker">Bi-weekly time and expense</div>
+  <h1>Timesheet board</h1>
+  <p class="sub">Who has sent in their sheet for the pay period, and who is still outstanding. It reads the mail that reaches the expense mailbox. A person counts as in once any time or expense email from them has arrived.</p>
+</header>
+<main class="wrap">
+  <div class="bar">
+    <button id="prev" type="button" aria-label="Earlier pay period">&larr;</button>
+    <span class="period" id="period">Loading...</span>
+    <button id="next" type="button" aria-label="Later pay period">&rarr;</button>
+    <select id="state" aria-label="State"><option value="">All states</option></select>
+    <label><input type="checkbox" id="contractors" /> Include contractors</label>
+    <button id="refresh" type="button" class="dark">Refresh</button>
+  </div>
+  <div id="out"></div>
+</main>
+<script>
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function when(iso) { try { return new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return iso; } }
+function pretty(ymd) { const p = ymd.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2])).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }); }
+function shift(ymd, days) { const p = ymd.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2] + days)).toISOString().slice(0, 10); }
+
+let periodEnd = "";
+let lastStates = [];
+const state = { missing: [], periodEnd: "" };
+
+function groupByState(list) {
+  const g = {};
+  list.forEach((x) => { const s = x.state || "??"; (g[s] = g[s] || []).push(x); });
+  return Object.keys(g).sort().map((s) => [s, g[s]]);
+}
+function personRows(list, kind) {
+  return groupByState(list).map(([s, people]) =>
+    '<div class="st">' + esc(s) + "</div>" + people.map((p) => {
+      if (kind === "missing") {
+        return '<div class="row"><div><div class="who">' + esc(p.name) + '</div><div class="meta">' + esc(p.email || "no email on file") + '</div></div><span class="tag out">Not in</span></div>';
+      }
+      return '<div class="row"><div><div class="who">' + esc(p.name) + '</div><div class="meta">' + esc(when(p.receivedAt)) + " &middot; " + esc(p.subject || "(no subject)") + (p.emails > 1 ? " &middot; " + p.emails + " emails" : "") + '</div></div><span class="tag in">In</span></div>';
+    }).join("")
+  ).join("");
+}
+function reminderText(missing, end) {
+  const names = missing.map((m) => m.name).join(", ");
+  return "Time and expense sheets for the period ending " + pretty(end) + " are still outstanding from: " + names + ". Please send yours to expense@mcrtechservice.com today.";
+}
+function render(d) {
+  state.missing = d.missing; state.periodEnd = d.periodEnd;
+  const out = document.getElementById("out");
+  const states = Array.from(new Set(d.received.concat(d.missing).map((x) => x.state).filter(Boolean))).sort();
+  const sel = document.getElementById("state");
+  if (!sel.dataset.filled || states.length > lastStates.length) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All states</option>' + states.map((s) => '<option value="' + esc(s) + '">' + esc(s) + "</option>").join("");
+    sel.value = cur; sel.dataset.filled = "1"; lastStates = states;
+  }
+  document.getElementById("period").textContent = "Period ending " + pretty(d.periodEnd);
+  const total = d.received.length + d.missing.length;
+  let html = '<div class="stats"><div class="stat ok"><b>' + d.received.length + "</b><span>Received</span></div>" +
+    '<div class="stat miss"><b>' + d.missing.length + "</b><span>Still missing</span></div>" +
+    '<div class="stat"><b>' + total + "</b><span>Expected</span></div></div>";
+
+  html += '<div class="panel"><h2>Still missing <small>' + d.missing.length + " of " + total + "</small></h2>";
+  if (d.missing.length) {
+    html += '<div class="msgbox"><textarea id="remind" readonly>' + esc(reminderText(d.missing, d.periodEnd)) + '</textarea><div class="bar"><button id="copy" type="button" class="dark">Copy for group text</button><span class="meta" id="copied" style="color:var(--muted);font-size:13px"></span></div></div>';
+    html += personRows(d.missing, "missing");
+  } else {
+    html += '<div class="note">Everyone expected has sent theirs in.</div>';
+  }
+  html += "</div>";
+
+  html += '<div class="panel"><h2>Received <small>' + d.received.length + "</small></h2>" +
+    (d.received.length ? personRows(d.received, "received") : '<div class="note">Nothing received yet for this period.</div>') + "</div>";
+
+  if (d.unmatched && d.unmatched.length) {
+    html += '<div class="panel"><h2>Could not tell whose <small>' + d.unmatched.length + "</small></h2>" +
+      d.unmatched.map((u) => '<div class="row"><div><div class="who">' + esc(u.subject || "(no subject)") + '</div><div class="meta">' + esc(u.sender || "") + " &middot; " + esc(when(u.receivedAt)) + " &middot; " + esc(u.reason || "") + "</div></div></div>").join("") + "</div>";
+  }
+  html += '<div class="note">Mail from ' + esc(pretty(d.periodStart)) + " through " + esc(pretty(d.countedUntil)) + " counts for this period. The board sees that a time or expense email arrived, not whether the attached sheet is complete.</div>";
+  out.innerHTML = html;
+  const copy = document.getElementById("copy");
+  if (copy) copy.addEventListener("click", async () => {
+    const ta = document.getElementById("remind");
+    try { await navigator.clipboard.writeText(ta.value); } catch (e) { ta.select(); document.execCommand("copy"); }
+    document.getElementById("copied").textContent = "Copied";
+  });
+}
+async function load() {
+  const out = document.getElementById("out");
+  out.innerHTML = '<div class="note">Loading...</div>';
+  const q = [];
+  if (periodEnd) q.push("end=" + encodeURIComponent(periodEnd));
+  const st = document.getElementById("state").value;
+  if (st) q.push("state=" + encodeURIComponent(st));
+  if (document.getElementById("contractors").checked) q.push("includeContractors=1");
+  try {
+    const res = await fetch("/.netlify/functions/get-timesheet-receipts" + (q.length ? "?" + q.join("&") : ""));
+    let d = null;
+    try { d = await res.json(); } catch (e) { throw new Error("The server did not answer (HTTP " + res.status + ")."); }
+    if (!res.ok || d.error) throw new Error(d.error || "HTTP " + res.status);
+    periodEnd = d.periodEnd;
+    render(d);
+  } catch (e) {
+    out.innerHTML = '<div class="err">' + esc(e.message) + "</div>";
+  }
+}
+document.getElementById("prev").addEventListener("click", () => { if (periodEnd) { periodEnd = shift(periodEnd, -14); load(); } });
+document.getElementById("next").addEventListener("click", () => { if (periodEnd) { periodEnd = shift(periodEnd, 14); load(); } });
+document.getElementById("refresh").addEventListener("click", load);
+document.getElementById("state").addEventListener("change", load);
+document.getElementById("contractors").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>
