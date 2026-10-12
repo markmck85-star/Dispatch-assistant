@@ -1,6 +1,7 @@
 /**
- * get-inventory-detail.js  (v2, 2026-10-06)
+ * get-inventory-detail.js  (v3, 2026-10-12)
  * SAVE AS: netlify/functions/get-inventory-detail.js
+ * ALSO NEEDS: netlify/functions/lib/inventory-notes.js (new in v3)
  *
  * Read-only. Returns the line items already parsed from saved count sheets,
  * plus the email text that arrived with them (the notes techs put in the
@@ -10,12 +11,17 @@
  * already requested or shipped to that technician is held like a date problem
  * (see lib/inventory-transit.js for the exact rule).
  *
+ * v3 (2026-10-12): the "Notes from the mailbox" text no longer includes email
+ * signatures (name, title, company, phone), and an email that was only a
+ * signature is left out of the notes list (see lib/inventory-notes.js).
+ *
  * GET ?since=YYYY-MM-DD&state=GA
  */
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
 const { transitProblems, shipmentsForTech } = require("./lib/inventory-transit.js");
 const { latestAllowedDate } = require("./lib/inventory-dates.js");
+const { noteText } = require("./lib/inventory-notes.js");
 
 const NAME_FORMAT = /^[A-Z]{2}(?:\s*,\s*[A-Z]{2})*\s*SST\s*-\s*MCR\s+[A-Za-z.'_ ]+?\s*-\s*\d{8}\.(xlsx|xls)$/i;
 const STALE_DAYS = 7;
@@ -156,13 +162,17 @@ exports.handler = async (event) => {
     seenMail.add(s.emailId);
     const mail = mailById.get(s.emailId);
     if (!mail || !mail.body_text) continue;
+    const sameMail = sheets.filter((x) => x.emailId === mail.id);
+    // Message only: no signature. An email that was just a signature is skipped.
+    const text = noteText(mail.body_text, { sender: mail.sender, names: sameMail.map((x) => x.name) });
+    if (!text) continue;
     notes.push({
       emailId: mail.id,
       subject: mail.subject || "",
       sender: mail.sender || "",
       receivedAt: mail.received_at,
-      text: clip(mail.body_text, 2500),
-      sheetCount: sheets.filter((x) => x.emailId === mail.id).length,
+      text: clip(text, 2500),
+      sheetCount: sameMail.length,
     });
   }
 

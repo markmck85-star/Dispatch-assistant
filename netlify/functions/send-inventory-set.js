@@ -1,10 +1,15 @@
 /**
- * send-inventory-set.js  (v1, 2026-10-05)
+ * send-inventory-set.js  (v2, 2026-10-12)
  * SAVE AS: netlify/functions/send-inventory-set.js
+ * ALSO NEEDS: netlify/functions/lib/inventory-notes.js (new in v2)
  *
  * Builds the weekly inventory set from saved sheets that have a matching date
  * and a standard file name, and can mail it. The address is supplied by the
  * caller (the board field), so a test address can be used before a real one.
+ *
+ * v2 (2026-10-12): the notes copied from the techs' emails into the message no
+ * longer include email signatures; the old stripSignature here missed most of
+ * them. Signature-only emails add nothing to the message.
  *
  * POST { to, since, state, subject, note, confirm }
  *   confirm omitted or false: preview only, nothing is sent
@@ -15,6 +20,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const { resolveSheetTech } = require("./lib/inventory-names.js");
 const { latestAllowedDate } = require("./lib/inventory-dates.js");
+const { noteText } = require("./lib/inventory-notes.js");
 
 const NAME_FORMAT = /^[A-Z]{2}(?:\s*,\s*[A-Z]{2})*\s*SST\s*-\s*MCR\s+[A-Za-z.'_ ]+?\s*-\s*\d{8}\.(xlsx|xls)$/i;
 const STALE_DAYS = 7;
@@ -116,16 +122,15 @@ async function buildSet(supabase, since, stateFilter) {
     seen.add(s.emailId);
     const mail = mailById.get(s.emailId);
     if (!mail || !mail.body_text) continue;
-    notes.push({ subject: mail.subject || "", text: String(mail.body_text).replace(/\r/g, "").trim().slice(0, 2500) });
+    // Message only: no signature. An email that was just a signature is skipped.
+    const names = sheets.filter((x) => x.emailId === mail.id).map((x) => x.name);
+    const text = noteText(mail.body_text, { sender: mail.sender, names }).slice(0, 2500);
+    if (!text) continue;
+    notes.push({ subject: mail.subject || "", text });
   }
   return { sheets, notes };
 }
 
-function stripSignature(text) {
-  const lines = String(text || "").replace(/\r/g, "").split("\n");
-  const cut = lines.findIndex((line) => /^(--|—|director of operations|mcr technical service)/i.test(line.trim()) || /^\(?\d{3}\)?\s*\d{3}-\d{4}/.test(line.trim()));
-  return (cut > 0 ? lines.slice(0, cut) : lines).join("\n").trim();
-}
 function previewText(since, sheets, notes, extraNote) {
   const ready = sheets.filter((s) => s.ready);
   const held = sheets.filter((s) => !s.ready);
@@ -133,7 +138,7 @@ function previewText(since, sheets, notes, extraNote) {
   if (extraNote) { lines.push(extraNote); lines.push(""); }
   lines.push("Inventory count sheets since " + since + " are attached (" + ready.length + ").");
   lines.push("");
-  const noteBody = notes.map((n) => stripSignature(n.text)).filter(Boolean);
+  const noteBody = notes.map((n) => n.text).filter(Boolean);
   if (noteBody.length) {
     lines.push(noteBody.join("\n\n"));
     lines.push("");
