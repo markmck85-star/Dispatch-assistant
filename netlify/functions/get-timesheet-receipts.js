@@ -1,6 +1,11 @@
 /**
- * get-timesheet-receipts.js  (v1, 2026-10-11)
+ * get-timesheet-receipts.js  (v1.1, 2026-10-12)
  * SAVE AS: netlify/functions/get-timesheet-receipts.js
+ *
+ * v1.1 (2026-10-12): Tom Ellison added to NOT_EXPECTED (TJ: he does not work for
+ * MCR). Lance Wise and Brit Kees stay expected: TJ confirmed they file time sheets.
+ * Contractors, including the company crews (Next Gig, Alliance Tech, Arcitechx,
+ * Dr. Joel), are already left out because they are flagged is_contractor.
  *
  * Who has sent in the bi-weekly time and expense sheet, and who has not, for one
  * pay period. Same idea as the inventory board: inbound mail is matched to the
@@ -39,7 +44,7 @@ const { createClient } = require("@supabase/supabase-js");
 const ANCHOR_END = "2026-10-10"; // a Saturday that closed a pay period
 const WINDOW_DAYS_BEFORE_END = 13; // period start is the Sunday 13 days before
 const WINDOW_DAYS_AFTER_END = 4; // late senders are still credited
-const NOT_EXPECTED = ["TJ Kadri"];
+const NOT_EXPECTED = ["TJ Kadri", "Tom Ellison"];
 const NOT_LIVE = [{ state: "CA", liveFrom: "2026-11-01" }];
 // Addresses that pass other people's sheets along; From is no clue about who filed.
 const OFFICE_ADDRESSES = new Set(["tkadri@mcrtechservice.com", "mbecker@mcrtechservice.com", "expense@mcrtechservice.com", "inventory@mcrtechservice.com", "dispatch@mcrdispatch.net"]);

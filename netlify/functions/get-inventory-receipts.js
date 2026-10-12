@@ -1,5 +1,5 @@
 /**
- * get-inventory-receipts.js  (v2.1, 2026-09-30)
+ * get-inventory-receipts.js  (v2.3, 2026-10-12)
  * SAVE AS: netlify/functions/get-inventory-receipts.js
  *
  * Received vs missing inventory mail for the period.
@@ -8,6 +8,17 @@
  *
  * GET /.netlify/functions/get-inventory-receipts?since=2026-09-22
  *      optional: &state=GA  &excludeContractors=1  &includeNotLive=1
+ *
+ * v2.3 (2026-10-12): TJ's answers on who files inventory.
+ *   - NOT_EXPECTED now also lists Lance Wise, Brit Kees and Tom Ellison, who do not
+ *     turn in inventories (Tom does not work for MCR).
+ *   - CONTRACTOR_COMPANIES now covers Next Gig, Alliance Tech, Arcitechx and Dr. Joel
+ *     as well as KMG Computers. Each company is ONE expected submitter. A sheet or
+ *     email from any crew member (by name in the subject, by the address on their
+ *     card, by the name in the body, or by the name written on the count sheet)
+ *     credits the company. A company row that already existed on the roster
+ *     (Arcitechx, Dr. Joel) is replaced by the company entry, not listed twice.
+ *   - The response shape is unchanged, so the board page needs no changes.
  *
  * v2.2 (2026-10-05): who is EXPECTED to submit. The roster used to be every
  * active technician card plus the owner (85 people), which overstated it:
@@ -52,7 +63,7 @@
  *   matching on attachment filename, and counting attachments.
  */
 const { createClient } = require("@supabase/supabase-js");
-const { resolveSheetTech } = require("./lib/inventory-names.js");
+const { resolveSheetTech, sheetTokens } = require("./lib/inventory-names.js");
 
 // Addresses that forward other people's inventory. From-address and
 // signature matching are skipped for these.
@@ -67,14 +78,21 @@ const FORWARDER_EMAILS = new Set(["tkadri@mcrtechservice.com"]);
 const EXTRA_ROSTER = [];
 
 // People who never file an inventory themselves. Listed by roster name.
-const NOT_EXPECTED = ["TJ Kadri"];
+// 2026-10-12, per TJ: Lance Wise and Brit Kees do not turn in inventories, and
+// Tom Ellison does not work for MCR. (Lance and Brit still file timesheets.)
+const NOT_EXPECTED = ["TJ Kadri", "Lance Wise", "Brit Kees", "Tom Ellison"];
 
 // Contractor COMPANIES that file ONE sheet for their whole crew. The company is
 // the expected submitter (listed and counted as its own entry); the individual
 // crew members are not expected separately. Add more companies here as TJ
-// confirms them. `members` are roster names.
+// confirms them. `members` are roster names. `aliases` are extra crew names that
+// have no roster card but may appear on a sheet or in a subject.
 const CONTRACTOR_COMPANIES = [
   { name: "KMG Computers", home_state: "WV", members: ["Craig Gosnell", "Zach Roach", "Cody Vanorsdale"] },
+  { name: "Next Gig", home_state: "NV", members: ["Alex Melendres", "Max Servi", "Daniel Winter"] },
+  { name: "Alliance Tech", home_state: "NV", members: ["Eddie Cortez", "Adrian Martinez"] },
+  { name: "Arcitechx", home_state: "FL", members: ["Jason Goodwin", "Dalton Childs", "Florian Preuss", "Jason Gingrich"] },
+  { name: "Dr. Joel", home_state: "CO", members: ["AJ Mitchell"], aliases: ["Joel Mitchell"] },
 ];
 
 // States whose technicians are not MCR's yet. They are skipped until liveFrom
@@ -110,6 +128,19 @@ function nameParts(name) {
   return { first: w[0] || "", last: w.length > 1 ? w[w.length - 1] : "" };
 }
 
+// Every full name a roster entry answers to: its own, plus a company's crew names.
+function nameList(t) {
+  return [t.name].concat(t.aliases || []);
+}
+
+// Last names usable for the "last name only one person has" tier. A company's own
+// name is left out ("Alliance Tech" must not match every subject that says "tech");
+// only its crew's last names count.
+function lastNamesOf(t) {
+  const names = t.company ? (t.aliases || []) : [t.name];
+  return names.map((n) => nameParts(n).last).filter(Boolean);
+}
+
 function addressOf(s) {
   const m = String(s || "").match(/[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
   return m ? m[0].toLowerCase() : "";
@@ -131,13 +162,20 @@ function hasWords(hay, needle) {
   return false;
 }
 
+function hasFullName(hayWords, t) {
+  return nameList(t).some((n) => {
+    const { first, last } = nameParts(n);
+    return first && last && hasWords(hayWords, [first]) && hasWords(hayWords, [last]);
+  });
+}
+
 function isForwarded(email, senderAddr) {
   if (FORWARDER_EMAILS.has(senderAddr)) return true;
   return /^\s*(fwd?|fw):/i.test(email.subject || "");
 }
 
 /**
- * Resolve one email to a technician. Returns
+ * Resolve one email to a technician (or contractor company). Returns
  *   { tech, matchedBy } or { tech: null, reason }.
  */
 function resolveEmail(email, roster) {
@@ -147,22 +185,17 @@ function resolveEmail(email, roster) {
   const realTechs = roster.filter((t) => !t.extra);
 
   // Tier 1a: full name in the subject.
-  const full = realTechs.filter((t) => {
-    const { first, last } = nameParts(t.name);
-    return first && last && hasWords(subjectWords, [first]) && hasWords(subjectWords, [last]);
-  });
+  const full = realTechs.filter((t) => hasFullName(subjectWords, t));
   if (full.length === 1) return { tech: full[0], matchedBy: "subject", forwarded };
 
   // Tier 1b: a last name held by exactly one roster tech.
-  const lastHits = realTechs.filter((t) => {
-    const { last } = nameParts(t.name);
-    return last.length >= 3 && hasWords(subjectWords, [last]);
-  });
+  const lastHits = realTechs.filter((t) => lastNamesOf(t).some((l) => l.length >= 3 && hasWords(subjectWords, [l])));
   let ambiguous = full.length > 1;
   if (lastHits.length === 1) return { tech: lastHits[0], matchedBy: "subject", forwarded };
   if (lastHits.length > 1) ambiguous = true;
 
-  // Tier 2: From address on a tech's card (never for forwards).
+  // Tier 2: From address on a tech's card (never for forwards). A company answers
+  // to the addresses on its crew's cards.
   if (!forwarded && senderAddr) {
     const byFrom = realTechs.filter((t) => techEmails(t).includes(senderAddr));
     if (byFrom.length === 1) return { tech: byFrom[0], matchedBy: "from", forwarded };
@@ -172,10 +205,7 @@ function resolveEmail(email, roster) {
   // Tier 3: full name in the signature area of the body (never for forwards).
   if (!forwarded) {
     const top = words(String(email.body_text || "").slice(0, 600));
-    const bySig = realTechs.filter((t) => {
-      const { first, last } = nameParts(t.name);
-      return first && last && hasWords(top, [first]) && hasWords(top, [last]);
-    });
+    const bySig = realTechs.filter((t) => hasFullName(top, t));
     if (bySig.length === 1) return { tech: bySig[0], matchedBy: "body", forwarded };
     if (bySig.length > 1) ambiguous = true;
   }
@@ -233,6 +263,75 @@ function matchInventory(roster, inventoryMail) {
   return { received, missing, unmatched };
 }
 
+const lc = (s) => String(s || "").trim().toLowerCase();
+
+/**
+ * The people and companies expected to file, from the active technician cards.
+ * Pure, so it can be tested without a database.
+ */
+function buildExpectedRoster(techs) {
+  const byName = new Map((techs || []).map((t) => [lc(t.name), t]));
+  const covered = new Set();
+  const companies = CONTRACTOR_COMPANIES.map((c) => {
+    const memberRows = c.members.map((m) => byName.get(lc(m))).filter(Boolean);
+    const selfRow = byName.get(lc(c.name)) || null; // e.g. the existing "Arcitechx" or "Dr. Joel" card
+    c.members.forEach((m) => covered.add(lc(m)));
+    covered.add(lc(c.name));
+    const emails = [...new Set(memberRows.concat(selfRow ? [selfRow] : []).map((t) => lc(t.email)).filter(Boolean))];
+    return {
+      id: "company-" + c.name.toLowerCase().replace(/\W+/g, "-"),
+      name: c.name,
+      home_state: c.home_state,
+      email: selfRow && selfRow.email ? selfRow.email : null,
+      emails,
+      active: true,
+      is_contractor: true,
+      company: true,
+      aliases: c.members.concat(c.aliases || []),
+    };
+  });
+  let roster = [...(techs || []), ...EXTRA_ROSTER];
+  // Crew members covered by a company sheet are not expected on their own; the
+  // company takes their place as one contractor entry.
+  roster = roster.filter((t) => !covered.has(lc(t.name)));
+  roster = roster.filter((t) => !NOT_EXPECTED.some((n) => lc(n) === lc(t.name)));
+  roster.push(...companies);
+  roster = roster.filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
+  roster.sort((a, b) => String(a.home_state || "").localeCompare(String(b.home_state || "")) || String(a.name || "").localeCompare(String(b.name || "")));
+  return roster;
+}
+
+/**
+ * Who a name written on a count sheet belongs to. A crew member's name, or the
+ * company's own name, credits the company; anyone else goes through the normal
+ * roster matching. Returns null when nothing (or more than one) fits.
+ */
+function ownerOfSheet(roster, rawName) {
+  const toks = sheetTokens(rawName);
+  if (!toks.length) return null;
+  const set = new Set(toks);
+  const companies = (roster || []).filter((t) => t.company);
+
+  // 1. a crew member's name on the sheet
+  const crew = [];
+  for (const c of companies) for (const a of c.aliases || []) crew.push({ id: c.id, name: a });
+  const viaCrew = resolveSheetTech(crew, rawName);
+  if (viaCrew) {
+    const c = companies.find((x) => x.id === viaCrew.id);
+    if (c) return c;
+  }
+
+  // 2. the company's own name on the sheet ("Alliance Tech", "Arcitechx")
+  const byCompanyName = companies.filter((c) => {
+    const ct = sheetTokens(c.name);
+    return ct.length && ct.every((w) => set.has(w));
+  });
+  if (byCompanyName.length === 1) return byCompanyName[0];
+
+  // 3. an ordinary technician
+  return resolveSheetTech(roster, rawName);
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return json(200, {});
   if (event.httpMethod !== "GET") return json(405, { error: "Method Not Allowed" });
@@ -259,16 +358,7 @@ exports.handler = async (event) => {
     .order("home_state", { ascending: true })
     .order("name", { ascending: true });
   if (tErr) return json(500, { error: tErr.message });
-  let roster = [...(techs || []), ...EXTRA_ROSTER];
-  // Crew members covered by a company sheet are not expected on their own; the
-  // company takes their place as one contractor entry.
-  const covered = new Set(CONTRACTOR_COMPANIES.flatMap((c) => c.members.map((m) => m.toLowerCase())));
-  roster = roster.filter((t) => !covered.has(String(t.name || "").toLowerCase()));
-  roster = roster.filter((t) => !NOT_EXPECTED.some((n) => n.toLowerCase() === String(t.name || "").toLowerCase()));
-  for (const c of CONTRACTOR_COMPANIES) {
-    roster.push({ id: "company-" + c.name.toLowerCase().replace(/\W+/g, "-"), name: c.name, home_state: c.home_state, email: null, active: true, is_contractor: true, company: true });
-  }
-  roster = roster.filter((t) => !/unassigned|placeholder|new site|tmp[-_]?site/i.test(String(t.name || "")));
+  let roster = buildExpectedRoster(techs || []);
   // Everyone a sheet could belong to, before the display filters below: a sheet
   // from a hidden contractor (or a not-yet-live state) is not an unknown sheet.
   const rosterAll = roster.slice();
@@ -318,7 +408,7 @@ exports.handler = async (event) => {
   const mailById = new Map((mails || []).map((m) => [m.id, m]));
   const creditedEmailIds = new Set();
   for (const sr of sheetRows || []) {
-    const tech = resolveSheetTech(roster, sr.tech);
+    const tech = ownerOfSheet(roster, sr.tech);
     if (!tech) continue;
     const already = received.find((r) => r.name === tech.name);
     if (already) { if (sr.inbound_email_id === already.emailId) creditedEmailIds.add(sr.inbound_email_id); continue; }
@@ -341,7 +431,7 @@ exports.handler = async (event) => {
   // (it credits no one and is not in the mail-level unmatched list). Show it.
   const seenSheetNames = new Set();
   for (const sr of sheetRows || []) {
-    if (resolveSheetTech(rosterAll, sr.tech)) continue;
+    if (ownerOfSheet(rosterAll, sr.tech)) continue;
     const key = String(sr.tech || "").toLowerCase() + "|" + String(sr.filename || "").toLowerCase();
     if (seenSheetNames.has(key)) continue;
     seenSheetNames.add(key);
@@ -395,3 +485,5 @@ exports.handler = async (event) => {
 
 // Exposed for tests only.
 exports._matchInventory = matchInventory;
+exports._buildExpectedRoster = buildExpectedRoster;
+exports._ownerOfSheet = ownerOfSheet;
