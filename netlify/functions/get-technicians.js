@@ -1,5 +1,6 @@
 /**
  * get-technicians.js — v2 — Phase 2 Stage 3 (techs read cutover)
+ * SAVE AS: netlify/functions/get-technicians.js
  *
  * Now reads from Supabase `technicians` (source of truth going forward)
  * instead of Blobs. Falls back to the old Blobs read if Supabase isn't
@@ -17,6 +18,8 @@
  * on-call page's tech-override save was broken without this, since slug
  * was the only identifier available client-side. Purely additive --
  * nothing existing reads or breaks on the new field.
+ *
+ * v4 (2026-10-12): added `city` (the roster's Tech Location). Purely additive.
  */
 
 const { getStore, connectLambda } = require("@netlify/blobs");
@@ -68,7 +71,7 @@ exports.handler = async (event) => {
       // real NC/SC home_state.
       const { data: techs, error: techErr } = await supabase
         .from("technicians")
-        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, title, is_contractor, lat, lng, geocoded_at")
+        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, title, city, is_contractor, lat, lng, geocoded_at")
         .or(`home_state.eq.${state},additional_states.cs.{${state}}`);
 
       if (techErr) throw techErr;
@@ -100,6 +103,7 @@ exports.handler = async (event) => {
           smsAddress: t.sms_address || "",
           active: t.active !== false,
           title: t.title || "",
+          city: t.city || "",
           isContractor: t.is_contractor === true,
           ...(t.lat != null && t.lng != null ? {
             lat: t.lat,

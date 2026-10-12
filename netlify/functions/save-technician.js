@@ -1,12 +1,19 @@
 /**
- * save-technician.js  (updated — v2 with auto-geocode)
+ * save-technician.js  (v3, 2026-10-12 -- adds job title and city)
+ * SAVE AS: netlify/functions/save-technician.js
+ *
  * Saves a technician record to Blobs.  If a homeAddress is provided and
  * GOOGLE_MAPS_API_KEY is configured, automatically geocodes the address
  * and stores lat/lng in the record.  Re-geocoding is triggered whenever
  * homeAddress changes (detected by comparing against the stored value).
  *
+ * v3 (2026-10-12): the admin form now carries a job title and a city (the roster's
+ * "Tech Location"). Both are optional in the request: a caller that does not send
+ * them leaves whatever is already saved untouched, so an older page can never blank
+ * a title by saving. Sending an empty string clears the value on purpose.
+ *
  * POST /.netlify/functions/save-technician
- * Body: { name, state, phone, email, homeAddress, smsAddress, active }
+ * Body: { name, state, phone, email, homeAddress, smsAddress, active, title, city }
  *
  * Optional env var: GOOGLE_MAPS_API_KEY (geocoding is skipped if absent)
  */
@@ -132,6 +139,11 @@ exports.handler = async (event) => {
     active: payload.active !== false,
     updatedAt: new Date().toISOString(),
   };
+  // Optional fields: only touched when the caller sent them (see v3 note above).
+  const hasTitle = typeof payload.title === "string";
+  const hasCity = typeof payload.city === "string";
+  if (hasTitle) record.title = payload.title.trim();
+  if (hasCity) record.city = payload.city.trim();
   if (lat != null && lng != null) {
     record.lat = lat;
     record.lng = lng;
@@ -178,6 +190,9 @@ exports.handler = async (event) => {
               home_address: merged.homeAddress || null,
               active: merged.active !== false,
             };
+            // Only included when sent, so an upsert never blanks a saved title or city.
+            if (hasTitle) techRow.title = record.title || null;
+            if (hasCity) techRow.city = record.city || null;
             if (merged.lat != null && merged.lng != null) {
               techRow.lat = merged.lat;
               techRow.lng = merged.lng;
