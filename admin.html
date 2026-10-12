@@ -1,4 +1,4 @@
-[Resource from Github at repo://markmck85-star/Dispatch-assistant/sha/6b0afb27784a09c08a2fb0acb4e2105b447e8a60/contents/admin.html] <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -3359,7 +3359,10 @@
         // anywhere in the DB, so they need a manual edit here if a state's
         // covered equipment changes or a new state gets added. Everything
         // else (name/title/phone/email) is pulled live.
-        const ROSTER_STATE_ORDER = ['AR','CA','CO','FL','GA','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
+        // 2026-10-12: order, blurbs and layout now follow the company roster file (state sections in
+        // alphabetical order of the full state name, so Nevada comes before North Carolina) and
+        // Idaho was added (it was missing, so AJ Willis never printed).
+        const ROSTER_STATE_ORDER = ['AR','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NV','NC','OH','OR','SC','WV'];
         const ROSTER_STATE_BLURB = {
             OH: 'Ohio, ITI, SST Small Kahuna, OTC POD MKIII',
             IN: 'Indiana, ITI, SST,Big Kahuna, Small Kahuna, Big Hoku, Small Hoku, SSO',
@@ -3374,10 +3377,34 @@
             SC: 'South Carolina, ITI, SST, Small Kahuna',
             IL: 'Illinois, ITI, SST, Big Kahuna, Small Kahuna',
             OR: 'Oregon, ITI, SST, Big Kahuna, Small Kahuna',
-            FL: 'Florida, ITI, SST, Small Kahuna, Surfboard',
+            FL: 'Florida, ITI, SST, Small Kahuna, Big Kahuna, Surfboard',
             CO: 'Colorado, ITI, SST, Big Kahuna, Small Kahuna, HOKU, K2D testing stations',
-            CA: 'California, ITI, SST (equipment mix not yet confirmed per site)',
+            CA: 'California, ITI, SST, Big Kahuna, Small Kahuna',
+            ID: 'Idaho, ITI, SST, Small Kahuna',
         };
+
+        // Rows that sit above the state sections. The President is not a technician, so he is not
+        // in the technicians table; the Director comes from the table (the person whose title is
+        // "Director of Operations").
+        const ROSTER_LEADERSHIP = [
+            { title: 'President', name: 'Mike Becker', phone: '614-402-1910', email: 'mbecker@mcrtechservice.com' },
+        ];
+        const ROSTER_TOP_TITLE = 'Director of Operations';
+        // Left off both tabs on purpose (not on the company roster).
+        const ROSTER_EXCLUDE = ['Tom Ellison'];
+        // Name shown on the roster when the saved record is the company rather than the person.
+        const ROSTER_NAME_SHOWN = { 'Dr. Joel': 'Joel Mitchell' };
+        // Order of the subcontractor rows within a state (owner first, then the crew), as on the
+        // company roster. Anyone not listed goes after these, alphabetically.
+        const ROSTER_SUB_ORDER = [
+            'Corey Sparks','Tarrence Juniors','Tarrence Junious','Victor Sacco','John Azzis','Issac Williams',
+            'Joseph Osborn','Dr. Joel','AJ Mitchell',
+            'Sean Keefe','Jason Goodwin','Jason Gingrich','Dalton Childs','Florian Preuss',
+            'Mike Cox','Ryan Cox',
+            'Eddie Cortez','Adrian Martinez','Max Servi','Alex Melendres','Daniel Winter',
+            'Craig Gosnell','Zach Roach','Cody Vanorsdale',
+        ];
+
 
         async function fetchAllRosterTechs() {
             const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
@@ -3439,70 +3466,107 @@ async function colLetterRoster(n) {
             const JSZip = (await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')).default;
 
             const S = { header:1, section:2, firstBold:3, firstNormal:4, dataBold:5, dataNormal:6, plain:7 };
-            let rowsXml = '';
-            let rowNum = 1;
-            const mergeCells = [];
 
-            // Row 1: logo row (merged A1:D1), tall enough for the image to
-            // sit in without overlapping the header row below it.
-            rowsXml += `<row r="${rowNum}" ht="105" customHeight="1">`;
-            for (let c = 1; c <= 4; c++) rowsXml += `<c r="${await colLetterRoster(c)}${rowNum}" s="${S.plain}"/>`;
-            rowsXml += `</row>`;
-            mergeCells.push(`A${rowNum}:D${rowNum}`);
-            rowNum++;
+            // ---- helpers (2026-10-12) ----
+            const fmtPhone = (p) => {
+                const d = String(p || '').replace(/\D/g, '');
+                if (d.length === 11 && d[0] === '1') return d.slice(1, 4) + '-' + d.slice(4, 7) + '-' + d.slice(7);
+                if (d.length === 10) return d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6);
+                const raw = String(p || '').trim();
+                return /^tbd$/i.test(raw) ? '' : raw;
+            };
+            // leaders first: managers, then coordinators / leads, then lead technicians, then everyone else
+            const rankOf = (title) => {
+                const t = String(title || '');
+                if (/manager/i.test(t)) return 0;
+                if (/coordinator|support lead|senior technical lead/i.test(t)) return 1;
+                if (/^lead\b/i.test(t)) return 2;
+                return 3;
+            };
+            const isExcluded = (t) => ROSTER_EXCLUDE.some((n) => n.toLowerCase() === String(t.name || '').toLowerCase());
+            const isPlaceholderSub = (t) => /^tbd$/i.test(String(t.phone || '').trim());
+            const allTechs = [];
+            for (const st of ROSTER_STATE_ORDER) for (const t of (byState[st] || [])) allTechs.push(t);
 
-            rowsXml += `<row r="${rowNum}">`;
-            const headers = ['Position', 'Name', 'Phone', 'Email'];
-            for (let i = 0; i < 4; i++) {
-                rowsXml += `<c r="${await colLetterRoster(i+1)}${rowNum}" t="inlineStr" s="${S.header}"><is><t xml:space="preserve">${escRosterXml(headers[i])}</t></is></c>`;
-            }
-            rowsXml += `</row>`;
-            rowNum++;
-
-            for (const state of ROSTER_STATE_ORDER) {
-                const techs = (byState[state] || [])
-                    .filter(t => t.active && !t.isContractor)
-                    .sort((a, b) => a.name.localeCompare(b.name));
-                if (techs.length === 0) continue;
-
-                rowsXml += `<row r="${rowNum}"><c r="A${rowNum}" t="inlineStr" s="${S.section}"><is><t xml:space="preserve">${escRosterXml(ROSTER_STATE_BLURB[state] || state)}</t></is></c>`;
-                for (let c = 2; c <= 4; c++) rowsXml += `<c r="${await colLetterRoster(c)}${rowNum}" s="${S.section}"/>`;
-                rowsXml += `</row>`;
-                mergeCells.push(`A${rowNum}:D${rowNum}`);
-                rowNum++;
-
-                for (let i = 0; i < techs.length; i++) {
-                    const t = techs[i];
-                    const title = t.title || 'Field Technician';
-                    const isElevated = title !== 'Field Technician';
-                    const sTitle = i === 0 ? (isElevated ? S.firstBold : S.firstNormal) : (isElevated ? S.dataBold : S.dataNormal);
-                    const sOther = i === 0 ? S.firstNormal : S.dataNormal;
-                    const vals = [title, t.name, t.phone || '', t.email || ''];
-                    rowsXml += `<row r="${rowNum}">`;
-                    for (let c = 0; c < 4; c++) {
-                        const st = c === 0 ? sTitle : sOther;
-                        rowsXml += `<c r="${await colLetterRoster(c+1)}${rowNum}" t="inlineStr" s="${st}"><is><t xml:space="preserve">${escRosterXml(vals[c])}</t></is></c>`;
-                    }
+            // One sheet's rows. sections = [{ blurb, people: [{title, city, name, phone, email}] }]
+            // lead = rows printed above the first section with no section heading of their own.
+            const buildSheet = async (opts) => {
+                let rowsXml = '';
+                let rowNum = 1;
+                const mergeCells = [];
+                const cell = async (c, r, text, style) => `<c r="${await colLetterRoster(c)}${r}" t="inlineStr" s="${style}"><is><t xml:space="preserve">${escRosterXml(text)}</t></is></c>`;
+                if (opts.logo) {
+                    rowsXml += `<row r="${rowNum}" ht="105" customHeight="1">`;
+                    for (let c = 1; c <= 5; c++) rowsXml += `<c r="${await colLetterRoster(c)}${rowNum}" s="${S.plain}"/>`;
                     rowsXml += `</row>`;
+                    mergeCells.push(`A${rowNum}:E${rowNum}`);
                     rowNum++;
                 }
-            }
+                rowsXml += `<row r="${rowNum}">`;
+                for (let i = 0; i < 5; i++) rowsXml += await cell(i + 1, rowNum, opts.headers[i], S.header);
+                rowsXml += `</row>`;
+                rowNum++;
+                const personRow = async (p, i) => {
+                    const elevated = String(p.title || '') !== 'Field Technician';
+                    const sTitle = i === 0 ? (elevated ? S.firstBold : S.firstNormal) : (elevated ? S.dataBold : S.dataNormal);
+                    const sOther = i === 0 ? S.firstNormal : S.dataNormal;
+                    const vals = [p.title, p.city, p.name, p.phone, p.email];
+                    let x = `<row r="${rowNum}">`;
+                    for (let c = 0; c < 5; c++) x += await cell(c + 1, rowNum, vals[c] || '', c === 0 ? sTitle : sOther);
+                    x += `</row>`;
+                    rowNum++;
+                    return x;
+                };
+                for (let i = 0; i < (opts.lead || []).length; i++) rowsXml += await personRow(opts.lead[i], i);
+                for (const sec of opts.sections) {
+                    if (!sec.people.length) continue;
+                    rowsXml += `<row r="${rowNum}">` + await cell(1, rowNum, sec.blurb, S.section);
+                    for (let c = 2; c <= 5; c++) rowsXml += `<c r="${await colLetterRoster(c)}${rowNum}" s="${S.section}"/>`;
+                    rowsXml += `</row>`;
+                    mergeCells.push(`A${rowNum}:E${rowNum}`);
+                    rowNum++;
+                    for (let i = 0; i < sec.people.length; i++) rowsXml += await personRow(sec.people[i], i);
+                }
+                return { rowsXml, mergeCells, lastRow: rowNum - 1 };
+            };
 
-            const lastRow = rowNum - 1;
-            const mergeCellsXml = mergeCells.length
-                ? `<mergeCells count="${mergeCells.length}">` + mergeCells.map(m => `<mergeCell ref="${m}"/>`).join('') + `</mergeCells>`
-                : '';
+            // ---- Employees tab ----
+            const director = allTechs.find((t) => t.active && String(t.title || '').trim() === ROSTER_TOP_TITLE);
+            const leadRows = ROSTER_LEADERSHIP.map((p) => ({ title: p.title, city: '', name: p.name, phone: fmtPhone(p.phone), email: p.email }));
+            if (director) leadRows.push({ title: ROSTER_TOP_TITLE, city: director.city || '', name: director.name, phone: fmtPhone(director.phone), email: director.email || '' });
+            const empSections = ROSTER_STATE_ORDER.map((state) => {
+                const people = (byState[state] || [])
+                    .filter((t) => t.active && !t.isContractor && !isExcluded(t) && String(t.title || '').trim() !== ROSTER_TOP_TITLE)
+                    .sort((a, b) => rankOf(a.title || 'Field Technician') - rankOf(b.title || 'Field Technician') || a.name.localeCompare(b.name))
+                    .map((t) => ({ title: t.title || 'Field Technician', city: t.city || '', name: t.name, phone: fmtPhone(t.phone), email: t.email || '' }));
+                return { blurb: ROSTER_STATE_BLURB[state] || state, people };
+            });
+            const emp = await buildSheet({ logo: true, headers: ['Position', 'Tech Location', 'Name', 'Phone', 'Email'], lead: leadRows, sections: empSections });
 
-            const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            // ---- Sub's tab (contractors) ----
+            const subIdx = (t) => { const i = ROSTER_SUB_ORDER.indexOf(t.name); return i < 0 ? 9999 : i; };
+            const subSections = ROSTER_STATE_ORDER.map((state) => {
+                const people = (byState[state] || [])
+                    .filter((t) => t.active && t.isContractor && !isExcluded(t) && !isPlaceholderSub(t))
+                    .sort((a, b) => subIdx(a) - subIdx(b) || a.name.localeCompare(b.name))
+                    .map((t) => ({ title: t.title || 'Field Technician', city: t.city || '', name: ROSTER_NAME_SHOWN[t.name] || t.name, phone: fmtPhone(t.phone), email: t.email || '' }));
+                return { blurb: ROSTER_STATE_BLURB[state] || state, people };
+            });
+            const sub = await buildSheet({ logo: false, headers: ['Company Name', 'Tech Location', 'Name', 'Phone', 'Email'], lead: [], sections: subSections });
+
+            const mergeXmlOf = (m) => m.length ? `<mergeCells count="${m.length}">` + m.map((x) => `<mergeCell ref="${x}"/>`).join('') + `</mergeCells>` : '';
+            const sheetXmlOf = (s, withDrawing) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<dimension ref="A1:D${lastRow}"/>
-<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>
+<dimension ref="A1:E${s.lastRow}"/>
+<sheetViews><sheetView ${withDrawing ? 'tabSelected="1" ' : ''}workbookViewId="0"/></sheetViews>
 <sheetFormatPr defaultRowHeight="15"/>
-<cols><col min="1" max="1" width="45" customWidth="1"/><col min="2" max="2" width="22" customWidth="1"/><col min="3" max="3" width="16" customWidth="1"/><col min="4" max="4" width="32" customWidth="1"/></cols>
-<sheetData>${rowsXml}</sheetData>
-${mergeCellsXml}
-<drawing r:id="rId1"/>
+<cols><col min="1" max="1" width="50" customWidth="1"/><col min="2" max="2" width="18" customWidth="1"/><col min="3" max="3" width="22" customWidth="1"/><col min="4" max="4" width="14" customWidth="1"/><col min="5" max="5" width="34" customWidth="1"/></cols>
+<sheetData>${s.rowsXml}</sheetData>
+${mergeXmlOf(s.mergeCells)}
+${withDrawing ? '<drawing r:id="rId1"/>' : ''}
 </worksheet>`;
+            const sheetXml = sheetXmlOf(emp, true);
+            const sheet2Xml = sheetXmlOf(sub, false);
 
             const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -3525,10 +3589,10 @@ ${mergeCellsXml}
 
             const DISPLAY_W_PX = 220, DISPLAY_H_PX = 137, EMU_PER_PX = 9525;
             const dispW = DISPLAY_W_PX * EMU_PER_PX, dispH = DISPLAY_H_PX * EMU_PER_PX;
-            // Center the logo across merged A1:D1.
+            // Center the logo across merged A1:E1.
             // Excel Calibri-11 column px ≈ Truncate(((256*w + 18) / 256) * 7)
-            // A45 + B22 + C16 + D32 = 315+154+112+224 = 805px.
-            const headerWidthPx = 805;
+            // A50 + B18 + C22 + D14 + E34 = 350+126+154+98+238 = 966px.
+            const headerWidthPx = 966;
             const logoColOff = Math.round(((headerWidthPx - DISPLAY_W_PX) / 2) * EMU_PER_PX);
             const rowHeightEmu = Math.round(105 * 12700); // row 1 ht="105" pt
             const logoRowOff = Math.max(0, Math.round((rowHeightEmu - dispH) / 2));
@@ -3548,10 +3612,10 @@ ${mergeCellsXml}
 
             const drawingRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/></Relationships>`;
             const sheetRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>`;
-            const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="21600" windowHeight="12000"/></bookViews><sheets><sheet name="Roster" sheetId="1" r:id="rId1"/></sheets></workbook>`;
-            const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+            const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="21600" windowHeight="12000"/></bookViews><sheets><sheet name="Employees" sheetId="1" r:id="rId1"/><sheet name="Sub's" sheetId="2" r:id="rId3"/></sheets></workbook>`;
+            const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>`;
             const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
-            const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
+            const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
             const corePropsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>MCR Roster</dc:title><dc:creator>Dispatch Tool</dc:creator><cp:lastModifiedBy>Dispatch Tool</cp:lastModifiedBy></cp:coreProperties>`;
             const appPropsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Microsoft Excel</Application></Properties>`;
 
@@ -3566,6 +3630,7 @@ ${mergeCellsXml}
             zip.file('xl/_rels/workbook.xml.rels', workbookRelsXml);
             zip.file('xl/styles.xml', stylesXml);
             zip.file('xl/worksheets/sheet1.xml', sheetXml);
+            zip.file('xl/worksheets/sheet2.xml', sheet2Xml);
             zip.file('xl/worksheets/_rels/sheet1.xml.rels', sheetRelsXml);
             zip.file('xl/drawings/drawing1.xml', drawingXml);
             zip.file('xl/drawings/_rels/drawing1.xml.rels', drawingRelsXml);
