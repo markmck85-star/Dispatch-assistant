@@ -80,7 +80,7 @@
 <body>
 <header>
   <h1>MCR Dispatch — Help</h1>
-  <span>10 Oct 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
+  <span>13 Oct 2026 &nbsp;·&nbsp; mcrdispatch.net</span>
   <a class="back-btn" href="/">← Back to App</a>
   <button class="print-btn" onclick="window.print()">🖨️ Print</button>
 </header>
@@ -113,10 +113,12 @@
     <div class="step"><strong>1. Open</strong> <a href="https://mcrdispatch.net">mcrdispatch.net</a>. Use the username and PIN an admin gave you. Same login works on the board and Admin. If the page asks for a login and you do not have a PIN, ask an admin — the public site will not guess it.</div>
     <div class="step"><strong>2. Confirm Region and Dispatch Date.</strong> The board opens on your home state. Next to the date is a <strong>Tomorrow</strong> button (it says <strong>Monday</strong> on Saturday or Sunday). Tap it once to jump to the next workday; the button then shows that weekday (Wed, Thu…).</div>
     <div class="step"><strong>3. Load the day’s list.</strong> Dispatch lists arrive automatically by email. When a new one is in, a gold <strong>📬 New dispatch received</strong> banner appears at the top of the board — tap <strong>Load</strong>, then <strong>Generate Dispatches</strong>. Review the cards. Reassign if the map looks wrong.</div>
-    <div class="step"><strong>4. Send the day</strong> with <strong>✅ Messages</strong> then <strong>Copy Message</strong> on each tech and send it from your own phone. <strong>📤 Send</strong> and <strong>📱 Text this stop</strong> still email the technician, but text delivery to Verizon phones is currently blocked by the carrier, so do not rely on the text part. Use Copy Message for anything urgent.</div>
-    <div class="step"><strong>5. Look up any site.</strong> Tap a <strong>site name</strong> on a stop card (on the board, the State Console or Saturday On-Call) to open its history: recent visits, ticket emails, closing notes, and shipments. It looks the same on every page. See <a href="#site-history">Site History</a>.</div>
-    <div class="step"><strong>6. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter because that is what gets billed. Click a column header to sort — Arrival starts newest first.</div>
-    <p>Want a different view of the same day? <strong>Compact Summary</strong> (next to Messages) lists the stops in a short form you can work from while dragging work orders onto the Salesforce console. <strong>📍 State Console</strong> shows any state and date without running a dispatch. Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
+    <div class="step"><strong>4. Enter the day in Salesforce first.</strong> Open <strong>Compact Summary</strong> (next to Messages) or <strong>Print Dispatch Summary</strong> and use it to drag the work orders onto the Salesforce Gantt. Conflicts show up there, such as a technician who is already booked or a call someone else took, so settle them on the board before anyone is messaged.</div>
+    <div class="step"><strong>5. Then send the day</strong> with <strong>✅ Messages</strong> and <strong>Copy Message</strong> on each tech, and send it from your own phone. <strong>📤 Send</strong> and <strong>📱 Text this stop</strong> still email the technician, but text delivery to Verizon phones is currently blocked by the carrier, so do not rely on the text part. Use Copy Message for anything urgent. If anything changes after messages go out, resend to every technician affected, not just the new one.</div>
+    <div class="step"><strong>6. Look up any site.</strong> Tap a <strong>site name</strong> on a stop card (on the board, the State Console or Saturday On-Call) to open its history: recent visits, ticket emails, closing notes, and shipments. It looks the same on every page. See <a href="#site-history">Site History</a>.</div>
+    <div class="step"><strong>7. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter. Click a column header to sort — Arrival starts newest first.</div>
+    <div class="step"><strong>8. Get trouble ticket alerts on your phone.</strong> Install the MCR Portal on your phone's home screen (ask an admin for the install guide), open the <strong>Watchdog</strong> tab, turn on alerts, and choose every state you dispatch. Alerts are set per state. Text alerts are being finalized, so until they are live, these app alerts and the Watchdog tab are how you stay informed.</div>
+    <p>The tool buttons on the left start in <strong>Simple</strong> view, which shows the everyday tools. Tap <strong>Everything</strong> to see all of them. <strong>📍 State Console</strong> shows any state and date without running a dispatch. Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
   </section>
 
   <!-- QUICK REFERENCE -->
@@ -125,20 +127,20 @@
     <p style="color:var(--muted); font-size:13px; margin-bottom:14px;">The short version. Every row below links to the full section if you need more.</p>
     <table>
       <tr><th>I want to...</th><th>Do this</th></tr>
-      <tr><td>Run today's normal dispatch</td><td><strong>Generate Dispatches</strong> → review/reassign → <strong>✅ Messages</strong> or <strong>📤 Send</strong>. See <a href="#daily">Daily Dispatch</a>.</td></tr>
+      <tr><td>Run today's normal dispatch</td><td><strong>Generate Dispatches</strong> → review/reassign → enter the stops in Salesforce (Compact Summary or Print Dispatch Summary) → <strong>✅ Messages</strong> or <strong>📤 Send</strong>. See <a href="#daily">Daily Dispatch</a>.</td></tr>
       <tr><td>Handle a trouble ticket right now</td><td>Trouble tickets arrive by email and are added to the site’s board entry automatically. SLA deadline is calculated automatically. See <a href="#urgent">Urgent Dispatch</a>.</td></tr>
       <tr><td>Text one trouble stop to the assigned tech</td><td>On that stop card tap <strong>📱 Text this stop</strong>. Edit the draft, Confirm Send. See <a href="#text-stop">Text this stop</a>.</td></tr>
       <tr><td>See a second ticket at a site already on the board</td><td>Amber chip <strong>⚠ Another ticket today — tap for WO / notes</strong>. Red SLA line sits under the restock. Do not assign a second tech.</td></tr>
       <tr><td>Collect a technician's cell carrier</td><td>Admin → Technicians → Carrier dropdown, or pick the carrier on the Text this stop sheet. Both save number@vtext.com on their card.</td></tr>
       <tr><td>Jump the board to tomorrow</td><td>Tap <strong>Tomorrow</strong> next to Dispatch Date (says <strong>Monday</strong> on the weekend). The button then shows the weekday you landed on.</td></tr>
-      <tr><td>See testing-station close-outs (old Blue Folder)</td><td>Sidebar <strong>⏱ Service responses</strong>. Click headers to sort. CSV / Excel for billing.</td></tr>
+      <tr><td>See testing-station close-outs (old Blue Folder)</td><td>Sidebar <strong>⏱ Service responses</strong>. Click headers to sort. CSV / Excel exports are available.</td></tr>
       <tr><td>See where everyone is today, at a glance</td><td><strong>🗺️ Map View</strong> on the dispatch board (today's board only), or the <strong>📍 State Console</strong> for any saved date, any state. See <a href="#state-console">State Console</a>.</td></tr>
       <tr><td>Check if today's routes are efficient</td><td><strong>🧭 Analyze Routes</strong> (dispatch board or State Console) -- suggests specific stop swaps with the mileage each one saves. See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
       <tr><td>Move a stop with a typed/spoken command</td><td>Type or dictate into the AI command bar, e.g. "move stop 2 from Robert to Sean." See <a href="#ai-assistant">AI Assistant</a>.</td></tr>
       <tr><td>Work a state I don't normally cover</td><td>Open that state's <strong>📍 State Console</strong> first -- shows who's out, recent tickets, and restock status without needing the full dispatch workflow.</td></tr>
       <tr><td>See a site's past visits, notes, or ticket emails</td><td>Tap the <strong>site name</strong> on any stop card. Same popup on the board, State Console and Saturday On-Call. See <a href="#site-history">Site History</a>.</td></tr>
       <tr><td>Record that a site was restocked (outside a normal ticket)</td><td>Open the site's history popup and tap <strong>✅ Mark Restocked</strong>. Add an optional note. See <a href="#site-history">Site History</a>.</td></tr>
-      <tr><td>Check for stale/unaddressed trouble tickets</td><td><strong>Watchdog Log</strong> (button next to the state selector, or <code>/watchdog/:state</code>) -- every open trouble/install/site-survey ticket for a state, sorted by urgency.</td></tr>
+      <tr><td>Check for stale/unaddressed trouble tickets</td><td><strong>Watchdog Log</strong> (button next to the state selector, or <code>/watchdog/:state</code>) -- every open trouble/install/site-survey ticket for a state, sorted by urgency. The same list is on the <strong>Watchdog</strong> tab of the MCR Portal, where you can also turn on phone alerts for your states.</td></tr>
       <tr><td>Undo something I just did</td><td><strong>↩ Undo</strong> in the Session Actions list at the bottom -- only works until you refresh the page. See <a href="#session-actions">Session Actions</a>.</td></tr>
       <tr><td>Add/edit a location or technician</td><td><strong>Admin Panel</strong> → Locations or Technicians tab. See <a href="#admin">Admin Panel</a>.</td></tr>
       <tr><td>Add a single new tech/location to the distance matrix</td><td>Just save them with a real address -- a prompt offers to add them right there, or use <strong>➕ Quick Add</strong> on the Distance Matrix tab any time after. See <a href="#admin">Admin Panel</a>.</td></tr>
@@ -151,7 +153,13 @@
   <section id="whats-new">
     <h2>🆕 What's New</h2>
 
-    <p style="color:var(--muted);font-size:13px;">Updated 10 October 2026. Print this page (button top right) if you want a paper copy.</p>
+    <p style="color:var(--muted);font-size:13px;">Updated 13 October 2026. Print this page (button top right) if you want a paper copy.</p>
+
+    <h3>Watchdog alerts in the MCR Portal</h3>
+    <p>The MCR Portal has a <strong>Watchdog</strong> tab that lists open trouble, install and site-survey tickets for a state. Install the portal on your phone's home screen, open the Watchdog tab, turn on alerts, and choose the states you dispatch. Alerts are per state, so a state you do not choose will not alert you. A maintenance work order that gets a line item added (for example a restock that picks up a printer fault) is tagged <strong>review: line item added</strong> on that tab so it does not go unnoticed. Text alerts are still being finalized, so these app alerts and the Watchdog tab are the reliable way to see new troubles for now.</p>
+
+    <h3>Simple and Everything view</h3>
+    <p>The tool buttons on the left of the board start in <strong>Simple</strong> view, which shows the everyday tools. Tap <strong>Everything</strong> to see every tool, including the ones under <strong>More tools</strong>.</p>
 
     <h3>Site history is the same everywhere</h3>
     <p>Tapping a site name now opens the same history popup on the dispatch board, the State Console and Saturday On-Call. It shows past visits with their closing notes, the emails behind tickets, shipments with tracking links, and has <strong>✅ Mark Restocked</strong>, <strong>Load more</strong> and <strong>Print</strong>. See <a href="#site-history">Site History</a>.</p>
@@ -220,7 +228,7 @@
     <p>🗺️ <strong>Route</strong> on a tech's card now opens Google Maps directly with that tech's full route, no extra tap or popup in the way.</p>
 
     <h3>Cluster Tool</h3>
-    <p>The 📍 pin icon next to Route lets you tag a tech's stops with a shared cluster name (e.g. "South Atlanta") for the corridor/preemptive-restock banner. A checklist lets you include or exclude specific stops -- useful when one stop is a genuine outlier (e.g. Sean has a Macon call mixed in with several South Atlanta stops).</p>
+    <p>The 📍 pin icon next to Route lets you tag a tech's stops with a shared cluster name (e.g. "South Atlanta") for the corridor/preemptive-restock banner. A checklist lets you include or exclude specific stops -- useful when one stop is a genuine outlier (e.g. a single call far from the rest of the group).</p>
 
     <h3>Unmatched Sites -- SA Numbers &amp; Map Lookup</h3>
     <p>The Admin Panel's Unmatched Sites tool now shows the Salesforce SA number(s) tied to each unresolved name, and a <strong>📍 Locate via Maps</strong> button that geocodes the raw name and shows the nearest existing site with a real-world distance -- a much stronger signal than name-similarity alone for telling apart two differently-worded records of the same site, or two similarly-named but genuinely different sites.</p>
@@ -240,7 +248,7 @@
     <div class="note"><strong>Note:</strong> the banner checks whether the cached list's own date has already passed before showing it as "new." If it looks like an already-handled list (e.g. opening the app for the first time in a few days), you'll get a confirmation prompt before it reloads, since reprocessing an old list unnecessarily is easy to do by mistake. Reloading is safe either way -- any stop still open for a site gets updated in place rather than duplicated.</div>
 
     <h3>Trouble Ticket SMS Alerts</h3>
-    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an alert is sent automatically to configured recipients (set per-state, per-person, with active-hours windows in Admin → Notifications) with the WO number, site name, issue, and SLA deadline. Text alerts to Verizon phones are currently blocked by the carrier, so check the Watchdog page for new troubles until that is restored.</p>
+    <p>When a trouble ticket is forwarded to dispatch@mcrdispatch.net, an alert is sent automatically to configured recipients (set per-state, per-person, with active-hours windows in Admin → Notifications) with the WO number, site name, issue, and SLA deadline. Text alerts to Verizon phones are currently blocked by the carrier, so check the Watchdog page, or turn on alerts on the Watchdog tab of the MCR Portal, to see new troubles until that is restored.</p>
 
     <h3>Technician Availability Board</h3>
     <p>The availability panel shows all techs with real-time status. Comp days and Saturday on-call rules apply automatically. Tap <strong>Mark Out</strong> to manually mark a tech unavailable for unscheduled absences — the dispatch engine routes around them immediately.</p>
@@ -273,11 +281,15 @@
       After reassigning, a prompt asks if you want to save the new tech as permanent primary for that location.<br>
       If a location has no fallback and the primary is out, a queue prompt cycles through each affected location asking who should cover.
     </div>
-    <div class="step"><strong>Step 5 — Send messages.</strong><br>
-      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send manually -- or tap <strong>📤 Send</strong> on a tech's card to email them directly. The text part of Send is currently blocked for Verizon phones, so Copy Message is the reliable way to reach a tech by text. Set each tech's carrier and SMS address in Admin → Technicians for when text delivery is restored.
+    <div class="step"><strong>Step 5 — Enter the stops in Salesforce.</strong><br>
+      Tap <strong>Compact Summary</strong> (next to Messages) or <strong>Print Dispatch Summary</strong> at the top, and use it to drag the work orders onto the Salesforce Gantt.<br>
+      Conflicts show up here, such as a technician who is already booked or a call someone else took. Fix them on the board first so the board and Salesforce match before anyone is messaged.
     </div>
-    <div class="step"><strong>Step 6 — Print or open Restock Tracker.</strong><br>
-      Tap <strong>Print Dispatch Summary</strong> at the top to open a printable summary in a new tab.<br>
+    <div class="step"><strong>Step 6 — Send messages.</strong><br>
+      Tap <strong>✅ Messages</strong> to generate tech text messages, then <strong>Copy Message</strong> for each tech and send manually -- or tap <strong>📤 Send</strong> on a tech's card to email them directly. The text part of Send is currently blocked for Verizon phones, so Copy Message is the reliable way to reach a tech by text. Set each tech's carrier and SMS address in Admin → Technicians for when text delivery is restored.<br>
+      If anything changes after messages go out, resend to every technician affected, not just the new one, so two technicians never head to the same location.
+    </div>
+    <div class="step"><strong>Step 7 — Open Restock Tracker or the route report.</strong><br>
       Tap <strong>📊 Restock Tracker</strong> (desktop) or <strong>📄 Report</strong> (mobile) next to the Messages button for quick access to the restock tracker or a mobile-friendly route report.
     </div>
   </section>
@@ -313,6 +325,7 @@
   <section id="map-view">
     <h2>Map View</h2>
     <p>Tap <strong>🗺️ Map View</strong> above the generated dispatches to plot every tech's stops geographically. Each tech gets a distinct color, matching the dot next to their name on their card. Tap any pin for that stop's site name, address, and distance from the previous stop.</p>
+    <p>The lines on the map are straight lines between stops, not roads, and the drive home is not drawn. Mileage figures elsewhere on the page (for example on Analyze Routes suggestions) use real driving distance and include the drive home, so they will not always match what the straight lines suggest.</p>
     <p><strong>Show all service locations</strong> (off by default) adds the rest of the state's sites as dots: green on track, amber due soon, red overdue for forms. Testing / OTC (T-codes) stay gray — they are not form-restock sites. Zoom and pan survive a refresh and survive toggling that checkbox. The AI command bar stays available in the expanded map.</p>
     <p>On a gray/red/amber site popup you can jump to Restock Tracker notes for the last visit, and see driving distance to the nearest stop already on today's board (not the straight line on the map).</p>
     <p>The legend below the map lists each tech with their stop count and lets you toggle their route on/off. Stops without saved coordinates are listed separately under the map ("Not plotted") rather than silently dropped.</p>
@@ -359,6 +372,7 @@
     <div class="note"><strong>Note:</strong> moving a stop this way -- or applying an Analyze Routes suggestion below -- automatically re-sorts both the giving and receiving technician's remaining stops into a sensible driving order right away. No separate Sort click needed afterward.</div>
     <h3>🧭 Analyze Routes</h3>
     <p>Scans the currently generated board and suggests specific single-stop swaps between two technicians where doing so would reduce total fleet mileage, or meaningfully even out a lopsided day (one tech nearly idle while another is overloaded) even when the mileage math alone is close to neutral. Each suggestion shows the site, which tech it would move from/to, and the net mileage change, with its own <strong>Apply</strong> button -- apply just the ones that make sense, and tap again to revert (the button relabels itself). It won't suggest moving a stop onto someone marked unavailable that day, won't suggest a swap that would push the receiving tech into likely overtime for the day, and won't hand more than a couple of stops to the same tech in a single pass.</p>
+    <p>The mileage on each suggestion is real driving distance for the full day, including each tech's drive home, so it can look different from the straight lines on Map View. A suggestion is a recommendation, not an order, so look it over before you apply it.</p>
     <div class="note"><strong>Note:</strong> suggestion quality depends on that state having a distance matrix built (Admin Panel → Distance Matrix). Haversine (free) is enough for reasonable suggestions; real driving-distance data (paid) sharpens them further. A state with no matrix built yet has no real distance data to suggest swaps from.</div>
   </section>
 
@@ -426,7 +440,7 @@ Tap the link in the text to confirm you got this.</div>
       <li>A toast alert when a new Armored Truck Meet ticket comes in, with a button to send the initial scheduling request straight from the app.</li>
       <li>A per-state/branch carrier contact directory (regional office, contact name, phone, email) so the app knows who to address -- built for Michigan (Detroit and Grand Rapids branches) and Oregon (Portland) so far; other states get added as their contacts are gathered.</li>
     </ul>
-    <div class="note"><strong>Note:</strong> Georgia has no cash-side units, so this workflow doesn't come up in Mark's own territory -- it's new coordination overhead specific to states with Big Kahuna kiosks.</div>
+    <div class="note"><strong>Note:</strong> Georgia has no cash-side units, so this workflow doesn't come up in Georgia -- it's extra coordination overhead specific to states with Big Kahuna kiosks.</div>
   </section>
 
   <!-- UNKNOWN CODES -->
@@ -543,8 +557,8 @@ Tap the link in the text to confirm you got this.</div>
     <ul>
       <li>Also linked from the dispatch sidebar between Mileage log and Admin.</li>
       <li>Times and miles parsed from ITI “Technician Service Response” emails — the testing-station / OTC close-outs that used to be typed into Blue Folder.</li>
-      <li>Default filter is Michigan testing stations (what gets billed). Change state or uncheck Testing to see more.</li>
-      <li>Click a column header to sort. Arrival starts newest first. CSV and Excel are for marking what actually goes on an invoice.</li>
+      <li>Default filter is Michigan testing stations. Change state or uncheck Testing to see more.</li>
+      <li>Click a column header to sort. Arrival starts newest first. CSV and Excel exports are available.</li>
     </ul>
     <h3>Inventory</h3>
     <ul>
@@ -573,12 +587,14 @@ Tap the link in the text to confirm you got this.</div>
           <li>Done / Cancel / Tomorrow controls with ↩ Undo</li>
           <li>Direct-to-Maps Route button, Sort, Cluster tagging</li>
           <li>Map View with real driving-distance labels</li>
+          <li>Compact Summary for entering stops in Salesforce</li>
           <li>Direct email + SMS send to technicians</li>
           <li>Print dispatch summary</li>
           <li>Tomorrow / Monday date jump</li>
           <li>Map: all sites + restock colors, zoom kept on refresh</li>
           <li>Board auto-rebuilds from saved state on page load/refresh</li>
           <li>Per-person login; board opens on that dispatcher's home state</li>
+          <li>Simple / Everything tool view</li>
         </ul>
       </div>
       <div class="feature-card">
@@ -645,6 +661,8 @@ Tap the link in the text to confirm you got this.</div>
         <h4>🔔 Watchdog</h4>
         <ul>
           <li>Email monitoring (dispatch, trouble/maintenance tickets, RMA shipping)</li>
+          <li>Watchdog tab in the MCR Portal with phone alerts, chosen per state</li>
+          <li>"review: line item added" tag when a maintenance WO picks up a new line item</li>
           <li>SMS alert on trouble tickets, filtered by state + active hours</li>
           <li>PC Name, WO number, issue category + detail parsed into alerts</li>
           <li>Duplicate reply filtering</li>
@@ -682,12 +700,14 @@ Tap the link in the text to confirm you got this.</div>
       <li>NC and SC share the GA location database in admin — separate NC/SC databases not yet implemented.</li>
       <li>Undo is session-only — refreshing the page clears session action history (though the board itself now reloads correctly on refresh).</li>
       <li>Map View / route-sorting shows real driving distance only where the site-to-site matrix has been built for that state -- a handful of smaller states are still pending; elsewhere, and for any specific pairs a build didn't resolve, distances fall back to straight-line, marked "(est.)".</li>
+      <li>Map View draws straight lines between stops and does not draw the drive home, so it can look different from the mileage shown on Analyze Routes suggestions, which use real driving distance.</li>
+      <li>Phone alerts are set per state. A dispatcher who has not chosen a state will not be alerted about it.</li>
       <li>On-call schedule is hardcoded through early 2027 in the app's code -- it will need extending (or migrating to an editable admin UI) before then.</li>
       <li>Closing notes are captured from roughly mid-August 2026 forward. Older visits show no note even if one exists in Salesforce; look it up there if the notes box says none are on file (the SA number is copied for that search).</li>
       <li>Brand-new locations, and testing-station / OTC stores that have not had a ticket yet, may not appear in Site History until their first ticket creates the site.</li>
       <li>Mail to @mcrtechservice.com from the app is accepted by the host; if someone does not see it, check Junk before assuming it never sent.</li>
     </ul>
-    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: October 10, 2026</p>
+    <p style="margin-top:20px; font-size:12px; color:var(--muted);">Last updated: October 13, 2026</p>
   </section>
 
 </main>
