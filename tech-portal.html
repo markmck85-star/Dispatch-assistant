@@ -91,6 +91,7 @@
   .wd .site { margin:4px 0; }
   .summban { background:var(--card); border:1px solid var(--warn); border-left:5px solid var(--warn); border-radius:10px; padding:10px 12px; margin-bottom:10px; font-size:14px; }
   .wdbar input[type=date] { flex:1; min-width:0; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  .applink { display:inline-block; padding:9px 14px; font-size:15px; border:1px solid var(--brand); color:var(--brand); border-radius:8px; text-decoration:none; background:var(--card); }
   .stop { border-top:1px solid var(--line); padding:8px 0; font-size:15px; }
   .stop:first-of-type { border-top:0; }
   .wd .desc { white-space:pre-wrap; font-size:14px; margin-top:6px; }
@@ -173,6 +174,7 @@
         <button id="summRefresh">Refresh</button>
       </div>
       <div class="shiprow"><div class="seg"><button id="summToday">Today</button><button id="summTomorrow">Tomorrow</button></div></div>
+      <div class="shiprow"><a id="summOpenApp" class="applink" href="/" target="_blank" rel="noopener">Open the dispatch app</a></div>
       <div class="muted" id="summStatus"></div>
       <div id="summList"></div>
     </section>
@@ -349,7 +351,15 @@
     d.setDate(d.getDate() + offset);
     return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   }
+  // Link to the dispatch board for the state and date picked here. The board
+  // reads ?state= and ?date= (and folds NC/SC into its Georgia board).
+  function summAppLink() {
+    var st = encodeURIComponent($('summState').value || '');
+    var dt = encodeURIComponent($('summDate').value || '');
+    $('summOpenApp').href = '/?state=' + st + '&date=' + dt;
+  }
   function summMarks() {
+    summAppLink();
     var v = $('summDate').value;
     $('summToday').classList.toggle('on', v === summDay(0));
     $('summTomorrow').classList.toggle('on', v === summDay(1));
