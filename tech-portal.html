@@ -164,6 +164,7 @@
         <select id="watchSel" aria-label="Watchdog state"></select>
         <button id="watchRefresh">Refresh</button>
       </div>
+      <div class="card hidden" id="satInfo"></div>
       <div class="shiprow hidden" id="satLinkRow"><a class="applink" href="/saturday-oncall.html" target="_blank" rel="noopener">Open the Saturday on-call page &rarr;</a></div>
       <div class="muted" id="watchStatus"></div>
       <div id="watchList"></div>
@@ -555,11 +556,31 @@
       (e.description ? '<div class="desc">' + esc(e.description) + '</div>' : '') +
       '</div>';
   }
+  async function loadSatInfo(show) {
+    var box = $('satInfo');
+    if (!show) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    box.innerHTML = '<span class="muted">Loading on-call schedule...</span>';
+    var j;
+    try { j = await call('oncall'); } catch (e) { j = { ok: false }; }
+    if (!j || !j.ok) { box.innerHTML = '<span class="muted">The on-call schedule could not be loaded.</span>'; return; }
+    var d = new Date(j.date + 'T12:00:00');
+    var label = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    var h = '<b>On call ' + esc(label) + '</b><br>';
+    h += j.dispatcher ? 'Dispatcher: ' + esc(j.dispatcher) : '<span class="muted">No on-call dispatcher is scheduled yet.</span>';
+    if (j.techs && j.techs.length) {
+      h += '<br>Technicians: ' + j.techs.map(function (t) { return esc(t.state) + ' ' + t.names.map(esc).join(' / '); }).join('; ');
+    } else {
+      h += '<br><span class="muted">No on-call technicians are scheduled yet.</span>';
+    }
+    box.innerHTML = h;
+  }
   async function loadWatch() {
     if (!WATCH_OK) return;
     var seq = ++WATCH_SEQ;
     var sel = $('watchSel').value;
     $('satLinkRow').classList.toggle('hidden', sel !== 'SAT_ONCALL');
+    loadSatInfo(sel === 'SAT_ONCALL');
     $('watchStatus').textContent = 'Loading...';
     $('watchList').innerHTML = '';
     var j;
