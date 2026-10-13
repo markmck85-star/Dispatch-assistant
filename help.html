@@ -117,7 +117,7 @@
     <div class="step"><strong>5. Then send the day</strong> with <strong>✅ Messages</strong> and <strong>Copy Message</strong> on each tech, and send it from your own phone. <strong>📤 Send</strong> and <strong>📱 Text this stop</strong> still email the technician, but text delivery to Verizon phones is currently blocked by the carrier, so do not rely on the text part. Use Copy Message for anything urgent. If anything changes after messages go out, resend to every technician affected, not just the new one.</div>
     <div class="step"><strong>6. Look up any site.</strong> Tap a <strong>site name</strong> on a stop card (on the board, the State Console or Saturday On-Call) to open its history: recent visits, ticket emails, closing notes, and shipments. It looks the same on every page. See <a href="#site-history">Site History</a>.</div>
     <div class="step"><strong>7. Testing-station / OTC close-outs</strong> (the old Blue Folder log): sidebar <strong>⏱ Service responses</strong>, or Admin → Service responses. Michigan testing is the default filter. Click a column header to sort — Arrival starts newest first.</div>
-    <div class="step"><strong>8. Get trouble ticket alerts on your phone.</strong> Install the MCR Portal on your phone's home screen (ask an admin for the install guide), open the <strong>Watchdog</strong> tab, turn on alerts, and choose every state you dispatch. Alerts are set per state. Text alerts are being finalized, so until they are live, these app alerts and the Watchdog tab are how you stay informed.</div>
+    <div class="step"><strong>8. Get trouble ticket alerts on your phone.</strong> Install the MCR Portal on your phone's home screen (ask an admin for the install guide), open the <strong>Watchdog</strong> tab, turn on alerts, and choose every state you dispatch. Alerts are set per state. Text alerts are being finalized, so until they are live, these app alerts and the Watchdog tab are how you stay informed. The portal also has a <strong>Summary</strong> tab with today's or tomorrow's planned stops, and it sends a short summary at 8:00 AM your time (details under What's New).</div>
     <p>The tool buttons on the left start in <strong>Simple</strong> view, which shows the everyday tools. Tap <strong>Everything</strong> to see all of them. <strong>📍 State Console</strong> shows any state and date without running a dispatch. Print this page from the button at the top if you want paper. The rest of this file is the longer reference.</p>
   </section>
 
@@ -153,7 +153,22 @@
   <section id="whats-new">
     <h2>🆕 What's New</h2>
 
-    <p style="color:var(--muted);font-size:13px;">Updated 13 October 2026. Print this page (button top right) if you want a paper copy.</p>
+    <p style="color:var(--muted);font-size:13px;">Updated 14 October 2026. Print this page (button top right) if you want a paper copy.</p>
+
+    <h3>Dispatch Summary tab in the MCR Portal</h3>
+    <p>Dispatcher and admin logins have a <strong>Summary</strong> tab in the portal. Pick a state, then tap <strong>Today</strong> or <strong>Tomorrow</strong> (or choose any date) to see each technician's open stops for that day. It is read-only and shows the dispatch plan in this app, not Salesforce. Completed stops are not listed, and a call cancelled in Salesforce can still show here until it is cancelled in the app. To change anything, tap <strong>Open the dispatch app to change assignments</strong>, which opens the board for that same state and date.</p>
+
+    <h3>Morning summary at 8:00 AM</h3>
+    <p>If you have portal alerts turned on, you get one summary notification a day at 8:00 AM in your own time zone, listing the open trouble tickets for the states you chose, including ones that came in overnight. It is not sent on Sundays or company holidays. On a Saturday it goes only to the scheduled on-call dispatcher and also lists that day's on-call technicians by state. If the calendar's Saturday schedule is changed for a swap or vacation cover, the summary follows it. The <strong>Watchdog</strong> tab has a button to send yourself a sample.</p>
+
+    <h3>Service window note on alerts</h3>
+    <p>Service calls run 8:00 AM to 5:00 PM in the site's local time. If a trouble ticket alert arrives outside those hours, the alert says so and when the window opens, so the technician is not contacted before then. The alert still reaches you right away.</p>
+
+    <h3>Saturday On-Call in the portal</h3>
+    <p>The <strong>Watchdog</strong> tab has a <strong>Saturday On-Call</strong> button that opens the Saturday page, and an info box showing the next Saturday's on-call dispatcher and technicians. Saturday work is service calls only, since restocks are not issued on Saturdays.</p>
+
+    <h3>Portal tips for Android</h3>
+    <p>If the portal looks small or zoomed out after installing, Chrome was probably in <strong>Desktop site</strong> mode when you added it. Turn Desktop site off in Chrome's menu, remove the portal icon from your home screen, and add it again. To give portal alerts their own sound, open the phone's notification settings for the portal (you may need to tap <strong>General</strong> first) and choose a distinct sound there. Web alerts cannot set the sound themselves.</p>
 
     <h3>Watchdog alerts in the MCR Portal</h3>
     <p>The MCR Portal has a <strong>Watchdog</strong> tab that lists open trouble, install and site-survey tickets for a state. Install the portal on your phone's home screen, open the Watchdog tab, turn on alerts, and choose the states you dispatch. Alerts are per state, so a state you do not choose will not alert you. A maintenance work order that gets a line item added (for example a restock that picks up a printer fault) is tagged <strong>review: line item added</strong> on that tab so it does not go unnoticed. Text alerts are still being finalized, so these app alerts and the Watchdog tab are the reliable way to see new troubles for now.</p>
@@ -468,6 +483,8 @@ Tap the link in the text to confirm you got this.</div>
       <li>Map pins for on-call houses and tickets, with SLA and a review badge when a site may already have a ticket today.</li>
       <li>Who is the on-call <em>dispatcher</em> for that calendar Saturday -- Change if you are covering for someone else before enabling text alerts.</li>
     </ul>
+    <h3>Saturday morning summary</h3>
+    <p>The on-call dispatcher shown on the calendar for that Saturday gets the 8:00 AM summary on their phone (portal alerts must be on), with the on-call technicians listed by state. The Watchdog tab in the portal also shows the next Saturday's on-call dispatcher and technicians, with a button to open this page.</p>
     <h3>Assigning</h3>
     <p>Closest on-call house is only a suggestion. Nothing is written until you tap <strong>Assign suggested</strong> or pick someone in the dropdown. The dropdown is that state's Saturday on-call list (usually one or two people). <strong>Show all techs</strong> is for the occasional cover-from-next-door case. Primary/secondary from the weekday board is not used here, because those people are often the same ones already on call.</p>
     <h3>Messaging</h3>
@@ -662,6 +679,9 @@ Tap the link in the text to confirm you got this.</div>
         <ul>
           <li>Email monitoring (dispatch, trouble/maintenance tickets, RMA shipping)</li>
           <li>Watchdog tab in the MCR Portal with phone alerts, chosen per state</li>
+          <li>Summary tab in the portal: open stops by technician, Today or Tomorrow, with a link to the board</li>
+          <li>8:00 AM morning summary in your time zone; Saturday version goes to the on-call dispatcher</li>
+          <li>Service-window note on alerts that arrive outside 8:00 to 5:00 site time</li>
           <li>"review: line item added" tag when a maintenance WO picks up a new line item</li>
           <li>SMS alert on trouble tickets, filtered by state + active hours</li>
           <li>PC Name, WO number, issue category + detail parsed into alerts</li>
