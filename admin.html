@@ -395,7 +395,7 @@
                 <p style="font-size:14px;color:#555;margin-bottom:10px;">The company-wide roster. Safe to circulate. It does not include home addresses.</p>
                 <button class="big-btn" style="background:#17a2b8;" onclick="exportRosterPublic()">Create MCR Company Roster</button>
             </div>
-            <div class="form-section">
+            <div class="form-section" id="rosterWithAddressesCard">
                 <h2>MCR Company Roster with addresses</h2>
                 <p style="font-size:14px;color:#555;margin-bottom:10px;">Same roster, plus home addresses for the distance matrix. Do not send this copy company-wide.</p>
                 <button class="big-btn" style="background:#6c757d;" onclick="exportRosterWithAddresses()">Create MCR Company Roster with addresses</button>
@@ -1872,6 +1872,15 @@
                 if (currentUser.role !== 'admin' && usersTabBtn.className === 'active') {
                     switchTab('locations');
                 }
+            }
+
+            // 2026-10-13: the roster copy with home addresses is for admins only
+            // (only the director circulates a roster company-wide, and that copy
+            // must not go out). Dispatchers can still read addresses on the
+            // Technicians tab and download the plain roster.
+            var rosterAddrCard = document.getElementById('rosterWithAddressesCard');
+            if (rosterAddrCard) {
+                rosterAddrCard.style.display = (currentUser.role === 'admin') ? '' : 'none';
             }
 
             var sel = document.getElementById('stateSelect');
@@ -3996,6 +4005,12 @@ ${withDrawing ? '<drawing r:id="rId1"/>' : ''}
         }
 
                 async function exportRosterWithAddresses() {
+            // 2026-10-13: admin-only. The card is hidden for other roles; this
+            // guard covers a stale tab or a call from the console.
+            if (!currentUser || currentUser.role !== 'admin') {
+                showToast('The roster with addresses is available to admins only.', 'error');
+                return;
+            }
             // 2026-09-12: this one has home addresses in it -- confirm
             // before downloading so it can't get grabbed and sent out
             // company-wide by mistake alongside the public roster.
