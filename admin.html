@@ -153,9 +153,28 @@
             <button id="tabRestockschedule" onclick="switchTab('restockschedule')">🔄 Restock Schedule</button>
             <button id="tabMileagecheck" onclick="switchTab('mileagecheck')">🚗 Mileage Check</button>
             <button id="tabUsers" onclick="switchTab('users')" style="display:none;">👤 Users</button>
+            <button id="tabStates" onclick="switchTab('states')" style="display:none;">🗺 States</button>
         </div>
 
         <!-- USERS TAB (admin role only) -->
+        <div id="sectionStates" class="section">
+            <div class="form-section">
+                <h2>States</h2>
+                <p style="font-size:13px;color:#555;margin-bottom:10px;">Turn a state on or off, set its time zone and Saturday coverage. A state that is on appears in the state pickers across the app and can be given to logins. Turning a state off hides it but keeps all of its history. Changes save as soon as you make them.</p>
+                <div id="statesList"><div class="card-detail">Loading…</div></div>
+            </div>
+            <div class="form-section">
+                <h2>Add a state</h2>
+                <label for="stNewCode">Two-letter code</label>
+                <input type="text" id="stNewCode" maxlength="2" placeholder="e.g. TX" autocapitalize="characters" autocomplete="off">
+                <label for="stNewName">Name</label>
+                <input type="text" id="stNewName" placeholder="e.g. Texas" autocomplete="off">
+                <label for="stNewTz">Time zone</label>
+                <select id="stNewTz"></select>
+                <button class="big-btn save-btn" onclick="createStateRow()">Add state</button>
+            </div>
+        </div>
+
         <div id="sectionUsers" class="section">
             <div class="form-section">
                 <h2 id="userFormTitle">Add Login</h2>
@@ -1664,6 +1683,18 @@
         var locationsData = {};
         var techniciansData = {};
         var currentUser = null;
+        // Built-in fallback lists. loadStateCodes() replaces them with the live
+        // contents of the states table (Admin -> States), so a state turned on
+        // there shows up here without a code change.
+        var STATE_CODES = ['AL', 'AR', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'MS', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV'];
+        var ALL_LOGIN_STATES = ['AL','AR','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
+        var STATE_NAMES = {};
+        var US_ZONES = [
+            ['America/New_York', 'Eastern'], ['America/Detroit', 'Eastern (Michigan)'], ['America/Chicago', 'Central'],
+            ['America/Denver', 'Mountain'], ['America/Phoenix', 'Mountain (Arizona, no DST)'],
+            ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii']
+        ];
+
         var currentState = '';
 
         // --- TOAST ---
@@ -1866,6 +1897,13 @@
                     switchTab('locations');
                 }
             }
+            var statesTabBtn = document.getElementById('tabStates');
+            if (statesTabBtn) {
+                statesTabBtn.style.display = (currentUser.role === 'admin') ? '' : 'none';
+                if (currentUser.role !== 'admin' && statesTabBtn.className === 'active') {
+                    switchTab('locations');
+                }
+            }
             var usersTabBtn = document.getElementById('tabUsers');
             if (usersTabBtn) {
                 usersTabBtn.style.display = (currentUser.role === 'admin') ? '' : 'none';
@@ -1886,7 +1924,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['AL', 'AR', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'MS', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV']
+                ? STATE_CODES.slice()
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');
@@ -1908,6 +1946,9 @@
             }
             sel.value = currentState;
             onStateChange();
+            // Pull the live list from the states table; if it differs from the
+            // built-in fallback list, the picker is rebuilt (see loadStateCodes).
+            loadStateCodes();
         }
 
         function onStateChange() {
@@ -1939,7 +1980,124 @@
         })();
 
         // --- TAB SWITCHING ---
-        var ALL_LOGIN_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
+        async function loadStateCodes() {
+            try {
+                var res = await fetch('/.netlify/functions/get-states');
+                var data = await res.json();
+                if (!res.ok || !data.states || !data.states.length) return;
+                var codes = data.states.map(function(r) { return r.code; });
+                data.states.forEach(function(r) { STATE_NAMES[r.code] = r.name; });
+                STATE_CODES = codes;
+                ALL_LOGIN_STATES = codes.slice();
+                // Rebuild the admin state picker, keeping the current choice.
+                if (currentUser && currentUser.role === 'admin') {
+                    var sel = document.getElementById('stateSelect');
+                    if (sel) {
+                        var keep = sel.value;
+                        sel.innerHTML = '';
+                        codes.forEach(function(c) {
+                            var o = document.createElement('option');
+                            o.value = c; o.textContent = c; sel.appendChild(o);
+                        });
+                        if (codes.indexOf(keep) >= 0) sel.value = keep;
+                    }
+                }
+                // Distance Matrix picker: add any live state it does not list yet.
+                var dm = document.getElementById('dm-state');
+                if (dm) {
+                    var have = Array.prototype.map.call(dm.options, function(o) { return o.value; });
+                    data.states.forEach(function(r) {
+                        if (have.indexOf(r.code) < 0) {
+                            var o = document.createElement('option');
+                            o.value = r.code; o.textContent = r.code + ' — ' + r.name; dm.appendChild(o);
+                        }
+                    });
+                }
+            } catch (e) { /* keep the built-in lists */ }
+        }
+
+        // ---- States tab (admin only) ----
+        async function manageStates(payload) {
+            var body = Object.assign(adminCreds(), payload);
+            var res = await fetch('/.netlify/functions/manage-states', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            var data = await res.json();
+            if (!res.ok || !data.ok) throw new Error((data && data.error) || 'Request failed');
+            return data;
+        }
+
+        function stateZoneOptions(current) {
+            var opts = US_ZONES.slice();
+            var known = opts.some(function(z) { return z[0] === current; });
+            if (current && !known) opts.push([current, current]);
+            return opts.map(function(z) {
+                return '<option value="' + z[0] + '"' + (z[0] === current ? ' selected' : '') + '>' + z[1] + '</option>';
+            }).join('');
+        }
+
+        async function loadStatesTab() {
+            var box = document.getElementById('statesList');
+            var newTz = document.getElementById('stNewTz');
+            if (newTz && !newTz.options.length) newTz.innerHTML = stateZoneOptions('America/Chicago');
+            try {
+                var data = await manageStates({ action: 'list' });
+                box.innerHTML = data.states.map(function(r) {
+                    var pre = (r.accepts_prefixes || []).join(', ');
+                    return '<div class="card" style="border-left-color:' + (r.active ? '#28a745' : '#999') + ';">'
+                        + '<div class="card-title">' + r.code + ' · ' + r.name + '</div>'
+                        + '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:6px 0;">'
+                        + '<label style="font-weight:600;margin:0;display:flex;gap:6px;align-items:center;"><input type="checkbox" ' + (r.active ? 'checked' : '') + ' onchange="saveStateField(\'' + r.code + '\', {active: this.checked})"> Active</label>'
+                        + '<label style="font-weight:600;margin:0;display:flex;gap:6px;align-items:center;"><input type="checkbox" ' + (r.saturday_coverage ? 'checked' : '') + ' onchange="saveStateField(\'' + r.code + '\', {saturday_coverage: this.checked})"> Saturday coverage</label>'
+                        + '<select style="margin:0;max-width:230px;" onchange="saveStateField(\'' + r.code + '\', {timezone: this.value})">' + stateZoneOptions(r.timezone) + '</select>'
+                        + '</div>'
+                        + (pre ? '<div class="card-detail">Also accepts codes: ' + pre + '</div>' : '')
+                        + '</div>';
+                }).join('');
+            } catch (e) {
+                box.innerHTML = '<div class="card-detail" style="color:#c0392b;">Could not load states: ' + e.message + '</div>';
+            }
+        }
+
+        async function saveStateField(code, patch) {
+            // Turning a state off, or taking away Saturday coverage, changes what
+            // people see and who is on call, so ask first. Cancel puts the toggle back.
+            var warn = '';
+            if (patch.active === false) {
+                warn = 'Turn ' + code + ' OFF?\n\nIt will disappear from the Admin state pickers and from Saturday on-call. History is kept and you can turn it back on here at any time.';
+            } else if (patch.saturday_coverage === false) {
+                warn = 'Remove Saturday coverage for ' + code + '?\n\nIt will drop off the Saturday on-call page and the calendar\'s on-call setup.';
+            }
+            if (warn && !window.confirm(warn)) { loadStatesTab(); return; }
+            try {
+                await manageStates(Object.assign({ action: 'update', code: code }, patch));
+                showToast(code + ' saved.', 'success');
+                await loadStatesTab();
+                loadStateCodes();
+            } catch (e) {
+                showToast('Not saved: ' + e.message, 'error');
+                loadStatesTab();
+            }
+        }
+
+        async function createStateRow() {
+            var code = document.getElementById('stNewCode').value.trim().toUpperCase();
+            var name = document.getElementById('stNewName').value.trim();
+            var tz = document.getElementById('stNewTz').value;
+            if (!/^[A-Z]{2}$/.test(code) || !name) { showToast('Enter a two-letter code and a name.', 'error'); return; }
+            try {
+                await manageStates({ action: 'create', code: code, name: name, timezone: tz });
+                document.getElementById('stNewCode').value = '';
+                document.getElementById('stNewName').value = '';
+                showToast(code + ' added and turned on.', 'success');
+                await loadStatesTab();
+                loadStateCodes();
+            } catch (e) {
+                showToast('Not added: ' + e.message, 'error');
+            }
+        }
 
         function adminCreds() {
             return { adminUsername: currentUser && currentUser.username, adminPin: sessionStorage.getItem('dispatchAdminPin') || '' };
@@ -2081,11 +2239,11 @@
         }
 
         function switchTab(tab) {
-            if ((tab === 'distancematrix' || tab === 'users') && (!currentUser || currentUser.role !== 'admin')) {
+            if ((tab === 'distancematrix' || tab === 'users' || tab === 'states') && (!currentUser || currentUser.role !== 'admin')) {
                 showToast('That tab is restricted to admin users.', 'error');
                 tab = 'locations';
             }
-            var tabs = ['locations', 'technicians', 'tools', 'documents', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users'];
+            var tabs = ['locations', 'technicians', 'tools', 'documents', 'notifications', 'distancematrix', 'closedtickets', 'repeatissues', 'issuetrends', 'unmatchedsites', 'restockschedule', 'mileagecheck', 'users', 'states'];
             for (var i = 0; i < tabs.length; i++) {
                 var t = tabs[i];
                 var secId = 'section' + t.charAt(0).toUpperCase() + t.slice(1);
@@ -2098,6 +2256,7 @@
             if (tab === 'unmatchedsites') loadUnmatchedSites();
             if (tab === 'restockschedule') loadRestockSchedule();
             if (tab === 'users') { renderUserStateChecks([]); loadManagedUsers(); }
+            if (tab === 'states') loadStatesTab();
         }
 
         // --- RESTOCK SCHEDULE ---
