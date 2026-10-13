@@ -40,6 +40,7 @@
 //                    from me.watch.options, expanded to states here
 //   push_unsubscribe { endpoint }   staff only
 //   push_test        { endpoint }   staff only; sends one test notification
+//   push_summary_test { endpoint }  staff only; sends a sample morning summary to this phone
 //   change_password  { current, next }
 
 const crypto = require('crypto');
@@ -802,6 +803,13 @@ async function doPush(supabase, ctx, action, body) {
   if (action === 'push_unsubscribe') {
     if (mine) await supabase.from('push_subscriptions').delete().eq('id', mine.id);
     return json(200, { ok: true });
+  }
+
+  if (action === 'push_summary_test') {
+    // Sends the morning summary to this phone now (ignores the clock).
+    if (!mine) return json(404, { ok: false, error: 'This phone is not subscribed yet.' });
+    const sr = await require('./lib/push-summary.js').sendSample(supabase, ctx.key, endpoint);
+    return json(sr.ok ? 200 : 502, sr.ok ? { ok: true } : { ok: false, error: sr.error || 'The sample could not be delivered.' });
   }
 
   // push_test
