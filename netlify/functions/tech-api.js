@@ -38,6 +38,7 @@
 //   push_status      { endpoint }   staff only; the choices saved for this phone
 //   push_subscribe   { subscription, selections }   staff only; selections are values
 //                    from me.watch.options, expanded to states here
+//   oncall           {}             staff only; next Saturday's on-call dispatcher and technicians
 //   push_unsubscribe { endpoint }   staff only
 //   push_test        { endpoint }   staff only; sends one test notification
 //   push_summary_test { endpoint }  staff only; sends a sample morning summary to this phone
@@ -741,6 +742,25 @@ async function doDispatchSummary(supabase, ctx, body) {
   return json(200, { ok: true, state: want, date, updatedAt, techs });
 }
 
+// ---------- Saturday on-call info (staff only, read only) ----------
+// The next Saturday (today, if it is Saturday, Eastern time): the on-call
+// dispatcher and the on-call technicians per state, from the same tables the
+// calendar and the Saturday on-call page use.
+async function doOnCall(supabase, ctx) {
+  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Not available for this account.' });
+  const ps = require('./lib/push-summary.js');
+  const lp = ps.localParts(new Date(), 'America/New_York');
+  const toSat = (6 - ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(lp.weekday) + 7) % 7;
+  const date = new Date(Date.UTC(Number(lp.iso.slice(0, 4)), Number(lp.iso.slice(5, 7)) - 1, Number(lp.iso.slice(8, 10)) + toSat))
+    .toISOString().slice(0, 10);
+  const c = await ps.saturdayContext(supabase, date);
+  const by = {};
+  c.techs.forEach((t) => { (by[t.state] = by[t.state] || []).push(t.name); });
+  const techs = Object.keys(by).sort().map((st) => ({ state: st, names: by[st] }));
+  const dn = c.dispatcher ? c.dispatcher.charAt(0).toUpperCase() + c.dispatcher.slice(1) : '';
+  return json(200, { ok: true, date, dispatcher: dn, techs });
+}
+
 // ---------- push alerts (staff only) ----------
 // A phone subscribes with the choices it picked on the Watchdog tab. Choices are
 // checked against the same options list the tab itself uses, so a dispatcher can
@@ -865,6 +885,7 @@ exports.handler = async (event) => {
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx, body);
     if (action === 'watchdog') return await doWatchdog(ctx, body);
+    if (action === 'oncall') return await doOnCall(supabase, ctx);
     if (action === 'dispatch_summary') return await doDispatchSummary(supabase, ctx, body);
     if (action.indexOf('push_') === 0) return await doPush(supabase, ctx, action, body);
     if (action === 'change_password') return await doChangePassword(supabase, ctx, body);
