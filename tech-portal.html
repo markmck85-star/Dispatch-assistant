@@ -89,6 +89,10 @@
   .wd.maintenance { border-left-color:var(--brand); }
   .wd.install, .wd.site_survey { border-left-color:var(--warn); }
   .wd .site { margin:4px 0; }
+  .summban { background:var(--card); border:1px solid var(--warn); border-left:5px solid var(--warn); border-radius:10px; padding:10px 12px; margin-bottom:10px; font-size:14px; }
+  .wdbar input[type=date] { flex:1; min-width:0; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  .stop { border-top:1px solid var(--line); padding:8px 0; font-size:15px; }
+  .stop:first-of-type { border-top:0; }
   .wd .desc { white-space:pre-wrap; font-size:14px; margin-top:6px; }
 </style>
 </head>
@@ -126,6 +130,7 @@
       <button id="tabSites" class="on">Locations</button>
       <button id="tabShip">My shipments</button>
       <button id="tabWatch" class="hidden">Watchdog</button>
+      <button id="tabSumm" class="hidden">Summary</button>
       <button id="tabAcct">Account</button>
     </div>
 
@@ -160,6 +165,17 @@
       <div id="watchList"></div>
     </section>
 
+    <section id="summPane" class="hidden">
+      <div class="summban"><b>App plan only. Not confirmed in Salesforce.</b><br>This is the plan in the dispatch app, either the default or as edited by a dispatcher. It may differ from what is assigned in Salesforce. Check Salesforce before relying on it.</div>
+      <div class="wdbar">
+        <select id="summState" aria-label="State"></select>
+        <input type="date" id="summDate" aria-label="Date">
+        <button id="summRefresh">Refresh</button>
+      </div>
+      <div class="muted" id="summStatus"></div>
+      <div id="summList"></div>
+    </section>
+
     <section id="acctPane" class="hidden">
       <div class="card">
         <h2>Change password</h2>
@@ -178,7 +194,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null, ME_WATCH_DATA = null;
+  var SUMM_SEQ = 0, TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null, ME_WATCH_DATA = null;
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -254,6 +270,16 @@
       ME_WATCH_DATA = w;
       alertsInit();
     }
+    // Summary tab: staff only. Only the states on this login are offered.
+    $('tabSumm').classList.toggle('hidden', KIND !== 's' || !sts.length);
+    if (KIND === 's') {
+      $('summState').innerHTML = sts.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+      if (STATE) $('summState').value = STATE;
+      var now = new Date();
+      $('summDate').value = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
+      $('summList').innerHTML = '';
+      $('summStatus').textContent = '';
+    }
     tab('Sites');
     loadSites();
     if (PENDING_WD && WATCH_OK) handleWdOpen(PENDING_WD.wo, PENDING_WD.st);
@@ -286,7 +312,7 @@
   };
 
   // ----- tabs -----
-  var PANES = { Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Acct: 'acctPane' };
+  var PANES = { Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
   function tab(name) {
     Object.keys(PANES).forEach(function (n) {
       $('tab' + n).classList.toggle('on', n === name);
@@ -294,9 +320,10 @@
     });
     // The portal state bar does not apply to the account or watchdog tabs
     // (the watchdog tab has its own selector).
-    $('stateBar').classList.toggle('hidden', name === 'Acct' || name === 'Watch' || $('stateSel').options.length < 2);
+    $('stateBar').classList.toggle('hidden', name === 'Acct' || name === 'Watch' || name === 'Summ' || $('stateSel').options.length < 2);
     if (name === 'Ship') loadShipments();
     if (name === 'Watch') loadWatch();
+    if (name === 'Summ') loadSumm();
   }
   $('stateSel').onchange = function () {
     STATE = $('stateSel').value;
@@ -313,6 +340,31 @@
   $('tabSites').onclick = function () { tab('Sites'); };
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabWatch').onclick = function () { tab('Watch'); };
+  $('tabSumm').onclick = function () { tab('Summ'); };
+  $('summRefresh').onclick = function () { loadSumm(); };
+  $('summState').onchange = function () { loadSumm(); };
+  $('summDate').onchange = function () { loadSumm(); };
+  async function loadSumm() {
+    if (KIND !== 's') return;
+    var seq = ++SUMM_SEQ;
+    $('summStatus').textContent = 'Loading...';
+    $('summList').innerHTML = '';
+    var j = await call('dispatch_summary', { state: $('summState').value, date: $('summDate').value });
+    if (seq !== SUMM_SEQ) return;
+    if (!j.ok) { $('summStatus').textContent = ''; $('summList').innerHTML = '<div class="err">' + esc(j.error || 'Could not load the summary.') + '</div>'; return; }
+    var techs = j.techs || [];
+    if (!techs.length) { $('summStatus').textContent = 'No stops planned in the app for this state and date.'; return; }
+    var total = techs.reduce(function (n, g) { return n + g.stops.length; }, 0);
+    $('summStatus').textContent = total + ' stop' + (total === 1 ? '' : 's') + ' in the app plan. Last changed in the app: ' + (fmtDT(j.updatedAt) || 'unknown') + '.';
+    $('summList').innerHTML = techs.map(function (g) {
+      return '<div class="card"><h2>' + esc(g.tech) + ' <span class="muted">(' + g.stops.length + ')</span></h2>' +
+        g.stops.map(function (s, i) {
+          return '<div class="stop"><b>' + (i + 1) + '. ' + esc(s.siteName) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
+            (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
+            (s.woNumber ? '<br><span class="tag">' + esc(s.woNumber) + '</span>' : '') + '</div>';
+        }).join('') + '</div>';
+    }).join('');
+  }
   $('tabAcct').onclick = function () { tab('Acct'); };
 
   // ----- search -----
