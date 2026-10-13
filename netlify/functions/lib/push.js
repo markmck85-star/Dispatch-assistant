@@ -173,4 +173,4 @@ async function notifyEndpoint(supabase, endpoint, message) {
   }
 }
 
-module.exports = { pushConfigured, subscriptionCovers, notifyState, notifyEndpoint };
+module.exports = { pushConfigured, subscriptionCovers, notifyState, notifyEndpoint, sendOne, getWebPush, activeStaffKeys };
