@@ -91,7 +91,8 @@
   .wd .site { margin:4px 0; }
   .summban { background:var(--card); border:1px solid var(--warn); border-left:5px solid var(--warn); border-radius:10px; padding:10px 12px; margin-bottom:10px; font-size:14px; }
   .wdbar input[type=date] { flex:1; min-width:0; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
-  .applink { display:inline-block; padding:9px 14px; font-size:15px; border:1px solid var(--brand); color:var(--brand); border-radius:8px; text-decoration:none; background:var(--card); }
+  .applink { display:block; width:100%; box-sizing:border-box; text-align:center; padding:13px 14px; font-size:16px; font-weight:600; border:0; color:#fff; background:var(--brand); border-radius:10px; text-decoration:none; box-shadow:0 2px 4px rgba(0,0,0,.25); }
+  .applink:active { filter:brightness(.9); box-shadow:none; }
   .stop { border-top:1px solid var(--line); padding:8px 0; font-size:15px; }
   .stop:first-of-type { border-top:0; }
   .wd .desc { white-space:pre-wrap; font-size:14px; margin-top:6px; }
@@ -162,6 +163,7 @@
         <select id="watchSel" aria-label="Watchdog state"></select>
         <button id="watchRefresh">Refresh</button>
       </div>
+      <div class="shiprow hidden" id="satLinkRow"><a class="applink" href="/saturday-oncall.html" target="_blank" rel="noopener">Open the Saturday on-call page &rarr;</a></div>
       <div class="muted" id="watchStatus"></div>
       <div id="watchList"></div>
     </section>
@@ -174,7 +176,7 @@
         <button id="summRefresh">Refresh</button>
       </div>
       <div class="shiprow"><div class="seg"><button id="summToday">Today</button><button id="summTomorrow">Tomorrow</button></div></div>
-      <div class="shiprow"><a id="summOpenApp" class="applink" href="/" target="_blank" rel="noopener">Open the dispatch app to change assignments</a></div>
+      <div class="shiprow"><a id="summOpenApp" class="applink" href="/" target="_blank" rel="noopener">Open the dispatch app to change assignments &rarr;</a></div>
       <div class="muted" id="summStatus"></div>
       <div id="summList"></div>
     </section>
@@ -556,6 +558,7 @@
     if (!WATCH_OK) return;
     var seq = ++WATCH_SEQ;
     var sel = $('watchSel').value;
+    $('satLinkRow').classList.toggle('hidden', sel !== 'SAT_ONCALL');
     $('watchStatus').textContent = 'Loading...';
     $('watchList').innerHTML = '';
     var j;
