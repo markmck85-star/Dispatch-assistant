@@ -86,6 +86,37 @@ function ticketUrl(wo, state) {
     (state ? '&st=' + encodeURIComponent(String(state).toUpperCase().slice(0, 2)) : '');
 }
 
+// A one-line note for alerts that arrive while the ticket's service clock is not
+// running (before 8:00 AM, after 5:00 PM, a Sunday, a holiday, or a Saturday in a
+// state without coverage), measured in the TICKET's local time. Dispatchers still
+// get the alert right away; the note tells them to hold the technician message.
+// Returns '' when the clock is running or anything cannot be worked out.
+async function serviceWindowNote(supabase, wo, ticketState, now) {
+  try {
+    const { serviceWindowStatus } = require('../slaCalculator.js');
+    let address = '';
+    let state = ticketState ? String(ticketState).toUpperCase() : '';
+    if (wo && supabase) {
+      const { data } = await supabase
+        .from('tickets').select('address, sites(state)')
+        .eq('wo_number', String(wo)).limit(1).maybeSingle();
+      if (data) {
+        address = data.address || '';
+        if (!state && data.sites && data.sites.state) state = String(data.sites.state).toUpperCase();
+      }
+    }
+    if (!state) return '';
+    const st = serviceWindowStatus(now || new Date(), address, state);
+    if (!st || st.open || !st.opensAt) return '';
+    const when = st.opensAt.toLocaleString('en-US', {
+      timeZone: st.tz, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+    });
+    return 'Service window not open at the site. Opens ' + when + '. Hold technician notification until then.';
+  } catch (e) {
+    return '';
+  }
+}
+
 // Notify every subscription that covers ticketState.
 // message = { title, body, tag?, wo?, url? }
 async function notifyState(supabase, ticketState, message) {
@@ -104,9 +135,11 @@ async function notifyState(supabase, ticketState, message) {
     if (activeKeys) rows = rows.filter((r) => activeKeys.has(r.account_key));
     if (!rows.length) return out;
     const webpush = getWebPush();
+    const windowNote = await serviceWindowNote(supabase, message.wo, ticketState);
+    const fullBody = windowNote ? (String(message.body || '') + '\n' + windowNote) : String(message.body || '');
     const payload = JSON.stringify({
       title: String(message.title || 'MCR Watchdog').slice(0, 80),
-      body: String(message.body || '').slice(0, 240),
+      body: fullBody.slice(0, 300),
       tag: message.tag || undefined,
       url: message.url || ticketUrl(message.wo, ticketState),
       wo: message.wo ? String(message.wo).slice(0, 40) : undefined,
