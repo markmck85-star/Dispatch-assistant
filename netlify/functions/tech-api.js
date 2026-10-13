@@ -676,6 +676,70 @@ async function doWatchdog(ctx, body) {
   return json(200, { ok: true, state: picked.value, label: picked.label, entries });
 }
 
+// ---------- dispatch summary (staff only, read only) ----------
+// Shows the app's own plan for a state and date (default or dispatcher-edited).
+// It is NOT a record of what is assigned in Salesforce. Technician logins get 403,
+// and the state must be one of the login's own states.
+async function doDispatchSummary(supabase, ctx, body) {
+  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Not available for this account.' });
+  const states = ctx.states || [];
+  const want = String((body && body.state) || '').trim().toUpperCase();
+  if (!want || !states.includes(want)) return json(403, { ok: false, error: 'Not available for this account.' });
+  const date = String((body && body.date) || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(400, { ok: false, error: 'Pick a date.' });
+
+  const { data: sites, error: sErr } = await supabase
+    .from('sites').select('id, site_code, name, address').eq('state', want).limit(5000);
+  if (sErr) return json(500, { ok: false, error: 'Could not load the summary.' });
+  const siteById = {};
+  (sites || []).forEach((s) => { siteById[s.id] = s; });
+
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('assignments')
+      .select('id, site_id, ticket_id, technician_id, sequence_order, status, updated_at')
+      .eq('dispatch_date', date).neq('status', 'removed')
+      .order('id').range(from, from + 999);
+    if (error) return json(500, { ok: false, error: 'Could not load the summary.' });
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const mine = rows.filter((a) => siteById[a.site_id]);
+
+  const techIds = [...new Set(mine.map((a) => a.technician_id).filter(Boolean))];
+  const ticketIds = [...new Set(mine.map((a) => a.ticket_id).filter(Boolean))];
+  const techName = {};
+  const ticketById = {};
+  if (techIds.length) {
+    const { data } = await supabase.from('technicians').select('id, name').in('id', techIds);
+    (data || []).forEach((t) => { techName[t.id] = t.name; });
+  }
+  if (ticketIds.length) {
+    const { data } = await supabase.from('tickets').select('id, wo_number, ticket_kind').in('id', ticketIds);
+    (data || []).forEach((t) => { ticketById[t.id] = t; });
+  }
+
+  let updatedAt = null;
+  const groups = {};
+  mine.forEach((a) => {
+    if (a.updated_at && (!updatedAt || a.updated_at > updatedAt)) updatedAt = a.updated_at;
+    const key = a.technician_id || 'none';
+    if (!groups[key]) groups[key] = { tech: a.technician_id ? (techName[a.technician_id] || 'Unknown') : 'Unassigned', stops: [] };
+    const s = siteById[a.site_id];
+    const t = ticketById[a.ticket_id] || {};
+    groups[key].stops.push({
+      seq: a.sequence_order == null ? 9999 : a.sequence_order,
+      siteCode: s.site_code, siteName: s.name, address: s.address,
+      woNumber: t.wo_number || null, ticketKind: t.ticket_kind || null,
+    });
+  });
+  const techs = Object.values(groups);
+  techs.forEach((g) => g.stops.sort((x, y) => x.seq - y.seq));
+  techs.sort((x, y) => (x.tech === 'Unassigned') - (y.tech === 'Unassigned') || x.tech.localeCompare(y.tech));
+  return json(200, { ok: true, state: want, date, updatedAt, techs });
+}
+
 // ---------- push alerts (staff only) ----------
 // A phone subscribes with the choices it picked on the Watchdog tab. Choices are
 // checked against the same options list the tab itself uses, so a dispatcher can
@@ -793,6 +857,7 @@ exports.handler = async (event) => {
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx, body);
     if (action === 'watchdog') return await doWatchdog(ctx, body);
+    if (action === 'dispatch_summary') return await doDispatchSummary(supabase, ctx, body);
     if (action.indexOf('push_') === 0) return await doPush(supabase, ctx, action, body);
     if (action === 'change_password') return await doChangePassword(supabase, ctx, body);
     return json(400, { ok: false, error: 'Unknown action.' });
