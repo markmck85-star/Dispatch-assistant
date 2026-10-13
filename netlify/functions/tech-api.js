@@ -29,6 +29,9 @@
 //   search           { q }
 //   site             { code }
 //   shipments        { state, technician_id? }   technician_id (staff only) filters to one
+//                    (v2026-10-13: first brings consumable_shipments up to date, see
+//                    refreshConsumableShipments below, so new Neumo emails show without
+//                    anyone opening the Inventory board)
 //                    employee from the returned techs list for that state
 //   watchdog         { state }   staff only; state is a value from me.watch.options
 //   push_config      {}   staff only; { configured, publicKey } for subscribing this phone
@@ -476,7 +479,55 @@ async function rosterForState(supabase, state) {
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
+// ---------- consumable shipment refresh (added 2026-10-13) ----------
+// consumable_shipments is only rebuilt from inbound_emails when
+// get-consumable-shipments.js runs, which used to happen only when someone
+// opened the Inventory board. That left new restock requests and warehouse
+// tracking replies invisible in this portal for hours. Now every Shipments
+// load makes sure the table is current first.
+//
+// Cost control (Netlify credits): per warm function instance,
+//   - never re-check more often than every 2 minutes;
+//   - between 2 and 10 minutes after the last rebuild, rebuild only if a new
+//     restock email has arrived since (one tiny query);
+//   - after 10 minutes, or on a cold start, rebuild regardless.
+// A rebuild is one short run of the same code the Inventory board uses. It can
+// never break this page: any error or a slow run (>7 s) is logged and skipped,
+// and the page just reads what is already saved.
+let lastShipSyncAt = 0;
+const SHIP_RECHECK_MS = 2 * 60 * 1000;
+const SHIP_MAX_AGE_MS = 10 * 60 * 1000;
+const SHIP_SYNC_TIMEOUT_MS = 7000;
+
+async function refreshConsumableShipments(supabase) {
+  try {
+    const now = Date.now();
+    const age = now - lastShipSyncAt;
+    if (lastShipSyncAt && age < SHIP_RECHECK_MS) return;
+    if (lastShipSyncAt && age < SHIP_MAX_AGE_MS) {
+      const { data, error } = await supabase
+        .from('inbound_emails')
+        .select('id')
+        .gte('received_at', new Date(lastShipSyncAt).toISOString())
+        .or('subject.ilike.%RESTOCK MCR%,subject.ilike.%DCO MCR%')
+        .limit(1);
+      if (!error && !(data && data.length)) return; // nothing new since last rebuild
+    }
+    lastShipSyncAt = now; // set first so concurrent requests on this instance do not pile on
+    const shipments = require('./get-consumable-shipments.js');
+    let timer;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve('timeout'), SHIP_SYNC_TIMEOUT_MS); });
+    const run = shipments.handler({ httpMethod: 'GET', queryStringParameters: {} });
+    const result = await Promise.race([run, timeout]);
+    clearTimeout(timer);
+    if (result === 'timeout') console.warn('consumable shipment refresh timed out; showing saved rows');
+  } catch (e) {
+    console.warn('consumable shipment refresh failed:', e && e.message);
+  }
+}
+
 async function doShipments(supabase, ctx, body) {
+  await refreshConsumableShipments(supabase);
   let roster = null;
   let rmaQ = supabase
     .from('rma_shipments')

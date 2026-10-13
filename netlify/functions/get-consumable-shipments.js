@@ -1,5 +1,5 @@
 /**
- * get-consumable-shipments.js  (v4, 2026-10-06)
+ * get-consumable-shipments.js  (v5, 2026-10-13)
  * SAVE AS: netlify/functions/get-consumable-shipments.js   (ONE file, no lib/ folder needed)
  *
  * Reads Neumo's consumable restock shipments out of inbound_emails and
@@ -23,6 +23,9 @@
  * held 18 instead of 24) and each item gets receivedUnits: the adjusted
  * number if there is one, otherwise the shipped units. Anything doing stock
  * math should use receivedUnits, never units.
+ *
+ * v5 (2026-10-13): technician match tolerates a small surname typo in the subject
+ *   (see matchTech); everything else unchanged from v4.
  *
  * v4 (2026-10-06): first real traffic from the shipments mailbox showed four
  * gaps, all fixed here:
@@ -316,7 +319,35 @@ function matchTech(nameRaw, roster) {
     const tw = words(t.name);
     return tw.includes(first) && tw.includes(last);
   });
-  return hits.length === 1 ? hits[0] : null;
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) return null;
+  // v5 (2026-10-13): Neumo sometimes misspells a surname in the subject
+  // ("MARK MCKLEVEY" for McKelvey), which left the shipment with no technician
+  // and invisible in the portal. Narrow typo tolerance: the FIRST name must match
+  // exactly, the surname must be within 2 letters (edit distance), at least 5
+  // letters long, and exactly ONE active technician may qualify. Any tie or doubt
+  // still returns null, so a wrong person is never picked.
+  if (w.length < 2 || last.length < 5) return null;
+  const typo = roster.filter((t) => {
+    const tw = words(t.name);
+    if (tw.length < 2 || tw[0] !== first) return false;
+    return editDistance(tw[tw.length - 1], last) <= 2;
+  });
+  return typo.length === 1 ? typo[0] : null;
+}
+
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 2) return 99;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
 }
 
 /** Merge parsed emails into shipments (one per tech + request date + state). */
