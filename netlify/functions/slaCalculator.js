@@ -209,7 +209,46 @@ function advanceToNextBusinessDayStart(cursor, timeZone, saturdayCovered) {
   return zonedTimeToUtc(parts.year, parts.month, parts.day, BUSINESS_START_HOUR, 0, timeZone);
 }
 
+// ---- Service-window status (used by push alerts) ---------------------------
+// Is the ticket's service clock running right now in the SITE'S local time
+// (8:00 AM - 5:00 PM on a business day)? If not, when does it next open?
+// Same business-day rules as computeSlaDeadline above. Never throws: returns
+// null if the time zone cannot be worked out.
+function serviceWindowStatus(now, address, state) {
+  try {
+    const st = String(state || '').toUpperCase();
+    const tz = resolveTimezone(address, st);
+    const saturdayCovered = !NO_SATURDAY_COVERAGE.has(st);
+    const parts = getZonedParts(now, tz);
+    const isBusinessDay = !isWeekendOrHoliday(parts, toIsoDate(parts), saturdayCovered);
+    if (isBusinessDay && parts.hour >= BUSINESS_START_HOUR && parts.hour < BUSINESS_END_HOUR) {
+      return { open: true, tz };
+    }
+    // Next opening: today at 8:00 if it is a business day and still before 8:00,
+    // otherwise 8:00 on the next business day.
+    let y = parts.year, m = parts.month, d = parts.day;
+    let first = !(isBusinessDay && parts.hour < BUSINESS_START_HOUR);
+    for (let i = 0; i < 14; i++) {
+      if (first) {
+        const next = new Date(Date.UTC(y, m - 1, d + 1, 12, 0, 0));
+        y = next.getUTCFullYear(); m = next.getUTCMonth() + 1; d = next.getUTCDate();
+      }
+      first = true;
+      const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' })
+        .format(new Date(Date.UTC(y, m - 1, d, 12, 0, 0)));
+      const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (!isWeekendOrHoliday({ weekday: wd }, iso, saturdayCovered)) {
+        return { open: false, tz, opensAt: zonedTimeToUtc(y, m, d, BUSINESS_START_HOUR, 0, tz) };
+      }
+    }
+    return { open: false, tz, opensAt: null };
+  } catch (e) {
+    return null;
+  }
+}
+
 module.exports = {
+  serviceWindowStatus,
   computeSlaDeadline,
   resolveTimezone,
   extractZip,
