@@ -155,6 +155,7 @@
         <div class="btns">
           <button id="alertOn" class="main">Turn on alerts</button>
           <button id="alertTest" class="hidden">Send test</button>
+          <button id="alertSumm" class="hidden">Send sample morning summary</button>
           <button id="alertOff" class="hidden">Turn off</button>
         </div>
         <div class="muted" id="alertMsg"></div>
@@ -692,6 +693,7 @@
       : 'Alerts on this phone: off';
     $('alertOn').textContent = subscribed ? 'Save choices' : 'Turn on alerts';
     $('alertTest').classList.toggle('hidden', !subscribed);
+    $('alertSumm').classList.toggle('hidden', !subscribed);
     $('alertOff').classList.toggle('hidden', !subscribed);
     alertOptions(subscribed ? (selections || []) : [(window.ME_WATCH || {}).home].filter(Boolean));
   }
@@ -751,6 +753,12 @@
     alertMsg('Sending test...');
     var j = await call('push_test', { endpoint: ALERT_SUB.endpoint });
     alertMsg(j.ok ? 'Test sent. You should see it in a few seconds.' : (j.error || 'The test failed.'), !j.ok);
+  };
+  $('alertSumm').onclick = async function () {
+    if (!ALERT_SUB) return;
+    alertMsg('Sending sample...');
+    var j = await call('push_summary_test', { endpoint: ALERT_SUB.endpoint });
+    alertMsg(j.ok ? 'Sample sent. You should see it in a few seconds.' : (j.error || 'The sample failed.'), !j.ok);
   };
   $('alertOff').onclick = async function () {
     if (!ALERT_SUB) return;

@@ -51,6 +51,12 @@
 [functions."reset-saturday-alerts"]
   schedule = "7 * * * *"
 
+# 2026-10-13: one morning summary push per dispatcher phone at 8:00 AM in the
+# dispatcher's own time zone (rules in lib/push-summary.js). Runs every 15 minutes;
+# a once-a-day record on push_subscriptions.last_summary_on prevents repeats.
+[functions."send-morning-summary"]
+  schedule = "*/15 * * * *"
+
 # 2026-10-12: keep every page of the platform out of search engines. A Google search
 # surfaced the admin page. Pages stay reachable by direct link; they just are not listed.
 # Do NOT add a robots.txt that blocks crawling: Google has to be able to load a page
