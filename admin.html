@@ -1886,7 +1886,7 @@
             var sel = document.getElementById('stateSelect');
             sel.innerHTML = '';
             var states = currentUser.role === 'admin'
-                ? ['AL', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'MS', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV']
+                ? ['AL', 'AR', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'MS', 'NC', 'NV', 'OH', 'OR', 'SC', 'WV']
                 : (currentUser.states || []);
             for (var i = 0; i < states.length; i++) {
                 var opt = document.createElement('option');
