@@ -699,7 +699,7 @@ async function doDispatchSummary(supabase, ctx, body) {
     const { data, error } = await supabase
       .from('assignments')
       .select('id, site_id, ticket_id, technician_id, sequence_order, status, updated_at')
-      .eq('dispatch_date', date).neq('status', 'removed')
+      .eq('dispatch_date', date).in('status', ['planned', 'notified'])
       .order('id').range(from, from + 999);
     if (error) return json(500, { ok: false, error: 'Could not load the summary.' });
     rows.push(...(data || []));
