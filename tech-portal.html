@@ -172,6 +172,7 @@
         <input type="date" id="summDate" aria-label="Date">
         <button id="summRefresh">Refresh</button>
       </div>
+      <div class="shiprow"><div class="seg"><button id="summToday">Today</button><button id="summTomorrow">Tomorrow</button></div></div>
       <div class="muted" id="summStatus"></div>
       <div id="summList"></div>
     </section>
@@ -275,8 +276,7 @@
     if (KIND === 's') {
       $('summState').innerHTML = sts.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
       if (STATE) $('summState').value = STATE;
-      var now = new Date();
-      $('summDate').value = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
+      $('summDate').value = summDay(0);
       $('summList').innerHTML = '';
       $('summStatus').textContent = '';
     }
@@ -344,7 +344,20 @@
   $('summRefresh').onclick = function () { loadSumm(); };
   $('summState').onchange = function () { loadSumm(); };
   $('summDate').onchange = function () { loadSumm(); };
+  function summDay(offset) {
+    var d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function summMarks() {
+    var v = $('summDate').value;
+    $('summToday').classList.toggle('on', v === summDay(0));
+    $('summTomorrow').classList.toggle('on', v === summDay(1));
+  }
+  $('summToday').onclick = function () { $('summDate').value = summDay(0); loadSumm(); };
+  $('summTomorrow').onclick = function () { $('summDate').value = summDay(1); loadSumm(); };
   async function loadSumm() {
+    summMarks();
     if (KIND !== 's') return;
     var seq = ++SUMM_SEQ;
     $('summStatus').textContent = 'Loading...';
