@@ -96,6 +96,7 @@
   .stop { border-top:1px solid var(--line); padding:8px 0; font-size:15px; }
   .stop:first-of-type { border-top:0; }
   .wd .desc { white-space:pre-wrap; font-size:14px; margin-top:6px; }
+  .msgbody { white-space:pre-wrap; font-size:16px; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -882,14 +883,21 @@
     $('todayStatus').textContent = j.stops && j.stops.length ? (j.stops.length + ' open stop' + (j.stops.length === 1 ? '' : 's')) : 'No open stops for this date (completed stops are hidden).';
     if (!j.stops || !j.stops.length) return;
     var html = '';
+    // When the dispatcher published a message, show it exactly as the
+    // dispatch app's Messages view wrote it, with a short action list below.
+    var compact = !!j.message;
+    if (compact) {
+      var msgText = String(j.message).replace(/\s*Please acknowledge receipt\.?\s*$/i, '');
+      html += '<div class="card"><div class="msgbody">' + esc(msgText) + '</div></div>';
+    }
     j.stops.forEach(function (s, i) {
       var kind = s.ticketKind || '';
       var cls = kind === 'trouble' ? 'trouble' : (kind === 'maintenance' || kind === 'restock' ? 'maintenance' : '');
       html += '<div class="wd ' + cls + '" data-id="' + esc(s.id || '') + '">' +
         '<div><b>' + (i + 1) + '. ' + esc(s.siteName || s.siteCode) + '</b></div>' +
         '<div class="muted">' + esc(s.siteCode) + (s.address ? ' · ' + esc(s.address) : '') + '</div>' +
-        (s.woNumber ? '<div>WO ' + esc(s.woNumber) + (kind ? ' · ' + esc(kind) : '') + '</div>' : '') +
-        (s.note ? '<div class="desc">' + esc(s.note) + '</div>' : '') +
+        (!compact && s.woNumber ? '<div>WO ' + esc(s.woNumber) + (kind ? ' · ' + esc(kind) : '') + '</div>' : '') +
+        (!compact && s.note ? '<div class="desc">' + esc(s.note) + '</div>' : '') +
         (s.address ? '<div style="margin-top:6px"><a target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(s.address) + '">Open in Maps</a></div>' : '') +
         (s.id ? '<div style="margin-top:8px"><button type="button" class="done-btn" data-id="' + esc(s.id) + '">Done</button></div>' : '') +
         '</div>';

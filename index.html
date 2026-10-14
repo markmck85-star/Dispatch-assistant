@@ -7155,6 +7155,22 @@ function distanceMatrixStatus(state) {
         }
 
         
+        // Reads the message boxes on screen (so dispatcher edits are kept).
+        function collectMessagesFromView() {
+            const out = {};
+            try {
+                document.querySelectorAll('#results .tech-card').forEach(function (card) {
+                    const hd = card.querySelector('.tech-header');
+                    const mb = card.querySelector('.tech-message');
+                    if (!hd || !mb) return;
+                    const name = hd.textContent.replace('📱', '').trim();
+                    const txt = (mb.innerText || '').trim();
+                    if (name && txt) out[name] = txt;
+                });
+            } catch (e) { console.error(e); }
+            return out;
+        }
+
         async function publishFromMessages() {
             const dateEl = document.getElementById('dispatchDate');
             const stateEl = document.getElementById('stateSelector');
@@ -7165,7 +7181,7 @@ function distanceMatrixStatus(state) {
                 const r = await fetch('/.netlify/functions/tech-api', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true })
+                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true, messages: collectMessagesFromView() })
                 });
                 const j = await r.json();
                 if (j.ok) {
@@ -7181,13 +7197,15 @@ function distanceMatrixStatus(state) {
             }
         }
 
-        function generateFinalMessages() {
+        function generateFinalMessages(opts) {
+            const returnOnly = !!(opts && opts.returnOnly);
+            const messagesByTech = {};
             const resultsDiv = document.getElementById('results');
             const dateInput = document.getElementById('dispatchDate');
             // The messages view replaces the board; the map lives outside
             // #results so it has to be hidden explicitly. The "Back" button
             // calls renderReviewBoard(), which brings it back.
-            hideDispatchMapPanel();
+            if (!returnOnly) hideDispatchMapPanel();
             
             let dispatchDate = new Date();
             if (dateInput && dateInput.value) {
@@ -7347,6 +7365,7 @@ function distanceMatrixStatus(state) {
                 if (window.dcoEnabled) msg += `\n🔔 DCO required — please confirm dispatch acknowledged per Gina.`;
                 msg += `\nPlease acknowledge receipt.`;
                 
+                messagesByTech[tech] = msg;
                 html += `<div class="tech-card">
                             <div class="tech-header">📱 ${tech}</div>
                             <div class="tech-message" id="msg-${tech.replace(/\s+/g, '-')}" contenteditable="true">${msg}</div>
@@ -7356,6 +7375,7 @@ function distanceMatrixStatus(state) {
                             </div>
                          </div>`;
             });
+            if (returnOnly) return messagesByTech;
             resultsDiv.innerHTML = html;
             resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -10405,7 +10425,7 @@ function distanceMatrixStatus(state) {
                 await fetch('/.netlify/functions/tech-api', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true })
+                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true, messages: (function () { try { return generateFinalMessages({ returnOnly: true }) || {}; } catch (e) { return {}; } })() })
                 });
                 hidePushToast();
                 // brief confirmation
