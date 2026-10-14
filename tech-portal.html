@@ -933,6 +933,19 @@
   }
   $('todayDate').value = todayIso(0);
   $('todayRefresh').onclick = function () { loadToday(); };
+  // Auto-refresh: only while the Today tab is on screen and the page is visible.
+  // Refreshes when the tech returns to the app, and every 3 minutes while open.
+  var lastTodayLoad = Date.now();
+  var _lt = loadToday;
+  loadToday = async function () { lastTodayLoad = Date.now(); return _lt.apply(this, arguments); };
+  function todayShowing() { return !document.hidden && TOKEN_OK() && !$('todayPane').classList.contains('hidden'); }
+  function TOKEN_OK() { return !!TOKEN; }
+  document.addEventListener('visibilitychange', function () {
+    if (todayShowing() && Date.now() - lastTodayLoad > 20000) loadToday();
+  });
+  setInterval(function () {
+    if (todayShowing() && Date.now() - lastTodayLoad > 170000) loadToday();
+  }, 60000);
   $('todayDate').onchange = function () { loadToday(); };
   // Load today when tab is selected
   var origTab = tab;
