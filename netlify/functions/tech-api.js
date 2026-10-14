@@ -733,6 +733,22 @@ async function doCompleteStop(supabase, ctx, body) {
   return json(200, { ok: true });
 }
 
+// A dispatcher/admin who also works stops has a technicians row. The staff
+// login only carries a display name ("Mark"), so match it to a technician:
+// exact name first, then a first name that matches exactly one active
+// non-contractor technician. No match means no stops of their own.
+async function staffTechId(supabase, ctx) {
+  const nm = String(ctx.name || '').trim().toLowerCase();
+  if (!nm) return null;
+  const { data } = await supabase.from('technicians').select('id, name, active, is_contractor').limit(2000);
+  const list = (data || []).filter((t) => t.active !== false && t.is_contractor !== true && t.name);
+  const exact = list.filter((t) => String(t.name).trim().toLowerCase() === nm);
+  if (exact.length === 1) return exact[0].id;
+  const first = nm.split(/\s+/)[0];
+  const byFirst = list.filter((t) => String(t.name).trim().toLowerCase().split(/\s+/)[0] === first);
+  return byFirst.length === 1 ? byFirst[0].id : null;
+}
+
 // ---------- my stops (tech or staff, own assignments only) ----------
 async function doMyStops(supabase, ctx, body) {
   const date = String((body && body.date) || '').trim();
@@ -748,7 +764,7 @@ async function doMyStops(supabase, ctx, body) {
     .eq('dispatch_date', date)
     .in('state', normStates)
     .limit(1);
-  if (!pub || !pub.length) return json(200, { ok: true, date, stops: [], published: false });
+  if (ctx.kind !== 's' && (!pub || !pub.length)) return json(200, { ok: true, date, stops: [], published: false });
 
   // Resolve technician id for this login
   let techId = null;
@@ -757,8 +773,10 @@ async function doMyStops(supabase, ctx, body) {
   } else if (body && body.tech) {
     const { data } = await supabase.from('technicians').select('id').ilike('name', body.tech).limit(1);
     techId = data && data[0] ? data[0].id : null;
+  } else {
+    techId = await staffTechId(supabase, ctx);
   }
-  if (!techId) return json(200, { ok: true, date, stops: [], published: true });
+  if (!techId) return json(200, { ok: true, date, stops: [], published: true, noTech: ctx.kind === 's' });
 
   const { data: assigns, error } = await supabase
     .from('assignments')
