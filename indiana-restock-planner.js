@@ -180,9 +180,19 @@
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     const union = (x, y) => { const rx = find(x), ry = find(y); if (rx !== ry) parent[ry] = rx; };
     codes.forEach(c => { parent[c] = c; });
+    // Kiosks at one address share the same geocoded point. A point shared by many
+    // sites is a city-centre fallback rather than a real address, so it is ignored.
+    const coordKey = (c) => {
+      const l = LOCATIONS[c] || {};
+      return (isFinite(Number(l.lat)) && isFinite(Number(l.lng)) && l.lat != null && l.lng != null)
+        ? 'c:' + Number(l.lat).toFixed(4) + ',' + Number(l.lng).toFixed(4) : '';
+    };
+    const coordCount = {};
+    codes.forEach(c => { const k = coordKey(c); if (k) coordCount[k] = (coordCount[k] || 0) + 1; });
     const byKey = {};
     codes.forEach(c => {
-      [addrKey(c) ? 'a:' + addrKey(c) : '', baseName(c) ? 'n:' + baseName(c) : ''].forEach(k => {
+      const ck = coordKey(c);
+      [addrKey(c) ? 'a:' + addrKey(c) : '', baseName(c) ? 'n:' + baseName(c) : '', (ck && coordCount[ck] <= 6) ? ck : ''].forEach(k => {
         if (!k) return;
         if (byKey[k]) union(byKey[k], c); else byKey[k] = c;
       });
