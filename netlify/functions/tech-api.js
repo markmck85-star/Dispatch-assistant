@@ -991,6 +991,10 @@ exports.handler = async (event) => {
   try {
     if (action === 'login') return await doLogin(supabase, body);
 
+    // Allow publish actions from the dispatch app without a portal token
+    if (action === 'publish_stops' || action === 'publish_status') {
+      return await (action === 'publish_stops' ? doPublishStops(supabase, { kind: 's', states: ['GA','NC','SC','IN','AL','OH','MI','CO','NV'], role: 'admin' }, body) : doPublishStatus(supabase, {}, body));
+    }
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
 
