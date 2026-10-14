@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "MCR Dispatch",
+  "short_name": "MCR Dispatch",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1e1e22",
+  "theme_color": "#1e1e22",
+  "icons": [
+    {
+      "src": "/dispatch-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/dispatch-app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
