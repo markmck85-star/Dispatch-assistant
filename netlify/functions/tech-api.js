@@ -894,8 +894,34 @@ async function doDispatchSummary(supabase, ctx, body) {
     (data || []).forEach((t) => { techName[t.id] = t.name; });
   }
   if (ticketIds.length) {
-    const { data } = await supabase.from('tickets').select('id, wo_number, ticket_kind').in('id', ticketIds);
+    const { data } = await supabase.from('tickets').select('id, wo_number, ticket_kind, sla_ends_at, due_at, out_of_service').in('id', ticketIds);
     (data || []).forEach((t) => { ticketById[t.id] = t; });
+  }
+
+  // Open trouble tickets in this state that nobody has been assigned yet.
+  // They have no assignment row, so the plan above cannot list them.
+  const openTroubles = [];
+  {
+    const { data: ot } = await supabase
+      .from('tickets')
+      .select('id, wo_number, site_id, sla_ends_at, due_at, out_of_service, issue_category')
+      .eq('ticket_kind', 'trouble').eq('status', 'open').is('manually_resolved_at', null).limit(500);
+    const cand = (ot || []).filter((t) => siteById[t.site_id]);
+    if (cand.length) {
+      const { data: pa } = await supabase
+        .from('assignments').select('ticket_id')
+        .in('ticket_id', cand.map((t) => t.id)).in('status', ['planned', 'notified']);
+      const taken = new Set((pa || []).map((x) => x.ticket_id));
+      cand.filter((t) => !taken.has(t.id)).forEach((t) => {
+        const s = siteById[t.site_id];
+        openTroubles.push({
+          siteCode: s.site_code, siteName: s.name, address: s.address,
+          woNumber: t.wo_number || null, due: t.sla_ends_at || t.due_at || null,
+          outOfService: !!t.out_of_service, category: t.issue_category || null,
+        });
+      });
+      openTroubles.sort((x, y) => String(x.due || '9').localeCompare(String(y.due || '9')));
+    }
   }
 
   let updatedAt = null;
@@ -910,12 +936,13 @@ async function doDispatchSummary(supabase, ctx, body) {
       seq: a.sequence_order == null ? 9999 : a.sequence_order,
       siteCode: s.site_code, siteName: s.name, address: s.address,
       woNumber: t.wo_number || null, ticketKind: t.ticket_kind || null,
+      due: t.ticket_kind === 'trouble' ? (t.sla_ends_at || t.due_at || null) : null,
     });
   });
   const techs = Object.values(groups);
   techs.forEach((g) => g.stops.sort((x, y) => x.seq - y.seq));
   techs.sort((x, y) => (x.tech === 'Unassigned') - (y.tech === 'Unassigned') || x.tech.localeCompare(y.tech));
-  return json(200, { ok: true, state: want, date, updatedAt, techs });
+  return json(200, { ok: true, state: want, date, updatedAt, techs, openTroubles });
 }
 
 // ---------- Saturday on-call info (staff only, read only) ----------
