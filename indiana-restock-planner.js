@@ -2,26 +2,26 @@
  * indiana-restock-planner.js
  *
  * Special planner for Indiana Wednesday bulk restock lists.
- * These lists contain restocks that must be divided between Thursday and Friday
- * (Restock By dates already tag the day). Other states treat the daily list
- * as primarily next-day work.
+ * The list holds Indiana restocks dated for the coming Thursday and Friday
+ * ("Restock By Day"), and it is pasted together with every other state's rows.
  *
- * Detection: CURRENT_STATE === 'IN' and the parsed form counts contain
- * Restock By dates that fall on the coming Thursday and/or Friday.
+ * Rules (from the Indiana dispatcher / Neumo):
+ *   - Only sites that belong to the Indiana board are planned. Rows for other
+ *     states in the same paste are ignored.
+ *   - A Thursday-dated stop is due Thursday (Neumo is worried about running
+ *     out), so it is planned for Thursday.
+ *   - A Friday-dated stop can be caught early. If it is close to a Thursday
+ *     stop the planner offers to do it Thursday with that technician
+ *     ("Do Thursday" box, on by default). Otherwise it stays on Friday.
  *
- * Suggestion strategy (advisory only):
+ * Suggestion strategy (advisory only, nothing is written until Apply):
  *   1. Prefer the site's primaryTech / defaultTech from LOCATIONS.
  *   2. Blend with historical restock technician for that site (when available).
- *   3. Balance stop counts across available technicians for that day,
- *      preferring techs who are not already heavily loaded.
+ *   3. Balance stop counts across available technicians for that day.
  *   4. Respect availability for the target date.
  *
- * Applying a plan calls the existing syncAssignmentToSupabase with
- * dispatchDateOverride so the suggestions land on the correct future board
- * without overriding the Salesforce Gantt.
- *
- * Loaded from index.html. Call window.checkIndianaRestockPlanner() after
- * processDispatch finishes parsing form counts, or wire a button.
+ * Applying a plan calls syncAssignmentToSupabase with dispatchDateOverride so
+ * the stops land on the correct day's board.
  */
 
 (function () {
@@ -49,7 +49,9 @@
     if (!formCounts || typeof formCounts !== 'object') return false;
 
     const dates = new Set();
-    Object.values(formCounts).forEach(fc => {
+    Object.entries(formCounts).forEach(([code, fcx]) => {
+      const fc = fcx;
+      if (!inBoard(code)) return; // other states in the same paste
       if (fc && fc.restockBy) {
         const iso = isoFromMDY(fc.restockBy);
         if (iso) dates.add(iso);
@@ -74,14 +76,32 @@
     return hasThu || hasFri;
   }
 
+  // Tunables for pulling a Friday stop forward to Thursday.
+  const PULL_FORWARD_MILES = 25;   // straight-line miles from one of that tech's Thursday stops
+  const MAX_PULL_PER_TECH = 3;     // extra Friday stops one tech takes on Thursday
+
+  // A row belongs to this planner only if it is an Indiana site. The paste holds
+  // every state's rows, and the board can also hold sites from other states.
+  function inBoard(code) {
+    if (typeof LOCATIONS === 'undefined') return false;
+    const loc = LOCATIONS[code];
+    if (!loc) return false;
+    if (loc.state) return String(loc.state).toUpperCase() === 'IN';
+    return /^IN\d/i.test(String(code));
+  }
+
   function groupByRestockDay(formCounts) {
     const groups = {}; // iso -> [{code, fc, iso}]
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     Object.entries(formCounts || {}).forEach(([code, fc]) => {
       if (!fc || !fc.restockBy) return;
+      if (!inBoard(code)) return; // other states in the same paste
       const iso = isoFromMDY(fc.restockBy);
       if (!iso) return;
       const dow = dayOfWeek(iso);
       if (dow !== 4 && dow !== 5) return; // only Thu/Fri for this planner
+      if (new Date(iso + 'T12:00:00') < today) return;
       if (!groups[iso]) groups[iso] = [];
       groups[iso].push({ code, fc, iso });
     });
@@ -104,150 +124,206 @@
     const loc = (typeof LOCATIONS !== 'undefined' && LOCATIONS[item.code]) || {};
     const primary = loc.primaryTech || loc.defaultTech;
     const hist = historicalPrefs[item.code];
-
-    // Score candidates
-    const candidates = availableTechs.slice();
     let best = null;
     let bestScore = -Infinity;
-
-    candidates.forEach(tech => {
+    availableTechs.forEach(tech => {
       let score = 0;
       if (tech === primary) score += 10;
       if (hist && tech === hist) score += 6;
-      // Prefer lighter load
-      const load = loadByTech[tech] || 0;
-      score -= load * 1.5;
-      if (score > bestScore) {
-        bestScore = score;
-        best = tech;
-      }
+      score -= (loadByTech[tech] || 0) * 1.5;
+      if (score > bestScore) { bestScore = score; best = tech; }
     });
+    return best || (availableTechs[0] || null);
+  }
 
-    return best || (candidates[0] || null);
+  function availableFor(iso) {
+    if (typeof TECHS === 'undefined') return [];
+    let all = Object.keys(TECHS);
+    if (typeof getUnavailableTechsForDate === 'function') {
+      const unavail = getUnavailableTechsForDate(iso);
+      all = all.filter(t => !unavail.has(t));
+    }
+    return all;
+  }
+
+  function miles(a, b) {
+    if (!a || !b) return null;
+    const la1 = Number(a.lat), lo1 = Number(a.lng), la2 = Number(b.lat), lo2 = Number(b.lng);
+    if (![la1, lo1, la2, lo2].every(isFinite)) return null;
+    const r = (d) => d * Math.PI / 180;
+    const h = Math.sin(r(la2 - la1) / 2) ** 2 + Math.cos(r(la1)) * Math.cos(r(la2)) * Math.sin(r(lo2 - lo1) / 2) ** 2;
+    return 3958.8 * 2 * Math.asin(Math.sqrt(h));
+  }
+
+  function cleanName(code) {
+    const n = (LOCATIONS[code] || {}).name || code;
+    return String(n).replace(new RegExp('\\s*[-\u2013\u2014]?\\s*' + code + '\\b.*$'), '').trim() || code;
   }
 
   async function buildPlan(formCounts) {
     const groups = groupByRestockDay(formCounts);
     const historicalPrefs = await fetchHistoricalPrefs();
-    const plan = []; // { iso, dayLabel, assignments: [{code, tech, name}] }
+    const isos = Object.keys(groups).sort();
+    const thuIso = isos.find(i => dayOfWeek(i) === 4) || null;
+    const friIso = isos.find(i => dayOfWeek(i) === 5) || null;
+    const days = {};
+    const mk = (iso) => ({ iso, dayLabel: dayOfWeek(iso) === 4 ? 'Thursday' : 'Friday', assignments: [] });
 
-    for (const iso of Object.keys(groups).sort()) {
-      const items = groups[iso];
-      const dow = dayOfWeek(iso);
-      const dayLabel = dow === 4 ? 'Thursday' : dow === 5 ? 'Friday' : iso;
-
-      // Availability for this future date
-      let available = [];
-      if (typeof getUnavailableTechsForDate === 'function' && typeof TECHS !== 'undefined') {
-        const unavail = getUnavailableTechsForDate(iso);
-        available = Object.keys(TECHS).filter(t => !unavail.has(t));
-      } else if (typeof TECHS !== 'undefined') {
-        available = Object.keys(TECHS);
-      }
-
-      const loadByTech = {};
-      const assignments = [];
-
-      items.forEach(item => {
-        const tech = suggestTech(item, available, loadByTech, historicalPrefs);
-        if (tech) {
-          loadByTech[tech] = (loadByTech[tech] || 0) + 1;
-          const name = (LOCATIONS[item.code] || {}).name || item.code;
-          assignments.push({ code: item.code, tech, name, restockBy: item.fc.restockBy });
-        }
+    // Thursday: fixed day, due Thursday.
+    if (thuIso) {
+      const d = days[thuIso] = mk(thuIso);
+      const avail = availableFor(thuIso);
+      const load = {};
+      groups[thuIso].forEach(item => {
+        const tech = suggestTech(item, avail, load, historicalPrefs);
+        if (!tech) return;
+        load[tech] = (load[tech] || 0) + 1;
+        d.assignments.push({ code: item.code, tech, name: cleanName(item.code), restockBy: item.fc.restockBy });
       });
-
-      plan.push({ iso, dayLabel, assignments });
     }
 
-    return plan;
+    // Friday: pull forward to Thursday when near a Thursday stop.
+    if (friIso) {
+      const d = days[friIso] = mk(friIso);
+      const thuAvail = thuIso ? availableFor(thuIso) : [];
+      const thuStops = thuIso ? days[thuIso].assignments : [];
+      const pulled = {};
+      const rest = [];
+      groups[friIso].forEach(item => {
+        let near = null;
+        if (thuIso) {
+          const loc = LOCATIONS[item.code];
+          thuStops.forEach(t => {
+            if (thuAvail.indexOf(t.tech) === -1) return;
+            const m = miles(loc, LOCATIONS[t.code]);
+            if (m !== null && m <= PULL_FORWARD_MILES && (!near || m < near.miles)) near = { tech: t.tech, code: t.code, miles: m };
+          });
+        }
+        if (near && (pulled[near.tech] || 0) < MAX_PULL_PER_TECH) {
+          pulled[near.tech] = (pulled[near.tech] || 0) + 1;
+          item._near = near;
+        }
+        rest.push(item);
+      });
+      const avail = availableFor(friIso);
+      const load = {};
+      // Stops that stay on Friday are balanced first; pulled ones are only an option.
+      rest.filter(i => !i._near).forEach(item => {
+        const tech = suggestTech(item, avail, load, historicalPrefs);
+        if (!tech) return;
+        load[tech] = (load[tech] || 0) + 1;
+        item._friTech = tech;
+      });
+      rest.forEach(item => {
+        const friTech = item._friTech || suggestTech(item, avail, load, historicalPrefs);
+        const a = { code: item.code, tech: friTech, name: cleanName(item.code), restockBy: item.fc.restockBy, friTech };
+        if (item._near) {
+          a.pullTech = item._near.tech;
+          a.pullNote = Math.round(item._near.miles) + ' mi from ' + item._near.code + ' (' + item._near.tech + ' Thu)';
+          a.tech = item._near.tech;
+          a.pull = true;
+        }
+        d.assignments.push(a);
+      });
+    }
+
+    return Object.keys(days).sort().map(k => days[k]);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function techSelect(selected) {
+    const names = typeof TECHS !== 'undefined' ? Object.keys(TECHS) : [];
+    if (selected && names.indexOf(selected) === -1) names.unshift(selected);
+    return '<select class="in-tech" style="background:#2a2a3e;color:#eee;border:1px solid #555;border-radius:4px;padding:3px;max-width:150px;">' +
+      names.map(n => '<option value="' + esc(n) + '"' + (n === selected ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>';
   }
 
   function renderPlanner(plan) {
     let existing = document.getElementById(PLANNER_ID);
     if (existing) existing.remove();
-
     if (!plan || plan.length === 0) return;
 
+    const thu = plan.find(d => d.dayLabel === 'Thursday');
     const container = document.createElement('div');
     container.id = PLANNER_ID;
     container.style.cssText = 'margin:12px 0; padding:14px; background:#1a1a2e; border:1px solid #444; border-radius:8px; color:#eee;';
 
-    let html = `<div style="font-weight:bold; font-size:16px; margin-bottom:8px; color:#ffa500;">Indiana Restock Planner (Wed list → Thu / Fri)</div>`;
-    html += `<div style="font-size:13px; color:#aaa; margin-bottom:12px;">Suggested technician assignments for the restocks on this Wednesday list. Review, adjust if needed, then apply to the respective boards. Nothing is written until you click Apply.</div>`;
+    let html = '<div style="font-weight:bold; font-size:16px; margin-bottom:8px; color:#ffa500;">Indiana Restock Planner (Wed list \u2192 Thu / Fri)</div>';
+    html += '<div style="font-size:13px; color:#aaa; margin-bottom:12px;">Only Indiana sites are shown. Thursday stops are due Thursday. A Friday stop close to a Thursday stop can be caught Thursday: leave "Do Thursday" checked to move it, or uncheck it to keep it on Friday. Change a technician with the dropdown. Nothing is written until you click Apply.</div>';
 
     plan.forEach(day => {
-      html += `<div style="margin-bottom:14px;">`;
-      html += `<div style="font-weight:600; color:#7edb8e; margin-bottom:4px;">${day.dayLabel} (${day.iso}) — ${day.assignments.length} stop${day.assignments.length === 1 ? '' : 's'}</div>`;
-      html += `<table style="width:100%; border-collapse:collapse; font-size:13px;">`;
-      html += `<tr style="background:#2a2a3e;"><th style="text-align:left; padding:4px;">Site</th><th style="text-align:left; padding:4px;">Suggested Tech</th></tr>`;
+      html += '<div style="margin-bottom:14px;">';
+      html += '<div class="in-day-title" data-iso="' + day.iso + '" style="font-weight:600; color:#7edb8e; margin-bottom:4px;">' + day.dayLabel + ' (' + day.iso + ')</div>';
+      html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+      html += '<tr style="background:#2a2a3e;"><th style="text-align:left; padding:4px;">Site</th><th style="text-align:left; padding:4px;">Tech</th>' + (day.dayLabel === 'Friday' && thu ? '<th style="text-align:left; padding:4px;">Do Thursday</th>' : '') + '</tr>';
       day.assignments.forEach(a => {
-        html += `<tr><td style="padding:3px 4px;">${a.code} ${a.name !== a.code ? '— ' + a.name : ''}</td><td style="padding:3px 4px;">${a.tech}</td></tr>`;
+        html += '<tr class="in-row" data-code="' + esc(a.code) + '" data-iso="' + day.iso + '"' +
+          (a.pullTech ? ' data-fri-tech="' + esc(a.friTech || '') + '" data-pull-tech="' + esc(a.pullTech) + '"' : '') + '>' +
+          '<td style="padding:3px 4px;">' + esc(a.code) + (a.name && a.name !== a.code ? ' \u2014 ' + esc(a.name) : '') + '</td>' +
+          '<td style="padding:3px 4px;">' + techSelect(a.tech) + '</td>';
+        if (day.dayLabel === 'Friday' && thu) {
+          html += '<td style="padding:3px 4px;">' + (a.pullTech
+            ? '<label><input type="checkbox" class="in-pull"' + (a.pull ? ' checked' : '') + '> ' + esc(a.pullNote) + '</label>'
+            : '<span style="color:#777;">no Thursday stop nearby</span>') + '</td>';
+        }
+        html += '</tr>';
       });
-      html += `</table>`;
-      html += `<button data-iso="${day.iso}" class="in-apply-day" style="margin-top:6px; padding:6px 12px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer;">Apply ${day.dayLabel} plan</button>`;
-      html += `</div>`;
+      html += '</table></div>';
     });
 
-    html += `<button id="in-apply-all" style="padding:8px 16px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Apply all suggested plans</button>`;
-    html += `<button id="in-dismiss" style="margin-left:8px; padding:8px 16px; background:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;">Dismiss</button>`;
-
+    html += '<button id="in-apply-all" style="padding:8px 16px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Apply plan</button>';
+    html += '<button id="in-dismiss" style="margin-left:8px; padding:8px 16px; background:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer;">Dismiss</button>';
     container.innerHTML = html;
 
-    // Insert near the results area if possible
     const results = document.getElementById('results') || document.querySelector('.results-panel') || document.body;
-    if (results.parentNode) {
-      results.parentNode.insertBefore(container, results);
-    } else {
-      document.body.prepend(container);
-    }
+    if (results.parentNode) results.parentNode.insertBefore(container, results);
+    else document.body.prepend(container);
 
-    // Wire buttons
-    container.querySelectorAll('.in-apply-day').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const iso = btn.getAttribute('data-iso');
-        const day = plan.find(d => d.iso === iso);
-        if (day) applyDay(day);
+    // Checking / unchecking "Do Thursday" swaps the tech between the Thursday and Friday suggestion.
+    container.querySelectorAll('.in-pull').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const tr = cb.closest('tr');
+        const sel = tr.querySelector('.in-tech');
+        const want = cb.checked ? tr.getAttribute('data-pull-tech') : tr.getAttribute('data-fri-tech');
+        if (want) sel.value = want;
       });
     });
-    const allBtn = container.querySelector('#in-apply-all');
-    if (allBtn) allBtn.addEventListener('click', () => plan.forEach(applyDay));
-    const dismiss = container.querySelector('#in-dismiss');
-    if (dismiss) dismiss.addEventListener('click', () => container.remove());
+    container.querySelector('#in-apply-all').addEventListener('click', () => applyPlan(container, thu ? thu.iso : null));
+    container.querySelector('#in-dismiss').addEventListener('click', () => container.remove());
   }
 
-  function applyDay(day) {
+  function applyPlan(container, thuIso) {
     if (typeof syncAssignmentToSupabase !== 'function') {
-      alert('syncAssignmentToSupabase not available — cannot apply plan.');
+      alert('syncAssignmentToSupabase not available \u2014 cannot apply plan.');
       return;
     }
-    let applied = 0;
-    day.assignments.forEach(a => {
-      const item = {
-        code: a.code,
-        // minimal item shape the sync expects
-      };
-      // Ensure form counts are present so they get persisted
-      if (window.parsedFormCounts && window.parsedFormCounts[a.code]) {
-        // already there
-      }
-      syncAssignmentToSupabase(a.tech, item, 'planned', 'manual', {
-        dispatchDateOverride: day.iso
-      });
-      applied++;
+    const rows = [...container.querySelectorAll('.in-row')].map(tr => {
+      const pull = tr.querySelector('.in-pull');
+      const iso = (pull && pull.checked && thuIso) ? thuIso : tr.getAttribute('data-iso');
+      return { code: tr.getAttribute('data-code'), tech: tr.querySelector('.in-tech').value, iso };
+    }).filter(r => r.code && r.tech);
+    const thuN = rows.filter(r => r.iso === thuIso).length;
+    if (!confirm('Apply ' + rows.length + ' stops (' + thuN + ' on Thursday, ' + (rows.length - thuN) + ' on Friday)?')) return;
+    rows.forEach(r => {
+      syncAssignmentToSupabase(r.tech, { code: r.code }, 'planned', 'manual', { dispatchDateOverride: r.iso });
     });
-    if (typeof showToast === 'function') {
-      showToast(`Applied ${applied} suggested stop${applied === 1 ? '' : 's'} to ${day.dayLabel} (${day.iso})`, 'success');
-    } else {
-      alert(`Applied ${applied} stops to ${day.dayLabel}`);
-    }
+    const msg = 'Applied ' + rows.length + ' Indiana stops (' + thuN + ' Thursday, ' + (rows.length - thuN) + ' Friday)';
+    if (typeof showToast === 'function') showToast(msg, 'success'); else alert(msg);
+    container.remove();
   }
 
   window.checkIndianaRestockPlanner = async function () {
     const counts = window.parsedFormCounts || {};
-    if (!isIndianaWednesdayBulk(counts)) return;
+    if (!isIndianaWednesdayBulk(counts)) {
+      alert('No Indiana Thursday or Friday restocks found. Paste the dispatch list on the Indiana board first.');
+      return;
+    }
     const plan = await buildPlan(counts);
     if (plan.length) renderPlanner(plan);
+    else alert('No Indiana Thursday or Friday restocks found in this list.');
   };
 
   // Auto-check after a short delay on load / after processDispatch if desired
