@@ -61,6 +61,7 @@
     <button type="button" id="prevBtn">Previous</button>
     <button type="button" id="nextBtn">Next</button>
     <button type="button" id="thisBtn">This period</button>
+    <button type="button" id="compBtn">Show comp days</button>
     <button type="button" class="primary" id="pdfBtn">Save as PDF / Print</button>
   </div>
   <div class="period" id="periodLabel"></div>
@@ -69,6 +70,9 @@
 <script>
 const REASON = { vacation: 'Vacation', personal: 'Personal', pto: 'PTO', comp_day: 'Comp day', manual: 'Out', other: 'Out', last_day: 'Last day', info: 'Note', site_survey: 'Site survey' };
 let periodStart = '';
+// Comp days (taken for on-call weeks) do not come out of personal or vacation
+// time, so they are hidden by default. The button brings them back.
+let showComp = false;
 
 function iso(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -91,7 +95,7 @@ function standingCompDay(sat, name) {
   return addDays(sat, /robert medley/i.test(name || '') ? -2 : -5);
 }
 function esc(s) {
-  return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"' }[c]));
+  return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 function pillClass(reason) {
   if (reason === 'Vacation' || reason === 'PTO') return 'vacation';
@@ -136,15 +140,18 @@ async function load() {
       rows.push({ name: entry.technician, day, reason: 'Comp day', note: 'Standing, on call Sat ' + pretty(entry.day), source: 'On-call' });
     });
 
+    const compTotal = rows.filter(r => r.reason === 'Comp day').length;
+    const shown = showComp ? rows : rows.filter(r => r.reason !== 'Comp day');
+    document.getElementById('compBtn').textContent = showComp ? 'Hide comp days' : 'Show comp days' + (compTotal ? ' (' + compTotal + ')' : '');
     const byName = new Map();
-    rows.sort((a, b) => a.name.localeCompare(b.name) || a.day.localeCompare(b.day));
-    rows.forEach(r => {
+    shown.sort((a, b) => a.name.localeCompare(b.name) || a.day.localeCompare(b.day));
+    shown.forEach(r => {
       if (!byName.has(r.name)) byName.set(r.name, []);
       byName.get(r.name).push(r);
     });
-    window._daysOff = { start: periodStart, end, groups: [...byName.entries()] };
+    window._daysOff = { start: periodStart, end, groups: [...byName.entries()], showComp };
     if (!byName.size) {
-      out.textContent = 'No days off in this pay period.';
+      out.textContent = compTotal && !showComp ? 'No vacation or personal days in this pay period. Comp days are hidden.' : 'No days off in this pay period.';
       return;
     }
     out.className = '';
@@ -155,7 +162,7 @@ async function load() {
       '<div class="stat"><b>' + byName.size + '</b><span>People with time off</span></div>' +
       '<div class="stat"><b>' + all.length + '</b><span>Days in this period</span></div>' +
       '<div class="stat"><b>' + vac + '</b><span>Vacation days</span></div>' +
-      '<div class="stat"><b>' + comp + '</b><span>Comp days</span></div></div>';
+      '<div class="stat"><b>' + (showComp ? comp : all.filter(r => r.reason !== 'Vacation').length) + '</b><span>' + (showComp ? 'Comp days' : 'Personal and other days') + '</span></div></div>';
     const cards = [...byName.entries()].map(([name, list]) =>
       '<section class="card"><h2>' + esc(name) + '<span>' + list.length + '</span></h2><table><tr><th>Day</th><th>Reason</th><th>Note</th></tr>' +
       list.map(r => '<tr><td>' + esc(pretty(r.day)) + '</td><td><span class="pill ' + pillClass(r.reason) + '">' + esc(r.reason) + '</span>' + (r.source === 'On-call' ? ' <span class="tag">standing</span>' : '') + '</td><td>' + esc(r.note) + '</td></tr>').join('') +
@@ -179,7 +186,7 @@ function printPdf() {
   const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Days off ' + data.start + '</title>' +
     '<style>body{font-family:Arial,sans-serif;padding:16px;font-size:13px;} table{border-collapse:collapse;width:100%;margin:0 0 16px;} td,th{border:1px solid #999;padding:4px;text-align:left;} h2,h3{margin:12px 0 6px;} .btn{margin-bottom:12px;}</style></head><body>' +
     '<button class="btn" onclick="window.print()">Save as PDF / Print</button>' +
-    '<h2>MCR Technical Service, LLC</h2><h3>Days off, ' + pretty(data.start) + ' to ' + pretty(data.end) + '</h3>' +
+    '<h2>MCR Technical Service, LLC</h2><h3>Days off, ' + pretty(data.start) + ' to ' + pretty(data.end) + (data.showComp ? '' : ' (comp days not shown)') + '</h3>' +
     rows + '</body></html>';
   const w = window.open('', '_blank');
   if (!w) { alert('Allow pop-ups to open the PDF view.'); return; }
@@ -190,6 +197,7 @@ function printPdf() {
 document.getElementById('prevBtn').onclick = () => { periodStart = addDays(periodStart, -14); load(); };
 document.getElementById('nextBtn').onclick = () => { periodStart = addDays(periodStart, 14); load(); };
 document.getElementById('thisBtn').onclick = () => { periodStart = sundayOf(new Date()); load(); };
+document.getElementById('compBtn').onclick = () => { showComp = !showComp; load(); };
 document.getElementById('pdfBtn').onclick = printPdf;
 periodStart = sundayOf(new Date());
 load();
