@@ -10469,6 +10469,19 @@ function distanceMatrixStatus(state) {
         // Hook after board renders or after syncs — call this from key change points
         window.maybeShowPushToast = async function() {
             if (window._pushToastSnoozeUntil && Date.now() < window._pushToastSnoozeUntil) return;
+            // Only ask when the stops for this date and state actually changed since
+            // the last time this browser looked. A plain refresh or reopening the
+            // board keeps the same fingerprint, so it never prompts.
+            const dEl = document.getElementById('dispatchDate');
+            const sEl = document.getElementById('stateSelector');
+            if (!dEl || !sEl || !dEl.value) return;
+            let sig = '';
+            try { sig = JSON.stringify(generateFinalMessages({ returnOnly: true }) || {}); } catch (e) { return; }
+            const key = 'pushSig:' + dEl.value + ':' + sEl.value;
+            let prev = null;
+            try { prev = localStorage.getItem(key); } catch (e) {}
+            try { localStorage.setItem(key, sig); } catch (e) {}
+            if (prev === null || prev === sig) return;
             if (await checkPublished()) showPushToast();
         };
 
