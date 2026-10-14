@@ -10418,9 +10418,30 @@ function distanceMatrixStatus(state) {
             } catch (e) { _isPublished = false; }
             return _isPublished;
         }
+        // The toast markup that used to sit in the page source belongs to the
+        // print report's own window, so the board never had one. Build it here.
+        function ensurePushToast() {
+            let t = document.getElementById('pushToast');
+            if (t) return t;
+            t = document.createElement('div');
+            t.id = 'pushToast';
+            t.innerHTML = '<div id="pushToastMsg"></div>' +
+                '<button class="push" id="pushToastYes" type="button">Push</button>' +
+                '<button class="later" id="pushToastNo" type="button">Not now</button>';
+            document.body.appendChild(t);
+            t.querySelector('#pushToastYes').onclick = doPushUpdate;
+            t.querySelector('#pushToastNo').onclick = function () {
+                window._pushToastSnoozeUntil = Date.now() + 60000; // ask again in a minute at most
+                hidePushToast();
+            };
+            return t;
+        }
         function showPushToast() {
-            const t = document.getElementById('pushToast');
-            if (t) t.style.display = 'block';
+            const t = ensurePushToast();
+            const msg = t.querySelector('#pushToastMsg');
+            if (msg) msg.textContent = 'Stops changed. Push update to techs?';
+            t.querySelectorAll('button').forEach(function (b) { b.style.display = ''; });
+            t.style.display = 'block';
         }
         function hidePushToast() {
             const t = document.getElementById('pushToast');
@@ -10438,21 +10459,16 @@ function distanceMatrixStatus(state) {
                 });
                 let _pj = null; try { _pj = await _pr.json(); } catch (e) {}
                 if (!_pj || !_pj.ok) { alert((_pj && _pj.error) || 'Could not push the update.'); return; }
-                hidePushToast();
-                // brief confirmation
-                const msg = document.getElementById('pushToastMsg');
+                const t = ensurePushToast();
+                const msg = t.querySelector('#pushToastMsg');
                 if (msg) msg.textContent = 'Pushed to techs';
+                t.querySelectorAll('button').forEach(function (b) { b.style.display = 'none'; });
                 setTimeout(hidePushToast, 1500);
             } catch (e) { console.error(e); }
         }
-        document.addEventListener('DOMContentLoaded', function() {
-            const yes = document.getElementById('pushToastYes');
-            const no = document.getElementById('pushToastNo');
-            if (yes) yes.onclick = doPushUpdate;
-            if (no) no.onclick = hidePushToast;
-        });
         // Hook after board renders or after syncs — call this from key change points
         window.maybeShowPushToast = async function() {
+            if (window._pushToastSnoozeUntil && Date.now() < window._pushToastSnoozeUntil) return;
             if (await checkPublished()) showPushToast();
         };
 
