@@ -597,7 +597,7 @@
 
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
-                <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.09 (IN btn forced off)</div>
+                <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.10 (publish in Messages)</div>
                 <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-215</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
@@ -7154,6 +7154,33 @@ function distanceMatrixStatus(state) {
             document.getElementById('ap-dismiss').onclick = function() { send('dismiss'); };
         }
 
+        
+        async function publishFromMessages() {
+            const dateEl = document.getElementById('dispatchDate');
+            const stateEl = document.getElementById('stateSelector');
+            if (!dateEl || !stateEl || !dateEl.value) { alert('Pick a date first.'); return; }
+            const btn = document.getElementById('publishFromMessagesBtn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Publishing…'; }
+            try {
+                const r = await fetch('/.netlify/functions/tech-api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true })
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    if (btn) btn.textContent = 'Published';
+                    setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = 'Publish to techs'; } }, 2000);
+                } else {
+                    alert(j.error || 'Could not publish');
+                    if (btn) { btn.disabled = false; btn.textContent = 'Publish to techs'; }
+                }
+            } catch (e) {
+                alert('Publish failed');
+                if (btn) { btn.disabled = false; btn.textContent = 'Publish to techs'; }
+            }
+        }
+
         function generateFinalMessages() {
             const resultsDiv = document.getElementById('results');
             const dateInput = document.getElementById('dispatchDate');
@@ -7185,7 +7212,10 @@ function distanceMatrixStatus(state) {
                 return best;
             }
 
-            let html = `<div style="margin-bottom:20px;"><button class="big-btn" onclick="renderReviewBoard()" style="background:#6c757d;">⬅ Back</button></div>`;
+            let html = `<div style="margin-bottom:20px;display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="big-btn" onclick="renderReviewBoard()" style="background:#6c757d;flex:1;">⬅ Back</button>
+                <button class="big-btn" id="publishFromMessagesBtn" onclick="publishFromMessages()" style="background:#1e7e34;flex:1;">Publish to techs</button>
+            </div>`;
             
             Object.keys(window.currentAssignments).sort().filter(t => window.currentAssignments[t].length > 0).forEach(tech => {
                 const items = window.currentAssignments[tech];
