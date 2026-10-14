@@ -918,7 +918,17 @@
   var origTab = tab;
   tab = function (name) {
     origTab(name);
-    if (name === 'Today') loadToday();
+    // Force Today pane visibility in case of class conflicts
+    var todayPane = document.getElementById('todayPane');
+    if (todayPane) {
+      if (name === 'Today') {
+        todayPane.classList.remove('hidden');
+        todayPane.style.display = '';
+        loadToday();
+      } else {
+        todayPane.classList.add('hidden');
+      }
+    }
   };
 
 })();
