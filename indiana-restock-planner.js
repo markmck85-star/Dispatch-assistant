@@ -160,70 +160,144 @@
     return String(n).replace(new RegExp('\\s*[-\u2013\u2014]?\\s*' + code + '\\b.*$'), '').trim() || code;
   }
 
+  // ---- Multi-kiosk sites -------------------------------------------------
+  // Some locations (Hoku sites, "Indy North 1-4", "Lafayette 1-3") have several
+  // kiosks at ONE address and each kiosk has its own site code and ticket. They
+  // must go to one technician together, so the planner works on whole sites.
+  function addrKey(code) {
+    const a = String((LOCATIONS[code] || {}).address || '').toLowerCase();
+    const m = a.match(/^\s*(\d+[a-z]?)\s+([a-z0-9.' ]+?)(?:,|$)/); // street number + street
+    return m ? (m[1] + ' ' + m[2].replace(/[^a-z0-9]/g, '')) : '';
+  }
+  function baseName(code) {
+    // "Mishawaka Hoku 3" -> "mishawaka hoku"; "Indy North 1" -> "indy north"
+    const n = cleanName(code).toLowerCase().replace(/\s+/g, ' ').trim();
+    const m = n.match(/^(.*?)\s+\d{1,2}$/);
+    return m ? m[1] : '';
+  }
+  function buildClusters(codes) {
+    const parent = {};
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const union = (x, y) => { const rx = find(x), ry = find(y); if (rx !== ry) parent[ry] = rx; };
+    codes.forEach(c => { parent[c] = c; });
+    const byKey = {};
+    codes.forEach(c => {
+      [addrKey(c) ? 'a:' + addrKey(c) : '', baseName(c) ? 'n:' + baseName(c) : ''].forEach(k => {
+        if (!k) return;
+        if (byKey[k]) union(byKey[k], c); else byKey[k] = c;
+      });
+    });
+    const id = {};
+    codes.forEach(c => { id[c] = find(c); });
+    return id;
+  }
+
+  function suggestTechForSite(members, availableTechs, loadByTech, historicalPrefs) {
+    // Score as one unit: the site's usual tech (most common among its kiosks) wins.
+    const votes = {};
+    members.forEach(m => {
+      const loc = (LOCATIONS[m.code] || {});
+      const pr = loc.primaryTech || loc.defaultTech;
+      if (pr) votes[pr] = (votes[pr] || 0) + 1;
+      const h = historicalPrefs[m.code];
+      if (h) votes[h] = (votes[h] || 0) + 0.5;
+    });
+    let best = null, bestScore = -Infinity;
+    availableTechs.forEach(tech => {
+      const score = (votes[tech] || 0) * 10 / members.length - (loadByTech[tech] || 0) * 1.5;
+      if (score > bestScore) { bestScore = score; best = tech; }
+    });
+    return best || (availableTechs[0] || null);
+  }
+
   async function buildPlan(formCounts) {
     const groups = groupByRestockDay(formCounts);
     const historicalPrefs = await fetchHistoricalPrefs();
     const isos = Object.keys(groups).sort();
     const thuIso = isos.find(i => dayOfWeek(i) === 4) || null;
     const friIso = isos.find(i => dayOfWeek(i) === 5) || null;
+    const allCodes = [];
+    isos.forEach(i => groups[i].forEach(it => allCodes.push(it.code)));
+    const cid = buildClusters(allCodes);
+    const clusterNo = {}; let nextNo = 1;
+    const noOf = (code) => { const k = cid[code]; if (!clusterNo[k]) clusterNo[k] = nextNo++; return clusterNo[k]; };
+
     const days = {};
     const mk = (iso) => ({ iso, dayLabel: dayOfWeek(iso) === 4 ? 'Thursday' : 'Friday', assignments: [] });
+    const byCluster = (items) => {
+      const m = {}; const order = [];
+      items.forEach(it => { const k = cid[it.code]; if (!m[k]) { m[k] = []; order.push(k); } m[k].push(it); });
+      return order.map(k => m[k]);
+    };
+    const mkAssign = (item, tech, extra) => Object.assign({
+      code: item.code, tech, name: cleanName(item.code), restockBy: item.fc.restockBy, cluster: noOf(item.code)
+    }, extra || {});
 
-    // Thursday: fixed day, due Thursday.
+    // Thursday: fixed day, due Thursday. A site's kiosks go to one technician.
+    const thuTechOfCluster = {};
     if (thuIso) {
       const d = days[thuIso] = mk(thuIso);
       const avail = availableFor(thuIso);
       const load = {};
-      groups[thuIso].forEach(item => {
-        const tech = suggestTech(item, avail, load, historicalPrefs);
+      byCluster(groups[thuIso]).forEach(members => {
+        const tech = suggestTechForSite(members, avail, load, historicalPrefs);
         if (!tech) return;
-        load[tech] = (load[tech] || 0) + 1;
-        d.assignments.push({ code: item.code, tech, name: cleanName(item.code), restockBy: item.fc.restockBy });
+        load[tech] = (load[tech] || 0) + members.length;
+        thuTechOfCluster[cid[members[0].code]] = tech;
+        members.forEach(item => d.assignments.push(mkAssign(item, tech)));
       });
     }
 
-    // Friday: pull forward to Thursday when near a Thursday stop.
+    // Friday: pull whole sites forward to Thursday when they share an address with, or sit
+    // near, a Thursday stop. Otherwise the site stays on Friday with one technician.
     if (friIso) {
       const d = days[friIso] = mk(friIso);
       const thuAvail = thuIso ? availableFor(thuIso) : [];
       const thuStops = thuIso ? days[thuIso].assignments : [];
       const pulled = {};
-      const rest = [];
-      groups[friIso].forEach(item => {
+      const sites = byCluster(groups[friIso]);
+      const plans = sites.map(members => {
+        const key = cid[members[0].code];
         let near = null;
-        if (thuIso) {
-          const loc = LOCATIONS[item.code];
+        if (thuIso && thuTechOfCluster[key] && thuAvail.indexOf(thuTechOfCluster[key]) !== -1) {
+          // Same site already has kiosks due Thursday: they go together, no distance test.
+          const t = thuStops.find(x => cid[x.code] === key);
+          near = { tech: thuTechOfCluster[key], code: t ? t.code : '', miles: 0, same: true };
+        } else if (thuIso) {
+          const loc = LOCATIONS[members[0].code];
           thuStops.forEach(t => {
             if (thuAvail.indexOf(t.tech) === -1) return;
             const m = miles(loc, LOCATIONS[t.code]);
             if (m !== null && m <= PULL_FORWARD_MILES && (!near || m < near.miles)) near = { tech: t.tech, code: t.code, miles: m };
           });
+          if (near && (pulled[near.tech] || 0) + members.length > MAX_PULL_PER_TECH) near = null;
         }
-        if (near && (pulled[near.tech] || 0) < MAX_PULL_PER_TECH) {
-          pulled[near.tech] = (pulled[near.tech] || 0) + 1;
-          item._near = near;
-        }
-        rest.push(item);
+        if (near) pulled[near.tech] = (pulled[near.tech] || 0) + members.length;
+        return { members, near };
       });
       const avail = availableFor(friIso);
       const load = {};
-      // Stops that stay on Friday are balanced first; pulled ones are only an option.
-      rest.filter(i => !i._near).forEach(item => {
-        const tech = suggestTech(item, avail, load, historicalPrefs);
+      plans.filter(pl => !pl.near).forEach(pl => {
+        const tech = suggestTechForSite(pl.members, avail, load, historicalPrefs);
         if (!tech) return;
-        load[tech] = (load[tech] || 0) + 1;
-        item._friTech = tech;
+        load[tech] = (load[tech] || 0) + pl.members.length;
+        pl.friTech = tech;
       });
-      rest.forEach(item => {
-        const friTech = item._friTech || suggestTech(item, avail, load, historicalPrefs);
-        const a = { code: item.code, tech: friTech, name: cleanName(item.code), restockBy: item.fc.restockBy, friTech };
-        if (item._near) {
-          a.pullTech = item._near.tech;
-          a.pullNote = Math.round(item._near.miles) + ' mi from ' + item._near.code + ' (' + item._near.tech + ' Thu)';
-          a.tech = item._near.tech;
-          a.pull = true;
-        }
-        d.assignments.push(a);
+      plans.forEach(pl => {
+        const friTech = pl.friTech || suggestTechForSite(pl.members, avail, load, historicalPrefs);
+        pl.members.forEach(item => {
+          const extra = { friTech };
+          let tech = friTech;
+          if (pl.near) {
+            tech = pl.near.tech;
+            extra.pullTech = pl.near.tech;
+            extra.pull = true;
+            extra.pullNote = pl.near.same
+              ? 'same site as ' + pl.near.code + ' (' + pl.near.tech + ' Thu)'
+              : Math.round(pl.near.miles) + ' mi from ' + pl.near.code + ' (' + pl.near.tech + ' Thu)';
+          }
+          d.assignments.push(mkAssign(item, tech, extra));
+        });
       });
     }
 
@@ -252,7 +326,7 @@
     container.style.cssText = 'margin:12px 0; padding:14px; background:#1a1a2e; border:1px solid #444; border-radius:8px; color:#eee;';
 
     let html = '<div style="font-weight:bold; font-size:16px; margin-bottom:8px; color:#ffa500;">Indiana Restock Planner (Wed list \u2192 Thu / Fri)</div>';
-    html += '<div style="font-size:13px; color:#aaa; margin-bottom:12px;">Only Indiana sites are shown. Thursday stops are due Thursday. A Friday stop close to a Thursday stop can be caught Thursday: leave "Do Thursday" checked to move it, or uncheck it to keep it on Friday. Change a technician with the dropdown. Nothing is written until you click Apply.</div>';
+    html += '<div style="font-size:13px; color:#aaa; margin-bottom:12px;">Only Indiana sites are shown. Sites with several kiosks at one address stay together with one technician. Thursday stops are due Thursday. A Friday stop close to a Thursday stop can be caught Thursday: leave "Do Thursday" checked to move it, or uncheck it to keep it on Friday. Change a technician with the dropdown. Nothing is written until you click Apply.</div>';
 
     plan.forEach(day => {
       html += '<div style="margin-bottom:14px;">';
@@ -260,7 +334,7 @@
       html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
       html += '<tr style="background:#2a2a3e;"><th style="text-align:left; padding:4px;">Site</th><th style="text-align:left; padding:4px;">Tech</th>' + (day.dayLabel === 'Friday' && thu ? '<th style="text-align:left; padding:4px;">Do Thursday</th>' : '') + '</tr>';
       day.assignments.forEach(a => {
-        html += '<tr class="in-row" data-code="' + esc(a.code) + '" data-iso="' + day.iso + '"' +
+        html += '<tr class="in-row" data-code="' + esc(a.code) + '" data-iso="' + day.iso + '" data-cluster="' + a.cluster + '"' +
           (a.pullTech ? ' data-fri-tech="' + esc(a.friTech || '') + '" data-pull-tech="' + esc(a.pullTech) + '"' : '') + '>' +
           '<td style="padding:3px 4px;">' + esc(a.code) + (a.name && a.name !== a.code ? ' \u2014 ' + esc(a.name) : '') + '</td>' +
           '<td style="padding:3px 4px;">' + techSelect(a.tech) + '</td>';
@@ -282,13 +356,23 @@
     if (results.parentNode) results.parentNode.insertBefore(container, results);
     else document.body.prepend(container);
 
-    // Checking / unchecking "Do Thursday" swaps the tech between the Thursday and Friday suggestion.
+    // A site's kiosks always move together: toggling "Do Thursday" or changing the
+    // technician on one row applies to every row of the same site and day.
+    const sameSite = (tr) => [...container.querySelectorAll('.in-row')].filter(r =>
+      r.getAttribute('data-cluster') === tr.getAttribute('data-cluster') && r.getAttribute('data-iso') === tr.getAttribute('data-iso'));
     container.querySelectorAll('.in-pull').forEach(cb => {
       cb.addEventListener('change', () => {
-        const tr = cb.closest('tr');
-        const sel = tr.querySelector('.in-tech');
-        const want = cb.checked ? tr.getAttribute('data-pull-tech') : tr.getAttribute('data-fri-tech');
-        if (want) sel.value = want;
+        sameSite(cb.closest('tr')).forEach(tr => {
+          const box = tr.querySelector('.in-pull');
+          if (box) box.checked = cb.checked;
+          const want = cb.checked ? tr.getAttribute('data-pull-tech') : tr.getAttribute('data-fri-tech');
+          if (want) tr.querySelector('.in-tech').value = want;
+        });
+      });
+    });
+    container.querySelectorAll('.in-tech').forEach(sel => {
+      sel.addEventListener('change', () => {
+        sameSite(sel.closest('tr')).forEach(tr => { tr.querySelector('.in-tech').value = sel.value; });
       });
     });
     container.querySelector('#in-apply-all').addEventListener('click', () => applyPlan(container, thu ? thu.iso : null));
@@ -303,12 +387,19 @@
     const rows = [...container.querySelectorAll('.in-row')].map(tr => {
       const pull = tr.querySelector('.in-pull');
       const iso = (pull && pull.checked && thuIso) ? thuIso : tr.getAttribute('data-iso');
-      return { code: tr.getAttribute('data-code'), tech: tr.querySelector('.in-tech').value, iso };
+      const origIso = tr.getAttribute('data-iso');
+      return { code: tr.getAttribute('data-code'), tech: tr.querySelector('.in-tech').value, iso, origIso,
+               friTech: tr.getAttribute('data-fri-tech') || tr.querySelector('.in-tech').value };
     }).filter(r => r.code && r.tech);
     const thuN = rows.filter(r => r.iso === thuIso).length;
     if (!confirm('Apply ' + rows.length + ' stops (' + thuN + ' on Thursday, ' + (rows.length - thuN) + ' on Friday)?')) return;
     rows.forEach(r => {
       syncAssignmentToSupabase(r.tech, { code: r.code }, 'planned', 'manual', { dispatchDateOverride: r.iso });
+      // A Friday stop pulled onto Thursday must leave Friday's board, or it would
+      // show on both days. Same remove-then-recreate pattern as Push to Tomorrow.
+      if (r.iso !== r.origIso) {
+        syncAssignmentToSupabase(r.friTech, { code: r.code }, 'removed', 'manual', { dispatchDateOverride: r.origIso });
+      }
     });
     const msg = 'Applied ' + rows.length + ' Indiana stops (' + thuN + ' Thursday, ' + (rows.length - thuN) + ' Friday)';
     if (typeof showToast === 'function') showToast(msg, 'success'); else alert(msg);
