@@ -129,7 +129,7 @@
   <main>
     <div class="statebar hidden" id="stateBar"><label for="stateSel">State</label><select id="stateSel"></select></div>
     <div class="tabs">
-      <button id="tabToday" class="on" onclick="showTodayTab()">Today</button>
+      <button id="tabToday" class="on">Today</button>
       <button id="tabSites" onclick="tab('Sites')">Locations</button>
       <button id="tabShip" onclick="tab('Ship')">My shipments</button>
       <button id="tabWatch" onclick="tab('Watch')" class="hidden">Watchdog</button>
@@ -299,6 +299,7 @@
       $('summList').innerHTML = '';
       $('summStatus').textContent = '';
     }
+    updatePublishBtn();
     tab('Today');
     loadSites();
     if (PENDING_WD && WATCH_OK) handleWdOpen(PENDING_WD.wo, PENDING_WD.st);
@@ -352,10 +353,13 @@
     closeSite();
     loadSites();
     if (!$('shipPane').classList.contains('hidden')) loadShipments();
+    if (!$('todayPane').classList.contains('hidden')) loadToday();
   };
   $('segRma').onclick = function () { SHIP_VIEW = 'rma'; renderShipments(); };
   $('segCon').onclick = function () { SHIP_VIEW = 'con'; renderShipments(); };
   $('shipTech').onchange = function () { SHIP_TECH = $('shipTech').value; loadShipments(); };
+  $('tabToday').onclick = function () { tab('Today'); };
+  window.showTodayTab = function () { tab('Today'); };
   $('tabSites').onclick = function () { tab('Sites'); };
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabWatch').onclick = function () { tab('Watch'); };
@@ -846,12 +850,22 @@
   function todayIso(offset) {
     var d = new Date();
     d.setDate(d.getDate() + (offset || 0));
-    return d.toISOString().slice(0, 10);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   }
   async function loadToday() {
     var date = $('todayDate').value || todayIso(0);
     $('todayStatus').textContent = 'Loading...';
     $('todayList').innerHTML = '';
+    if (KIND === 's') {
+      // Staff do not carry a stop list here. Show whether this date is
+      // published for the selected state, and let them toggle it.
+      var ps = await call('publish_status', { date: date, state: STATE });
+      var isPub = !!(ps && ps.published);
+      $('publishBtn').textContent = isPub ? 'Unpublish' : 'Publish to techs';
+      $('publishStatus').textContent = isPub ? 'Published' : 'Not published';
+      $('todayStatus').textContent = 'Publishing makes this date\'s stops visible to technicians in ' + (STATE || 'your state') + '. Technicians see their own stops on this tab.';
+      return;
+    }
     var j = await call('my_stops', { date: date });
     if (!j.ok) {
       $('todayStatus').textContent = j.error || 'Could not load stops.';
@@ -892,30 +906,27 @@
   }
 
   // Publish toggle for staff
-  async function updatePublishBtn() {
-    // Show for staff or admin
-    var isStaffOrAdmin = (KIND === 's') || (KIND === 'a') || (KIND === 'admin') || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.kind === 's'));
-    if (!isStaffOrAdmin) { $('publishBar').classList.add('hidden'); return; }
+  function updatePublishBtn() {
+    if (KIND !== 's') { $('publishBar').classList.add('hidden'); return; }
     $('publishBar').classList.remove('hidden');
-    $('publishBar').style.display = 'block';
-    $('publishBar').classList.remove('hidden');
-    var date = $('todayDate').value || todayIso(0);
-    var st = STATE || (document.getElementById('stateSel') && document.getElementById('stateSel').value);
-    // Simple check via a lightweight call or just toggle on click
-    $('publishBtn').textContent = 'Publish to techs';
     $('publishBtn').onclick = async function () {
+      var date = $('todayDate').value || todayIso(0);
+      var st = STATE || $('stateSel').value;
       var on = $('publishBtn').textContent.indexOf('Unpublish') === -1;
-      var r = await call('publish_stops', { date: date, state: st, on: on });
-      if (r.ok) {
-        $('publishBtn').textContent = on ? 'Unpublish' : 'Publish to techs';
-        $('publishStatus').textContent = on ? 'Published' : 'Unpublished';
-        loadToday();
-      } else alert(r.error || 'Could not update');
+      $('publishBtn').disabled = true;
+      try {
+        var r = await call('publish_stops', { date: date, state: st, on: on });
+        if (r.ok) {
+          $('publishBtn').textContent = on ? 'Unpublish' : 'Publish to techs';
+          $('publishStatus').textContent = on ? 'Published' : 'Unpublished';
+        } else alert(r.error || 'Could not update');
+      } catch (e) { alert('Could not update'); }
+      finally { $('publishBtn').disabled = false; }
     };
   }
   $('todayDate').value = todayIso(0);
-  $('todayRefresh').onclick = function(){ loadToday(); updatePublishBtn(); };
-  updatePublishBtn();
+  $('todayRefresh').onclick = function () { loadToday(); };
+  $('todayDate').onchange = function () { loadToday(); };
   // Load today when tab is selected
   var origTab = tab;
   tab = function (name) {
