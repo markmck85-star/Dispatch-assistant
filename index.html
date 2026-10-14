@@ -707,6 +707,7 @@
                     <button class="big-btn" onclick="processDispatch(false, true)">Generate Dispatches</button>
                     <button class="big-btn" style="background:#6c757d;" onclick="printReport()">Print Dispatch Summary</button>
                     <button class="big-btn" style="background:#2f5f8f;" onclick="openCompactSummary()">Compact Summary</button>
+                    <button id="indianaPlannerBtn" class="big-btn" style="background:#1e7e34; display:none;" onclick="if(window.checkIndianaRestockPlanner) window.checkIndianaRestockPlanner();">Plan IN Thu/Fri Restocks</button>
                 </div>
             </div>
 
@@ -735,7 +736,7 @@
 <div class="more-ai-row board-ai-line">
                 <div class="board-context">
                     <label>Region
-                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateInboundMailLink(); updateLocationLookupLink(); updateRestockLink(); updateStateConsoleLink(); updateLocationLookupLink();">
+                        <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateInboundMailLink(); updateLocationLookupLink(); updateRestockLink(); updateStateConsoleLink(); updateLocationLookupLink(); updateIndianaPlannerButton();">
                             <option value="AL">Alabama</option>
                             <option value="CA">California</option>
                             <option value="CO">Colorado</option>
@@ -2616,6 +2617,13 @@ function distanceMatrixStatus(state) {
             const link = document.getElementById('restockLink');
             if (sel && link) link.href = 'restock-tracker.html?state=' + sel.value;
         }
+        function updateIndianaPlannerButton() {
+            const btn = document.getElementById('indianaPlannerBtn');
+            const sel = document.getElementById('stateSelector');
+            if (!btn || !sel) return;
+            btn.style.display = (sel.value === 'IN') ? '' : 'none';
+        }
+
 
         // Same idea again for the State Console link -- this one got missed
         // when watchdog/restock links were fixed to follow the selected
@@ -7836,7 +7844,7 @@ function distanceMatrixStatus(state) {
 </style>
 </head><body>
 <button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
-${content}</body></html>`;
+</body></html>`;
 
             const blob = new Blob([html], { type: 'text/html' });
             const blobUrl = URL.createObjectURL(blob);
@@ -10280,5 +10288,6 @@ ${content}</body></html>`;
 })();
 </script>
 
+    <script src="/indiana-restock-planner.js"></script>
 </body>
 </html>
