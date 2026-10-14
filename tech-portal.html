@@ -129,7 +129,7 @@
   <main>
     <div class="statebar hidden" id="stateBar"><label for="stateSel">State</label><select id="stateSel"></select></div>
     <div class="tabs">
-      <button id="tabToday" class="on" onclick="tab('Today')">Today</button>
+      <button id="tabToday" class="on" onclick="window.showTodayTab && window.showTodayTab()">Today</button>
       <button id="tabSites" onclick="tab('Sites')">Locations</button>
       <button id="tabShip" onclick="tab('Ship')">My shipments</button>
       <button id="tabWatch" onclick="tab('Watch')" class="hidden">Watchdog</button>
