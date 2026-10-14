@@ -201,7 +201,7 @@ async function authenticate(supabase, token) {
   if (tk.k === 's') {
     const { data: acct } = await supabase
       .from('staff_accounts')
-      .select('username, dispatcher_username, display_name, default_state, created_at, password_changed_at')
+      .select('username, dispatcher_username, display_name, default_state, technician_id, created_at, password_changed_at')
       .eq('username', tk.t)
       .maybeSingle();
     if (!acct || pwVersion(acct) !== tk.p) return null;
@@ -211,7 +211,7 @@ async function authenticate(supabase, token) {
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return null;
-    return { kind: 's', name: acct.display_name, states: staffStates(d), role: d.role, key: acct.username, defaultState: acct.default_state || null };
+    return { kind: 's', name: acct.display_name, states: staffStates(d), role: d.role, key: acct.username, defaultState: acct.default_state || null, technicianId: acct.technician_id || null };
   }
 
   const { data: acct } = await supabase
@@ -733,20 +733,11 @@ async function doCompleteStop(supabase, ctx, body) {
   return json(200, { ok: true });
 }
 
-// A dispatcher/admin who also works stops has a technicians row. The staff
-// login only carries a display name ("Mark"), so match it to a technician:
-// exact name first, then a first name that matches exactly one active
-// non-contractor technician. No match means no stops of their own.
+// A dispatcher/admin who also works stops is linked to their technicians row
+// by staff_accounts.technician_id (set by hand). No link means no stops of
+// their own to show; names are never guessed.
 async function staffTechId(supabase, ctx) {
-  const nm = String(ctx.name || '').trim().toLowerCase();
-  if (!nm) return null;
-  const { data } = await supabase.from('technicians').select('id, name, active, is_contractor').limit(2000);
-  const list = (data || []).filter((t) => t.active !== false && t.is_contractor !== true && t.name);
-  const exact = list.filter((t) => String(t.name).trim().toLowerCase() === nm);
-  if (exact.length === 1) return exact[0].id;
-  const first = nm.split(/\s+/)[0];
-  const byFirst = list.filter((t) => String(t.name).trim().toLowerCase().split(/\s+/)[0] === first);
-  return byFirst.length === 1 ? byFirst[0].id : null;
+  return ctx.technicianId || null;
 }
 
 // ---------- my stops (tech or staff, own assignments only) ----------
