@@ -857,22 +857,20 @@
     $('todayStatus').textContent = 'Loading...';
     $('todayList').innerHTML = '';
     if (KIND === 's') {
-      // Staff do not carry a stop list here. Show whether this date is
-      // published for the selected state, and let them toggle it.
+      // Staff see their own stops (if their login is linked to a technician)
+      // and can publish or unpublish the date for the selected state.
       var ps = await call('publish_status', { date: date, state: STATE });
       var isPub = !!(ps && ps.published);
       $('publishBtn').textContent = isPub ? 'Unpublish' : 'Publish to techs';
-      $('publishStatus').textContent = isPub ? 'Published' : 'Not published';
-      $('todayStatus').textContent = 'Publishing makes this date\'s stops visible to technicians in ' + (STATE || 'your state') + '. Technicians see their own stops on this tab.';
-      return;
+      $('publishStatus').textContent = isPub ? 'Published to techs' : 'Not published to techs yet';
     }
     var j = await call('my_stops', { date: date });
     if (!j.ok) {
       $('todayStatus').textContent = j.error || 'Could not load stops.';
       return;
     }
-    var published = j.published !== false;
-    if ($('publishBtn')) {
+    var published = KIND === 's' ? true : j.published !== false;
+    if (KIND !== 's' && $('publishBtn')) {
       $('publishBtn').textContent = published ? 'Unpublish' : 'Publish to techs';
       if ($('publishStatus')) $('publishStatus').textContent = published ? 'Published' : '';
     }
@@ -880,6 +878,7 @@
       $('todayStatus').textContent = 'Not published yet for this date.';
       return;
     }
+    if (j.noTech) { $('todayStatus').textContent = 'Your login is not linked to a technician, so there are no stops of your own to show here.'; return; }
     $('todayStatus').textContent = j.stops && j.stops.length ? (j.stops.length + ' open stop' + (j.stops.length === 1 ? '' : 's')) : 'No open stops for this date (completed stops are hidden).';
     if (!j.stops || !j.stops.length) return;
     var html = '';
