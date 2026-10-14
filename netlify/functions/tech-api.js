@@ -207,11 +207,11 @@ async function authenticate(supabase, token) {
     if (!acct || pwVersion(acct) !== tk.p) return null;
     const { data: d } = await supabase
       .from('dispatchers')
-      .select('username, role, states, active')
+      .select('username, role, states, active, technician_id')
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return null;
-    return { kind: 's', name: acct.display_name, states: staffStates(d), role: d.role, key: acct.username, defaultState: acct.default_state || null, technicianId: acct.technician_id || null };
+    return { kind: 's', name: acct.display_name, states: staffStates(d), role: d.role, key: acct.username, defaultState: acct.default_state || null, technicianId: d.technician_id || acct.technician_id || null };
   }
 
   const { data: acct } = await supabase
@@ -686,6 +686,25 @@ async function doWatchdog(ctx, body) {
 
 
 
+// The dispatch board signs in with a username and PIN (login.js) and keeps
+// both for the session, the same way its tool settings call does. Publishing
+// from the board must present them; they are checked here against dispatchers.
+async function boardAuth(supabase, body) {
+  const username = String((body && body.username) || '').trim().toLowerCase().replace(/[^a-z0-9.\-]/g, '');
+  const pin = String((body && body.pin) || '').trim();
+  if (!username || !pin) return null;
+  const { data } = await supabase
+    .from('dispatchers')
+    .select('username, role, states, active')
+    .ilike('username', username)
+    .eq('pin', pin)
+    .eq('active', true)
+    .maybeSingle();
+  if (!data || (data.role !== 'admin' && data.role !== 'dispatcher')) return null;
+  const states = data.role === 'admin' ? PUBLISH_BOARD_STATES : (data.states || []).map((x) => String(x).toUpperCase());
+  return { kind: 's', name: data.username, states, role: data.role, key: data.username };
+}
+
 // ---------- check if a date/state is published ----------
 async function doPublishStatus(supabase, ctx, body) {
   const date = String((body && body.date) || '').trim();
@@ -1034,17 +1053,16 @@ exports.handler = async (event) => {
   try {
     if (action === 'login') return await doLogin(supabase, body);
 
-    // The dispatch board has no portal token, so publish actions are allowed
-    // without one. A request that DOES carry a valid portal token is checked
-    // against that login's states like everything else.
-    // KNOWN GAP: the tokenless path is an open write (publish flag only).
-    // Tighten it when the board and portal share a login.
-    if (action === 'publish_stops' || action === 'publish_status') {
-      const tokenCtx = body.token ? await authenticate(supabase, body.token) : null;
-      if (tokenCtx) {
-        return await (action === 'publish_stops' ? doPublishStops(supabase, tokenCtx, body) : doPublishStatus(supabase, tokenCtx, body));
-      }
-      return await (action === 'publish_stops' ? doPublishStops(supabase, { kind: 's', states: PUBLISH_BOARD_STATES, role: 'admin' }, body) : doPublishStatus(supabase, {}, body));
+    // Publishing needs either a portal token (staff) or the dispatch board's
+    // username + PIN, and is limited to that login's states. Checking whether
+    // a date is published is read only and stays open so the board can ask.
+    if (action === 'publish_status') {
+      return await doPublishStatus(supabase, {}, body);
+    }
+    if (action === 'publish_stops') {
+      const pubCtx = (body.token ? await authenticate(supabase, body.token) : null) || (await boardAuth(supabase, body));
+      if (!pubCtx) return json(401, { ok: false, error: 'Sign in again on the dispatch board, then retry.' });
+      return await doPublishStops(supabase, pubCtx, body);
     }
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
