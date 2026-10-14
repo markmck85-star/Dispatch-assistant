@@ -276,6 +276,13 @@
     if (STATE) sel.value = STATE;
     $('stateBar').classList.toggle('hidden', sts.length < 2);
     $('tabShip').textContent = KIND === 's' ? 'Shipments' : 'My shipments';
+    // Staff: Summary, Watchdog, Locations, Shipments first, then Today and Account.
+    // Technicians keep Today first.
+    (function () {
+      var bar = $('tabToday').parentNode;
+      var order = KIND === 's' ? ['Summ', 'Watch', 'Sites', 'Ship', 'Today', 'Acct'] : ['Today', 'Sites', 'Ship', 'Acct', 'Watch', 'Summ'];
+      order.forEach(function (n) { bar.appendChild($('tab' + n)); });
+    })();
 
     // Watchdog tab: staff only. It always opens on the account's home state
     // (the server sends the options and the default); the choice is not saved.
@@ -398,15 +405,31 @@
     if (seq !== SUMM_SEQ) return;
     if (!j.ok) { $('summStatus').textContent = ''; $('summList').innerHTML = '<div class="err">' + esc(j.error || 'Could not load the summary.') + '</div>'; return; }
     var techs = j.techs || [];
-    if (!techs.length) { $('summStatus').textContent = 'No stops planned in the app for this state and date.'; return; }
+    var open = j.openTroubles || [];
+    var openHtml = open.length ? '<div class="card"><h2>Open trouble tickets, not assigned <span class="muted">(' + open.length + ')</span></h2>' +
+      open.map(function (s) {
+        return '<div class="stop"><b>' + esc(s.siteName) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
+          (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
+          '<br>' + (s.outOfService ? '<span class="tag alert">Out of service</span>' : '') +
+          (s.woNumber ? '<span class="tag">' + esc(s.woNumber) + '</span>' : '') +
+          (s.category ? '<span class="tag">' + esc(s.category) + '</span>' : '') +
+          (s.due ? '<span class="tag warn">Due ' + esc(fmtDT(s.due)) + '</span>' : '') + '</div>';
+      }).join('') + '</div>' : '';
+    if (!techs.length) {
+      $('summStatus').textContent = open.length ? 'No stops planned in the app for this state and date.' : 'No stops planned in the app for this state and date.';
+      $('summList').innerHTML = openHtml;
+      return;
+    }
     var total = techs.reduce(function (n, g) { return n + g.stops.length; }, 0);
     $('summStatus').textContent = total + ' stop' + (total === 1 ? '' : 's') + ' in the app plan. Last changed in the app: ' + (fmtDT(j.updatedAt) || 'unknown') + '.';
-    $('summList').innerHTML = techs.map(function (g) {
+    $('summList').innerHTML = openHtml + techs.map(function (g) {
       return '<div class="card"><h2>' + esc(g.tech) + ' <span class="muted">(' + g.stops.length + ')</span></h2>' +
         g.stops.map(function (s, i) {
           return '<div class="stop"><b>' + (i + 1) + '. ' + esc(s.siteName) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
             (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
-            (s.woNumber ? '<br><span class="tag">' + esc(s.woNumber) + '</span>' : '') + '</div>';
+            '<br>' + (s.ticketKind === 'trouble' ? '<span class="tag alert">Trouble ticket</span>' : (s.ticketKind === 'maintenance' ? '<span class="tag restock">Restock</span>' : '')) +
+            (s.woNumber ? '<span class="tag">' + esc(s.woNumber) + '</span>' : '') +
+            (s.due ? '<span class="tag warn">Due ' + esc(fmtDT(s.due)) + '</span>' : '') + '</div>';
         }).join('') + '</div>';
     }).join('');
   }
