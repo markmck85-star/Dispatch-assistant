@@ -888,7 +888,9 @@
 
   // Publish toggle for staff
   async function updatePublishBtn() {
-    if (KIND !== 's') { $('publishBar').classList.add('hidden'); return; }
+    // Show for staff or admin
+    var isStaffOrAdmin = (KIND === 's') || (KIND === 'a') || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'admin');
+    if (!isStaffOrAdmin) { $('publishBar').classList.add('hidden'); return; }
     $('publishBar').classList.remove('hidden');
     var date = $('todayDate').value || todayIso(0);
     var st = STATE || (document.getElementById('stateSel') && document.getElementById('stateSel').value);
