@@ -4465,6 +4465,15 @@ function distanceMatrixStatus(state) {
                         const d = new Date(parseInt(parts[2]), parseInt(parts[0])-1, parseInt(parts[1]));
                         d.setHours(0,0,0,0);
                         item.isSameDay = (d.getTime() === today.getTime());
+                        // A stop whose Restock By is later than this board's date, but
+                        // which the dispatcher has planned ON this date (saved under it),
+                        // is an early catch: it is part of this day's real route and
+                        // mileage, not a faded "pushed to later" pin. (Indiana Thu/Fri
+                        // planner pulls Friday stops onto Thursday this way.)
+                        if (!item.isSameDay && d.getTime() > today.getTime()) {
+                            const _ex = existingByCode[item.code];
+                            if (_ex && (_ex.status === 'planned' || _ex.status === 'notified')) item.isSameDay = true;
+                        }
                         item.restockUrgent = d.getTime() <= realToday.getTime();
                         item.restockOverdue = d.getTime() < realToday.getTime();
                     }
@@ -8013,7 +8022,14 @@ ${content}
         }
 
         async function openCompactSummary() {
-            const assignments = window.currentAssignments || {};
+            // Stops dated for another day show on this board only as dashed "pushed to a
+            // later date" placeholders. They are not part of this day's route, so leave
+            // them out of the compact list (urgent/trouble tickets always stay).
+            const _rawAssignments = window.currentAssignments || {};
+            const assignments = {};
+            Object.keys(_rawAssignments).forEach(t => {
+                assignments[t] = (_rawAssignments[t] || []).filter(i => i.isSameDay !== false || i.urgent || i.restockUrgent);
+            });
             const withStops = Object.keys(assignments).filter(t => (assignments[t] || []).length > 0);
             if (!withStops.length) {
                 alert("Please generate dispatches first, then open the compact summary.");
