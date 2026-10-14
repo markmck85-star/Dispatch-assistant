@@ -591,7 +591,7 @@
 
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
-                <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.01 (IN planner btn)</div>
+                <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.02 (IN btn visible)</div>
                 <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-215</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
@@ -2617,10 +2617,12 @@ function distanceMatrixStatus(state) {
             if (sel && link) link.href = 'restock-tracker.html?state=' + sel.value;
         }
         function updateIndianaPlannerButton() {
-            const btn = document.getElementById('indianaPlannerBtn');
+            const btns = document.querySelectorAll('#indianaPlannerBtn');
             const sel = document.getElementById('stateSelector');
-            if (!btn || !sel) return;
-            btn.style.display = (sel.value === 'IN') ? '' : 'none';
+            const isIN = sel && sel.value === 'IN';
+            btns.forEach(function(btn) {
+                btn.style.display = isIN ? '' : 'none';
+            });
         }
 
 
@@ -10286,6 +10288,26 @@ function distanceMatrixStatus(state) {
     window.refreshBoardTools = refresh;
 })();
 </script>
+
+
+    // Ensure IN planner button visibility after board builds
+    (function() {
+        function hook() {
+            if (window.updateIndianaPlannerButton) window.updateIndianaPlannerButton();
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(hook, 500);
+            setTimeout(hook, 2000);
+        });
+        const orig = window.processDispatch;
+        if (orig) {
+            window.processDispatch = function() {
+                const r = orig.apply(this, arguments);
+                setTimeout(hook, 300);
+                return r;
+            };
+        }
+    })();
 
     <script src="/indiana-restock-planner.js"></script>
 </body>
