@@ -7155,6 +7155,15 @@ function distanceMatrixStatus(state) {
         }
 
         
+        // Who is publishing: the board's own sign-in (username + PIN), the same
+        // pair its tool-settings call already sends to the server.
+        function boardAuthFields() {
+            let pin = '';
+            try { pin = sessionStorage.getItem('dispatchAdminPin') || ''; } catch (e) {}
+            const u = window.CURRENT_USER && window.CURRENT_USER.username;
+            return u && pin ? { username: u, pin: pin } : {};
+        }
+
         // Reads the message boxes on screen (so dispatcher edits are kept).
         function collectMessagesFromView() {
             const out = {};
@@ -7181,7 +7190,7 @@ function distanceMatrixStatus(state) {
                 const r = await fetch('/.netlify/functions/tech-api', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true, messages: collectMessagesFromView() })
+                    body: JSON.stringify(Object.assign({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true, messages: collectMessagesFromView() }, boardAuthFields()))
                 });
                 const j = await r.json();
                 if (j.ok) {
@@ -10422,11 +10431,13 @@ function distanceMatrixStatus(state) {
             const stateEl = document.getElementById('stateSelector');
             if (!dateEl || !stateEl) return;
             try {
-                await fetch('/.netlify/functions/tech-api', {
+                const _pr = await fetch('/.netlify/functions/tech-api', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true, messages: (function () { try { return generateFinalMessages({ returnOnly: true }) || {}; } catch (e) { return {}; } })() })
+                    body: JSON.stringify(Object.assign({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true, messages: (function () { try { return generateFinalMessages({ returnOnly: true }) || {}; } catch (e) { return {}; } })() }, boardAuthFields()))
                 });
+                let _pj = null; try { _pj = await _pr.json(); } catch (e) {}
+                if (!_pj || !_pj.ok) { alert((_pj && _pj.error) || 'Could not push the update.'); return; }
                 hidePushToast();
                 // brief confirmation
                 const msg = document.getElementById('pushToastMsg');
