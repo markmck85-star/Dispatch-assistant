@@ -678,6 +678,120 @@ async function doWatchdog(ctx, body) {
   return json(200, { ok: true, state: picked.value, label: picked.label, entries });
 }
 
+
+
+
+// ---------- check if a date/state is published ----------
+async function doPublishStatus(supabase, ctx, body) {
+  const date = String((body && body.date) || '').trim();
+  const state = String((body && body.state) || '').trim().toUpperCase();
+  if (!date || !state) return json(200, { ok: true, published: false });
+  const { data } = await supabase
+    .from('published_dispatches')
+    .select('id')
+    .eq('dispatch_date', date)
+    .eq('state', state)
+    .limit(1);
+  return json(200, { ok: true, published: !!(data && data.length) });
+}
+
+// ---------- publish / unpublish today's stops (staff only) ----------
+async function doPublishStops(supabase, ctx, body) {
+  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Staff only.' });
+  const date = String((body && body.date) || '').trim();
+  const state = String((body && body.state) || '').trim().toUpperCase();
+  const on = !!(body && body.on);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !state) return json(400, { ok: false, error: 'Date and state required.' });
+  if (!(ctx.states || []).includes(state)) return json(403, { ok: false, error: 'Not your state.' });
+
+  if (on) {
+    await supabase.from('published_dispatches').upsert({ dispatch_date: date, state, published_at: new Date().toISOString() }, { onConflict: 'dispatch_date,state' });
+  } else {
+    await supabase.from('published_dispatches').delete().eq('dispatch_date', date).eq('state', state);
+  }
+  return json(200, { ok: true, date, state, published: on });
+}
+
+// ---------- tech marks a stop done ----------
+async function doCompleteStop(supabase, ctx, body) {
+  const id = body && body.id;
+  if (!id) return json(400, { ok: false, error: 'Missing stop.' });
+  // Only the assigned tech (or staff) can complete
+  const { data: a } = await supabase.from('assignments').select('id, technician_id').eq('id', id).single();
+  if (!a) return json(404, { ok: false, error: 'Stop not found.' });
+  if (ctx.kind === 't') {
+    const { data: t } = await supabase.from('technicians').select('id').ilike('name', ctx.name).limit(1);
+    if (!t || !t[0] || t[0].id !== a.technician_id) return json(403, { ok: false, error: 'Not your stop.' });
+  }
+  await supabase.from('assignments').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', id);
+  return json(200, { ok: true });
+}
+
+// ---------- my stops (tech or staff, own assignments only) ----------
+async function doMyStops(supabase, ctx, body) {
+  const date = String((body && body.date) || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(400, { ok: false, error: 'Pick a date.' });
+
+  // Only show if this date has been published for the tech's state(s)
+  const states = ctx.states || [];
+  const { data: pub } = await supabase
+    .from('published_dispatches')
+    .select('id')
+    .eq('dispatch_date', date)
+    .in('state', states)
+    .limit(1);
+  if (!pub || !pub.length) return json(200, { ok: true, date, stops: [], published: false });
+
+  // Resolve technician id for this login
+  let techId = null;
+  if (ctx.kind === 't') {
+    const { data } = await supabase.from('technicians').select('id').ilike('name', ctx.name).limit(1);
+    techId = data && data[0] ? data[0].id : null;
+  } else if (body && body.tech) {
+    const { data } = await supabase.from('technicians').select('id').ilike('name', body.tech).limit(1);
+    techId = data && data[0] ? data[0].id : null;
+  }
+  if (!techId) return json(200, { ok: true, date, stops: [], published: true });
+
+  const { data: assigns, error } = await supabase
+    .from('assignments')
+    .select('id, site_id, ticket_id, sequence_order, status')
+    .eq('dispatch_date', date)
+    .eq('technician_id', techId)
+    .in('status', ['planned', 'notified'])
+    .order('sequence_order');
+  if (error) return json(500, { ok: false, error: 'Could not load stops.' });
+
+  const siteIds = [...new Set((assigns || []).map(a => a.site_id).filter(Boolean))];
+  const ticketIds = [...new Set((assigns || []).map(a => a.ticket_id).filter(Boolean))];
+  const siteById = {};
+  const ticketById = {};
+  if (siteIds.length) {
+    const { data } = await supabase.from('sites').select('id, site_code, name, address').in('id', siteIds);
+    (data || []).forEach(s => { siteById[s.id] = s; });
+  }
+  if (ticketIds.length) {
+    const { data } = await supabase.from('tickets').select('id, wo_number, ticket_kind, description').in('id', ticketIds);
+    (data || []).forEach(t => { ticketById[t.id] = t; });
+  }
+
+  const stops = (assigns || []).map(a => {
+    const s = siteById[a.site_id] || {};
+    const t = ticketById[a.ticket_id] || {};
+    return {
+      id: a.id,
+      seq: a.sequence_order,
+      siteCode: s.site_code,
+      siteName: s.name,
+      address: s.address,
+      woNumber: t.wo_number || null,
+      ticketKind: t.ticket_kind || null,
+      note: t.description || null
+    };
+  });
+  return json(200, { ok: true, date, stops });
+}
+
 // ---------- dispatch summary (staff only, read only) ----------
 // Shows the app's own plan for a state and date (default or dispatcher-edited).
 // It is NOT a record of what is assigned in Salesforce. Technician logins get 403,
@@ -884,6 +998,12 @@ exports.handler = async (event) => {
     if (action === 'search') return await doSearch(supabase, ctx, body);
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx, body);
+    if (action === 'my_stops') return await doMyStops(supabase, ctx, body);
+    if (action === 'publish_stops') return await doPublishStops(supabase, ctx, body);
+    if (action === 'publish_status') return await doPublishStatus(supabase, ctx, body);
+    if (action === 'complete_stop') return await doCompleteStop(supabase, ctx, body);
+
+
     if (action === 'watchdog') return await doWatchdog(ctx, body);
     if (action === 'oncall') return await doOnCall(supabase, ctx);
     if (action === 'dispatch_summary') return await doDispatchSummary(supabase, ctx, body);
