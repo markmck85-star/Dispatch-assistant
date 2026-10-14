@@ -83,6 +83,11 @@ function watchRegion(st) {
   return (s === 'NC' || s === 'SC') ? 'GA' : s;
 }
 
+// Published dates are stored per board region (NC and SC are on the GA board).
+function pubRegion(s) { return watchRegion(s); }
+// States the dispatch app may publish for when it has no portal token.
+const PUBLISH_BOARD_STATES = ['AL', 'AR', 'CA', 'CO', 'FL', 'GA', 'ID', 'IL', 'IN', 'MI', 'MN', 'MS', 'NV', 'OH', 'OR', 'WV'];
+
 // The selections a staff account may request on the watchdog tab.
 // admin: everything. dispatcher: their own profile state(s), mapped to the
 // watchdog's regions, plus Saturday On-Call.
@@ -684,7 +689,7 @@ async function doWatchdog(ctx, body) {
 // ---------- check if a date/state is published ----------
 async function doPublishStatus(supabase, ctx, body) {
   const date = String((body && body.date) || '').trim();
-  const state = String((body && body.state) || '').trim().toUpperCase();
+  const state = pubRegion((body && body.state) || '');
   if (!date || !state) return json(200, { ok: true, published: false });
   const { data } = await supabase
     .from('published_dispatches')
@@ -699,16 +704,18 @@ async function doPublishStatus(supabase, ctx, body) {
 async function doPublishStops(supabase, ctx, body) {
   if (ctx.kind !== 's' && ctx.kind !== 'a' && !(ctx.role === 'admin')) return json(403, { ok: false, error: 'Staff or admin only.' });
   const date = String((body && body.date) || '').trim();
-  const state = String((body && body.state) || '').trim().toUpperCase();
+  const state = pubRegion((body && body.state) || '');
   const on = !!(body && body.on);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !state) return json(400, { ok: false, error: 'Date and state required.' });
-  if (!(ctx.states || []).includes(state)) return json(403, { ok: false, error: 'Not your state.' });
+  if (!(ctx.states || []).map(pubRegion).includes(state)) return json(403, { ok: false, error: 'Not your state.' });
 
+  let err = null;
   if (on) {
-    await supabase.from('published_dispatches').upsert({ dispatch_date: date, state, published_at: new Date().toISOString() }, { onConflict: 'dispatch_date,state' });
+    ({ error: err } = await supabase.from('published_dispatches').upsert({ dispatch_date: date, state, published_at: new Date().toISOString() }, { onConflict: 'dispatch_date,state' }));
   } else {
-    await supabase.from('published_dispatches').delete().eq('dispatch_date', date).eq('state', state);
+    ({ error: err } = await supabase.from('published_dispatches').delete().eq('dispatch_date', date).eq('state', state));
   }
+  if (err) return json(500, { ok: false, error: 'Could not save. Try again.' });
   return json(200, { ok: true, date, state, published: on });
 }
 
@@ -720,8 +727,7 @@ async function doCompleteStop(supabase, ctx, body) {
   const { data: a } = await supabase.from('assignments').select('id, technician_id').eq('id', id).single();
   if (!a) return json(404, { ok: false, error: 'Stop not found.' });
   if (ctx.kind === 't') {
-    const { data: t } = await supabase.from('technicians').select('id').ilike('name', ctx.name).limit(1);
-    if (!t || !t[0] || t[0].id !== a.technician_id) return json(403, { ok: false, error: 'Not your stop.' });
+    if (!ctx.tech || ctx.tech.id !== a.technician_id) return json(403, { ok: false, error: 'Not your stop.' });
   }
   await supabase.from('assignments').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', id);
   return json(200, { ok: true });
@@ -734,9 +740,8 @@ async function doMyStops(supabase, ctx, body) {
 
   // Only show if this date has been published for the tech's state(s)
   const states = ctx.states || [];
-  // Normalize state (handle labels like "Georgia / NC / SC" → GA)
-  var stateMap = { 'GEORGIA / NC / SC': 'GA', 'GEORGIA': 'GA', 'INDIANA': 'IN', 'ALABAMA': 'AL' };
-  var normStates = states.map(function(s){ return stateMap[String(s).toUpperCase()] || s; });
+  // NC and SC publish under the GA board.
+  const normStates = [...new Set(states.map(pubRegion))];
   const { data: pub } = await supabase
     .from('published_dispatches')
     .select('id')
@@ -748,8 +753,7 @@ async function doMyStops(supabase, ctx, body) {
   // Resolve technician id for this login
   let techId = null;
   if (ctx.kind === 't') {
-    const { data } = await supabase.from('technicians').select('id').ilike('name', ctx.name).limit(1);
-    techId = data && data[0] ? data[0].id : null;
+    techId = ctx.tech && ctx.tech.id ? ctx.tech.id : null;
   } else if (body && body.tech) {
     const { data } = await supabase.from('technicians').select('id').ilike('name', body.tech).limit(1);
     techId = data && data[0] ? data[0].id : null;
@@ -994,9 +998,17 @@ exports.handler = async (event) => {
   try {
     if (action === 'login') return await doLogin(supabase, body);
 
-    // Allow publish actions from the dispatch app without a portal token
+    // The dispatch board has no portal token, so publish actions are allowed
+    // without one. A request that DOES carry a valid portal token is checked
+    // against that login's states like everything else.
+    // KNOWN GAP: the tokenless path is an open write (publish flag only).
+    // Tighten it when the board and portal share a login.
     if (action === 'publish_stops' || action === 'publish_status') {
-      return await (action === 'publish_stops' ? doPublishStops(supabase, { kind: 's', states: ['GA','NC','SC','IN','AL','OH','MI','CO','NV'], role: 'admin' }, body) : doPublishStatus(supabase, {}, body));
+      const tokenCtx = body.token ? await authenticate(supabase, body.token) : null;
+      if (tokenCtx) {
+        return await (action === 'publish_stops' ? doPublishStops(supabase, tokenCtx, body) : doPublishStatus(supabase, tokenCtx, body));
+      }
+      return await (action === 'publish_stops' ? doPublishStops(supabase, { kind: 's', states: PUBLISH_BOARD_STATES, role: 'admin' }, body) : doPublishStatus(supabase, {}, body));
     }
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
