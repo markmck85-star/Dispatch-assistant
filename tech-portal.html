@@ -129,7 +129,7 @@
   <main>
     <div class="statebar hidden" id="stateBar"><label for="stateSel">State</label><select id="stateSel"></select></div>
     <div class="tabs">
-      <button id="tabToday" class="on" onclick="window.showTodayTab && window.showTodayTab()">Today</button>
+      <button id="tabToday" class="on" onclick="showTodayTab()">Today</button>
       <button id="tabSites" onclick="tab('Sites')">Locations</button>
       <button id="tabShip" onclick="tab('Ship')">My shipments</button>
       <button id="tabWatch" onclick="tab('Watch')" class="hidden">Watchdog</button>
@@ -894,8 +894,10 @@
   // Publish toggle for staff
   async function updatePublishBtn() {
     // Show for staff or admin
-    var isStaffOrAdmin = (KIND === 's') || (KIND === 'a') || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role === 'admin');
+    var isStaffOrAdmin = (KIND === 's') || (KIND === 'a') || (KIND === 'admin') || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && (CURRENT_USER.role === 'admin' || CURRENT_USER.kind === 's'));
     if (!isStaffOrAdmin) { $('publishBar').classList.add('hidden'); return; }
+    $('publishBar').classList.remove('hidden');
+    $('publishBar').style.display = 'block';
     $('publishBar').classList.remove('hidden');
     var date = $('todayDate').value || todayIso(0);
     var st = STATE || (document.getElementById('stateSel') && document.getElementById('stateSel').value);
