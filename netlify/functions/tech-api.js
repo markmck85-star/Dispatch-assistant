@@ -693,7 +693,7 @@ async function doPublishStatus(supabase, ctx, body) {
   if (!date || !state) return json(200, { ok: true, published: false });
   const { data } = await supabase
     .from('published_dispatches')
-    .select('id')
+    .select('dispatch_date')
     .eq('dispatch_date', date)
     .eq('state', state)
     .limit(1);
@@ -711,7 +711,20 @@ async function doPublishStops(supabase, ctx, body) {
 
   let err = null;
   if (on) {
-    ({ error: err } = await supabase.from('published_dispatches').upsert({ dispatch_date: date, state, published_at: new Date().toISOString() }, { onConflict: 'dispatch_date,state' }));
+    const row = { dispatch_date: date, state, published_at: new Date().toISOString() };
+    // Optional: the finished message text per technician, as shown in the
+    // dispatch app's Messages view. Plain text only (the portal draws it with
+    // textContent). Left out on a plain re-publish so earlier text is kept.
+    const rawMsgs = body && body.messages;
+    if (rawMsgs && typeof rawMsgs === 'object' && !Array.isArray(rawMsgs)) {
+      const clean = {};
+      Object.keys(rawMsgs).slice(0, 80).forEach((k) => {
+        const v = rawMsgs[k];
+        if (typeof v === 'string' && v.trim()) clean[String(k).slice(0, 80)] = v.slice(0, 4000);
+      });
+      row.messages = clean;
+    }
+    ({ error: err } = await supabase.from('published_dispatches').upsert(row, { onConflict: 'dispatch_date,state' }));
   } else {
     ({ error: err } = await supabase.from('published_dispatches').delete().eq('dispatch_date', date).eq('state', state));
   }
@@ -751,10 +764,10 @@ async function doMyStops(supabase, ctx, body) {
   const normStates = [...new Set(states.map(pubRegion))];
   const { data: pub } = await supabase
     .from('published_dispatches')
-    .select('id')
+    .select('dispatch_date, state, messages')
     .eq('dispatch_date', date)
     .in('state', normStates)
-    .limit(1);
+    .limit(20);
   if (ctx.kind !== 's' && (!pub || !pub.length)) return json(200, { ok: true, date, stops: [], published: false });
 
   // Resolve technician id for this login
@@ -768,6 +781,20 @@ async function doMyStops(supabase, ctx, body) {
     techId = await staffTechId(supabase, ctx);
   }
   if (!techId) return json(200, { ok: true, date, stops: [], published: true, noTech: ctx.kind === 's' });
+
+  // The message the dispatcher published for this technician (if any).
+  let techName = ctx.kind === 't' ? ctx.name : '';
+  if (!techName) {
+    const { data: tn } = await supabase.from('technicians').select('name').eq('id', techId).limit(1);
+    techName = tn && tn[0] ? tn[0].name : '';
+  }
+  let message = null;
+  const want = String(techName || '').trim().toLowerCase();
+  (pub || []).forEach((r) => {
+    if (message || !r.messages || typeof r.messages !== 'object') return;
+    const k = Object.keys(r.messages).find((x) => String(x).trim().toLowerCase() === want);
+    if (k && typeof r.messages[k] === 'string') message = r.messages[k];
+  });
 
   const { data: assigns, error } = await supabase
     .from('assignments')
@@ -805,7 +832,7 @@ async function doMyStops(supabase, ctx, body) {
       note: t.description || null
     };
   });
-  return json(200, { ok: true, date, stops });
+  return json(200, { ok: true, date, stops, message });
 }
 
 // ---------- dispatch summary (staff only, read only) ----------
