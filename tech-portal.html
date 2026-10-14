@@ -857,11 +857,16 @@
       $('todayStatus').textContent = j.error || 'Could not load stops.';
       return;
     }
-    if (j.published === false) {
+    var published = j.published !== false;
+    if ($('publishBtn')) {
+      $('publishBtn').textContent = published ? 'Unpublish' : 'Publish to techs';
+      if ($('publishStatus')) $('publishStatus').textContent = published ? 'Published' : '';
+    }
+    if (!published) {
       $('todayStatus').textContent = 'Not published yet for this date.';
       return;
     }
-    $('todayStatus').textContent = j.stops && j.stops.length ? (j.stops.length + ' stop' + (j.stops.length === 1 ? '' : 's')) : 'No open stops for this date.';
+    $('todayStatus').textContent = j.stops && j.stops.length ? (j.stops.length + ' open stop' + (j.stops.length === 1 ? '' : 's')) : 'No open stops for this date (completed stops are hidden).';
     if (!j.stops || !j.stops.length) return;
     var html = '';
     j.stops.forEach(function (s, i) {
