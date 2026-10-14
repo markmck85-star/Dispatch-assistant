@@ -129,14 +129,27 @@
   <main>
     <div class="statebar hidden" id="stateBar"><label for="stateSel">State</label><select id="stateSel"></select></div>
     <div class="tabs">
-      <button id="tabSites" class="on">Locations</button>
+      <button id="tabToday" class="on">Today</button>
+      <button id="tabSites">Locations</button>
       <button id="tabShip">My shipments</button>
       <button id="tabWatch" class="hidden">Watchdog</button>
       <button id="tabSumm" class="hidden">Summary</button>
       <button id="tabAcct">Account</button>
     </div>
 
-    <section id="sitesPane">
+    <section id="todayPane">
+      <div class="wdbar" style="margin-bottom:10px;">
+        <input type="date" id="todayDate" aria-label="Date">
+        <button type="button" id="todayRefresh">Refresh</button>
+      </div>
+      <div id="publishBar" class="hidden" style="margin-bottom:10px;">
+        <button type="button" id="publishBtn" class="primary" style="margin:0;">Publish to techs</button>
+        <span id="publishStatus" class="muted" style="margin-left:8px;"></span>
+      </div>
+      <div id="todayStatus" class="muted"></div>
+      <div id="todayList"></div>
+    </section>
+    <section id="sitesPane" class="hidden">
       <div id="searchBox">
         <input id="q" type="search" placeholder="Filter by store name, site code, address or county" autocomplete="off">
 
@@ -286,7 +299,7 @@
       $('summList').innerHTML = '';
       $('summStatus').textContent = '';
     }
-    tab('Sites');
+    tab('Today');
     loadSites();
     if (PENDING_WD && WATCH_OK) handleWdOpen(PENDING_WD.wo, PENDING_WD.st);
   }
@@ -828,6 +841,79 @@
       } catch (e) { signOut(); }
     } finally { hideSplash(); }
   })();
+
+  // ----- Today / My stops -----
+  function todayIso(offset) {
+    var d = new Date();
+    d.setDate(d.getDate() + (offset || 0));
+    return d.toISOString().slice(0, 10);
+  }
+  async function loadToday() {
+    var date = $('todayDate').value || todayIso(0);
+    $('todayStatus').textContent = 'Loading...';
+    $('todayList').innerHTML = '';
+    var j = await call('my_stops', { date: date });
+    if (!j.ok) {
+      $('todayStatus').textContent = j.error || 'Could not load stops.';
+      return;
+    }
+    if (j.published === false) {
+      $('todayStatus').textContent = 'Not published yet for this date.';
+      return;
+    }
+    $('todayStatus').textContent = j.stops && j.stops.length ? (j.stops.length + ' stop' + (j.stops.length === 1 ? '' : 's')) : 'No open stops for this date.';
+    if (!j.stops || !j.stops.length) return;
+    var html = '';
+    j.stops.forEach(function (s, i) {
+      var kind = s.ticketKind || '';
+      var cls = kind === 'trouble' ? 'trouble' : (kind === 'maintenance' || kind === 'restock' ? 'maintenance' : '');
+      html += '<div class="wd ' + cls + '" data-id="' + esc(s.id || '') + '">' +
+        '<div><b>' + (i + 1) + '. ' + esc(s.siteName || s.siteCode) + '</b></div>' +
+        '<div class="muted">' + esc(s.siteCode) + (s.address ? ' · ' + esc(s.address) : '') + '</div>' +
+        (s.woNumber ? '<div>WO ' + esc(s.woNumber) + (kind ? ' · ' + esc(kind) : '') + '</div>' : '') +
+        (s.note ? '<div class="desc">' + esc(s.note) + '</div>' : '') +
+        (s.address ? '<div style="margin-top:6px"><a target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(s.address) + '">Open in Maps</a></div>' : '') +
+        (s.id ? '<div style="margin-top:8px"><button type="button" class="done-btn" data-id="' + esc(s.id) + '">Done</button></div>' : '') +
+        '</div>';
+    });
+    $('todayList').innerHTML = html;
+    Array.prototype.forEach.call($('todayList').querySelectorAll('.done-btn'), function (b) {
+      b.onclick = async function () {
+        b.disabled = true; b.textContent = '…';
+        var r = await call('complete_stop', { id: b.getAttribute('data-id') });
+        if (r.ok) loadToday(); else { b.disabled = false; b.textContent = 'Done'; alert(r.error || 'Could not mark done'); }
+      };
+    });
+  }
+
+  // Publish toggle for staff
+  async function updatePublishBtn() {
+    if (KIND !== 's') { $('publishBar').classList.add('hidden'); return; }
+    $('publishBar').classList.remove('hidden');
+    var date = $('todayDate').value || todayIso(0);
+    var st = STATE || (document.getElementById('stateSel') && document.getElementById('stateSel').value);
+    // Simple check via a lightweight call or just toggle on click
+    $('publishBtn').textContent = 'Publish to techs';
+    $('publishBtn').onclick = async function () {
+      var on = $('publishBtn').textContent.indexOf('Unpublish') === -1;
+      var r = await call('publish_stops', { date: date, state: st, on: on });
+      if (r.ok) {
+        $('publishBtn').textContent = on ? 'Unpublish' : 'Publish to techs';
+        $('publishStatus').textContent = on ? 'Published' : 'Unpublished';
+        loadToday();
+      } else alert(r.error || 'Could not update');
+    };
+  }
+  $('todayDate').value = todayIso(0);
+  $('todayRefresh').onclick = function(){ loadToday(); updatePublishBtn(); };
+  updatePublishBtn();
+  // Load today when tab is selected
+  var origTab = tab;
+  tab = function (name) {
+    origTab(name);
+    if (name === 'Today') loadToday();
+  };
+
 })();
 </script>
 </body>

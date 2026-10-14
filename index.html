@@ -545,6 +545,12 @@
         #boardLoginError { color: #ff8a80; font-size: 13px; min-height: 18px; margin-top: 8px; }
         #boardUserChip { font-size: 13px; color: #888; margin: 4px 0 8px; }
         #boardUserChip button { margin-left: 8px; background: transparent; border: none; color: #dc3545; text-decoration: underline; cursor: pointer; font-size: 13px; }
+    
+        #pushToast { position:fixed; bottom:20px; right:20px; z-index:9999; background:#1e1e1e; color:#fff; border:1px solid #444; border-radius:10px; padding:14px 16px; max-width:320px; box-shadow:0 4px 12px rgba(0,0,0,.4); display:none; font-size:14px; }
+        #pushToast button { margin:8px 6px 0 0; padding:6px 12px; border:none; border-radius:6px; cursor:pointer; font-weight:600; }
+        #pushToast .push { background:#1e7e34; color:#fff; }
+        #pushToast .later { background:#6c757d; color:#fff; }
+
     </style>
 </head>
 <body>
@@ -591,7 +597,7 @@
 
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
-                <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.03 (IN btn forced)</div>
+                <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.04 (portal push toast)</div>
                 <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-215</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
@@ -4865,6 +4871,7 @@ function distanceMatrixStatus(state) {
         });
 
         function renderReviewBoard(preserveScroll) {
+            setTimeout(function(){ if (window.maybeShowPushToast) window.maybeShowPushToast(); }, 400);
             const resultsDiv = document.getElementById('results');
             const assignments = window.currentAssignments;
             const _savedScrollY = preserveScroll ? window.scrollY : null;
@@ -7845,6 +7852,13 @@ function distanceMatrixStatus(state) {
 </style>
 </head><body>
 <button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
+
+<div id="pushToast">
+  <div id="pushToastMsg">Stops changed — push update to techs?</div>
+  <button class="push" id="pushToastYes">Push</button>
+  <button class="later" id="pushToastNo">Not now</button>
+</div>
+
 </body></html>`;
 
             const blob = new Blob([html], { type: 'text/html' });
@@ -10308,6 +10322,64 @@ function distanceMatrixStatus(state) {
         }
     })();
 
-    <script src="/indiana-restock-planner.js"></script>
+    <script src="/indiana-restock-planner.js">
+        // ---- Portal publish toast ----
+        let _lastPublishedCheck = 0;
+        let _isPublished = false;
+        async function checkPublished() {
+            const dateEl = document.getElementById('dispatchDate');
+            const stateEl = document.getElementById('stateSelector');
+            if (!dateEl || !stateEl || !dateEl.value) return false;
+            const now = Date.now();
+            if (now - _lastPublishedCheck < 10000) return _isPublished;
+            _lastPublishedCheck = now;
+            try {
+                const r = await fetch('/.netlify/functions/tech-api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'publish_status', date: dateEl.value, state: stateEl.value })
+                });
+                const j = await r.json();
+                _isPublished = !!(j && j.published);
+            } catch (e) { _isPublished = false; }
+            return _isPublished;
+        }
+        function showPushToast() {
+            const t = document.getElementById('pushToast');
+            if (t) t.style.display = 'block';
+        }
+        function hidePushToast() {
+            const t = document.getElementById('pushToast');
+            if (t) t.style.display = 'none';
+        }
+        async function doPushUpdate() {
+            const dateEl = document.getElementById('dispatchDate');
+            const stateEl = document.getElementById('stateSelector');
+            if (!dateEl || !stateEl) return;
+            try {
+                await fetch('/.netlify/functions/tech-api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'publish_stops', date: dateEl.value, state: stateEl.value, on: true })
+                });
+                hidePushToast();
+                // brief confirmation
+                const msg = document.getElementById('pushToastMsg');
+                if (msg) msg.textContent = 'Pushed to techs';
+                setTimeout(hidePushToast, 1500);
+            } catch (e) { console.error(e); }
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            const yes = document.getElementById('pushToastYes');
+            const no = document.getElementById('pushToastNo');
+            if (yes) yes.onclick = doPushUpdate;
+            if (no) no.onclick = hidePushToast;
+        });
+        // Hook after board renders or after syncs — call this from key change points
+        window.maybeShowPushToast = async function() {
+            if (await checkPublished()) showPushToast();
+        };
+
+</script>
 </body>
 </html>
