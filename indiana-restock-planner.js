@@ -389,7 +389,7 @@
     container.querySelector('#in-dismiss').addEventListener('click', () => container.remove());
   }
 
-  function applyPlan(container, thuIso) {
+  async function applyPlan(container, thuIso) {
     if (typeof syncAssignmentToSupabase !== 'function') {
       alert('syncAssignmentToSupabase not available \u2014 cannot apply plan.');
       return;
@@ -411,7 +411,26 @@
         syncAssignmentToSupabase(r.friTech, { code: r.code }, 'removed', 'manual', { dispatchDateOverride: r.origIso });
       }
     });
-    const msg = 'Applied ' + rows.length + ' Indiana stops (' + thuN + ' Thursday, ' + (rows.length - thuN) + ' Friday)';
+    // The dispatch list first loads every stop onto the board date (Wednesday).
+    // Once a stop is planned for Thursday/Friday, that Wednesday copy is a stale
+    // duplicate, so clear it. Only touches copies still planned/notified.
+    let cleared = 0;
+    try {
+      const boardEl = document.getElementById('dispatchDate');
+      const boardIso = boardEl && boardEl.value ? boardEl.value : '';
+      if (boardIso && typeof fetchExistingAssignments === 'function') {
+        const onBoard = await fetchExistingAssignments(boardIso);
+        rows.forEach(r => {
+          if (r.iso === boardIso || r.origIso === boardIso) return;
+          const ex = onBoard[r.code];
+          if (ex && (ex.status === 'planned' || ex.status === 'notified') && ex.techName) {
+            syncAssignmentToSupabase(ex.techName, { code: r.code }, 'removed', 'manual', { dispatchDateOverride: boardIso });
+            cleared++;
+          }
+        });
+      }
+    } catch (e) { console.error('[IN planner] board-day cleanup failed (non-fatal)', e); }
+    const msg = 'Applied ' + rows.length + ' Indiana stops (' + thuN + ' Thursday, ' + (rows.length - thuN) + ' Friday)' + (cleared ? '; cleared ' + cleared + ' leftover copies from the board day' : '');
     if (typeof showToast === 'function') showToast(msg, 'success'); else alert(msg);
     container.remove();
   }
