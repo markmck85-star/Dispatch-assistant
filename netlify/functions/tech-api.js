@@ -734,11 +734,14 @@ async function doMyStops(supabase, ctx, body) {
 
   // Only show if this date has been published for the tech's state(s)
   const states = ctx.states || [];
+  // Normalize state (handle labels like "Georgia / NC / SC" → GA)
+  var stateMap = { 'GEORGIA / NC / SC': 'GA', 'GEORGIA': 'GA', 'INDIANA': 'IN', 'ALABAMA': 'AL' };
+  var normStates = states.map(function(s){ return stateMap[String(s).toUpperCase()] || s; });
   const { data: pub } = await supabase
     .from('published_dispatches')
     .select('id')
     .eq('dispatch_date', date)
-    .in('state', states)
+    .in('state', normStates)
     .limit(1);
   if (!pub || !pub.length) return json(200, { ok: true, date, stops: [], published: false });
 
