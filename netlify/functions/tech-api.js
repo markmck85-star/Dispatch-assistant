@@ -697,7 +697,7 @@ async function doPublishStatus(supabase, ctx, body) {
 
 // ---------- publish / unpublish today's stops (staff only) ----------
 async function doPublishStops(supabase, ctx, body) {
-  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Staff only.' });
+  if (ctx.kind !== 's' && ctx.kind !== 'a' && !(ctx.role === 'admin')) return json(403, { ok: false, error: 'Staff or admin only.' });
   const date = String((body && body.date) || '').trim();
   const state = String((body && body.state) || '').trim().toUpperCase();
   const on = !!(body && body.on);
