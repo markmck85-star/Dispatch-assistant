@@ -129,12 +129,12 @@
   <main>
     <div class="statebar hidden" id="stateBar"><label for="stateSel">State</label><select id="stateSel"></select></div>
     <div class="tabs">
-      <button id="tabToday" class="on">Today</button>
-      <button id="tabSites">Locations</button>
-      <button id="tabShip">My shipments</button>
-      <button id="tabWatch" class="hidden">Watchdog</button>
-      <button id="tabSumm" class="hidden">Summary</button>
-      <button id="tabAcct">Account</button>
+      <button id="tabToday" class="on" onclick="tab('Today')">Today</button>
+      <button id="tabSites" onclick="tab('Sites')">Locations</button>
+      <button id="tabShip" onclick="tab('Ship')">My shipments</button>
+      <button id="tabWatch" onclick="tab('Watch')" class="hidden">Watchdog</button>
+      <button id="tabSumm" onclick="tab('Summ')" class="hidden">Summary</button>
+      <button id="tabAcct" onclick="tab('Acct')">Account</button>
     </div>
 
     <section id="todayPane">
@@ -331,7 +331,7 @@
   };
 
   // ----- tabs -----
-  var PANES = { Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
+  var PANES = { Today: 'todayPane', Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
   function tab(name) {
     Object.keys(PANES).forEach(function (n) {
       $('tab' + n).classList.toggle('on', n === name);
