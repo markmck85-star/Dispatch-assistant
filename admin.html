@@ -100,15 +100,15 @@
         <div class="subtitle">Dispatch Tool</div>
         <label for="loginUser">Username</label>
         <input type="text" id="loginUser" placeholder="Username" autocomplete="username" autocapitalize="none">
-        <label for="loginPin">PIN</label>
-        <input type="password" id="loginPin" placeholder="PIN" inputmode="numeric" maxlength="10" autocomplete="current-password">
+        <label for="loginPin">PIN or passphrase</label>
+        <input type="password" id="loginPin" placeholder="PIN or passphrase" maxlength="64" autocomplete="current-password">
         <button class="big-btn" onclick="doLogin()">Log In</button>
         <button type="button" class="big-btn" onclick="toggleChangePinForm()" style="background:#6c757d;margin-top:8px;">Change my PIN</button>
         <div id="changePinBox" style="display:none;margin-top:12px;text-align:left;">
             <label for="changePinCurrent">Current PIN</label>
-            <input type="password" id="changePinCurrent" placeholder="Current PIN" inputmode="numeric" maxlength="8">
-            <label for="changePinNew">New PIN (4–8 digits)</label>
-            <input type="password" id="changePinNew" placeholder="New PIN" inputmode="numeric" maxlength="8">
+            <input type="password" id="changePinCurrent" placeholder="Current PIN" maxlength="64" autocomplete="current-password">
+            <label for="changePinNew">New PIN or passphrase (8 to 64 characters, letters and numbers welcome)</label>
+            <input type="password" id="changePinNew" placeholder="New PIN or passphrase" maxlength="64" autocomplete="new-password">
             <button type="button" class="big-btn save-btn" onclick="changeOwnPinFromLogin()">Save new PIN</button>
         </div>
         <div class="login-error" id="loginError"></div>
@@ -185,9 +185,9 @@
                 <label for="userEmail">Email</label>
                 <input type="email" id="userEmail" placeholder="name@company.com" autocapitalize="none" autocomplete="off">
                 <p style="font-size:12px;color:#666;margin:-4px 0 10px;">Saved on this login only. Does not create or edit a technician record.</p>
-                <label for="userPin">PIN <span style="color:#888;font-weight:400;font-size:12px;">(4–8 digits)</span></label>
+                <label for="userPin">PIN or passphrase <span style="color:#888;font-weight:400;font-size:12px;">(8 to 64 characters; leave blank when editing to keep the current one)</span></label>
                 <div style="position:relative;margin-bottom:10px;">
-                    <input type="password" id="userPin" placeholder="PIN" inputmode="numeric" maxlength="8" autocomplete="new-password" style="margin-bottom:0;padding-right:52px;">
+                    <input type="password" id="userPin" placeholder="PIN or passphrase" maxlength="64" autocomplete="new-password" style="margin-bottom:0;padding-right:52px;">
                     <button type="button" id="userPinToggle" onclick="toggleUserPinField()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:#e9ecef;border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;">Show</button>
                 </div>
                 <label for="userRole">Role</label>
@@ -299,8 +299,8 @@
                 <div id="techDispatcherFields" style="display:none;background:#fff;border:1px solid #dde;border-radius:8px;padding:12px;margin-bottom:12px;">
                     <label for="techDispatcherUsername">Dispatcher username</label>
                     <input type="text" id="techDispatcherUsername" placeholder="e.g. mark" autocapitalize="none" autocomplete="off">
-                    <label for="techDispatcherPin">PIN (4–8 digits)</label>
-                    <input type="password" id="techDispatcherPin" placeholder="PIN" inputmode="numeric" maxlength="8" autocomplete="new-password">
+                    <label for="techDispatcherPin">PIN or passphrase (8 to 64 characters)</label>
+                    <input type="password" id="techDispatcherPin" placeholder="PIN or passphrase" maxlength="64" autocomplete="new-password">
                     <label for="techDispatcherRole">Login role</label>
                     <select id="techDispatcherRole">
                         <option value="dispatcher">Dispatcher</option>
@@ -1867,6 +1867,7 @@
 
         function doLogout() {
             currentUser = null;
+            try { fetch('/.netlify/functions/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }); } catch (e) {}
             sessionStorage.removeItem('dispatchUser');
             document.getElementById('adminPanel').style.display = 'none';
             document.getElementById('loginScreen').style.display = 'block';
@@ -2153,14 +2154,14 @@
                     var states = (u.states && u.states.length) ? u.states.join(', ') : '—';
                     var emailLine = u.email ? esc(u.email) : '—';
                     var toggleLabel = u.active === false ? 'Reactivate' : 'Deactivate';
-                    var pinId = 'pin-'+u.id;
+                    var lockedNow = u.lockedUntil && new Date(u.lockedUntil).getTime() > Date.now();
                     return '<div class="card">'
                         + '<div class="card-title">'+u.username+' <span style="font-weight:400;color:#666;font-size:13px;">('+u.role+')</span></div>'
                         + '<div class="card-detail">'+badge+' · territories: '+states+'</div>'
                         + '<div class="card-detail">Email: '+emailLine+'</div>'
                         + '<div class="card-detail">Last login: '+(u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : 'never')+'</div>'
-                        + '<div class="card-detail">PIN: <span id="'+pinId+'" data-pin="'+(u.pin||'')+'">••••</span> '
-                        + '<button type="button" class="edit-btn" style="padding:2px 8px;" onclick="togglePinReveal(\''+pinId+'\')">Show</button></div>'
+                        + '<div class="card-detail">PIN: '+(u.hasPin ? 'set (hidden)' : '<span style="color:#dc3545;">not set</span>')+'</div>'
+                        + (lockedNow ? '<div class="card-detail" style="color:#dc3545;">Locked after wrong tries until '+new Date(u.lockedUntil).toLocaleTimeString()+' <button type="button" class="edit-btn" style="padding:2px 8px;" onclick="unlockManagedUser(\''+u.id+'\')">Unlock now</button></div>' : '')
                         + '<div class="card-actions">'
                         + '<button class="edit-btn" onclick="editManagedUser(\''+u.id+'\')">Edit</button>'
                         + '<button class="edit-btn" onclick="resetManagedPin(\''+u.id+'\',\''+u.username+'\')">Change PIN</button>'
@@ -2181,7 +2182,7 @@
             document.getElementById('userUsername').value = u.username;
             document.getElementById('userUsername').disabled = true;
             document.getElementById('userEmail').value = u.email || '';
-            document.getElementById('userPin').value = u.pin || '';
+            document.getElementById('userPin').value = '';
             document.getElementById('userPin').type = 'password';
             document.getElementById('userPinToggle').textContent = 'Show';
             document.getElementById('userRole').value = u.role || 'dispatcher';
@@ -2216,11 +2217,21 @@
         }
 
         async function resetManagedPin(id, username) {
-            var pin = prompt('New 4–8 digit PIN for ' + username + ':');
+            var pin = prompt('New PIN or passphrase for ' + username + ' (8 to 64 characters):');
             if (pin == null) return;
             try {
                 await manageUsers({ action: 'set-pin', id: id, pin: pin.trim() });
                 showToast('PIN updated for ' + username, 'success');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function unlockManagedUser(id) {
+            try {
+                await manageUsers({ action: 'unlock', id: id });
+                showToast('Login unlocked', 'success');
+                loadManagedUsers();
             } catch (e) {
                 showToast(e.message, 'error');
             }

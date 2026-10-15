@@ -39,7 +39,7 @@
   <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.36</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
-    <label>PIN <input id="loginPin" type="password" inputmode="numeric"></label>
+    <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
     <button type="button" onclick="doLogin()">Log in</button>
     <div class="status" id="loginErr"></div>
   </div>
@@ -239,7 +239,12 @@ async function doLogin() {
 
 function doLogout() {
   sessionStorage.removeItem('dispatchUser');
-  location.reload();
+  let done = false;
+  const again = function () { if (!done) { done = true; location.reload(); } };
+  try {
+    fetch('/.netlify/functions/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }).then(again, again);
+    setTimeout(again, 1500);
+  } catch (e) { again(); }
 }
 
 function showApp() {

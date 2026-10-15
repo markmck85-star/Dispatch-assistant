@@ -583,8 +583,8 @@
             <p>Same username and PIN as the Admin Panel. The board will open on your home state.</p>
             <label for="boardLoginUser">Username</label>
             <input id="boardLoginUser" type="text" autocomplete="username" autocapitalize="none">
-            <label for="boardLoginPin">PIN</label>
-            <input id="boardLoginPin" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password">
+            <label for="boardLoginPin">PIN or passphrase</label>
+            <input id="boardLoginPin" type="password" maxlength="64" autocomplete="current-password">
             <button type="button" onclick="submitBoardLogin()">Sign in</button>
             <div id="boardLoginError"></div>
         </div>
@@ -2817,7 +2817,12 @@ function distanceMatrixStatus(state) {
         function switchBoardUser() {
             sessionStorage.removeItem('dispatchUser');
             sessionStorage.removeItem('dispatchAdminPin');
-            window.location.reload();
+            let reloaded = false;
+            const again = function() { if (!reloaded) { reloaded = true; window.location.reload(); } };
+            try {
+                fetch('/.netlify/functions/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }).then(again, again);
+                setTimeout(again, 1500);
+            } catch (e) { again(); }
         }
 
         function ensureBoardLogin() {
@@ -7485,6 +7490,19 @@ function distanceMatrixStatus(state) {
                 if (ackUrl) txt += '\n\nTap to confirm you got this: ' + ackUrl;
 
                 sendPlainMessage(tech, txt, wo ? ('MCR Dispatch — ' + wo) : 'MCR Dispatch — assigned stop');
+
+                // Also push it to the technician's phone if they turned on Dispatch alerts in
+                // the portal. Never blocks or breaks the text above.
+                try {
+                    const pushBody = site + (wo ? ' - ' + wo : '') + '\n' + issue + (sla ? '\nSLA ends: ' + sla : '');
+                    fetch('/.netlify/functions/tech-api', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(Object.assign({ action: 'notify_tech', tech: tech, title: 'New trouble ticket', body: pushBody, wo: item.ticketWo || '' }, boardAuthFields()))
+                    }).then(r => r.json()).then(j => {
+                        if (j && j.ok && j.sent > 0 && typeof showToast === 'function') showToast('Also sent as a phone alert to ' + first, 5000);
+                    }).catch(() => {});
+                } catch (e2) {}
             } catch (e) {
                 alert('Text this stop failed: ' + (e && e.message ? e.message : e));
             }

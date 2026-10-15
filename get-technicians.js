@@ -1,0 +1,150 @@
+/**
+ * get-technicians.js — v2 — Phase 2 Stage 3 (techs read cutover)
+ * SAVE AS: netlify/functions/get-technicians.js
+ *
+ * Now reads from Supabase `technicians` (source of truth going forward)
+ * instead of Blobs. Falls back to the old Blobs read if Supabase isn't
+ * configured or the query errors, matching the same pattern used in the
+ * companion get-locations.js rewrite.
+ *
+ * Returned shape is unchanged from the Blobs version so index.html doesn't
+ * need any changes: an object keyed by tech slug, each value shaped like
+ * { name, state, phone, email, homeAddress, smsAddress, active, lat, lng,
+ *   geoFormatted, geoAt }.
+ *
+ * v3 (2026-09-26): added `id` (technicians.id, the real uuid) to each
+ * record. Every write endpoint that takes a technician_id -- save-on-call.js
+ * included -- needs the actual FK value, not the slug; the Saturday
+ * on-call page's tech-override save was broken without this, since slug
+ * was the only identifier available client-side. Purely additive --
+ * nothing existing reads or breaks on the new field.
+ *
+ * v4 (2026-10-12): added `city` (the roster's Tech Location). Purely additive.
+ */
+
+const { getStore, connectLambda } = require("@netlify/blobs");
+const { createClient } = require("@supabase/supabase-js");
+const auth = require("./lib/auth");
+
+function getDispatchStore() {
+  return getStore("dispatch");
+}
+
+async function readFromBlobs(state) {
+  try {
+    const store = getDispatchStore();
+    const data = await store.get("technicians/" + state, { type: "json" });
+    return data || {};
+  } catch (err) {
+    return {};
+  }
+}
+
+exports.handler = async (event) => {
+  connectLambda(event);
+
+  // v5 (2026-10-15): names, phones and home addresses -- signed-in logins only.
+  // (The gate in front of all functions checks this too; this is the second lock.)
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.AUTH_ENFORCE !== "0") {
+    const who = await auth.requireUser(createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY), event);
+    if (who.error) {
+      return { statusCode: who.status || 401, headers: { "Content-Type": "application/json", "x-mcr-gate": "deny" }, body: JSON.stringify({ ok: false, error: who.error, code: "auth_required" }) };
+    }
+  }
+
+  const params = event.queryStringParameters || {};
+  const state = (params.state || "").trim().toUpperCase();
+
+  if (!state || !/^[A-Z]{2}$/.test(state)) {
+    return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Missing or invalid state parameter" }),
+    };
+  }
+
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+      // 2026-08-23: was .eq("home_state", state) -- an exact match, which
+      // silently excluded any technician whose real home_state differs
+      // from the region they're being viewed under. Found via Evan Zent
+      // (home NC) and Michael Newboult (home SC) missing their home-base
+      // pin on Gina's combined GA/NC/SC dispatch map -- their tickets/
+      // sites showed fine (site records ARE stored with state='GA' by
+      // design for that combined region), but technicians never got the
+      // same treatment, so a state='GA' fetch never returned them at all.
+      // additional_states (new column) lets a tech be included under
+      // states beyond their real home_state without changing what their
+      // home_state actually is -- Evan/Michael both get additional_states
+      // = ['GA'] so they now show up on the GA screen alongside their
+      // real NC/SC home_state.
+      const { data: techs, error: techErr } = await supabase
+        .from("technicians")
+        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, title, city, is_contractor, lat, lng, geocoded_at")
+        .or(`home_state.eq.${state},additional_states.cs.{${state}}`);
+
+      if (techErr) throw techErr;
+
+      const result = {};
+      // 2026-09-17 fix: three technicians rows are literally named
+      // "Unassigned (New Site)" (GA, ID, IN) -- a placeholder used
+      // somewhere in the site-creation flow for "no tech assigned yet",
+      // not a real person, but active:true and otherwise shaped like a
+      // normal technician row (no coordinates, since they have no real
+      // home base). Because this endpoint feeds TECHS everywhere in
+      // index.html without distinction, these sentinels were being
+      // treated as genuine, always-idle, always-available technicians --
+      // including by the Analyze Routes AI rebalance tool, which (with no
+      // home coordinates to weigh against) kept suggesting moving real
+      // stops onto "Unassigned" as if it were the cheapest possible
+      // destination. Filtered out here, the one place TECHS gets built,
+      // rather than patching every downstream consumer separately.
+      for (const t of (techs || [])) {
+        if (t.name === 'Unassigned (New Site)') continue;
+        result[t.slug] = {
+          id: t.id,
+          name: t.name,
+          state: t.home_state,
+          additionalStates: Array.isArray(t.additional_states) ? t.additional_states : [],
+          phone: t.phone || "",
+          email: t.email || "",
+          homeAddress: t.home_address || "",
+          smsAddress: t.sms_address || "",
+          active: t.active !== false,
+          title: t.title || "",
+          city: t.city || "",
+          isContractor: t.is_contractor === true,
+          ...(t.lat != null && t.lng != null ? {
+            lat: t.lat,
+            lng: t.lng,
+            geoAt: t.geocoded_at || null,
+          } : {}),
+        };
+      }
+
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result),
+      };
+    } catch (err) {
+      console.error("[get-technicians] Supabase read failed, falling back to Blobs:", err.message);
+      const fallback = await readFromBlobs(state);
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fallback),
+      };
+    }
+  }
+
+  // Supabase not configured -- old behavior
+  const data = await readFromBlobs(state);
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  };
+};

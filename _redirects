@@ -1,3 +1,16 @@
+# 2026-10-15: the site publishes the whole repository folder, so server code and
+# config files were downloadable as plain files. Refuse them. (/.netlify/functions/*
+# is the live function address and is NOT affected: it starts with a dot.)
+/netlify/*            /not-found   404!
+/netlify.toml         /not-found   404!
+/package.json         /not-found   404!
+/package-lock.json    /not-found   404!
+/deno.lock            /not-found   404!
+/get-locations.js     /not-found   404!
+/pull-mailbox.js      /not-found   404!
+/send-inventory-set.js /not-found  404!
+/inventory-sheet.js   /not-found   404!
+
 /restore.html    /restore.html    200
 /admin.html      /admin.html      200
 /calendar.html   /calendar.html   200

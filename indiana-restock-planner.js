@@ -431,7 +431,7 @@
       }
     } catch (e) { console.error('[IN planner] board-day cleanup failed (non-fatal)', e); }
     const msg = 'Applied ' + rows.length + ' Indiana stops (' + thuN + ' Thursday, ' + (rows.length - thuN) + ' Friday)' + (cleared ? '; cleared ' + cleared + ' leftover copies from the board day' : '');
-    if (typeof showToast === 'function') showToast(msg, 'success'); else alert(msg);
+    if (typeof showToast === 'function') showToast(msg, 6000); else alert(msg);
     container.remove();
   }
 

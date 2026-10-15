@@ -139,6 +139,16 @@
     </div>
 
     <section id="todayPane">
+      <details class="alerts hidden" id="tAlertBox">
+        <summary id="tAlertSum">Dispatch alerts on this phone: checking...</summary>
+        <p class="muted" id="tAlertHelp"></p>
+        <div class="btns">
+          <button id="tAlertOn" class="main">Turn on alerts</button>
+          <button id="tAlertTest" class="hidden">Send test</button>
+          <button id="tAlertOff" class="hidden">Turn off</button>
+        </div>
+        <div class="muted" id="tAlertMsg"></div>
+      </details>
       <div class="wdbar" style="margin-bottom:10px;">
         <input type="date" id="todayDate" aria-label="Date">
         <button type="button" id="todayRefresh">Refresh</button>
@@ -298,6 +308,7 @@
       ME_WATCH_DATA = w;
       alertsInit();
     }
+    tAlertsInit();
     // Summary tab: staff only. Only the states on this login are offered.
     $('tabSumm').classList.toggle('hidden', KIND !== 's' || !sts.length);
     if (KIND === 's') {
@@ -831,6 +842,81 @@
     alertRender(false, []);
     alertMsg('Alerts are off for this phone.');
   };
+  // ----- technician alerts (web push): a ticket the dispatcher sends to this technician -----
+  var T_SUB = null, T_REG = null;
+  function tAlertMsg(t, bad) { $('tAlertMsg').innerHTML = t ? (bad ? '<span class="err">' + esc(t) + '</span>' : esc(t)) : ''; }
+  function tAlertRender(on) {
+    $('tAlertSum').textContent = on ? 'Dispatch alerts on this phone: on' : 'Dispatch alerts on this phone: off';
+    $('tAlertOn').classList.toggle('hidden', !!on);
+    $('tAlertTest').classList.toggle('hidden', !on);
+    $('tAlertOff').classList.toggle('hidden', !on);
+    $('tAlertHelp').textContent = on
+      ? 'You will get a notification with sound when your dispatcher sends you a trouble ticket.'
+      : 'Turn this on to get a notification with sound when your dispatcher sends you a trouble ticket, even when this page is closed.';
+  }
+  async function tAlertsInit() {
+    $('tAlertBox').classList.add('hidden');
+    if (KIND !== 't') return;
+    $('tAlertBox').classList.remove('hidden');
+    tAlertMsg('');
+    if (!alertsSupported()) {
+      $('tAlertSum').textContent = 'Dispatch alerts on this phone: not available here';
+      $('tAlertHelp').textContent = /iPhone|iPad/.test(navigator.userAgent)
+        ? 'On iPhone, alerts only work from the home screen app. Add this page to your Home Screen, open it from there, and come back.'
+        : 'This browser does not support phone alerts. Try Chrome on Android.';
+      $('tAlertOn').classList.add('hidden');
+      return;
+    }
+    try {
+      T_REG = await navigator.serviceWorker.register('tech-sw.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      T_SUB = await T_REG.pushManager.getSubscription();
+    } catch (e) { T_SUB = null; }
+    var on = false;
+    if (T_SUB && Notification.permission === 'granted') {
+      var st = {};
+      try { st = await call('push_status', { endpoint: T_SUB.endpoint }); } catch (e) { st = {}; }
+      on = !!(st && st.subscribed);
+    }
+    tAlertRender(on);
+  }
+  $('tAlertOn').onclick = async function () {
+    $('tAlertOn').disabled = true; tAlertMsg('Working...');
+    try {
+      var perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+      if (perm !== 'granted') { tAlertMsg('Notifications are blocked for this app. Allow them in your phone settings, then try again.', true); return; }
+      var cfg = await call('push_config');
+      if (!cfg.ok || !cfg.configured || !cfg.publicKey) { tAlertMsg('Alerts are not switched on at the server yet.', true); return; }
+      var reg = T_REG || await navigator.serviceWorker.ready;
+      var sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        try { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(cfg.publicKey) }); }
+        catch (e1) { tAlertMsg('Could not subscribe this phone.', true); return; }
+      }
+      var j = await call('push_subscribe', { subscription: sub.toJSON(), ua: navigator.userAgent });
+      if (!j.ok) { tAlertMsg(j.error || 'Could not save.', true); return; }
+      T_SUB = sub;
+      tAlertRender(true);
+      tAlertMsg('Saved. Tap "Send test" to check it.');
+    } catch (e) { tAlertMsg('Something went wrong. Try again.', true); }
+    finally { $('tAlertOn').disabled = false; }
+  };
+  $('tAlertTest').onclick = async function () {
+    if (!T_SUB) return;
+    tAlertMsg('Sending test...');
+    var j = await call('push_test', { endpoint: T_SUB.endpoint });
+    tAlertMsg(j.ok ? 'Test sent. You should see it in a few seconds.' : (j.error || 'The test failed.'), !j.ok);
+  };
+  $('tAlertOff').onclick = async function () {
+    if (!T_SUB) return;
+    tAlertMsg('Working...');
+    try { await call('push_unsubscribe', { endpoint: T_SUB.endpoint }); } catch (e) {}
+    try { await T_SUB.unsubscribe(); } catch (e) {}
+    T_SUB = null;
+    tAlertRender(false);
+    tAlertMsg('Alerts are off for this phone.');
+  };
+
   $('watchSel').onchange = loadWatch;
   $('watchRefresh').onclick = loadWatch;
 
