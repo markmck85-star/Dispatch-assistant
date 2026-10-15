@@ -181,7 +181,7 @@ function cleanUsername(u) {
   return String(u || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
 }
 
-const USER_COLS = 'id, username, role, states, active, technician_id, pin, pin_hash, pin_changed_at, created_at, failed_attempts, locked_until';
+const USER_COLS = 'id, username, role, states, active, technician_id, pin, pin_hash, pin_changed_at, created_at, failed_attempts, locked_until, must_change_pin';
 
 async function logAttempt(sb, ip, username, ok, reason) {
   try {
@@ -207,6 +207,7 @@ async function tooManyFromIp(sb, ip) {
 
 function publicRow(row) {
   return {
+    mustChange: row.must_change_pin === true,
     id: row.id,
     username: row.username,
     role: row.role || 'dispatcher',
@@ -287,6 +288,9 @@ async function verifyCredentials(sb, usernameRaw, pinRaw, opts) {
   try { await sb.from('dispatchers').update(patch).eq('id', row.id); } catch (e) { /* ignore */ }
   if (legacy) row.pin_changed_at = patch.pin_changed_at;
   await logAttempt(sb, ip, row.username, true, legacy ? 'ok-upgraded' : 'ok');
+  if (row.must_change_pin === true && !(opts && opts.allowMustChange)) {
+    return { error: 'Choose a new password first: sign in on the main dispatch page and you will be asked for one.', status: 403, mustChange: true };
+  }
   return { user: publicRow(row) };
 }
 
