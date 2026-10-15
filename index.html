@@ -1227,6 +1227,16 @@
                     ? consumablesMatch.map(m => m.trim()).join(', ').replace(/,\s*,/g, ',').trim()
                     : '';
 
+                // Indiana table: P1F P1R P2F P2R [P3F P3R [P4F P4R]] Journal. Sites have 2-4
+                // printers and unused printer cells are blank, so a row holds 5, 7 or 9 numbers
+                // and the Journal is ALWAYS the last one (a fixed slot gave printer 3's count).
+                let inNums = null;
+                if (/^IN\d/i.test(code)) {
+                    const numPart = cleanWindow.replace(/[A-Za-z][\s\S]*$/, '');
+                    const all = [...numPart.matchAll(/(?<![\w\/\.])-?\d{1,4}(?![\w\/\.])/g)].map(m => parseInt(m[0], 10));
+                    if (all.length >= 5 && all.length <= 9 && all.length % 2 === 1) inNums = all;
+                }
+
                 if (isSurfboard(code)) {
                     // Surfboard: single printer — columns are LF, LR(ribbon), Journal
                     counts[code] = {
@@ -1262,6 +1272,14 @@
                     // Use earliest restockBy date
                     if (dateMatch[1] < existing.restockBy) existing.restockBy = dateMatch[1];
                     counts[code] = existing;
+                } else if (inNums) {
+                    const v = inNums;
+                    counts[code] = { LF: v[0], LR: v[1], RF: v[2], RR: v[3], Journal: v[v.length - 1],
+                        P1F: v[0], P1R: v[1], P2F: v[2], P2R: v[3],
+                        P3F: v.length >= 7 ? v[4] : null, P3R: v.length >= 7 ? v[5] : null,
+                        P4F: v.length >= 9 ? v[6] : null, P4R: v.length >= 9 ? v[7] : null,
+                        isMultiPrinter: true, consumables: consumablesStr, restockBy: dateMatch[1],
+                        hasRightForms: /right forms/i.test(consumablesStr) };
                 } else {
                     // Kahuna (SK/BK): dual printer — columns are LF, LR, RF, RR, Journal
                     counts[code] = {
@@ -7775,7 +7793,7 @@ function distanceMatrixStatus(state) {
                             const journalRequested = listed.includes('journal');
                             const journalLow = fc.Journal !== null && fc.Journal !== undefined && fc.Journal < JOURNAL_LOW_THRESHOLD;
                             const parts = [];
-                            if (isBigHoku(code)) {
+                            if (isBigHoku(code) || fc.isMultiPrinter) {
                                 // Big Hoku 7000: show all printer counts
                                 if (fc.P1F !== null && fc.P1F !== undefined) parts.push(`P1F: ${fc.P1F}`);
                                 if (fc.P1R !== null && fc.P1R !== undefined) parts.push(`P1R: ${fc.P1R}`);
@@ -7931,6 +7949,7 @@ function distanceMatrixStatus(state) {
   @media print { .print-btn { display: none; } body { padding: 0; } }
 </style>
 </head><body>
+<button class="print-btn" onclick="(function(){try{window.close();}catch(e){}setTimeout(function(){location.href='${location.origin}/';},250);})()" style="right:auto;left:16px;background:#555;">← Back to app</button>
 <button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
 
 ${content}
@@ -7992,7 +8011,7 @@ ${content}
             const journalRequested = listed.includes('journal');
             const journalLow = fc.Journal !== null && fc.Journal !== undefined && fc.Journal < JOURNAL_LOW_THRESHOLD;
             const parts = out.parts;
-            if (isBigHoku(code)) {
+            if (isBigHoku(code) || fc.isMultiPrinter) {
                 ['P1F','P1R','P2F','P2R','P3F','P3R','P4F','P4R'].forEach(k => {
                     if (fc[k] !== null && fc[k] !== undefined) parts.push(`${k}: ${fc[k]}`);
                 });
@@ -8213,7 +8232,7 @@ ${content}
   }
   @media print { .bar button { display: none; } body { padding: 0; } }
 </style></head><body>
-<div class="bar"><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('two')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
+<div class="bar"><button onclick="(function(){try{window.close();}catch(e){}setTimeout(function(){location.href='${location.origin}/';},250);})()">← Back to app</button><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('two')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
 <div class="cols">${body}</div>
 <\/body><\/html>`;
             w.document.open();
