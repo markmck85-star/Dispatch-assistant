@@ -3898,17 +3898,28 @@ function distanceMatrixStatus(state) {
                         }
                         const nums = [], nj_start = ni + 1;
                         let consumables = '', restockBy = '', nj = nj_start;
+                        // Indiana rows have 2-4 printers (5, 7 or 9 numbers, Journal last, blanks omitted)
+                        const isINRow = /^IN\d/i.test(siteCode);
+                        const numCap = isINRow ? 9 : 5;
                         while (nj < allLines.length) {
                             const l = allLines[nj];
                             if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(l)) { restockBy = l; nj++; continue; }
-                            if (/^\d{1,4}$/.test(l) && nums.length < 5) { nums.push(parseInt(l)); }
+                            if ((isINRow ? /^-?\d{1,4}$/ : /^\d{1,4}$/).test(l) && nums.length < numCap) { nums.push(parseInt(l)); }
                             else if (/journal|forms|ribbon|p\d forms/i.test(l)) { consumables = l; }
                             else if (STATE_TOKENS.has(l) || /\b[A-Z]{2}\d{3,5}\b/.test(l) || /[-–]\s*\d{3,4}\s*$/.test(l)) { break; }
                             nj++;
                         }
                         if (nums.length >= 2 && restockBy && !window.parsedFormCounts[siteCode]) {
                             const isSB = isSurfboard(siteCode);
-                            window.parsedFormCounts[siteCode] = isSB ? {
+                            const inOk = isINRow && nums.length >= 5 && nums.length % 2 === 1;
+                            window.parsedFormCounts[siteCode] = inOk ? {
+                                LF: nums[0], LR: nums[1], RF: nums[2], RR: nums[3], Journal: nums[nums.length - 1],
+                                P1F: nums[0], P1R: nums[1], P2F: nums[2], P2R: nums[3],
+                                P3F: nums.length >= 7 ? nums[4] : null, P3R: nums.length >= 7 ? nums[5] : null,
+                                P4F: nums.length >= 9 ? nums[6] : null, P4R: nums.length >= 9 ? nums[7] : null,
+                                isMultiPrinter: true, consumables: consumables, restockBy: restockBy,
+                                hasRightForms: /right forms/i.test(consumables)
+                            } : isSB ? {
                                 LF: nums[0], LR: nums[1], RF: null, RR: null,
                                 Journal: nums[2] !== undefined ? nums[2] : null,
                                 consumables: consumables, restockBy: restockBy,
