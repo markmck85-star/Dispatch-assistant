@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.10 (publish in Messages)</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-215</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-216</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -1237,7 +1237,15 @@
                     if (all.length >= 5 && all.length <= 9 && all.length % 2 === 1) inNums = all;
                 }
 
-                if (isSurfboard(code)) {
+                if (inNums) {
+                    const v = inNums;
+                    counts[code] = { LF: v[0], LR: v[1], RF: v[2], RR: v[3], Journal: v[v.length - 1],
+                        P1F: v[0], P1R: v[1], P2F: v[2], P2R: v[3],
+                        P3F: v.length >= 7 ? v[4] : null, P3R: v.length >= 7 ? v[5] : null,
+                        P4F: v.length >= 9 ? v[6] : null, P4R: v.length >= 9 ? v[7] : null,
+                        isMultiPrinter: true, consumables: consumablesStr, restockBy: dateMatch[1],
+                        hasRightForms: /right forms/i.test(consumablesStr) };
+                } else if (isSurfboard(code)) {
                     // Surfboard: single printer — columns are LF, LR(ribbon), Journal
                     counts[code] = {
                         LF: nums[0], LR: nums[1], RF: null, RR: null,
@@ -1272,14 +1280,6 @@
                     // Use earliest restockBy date
                     if (dateMatch[1] < existing.restockBy) existing.restockBy = dateMatch[1];
                     counts[code] = existing;
-                } else if (inNums) {
-                    const v = inNums;
-                    counts[code] = { LF: v[0], LR: v[1], RF: v[2], RR: v[3], Journal: v[v.length - 1],
-                        P1F: v[0], P1R: v[1], P2F: v[2], P2R: v[3],
-                        P3F: v.length >= 7 ? v[4] : null, P3R: v.length >= 7 ? v[5] : null,
-                        P4F: v.length >= 9 ? v[6] : null, P4R: v.length >= 9 ? v[7] : null,
-                        isMultiPrinter: true, consumables: consumablesStr, restockBy: dateMatch[1],
-                        hasRightForms: /right forms/i.test(consumablesStr) };
                 } else {
                     // Kahuna (SK/BK): dual printer — columns are LF, LR, RF, RR, Journal
                     counts[code] = {
