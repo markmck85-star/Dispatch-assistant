@@ -10,7 +10,7 @@
 // other sessions.
 //
 // Dispatcher role: change-own-pin only (needs the current PIN).
-// Admin role: list / create / update / set-pin / set-active / unlock.
+// Admin role: list / create / update / set-pin / set-active / unlock / require-change.
 // Email is stored on the dispatchers row only. It never creates or edits a technician.
 //
 // POST { adminUsername, adminPin, action, ... }
@@ -20,7 +20,7 @@ const auth = require('./lib/auth');
 
 const ALL_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
 const ROLES = new Set(['admin', 'dispatcher']);
-const USER_COLS = 'id, username, role, states, active, technician_id, phone, pin, pin_hash, last_seen_at, email, locked_until';
+const USER_COLS = 'id, username, role, states, active, technician_id, phone, pin, pin_hash, last_seen_at, email, locked_until, must_change_pin';
 
 function json(statusCode, obj, extraHeaders) {
   return { statusCode, headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, extraHeaders || {}), body: JSON.stringify(obj) };
@@ -62,12 +62,16 @@ function publicUser(row) {
     email: row.email || '',
     hasPin: !!(row.pin_hash || row.pin),
     lockedUntil: row.locked_until || null,
+    mustChange: row.must_change_pin === true,
     lastSeenAt: row.last_seen_at || null,
   };
 }
 
-function pinPatch(pin) {
+// forceChange: true = the person must choose their own passphrase at next
+// sign-in (use for a temporary one an admin typed in); false = they chose it.
+function pinPatch(pin, forceChange) {
   return {
+    must_change_pin: forceChange === true,
     pin_hash: auth.hashPin(pin),
     pin: '',
     pin_changed_at: new Date().toISOString(),
@@ -92,7 +96,7 @@ exports.handler = async (event) => {
   // Changing your own PIN always proves the current one, even when signed in.
   let gate;
   if (action === 'change-own-pin') {
-    gate = await auth.verifyCredentials(sb, body.adminUsername, body.adminPin, { ip: auth.clientIp(event) });
+    gate = await auth.verifyCredentials(sb, body.adminUsername, body.adminPin, { ip: auth.clientIp(event), allowMustChange: true });
   } else {
     gate = await auth.authenticateRequest(sb, event, { username: body.adminUsername, pin: body.adminPin });
   }
@@ -106,7 +110,7 @@ exports.handler = async (event) => {
       if (bad) return json(400, { ok: false, error: 'New PIN: ' + bad });
       const { data, error } = await sb
         .from('dispatchers')
-        .update(pinPatch(newPin))
+        .update(pinPatch(newPin, false))
         .eq('id', gate.user.id)
         .select(USER_COLS + ', created_at, pin_changed_at')
         .single();
@@ -152,7 +156,7 @@ exports.handler = async (event) => {
       if (existingLink) {
         const { data, error } = await sb
           .from('dispatchers')
-          .update(Object.assign({ username, role, states, active: true, technician_id: tech.id }, pinPatch(pin)))
+          .update(Object.assign({ username, role, states, active: true, technician_id: tech.id }, pinPatch(pin, true)))
           .eq('id', existingLink.id)
           .select(USER_COLS)
           .single();
@@ -162,7 +166,7 @@ exports.handler = async (event) => {
       if (existingUser) {
         const { data, error } = await sb
           .from('dispatchers')
-          .update(Object.assign({ role, states, active: true, technician_id: tech.id }, pinPatch(pin)))
+          .update(Object.assign({ role, states, active: true, technician_id: tech.id }, pinPatch(pin, true)))
           .eq('id', existingUser.id)
           .select(USER_COLS)
           .single();
@@ -171,7 +175,7 @@ exports.handler = async (event) => {
       }
       const { data, error } = await sb
         .from('dispatchers')
-        .insert(Object.assign({ username, role, states, active: true, technician_id: tech.id }, pinPatch(pin)))
+        .insert(Object.assign({ username, role, states, active: true, technician_id: tech.id }, pinPatch(pin, true)))
         .select(USER_COLS)
         .single();
       if (error) throw error;
@@ -196,7 +200,7 @@ exports.handler = async (event) => {
         .from('dispatchers')
         .insert({
           username,
-          ...pinPatch(pin),
+          ...pinPatch(pin, true),
           role,
           states,
           active: true,
@@ -209,7 +213,7 @@ exports.handler = async (event) => {
       return json(200, { ok: true, user: publicUser(data) });
     }
 
-    if (action === 'update' || action === 'set-pin' || action === 'set-active' || action === 'unlock') {
+    if (action === 'update' || action === 'set-pin' || action === 'set-active' || action === 'unlock' || action === 'require-change') {
       const id = body.id;
       if (!id) return json(400, { ok: false, error: 'id is required' });
 
@@ -226,8 +230,12 @@ exports.handler = async (event) => {
         const pin = String(body.pin || '').trim();
         const bad = auth.pinProblem(pin);
         if (bad) return json(400, { ok: false, error: 'PIN: ' + bad });
-        Object.assign(patch, pinPatch(pin));
+        // A passphrase an admin types for someone else is temporary: they must
+        // choose their own at next sign-in (unless the admin turns that off).
+        const force = target.id === gate.user.id ? false : body.forceChange !== false;
+        Object.assign(patch, pinPatch(pin, force));
       }
+      if (action === 'require-change') patch.must_change_pin = true;
       if (action === 'set-active' || typeof body.active === 'boolean') {
         const nextActive = body.active !== false;
         if (!nextActive && target.role === 'admin' && target.id === gate.user.id) {
