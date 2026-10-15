@@ -2861,13 +2861,19 @@ function distanceMatrixStatus(state) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username: username, pin: pin })
                 });
-                const data = await res.json();
-                if (!res.ok) {
+                let data = await res.json();
+                let loginOk = res.ok;
+                let pinUsed = pin;
+                if (!loginOk && data.mustChange && window.mcrForceChange) {
+                    try { data = await window.mcrForceChange(username, pin); loginOk = true; pinUsed = ''; }
+                    catch (ce) { err.textContent = ce.message; return; }
+                }
+                if (!loginOk) {
                     err.textContent = data.error || 'Login failed';
                     return;
                 }
                 sessionStorage.setItem('dispatchUser', JSON.stringify(data));
-                sessionStorage.setItem('dispatchAdminPin', pin);
+                sessionStorage.setItem('dispatchAdminPin', pinUsed);
                 applyDispatcherSession(data);
                 document.getElementById('boardLoginOverlay').classList.remove('active');
                 if (window.__resolveBoardLogin) window.__resolveBoardLogin(data);

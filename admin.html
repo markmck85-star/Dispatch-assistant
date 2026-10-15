@@ -1850,6 +1850,10 @@
                     body: JSON.stringify({ username: username, pin: pin })
                 });
                 var data = await res.json();
+                if (!res.ok && data.mustChange && window.mcrForceChange) {
+                    try { data = await window.mcrForceChange(username, pin); pin = ''; res = { ok: true }; }
+                    catch (ce) { errEl.textContent = ce.message; errEl.style.display = 'block'; return; }
+                }
                 if (!res.ok) {
                     errEl.textContent = data.error || 'Login failed';
                     errEl.style.display = 'block';
@@ -2160,11 +2164,12 @@
                         + '<div class="card-detail">'+badge+' · territories: '+states+'</div>'
                         + '<div class="card-detail">Email: '+emailLine+'</div>'
                         + '<div class="card-detail">Last login: '+(u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : 'never')+'</div>'
-                        + '<div class="card-detail">PIN: '+(u.hasPin ? 'set (hidden)' : '<span style="color:#dc3545;">not set</span>')+'</div>'
+                        + '<div class="card-detail">PIN: '+(u.hasPin ? 'set (hidden)' : '<span style="color:#dc3545;">not set</span>')+(u.mustChange ? ' · <span style="color:#b45309;">must choose a new password at next sign-in</span>' : '')+'</div>'
                         + (lockedNow ? '<div class="card-detail" style="color:#dc3545;">Locked after wrong tries until '+new Date(u.lockedUntil).toLocaleTimeString()+' <button type="button" class="edit-btn" style="padding:2px 8px;" onclick="unlockManagedUser(\''+u.id+'\')">Unlock now</button></div>' : '')
                         + '<div class="card-actions">'
                         + '<button class="edit-btn" onclick="editManagedUser(\''+u.id+'\')">Edit</button>'
                         + '<button class="edit-btn" onclick="resetManagedPin(\''+u.id+'\',\''+u.username+'\')">Change PIN</button>'
+                        + (u.mustChange ? '' : '<button class="edit-btn" onclick="requireManagedChange(\''+u.id+'\',\''+u.username+'\')">Require new password</button>')
                         + '<button class="del-btn" onclick="toggleManagedUser(\''+u.id+'\','+(u.active===false)+')">'+toggleLabel+'</button>'
                         + '</div></div>';
                 }).join('') || '<div class="card-detail">No logins found.</div>';
@@ -2220,8 +2225,21 @@
             var pin = prompt('New PIN or passphrase for ' + username + ' (8 to 64 characters):');
             if (pin == null) return;
             try {
-                await manageUsers({ action: 'set-pin', id: id, pin: pin.trim() });
-                showToast('PIN updated for ' + username, 'success');
+                var force = confirm('Make ' + username + ' choose their own password at next sign-in?\n\nOK = yes (use this when you are giving them a temporary one)\nCancel = no, keep this one');
+                await manageUsers({ action: 'set-pin', id: id, pin: pin.trim(), forceChange: force });
+                showToast('PIN updated for ' + username + (force ? ' (they will choose their own at next sign-in)' : ''), 'success');
+                loadManagedUsers();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function requireManagedChange(id, username) {
+            if (!confirm(username + ' will be asked to choose a new password the next time they sign in. Continue?')) return;
+            try {
+                await manageUsers({ action: 'require-change', id: id });
+                showToast(username + ' must choose a new password at next sign-in', 'success');
+                loadManagedUsers();
             } catch (e) {
                 showToast(e.message, 'error');
             }

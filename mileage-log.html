@@ -224,8 +224,13 @@ async function doLogin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: username, pin: pin })
     });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Login failed');
+    let data = await res.json();
+    let loginOk = res.ok && !data.error;
+    if (!loginOk && data.mustChange && window.mcrForceChange) {
+      data = await window.mcrForceChange(username, pin);
+      loginOk = true;
+    }
+    if (!loginOk) throw new Error(data.error || 'Login failed');
     if (data.role !== 'tech' && data.role !== 'admin' && data.role !== 'dispatcher') {
       throw new Error('This login cannot use the mileage log.');
     }
