@@ -1,10 +1,22 @@
 const { connectLambda } = require('@netlify/blobs');
+const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
 exports.handler = async (event) => {
     connectLambda(event);
 
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
+    }
+
+    // v2 (2026-10-15): this sends mail and texts as the dispatch domain, so it is
+    // for signed-in logins (or another function) only. The gate in front of all
+    // functions checks this too; this is the second lock.
+    if (process.env.AUTH_ENFORCE !== '0') {
+        const who = await auth.requireUser(createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY), event);
+        if (who.error) {
+            return { statusCode: who.status || 401, headers: { 'Content-Type': 'application/json', 'x-mcr-gate': 'deny' }, body: JSON.stringify({ ok: false, error: who.error, code: 'auth_required' }) };
+        }
     }
 
     try {

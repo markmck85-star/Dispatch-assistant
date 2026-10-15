@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
 function json(statusCode, obj) {
   return { statusCode, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
@@ -10,6 +11,14 @@ function getSupabase() {
 
 exports.handler = async (event) => {
   const supabase = getSupabase();
+
+  // v2 (2026-10-15): backups hold everything -- admin logins only. (The gate in
+  // front of all functions checks this too; this is the second lock.)
+  if (process.env.AUTH_ENFORCE !== '0') {
+    const who = await auth.requireUser(supabase, event, { roles: ['admin'] });
+    if (who.error) return json(who.status || 401, { error: who.error, code: who.status === 403 ? 'forbidden' : 'auth_required' });
+  }
+
   const params = event.queryStringParameters || {};
   const action = params.action || (event.httpMethod === 'GET' ? 'list' : '');
 

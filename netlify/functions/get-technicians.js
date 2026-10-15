@@ -24,6 +24,7 @@
 
 const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
+const auth = require("./lib/auth");
 
 function getDispatchStore() {
   return getStore("dispatch");
@@ -41,6 +42,16 @@ async function readFromBlobs(state) {
 
 exports.handler = async (event) => {
   connectLambda(event);
+
+  // v5 (2026-10-15): names, phones and home addresses -- signed-in logins only.
+  // (The gate in front of all functions checks this too; this is the second lock.)
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.AUTH_ENFORCE !== "0") {
+    const who = await auth.requireUser(createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY), event);
+    if (who.error) {
+      return { statusCode: who.status || 401, headers: { "Content-Type": "application/json", "x-mcr-gate": "deny" }, body: JSON.stringify({ ok: false, error: who.error, code: "auth_required" }) };
+    }
+  }
+
   const params = event.queryStringParameters || {};
   const state = (params.state || "").trim().toUpperCase();
 

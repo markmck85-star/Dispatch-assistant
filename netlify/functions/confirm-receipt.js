@@ -83,7 +83,7 @@ exports.handler = async (event) => {
       const when = now.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
       await fetch(`${base}/.netlify/functions/send-sms`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, require('./lib/auth').internalHeaders()),
         body: JSON.stringify({
           to: dispatcherSms,
           body: `✅ ${techName} confirmed receipt — ${siteCode} ${siteName}, ${when}.`,

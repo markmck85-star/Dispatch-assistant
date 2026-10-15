@@ -1,22 +1,29 @@
 // manage-dispatchers.js
 //
 // User management for dispatcher logins (the same rows login.js uses).
-// Every request includes username + current PIN.
+// Every request is signed in: the sign-in cookie (set by login.js) or
+// adminUsername + adminPin in the body.
 //
-// Dispatcher role: change-own-pin only.
-// Admin role: list / create / update / set-pin / set-active.
+// PINs are now passphrases: 8 to 64 characters, letters, digits and symbols.
+// They are stored hashed (lib/auth.js) and can never be shown again; an admin
+// sets a new one instead. Changing a passphrase signs that login out of its
+// other sessions.
+//
+// Dispatcher role: change-own-pin only (needs the current PIN).
+// Admin role: list / create / update / set-pin / set-active / unlock.
 // Email is stored on the dispatchers row only. It never creates or edits a technician.
 //
 // POST { adminUsername, adminPin, action, ... }
 
 const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
 const ALL_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
 const ROLES = new Set(['admin', 'dispatcher']);
-const USER_COLS = 'id, username, role, states, active, technician_id, phone, pin, last_seen_at, email';
+const USER_COLS = 'id, username, role, states, active, technician_id, phone, pin, pin_hash, last_seen_at, email, locked_until';
 
-function json(statusCode, obj) {
-  return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
+function json(statusCode, obj, extraHeaders) {
+  return { statusCode, headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, extraHeaders || {}), body: JSON.stringify(obj) };
 }
 
 function missingEmailColumn(err) {
@@ -53,25 +60,20 @@ function publicUser(row) {
     technicianId: row.technician_id || null,
     phone: row.phone || '',
     email: row.email || '',
-    pin: row.pin || '',
+    hasPin: !!(row.pin_hash || row.pin),
+    lockedUntil: row.locked_until || null,
     lastSeenAt: row.last_seen_at || null,
   };
 }
 
-async function requireLogin(sb, username, pin) {
-  const u = String(username || '').trim().toLowerCase();
-  const p = String(pin || '').trim();
-  if (!u || !p) return { error: 'Username and PIN are required', status: 401 };
-  const { data, error } = await sb
-    .from('dispatchers')
-    .select('id, username, role, active')
-    .ilike('username', u)
-    .eq('pin', p)
-    .eq('active', true)
-    .maybeSingle();
-  if (error) return { error: error.message, status: 500 };
-  if (!data) return { error: 'Invalid username or PIN', status: 401 };
-  return { user: data };
+function pinPatch(pin) {
+  return {
+    pin_hash: auth.hashPin(pin),
+    pin: '',
+    pin_changed_at: new Date().toISOString(),
+    failed_attempts: 0,
+    locked_until: null,
+  };
 }
 
 exports.handler = async (event) => {
@@ -85,24 +87,32 @@ exports.handler = async (event) => {
   catch { return json(400, { ok: false, error: 'Invalid JSON body' }); }
 
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const gate = await requireLogin(sb, body.adminUsername, body.adminPin);
-  if (gate.error) return json(gate.status, { ok: false, error: gate.error });
-
   const action = body.action || 'list';
+
+  // Changing your own PIN always proves the current one, even when signed in.
+  let gate;
+  if (action === 'change-own-pin') {
+    gate = await auth.verifyCredentials(sb, body.adminUsername, body.adminPin, { ip: auth.clientIp(event) });
+  } else {
+    gate = await auth.authenticateRequest(sb, event, { username: body.adminUsername, pin: body.adminPin });
+  }
+  if (gate.error) return json(gate.status, { ok: false, error: gate.error });
   const isAdmin = gate.user.role === 'admin';
 
   try {
     if (action === 'change-own-pin') {
       const newPin = String(body.pin || body.newPin || '').trim();
-      if (!/^\d{4,8}$/.test(newPin)) return json(400, { ok: false, error: 'New PIN must be 4–8 digits' });
+      const bad = auth.pinProblem(newPin);
+      if (bad) return json(400, { ok: false, error: 'New PIN: ' + bad });
       const { data, error } = await sb
         .from('dispatchers')
-        .update({ pin: newPin })
+        .update(pinPatch(newPin))
         .eq('id', gate.user.id)
-        .select(USER_COLS)
+        .select(USER_COLS + ', created_at, pin_changed_at')
         .single();
       if (error) throw error;
-      return json(200, { ok: true, user: publicUser(data) });
+      auth.clearSeen(data.username);
+      return json(200, { ok: true, user: publicUser(data) }, { 'Set-Cookie': auth.cookieHeader(auth.makeToken(data)) });
     }
 
     if (!isAdmin) return json(403, { ok: false, error: 'User management is restricted to admin accounts' });
@@ -126,7 +136,7 @@ exports.handler = async (event) => {
       if (!username || !/^[a-z0-9._-]{2,32}$/.test(username)) {
         return json(400, { ok: false, error: 'Username must be 2–32 letters, numbers, dot, dash, or underscore' });
       }
-      if (!/^\d{4,8}$/.test(pin)) return json(400, { ok: false, error: 'PIN must be 4–8 digits' });
+      { const bad = auth.pinProblem(pin); if (bad) return json(400, { ok: false, error: 'PIN: ' + bad }); }
       const { data: tech, error: techErr } = await sb
         .from('technicians')
         .select('id, name, home_state, additional_states')
@@ -142,7 +152,7 @@ exports.handler = async (event) => {
       if (existingLink) {
         const { data, error } = await sb
           .from('dispatchers')
-          .update({ username, pin, role, states, active: true, technician_id: tech.id })
+          .update(Object.assign({ username, role, states, active: true, technician_id: tech.id }, pinPatch(pin)))
           .eq('id', existingLink.id)
           .select(USER_COLS)
           .single();
@@ -152,7 +162,7 @@ exports.handler = async (event) => {
       if (existingUser) {
         const { data, error } = await sb
           .from('dispatchers')
-          .update({ pin, role, states, active: true, technician_id: tech.id })
+          .update(Object.assign({ role, states, active: true, technician_id: tech.id }, pinPatch(pin)))
           .eq('id', existingUser.id)
           .select(USER_COLS)
           .single();
@@ -161,7 +171,7 @@ exports.handler = async (event) => {
       }
       const { data, error } = await sb
         .from('dispatchers')
-        .insert({ username, pin, role, states, active: true, technician_id: tech.id })
+        .insert(Object.assign({ username, role, states, active: true, technician_id: tech.id }, pinPatch(pin)))
         .select(USER_COLS)
         .single();
       if (error) throw error;
@@ -177,9 +187,7 @@ exports.handler = async (event) => {
       if (!username || !/^[a-z0-9._-]{2,32}$/.test(username)) {
         return json(400, { ok: false, error: 'Username must be 2–32 letters, numbers, dot, dash, or underscore' });
       }
-      if (!/^\d{4,8}$/.test(pin)) {
-        return json(400, { ok: false, error: 'PIN must be 4–8 digits' });
-      }
+      { const bad = auth.pinProblem(pin); if (bad) return json(400, { ok: false, error: 'PIN: ' + bad }); }
       const email = cleanEmail(body.email);
       if (email && email.error) return json(400, { ok: false, error: email.error });
       const { data: existing } = await sb.from('dispatchers').select('id').ilike('username', username).maybeSingle();
@@ -188,7 +196,7 @@ exports.handler = async (event) => {
         .from('dispatchers')
         .insert({
           username,
-          pin,
+          ...pinPatch(pin),
           role,
           states,
           active: true,
@@ -201,7 +209,7 @@ exports.handler = async (event) => {
       return json(200, { ok: true, user: publicUser(data) });
     }
 
-    if (action === 'update' || action === 'set-pin' || action === 'set-active') {
+    if (action === 'update' || action === 'set-pin' || action === 'set-active' || action === 'unlock') {
       const id = body.id;
       if (!id) return json(400, { ok: false, error: 'id is required' });
 
@@ -216,8 +224,9 @@ exports.handler = async (event) => {
       const patch = {};
       if (action === 'set-pin' || body.pin) {
         const pin = String(body.pin || '').trim();
-        if (!/^\d{4,8}$/.test(pin)) return json(400, { ok: false, error: 'PIN must be 4–8 digits' });
-        patch.pin = pin;
+        const bad = auth.pinProblem(pin);
+        if (bad) return json(400, { ok: false, error: 'PIN: ' + bad });
+        Object.assign(patch, pinPatch(pin));
       }
       if (action === 'set-active' || typeof body.active === 'boolean') {
         const nextActive = body.active !== false;
@@ -244,6 +253,7 @@ exports.handler = async (event) => {
         }
       }
 
+      if (action === 'unlock') { patch.failed_attempts = 0; patch.locked_until = null; }
       if (!Object.keys(patch).length) return json(400, { ok: false, error: 'Nothing to update' });
 
       const { data, error } = await sb
@@ -253,6 +263,7 @@ exports.handler = async (event) => {
         .select(USER_COLS)
         .single();
       if (error) throw error;
+      auth.clearSeen(data.username);
       return json(200, { ok: true, user: publicUser(data) });
     }
 

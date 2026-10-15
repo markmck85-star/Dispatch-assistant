@@ -1,93 +1,58 @@
 /**
- * login.js — v3 — tech role for mileage log only
+ * login.js -- v4 -- server-side sign-in
  *
- * Authenticates against dispatchers. New role: tech
- * (mileage-log.html only; not dispatch or admin).
+ * Checks username + PIN/passphrase against dispatchers (lib/auth.js), counts
+ * wrong tries (5 wrong = 10 minute lock, plus a per-address limit), and sets
+ * the HttpOnly sign-in cookie the edge gate checks on every function call.
+ * The old hard-coded backup logins are gone.
+ *
+ * POST { username, pin }            -> { ok, username, role, states, technician_id } + cookie
+ * POST { action: 'logout' }         -> clears the cookie
+ * GET                               -> { ok, signedIn, ...user } for the current cookie
  */
 
-const { createClient } = require("@supabase/supabase-js");
+const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
-const FALLBACK_USERS = [
-  { username: "gina",  pin: "4084", states: ["GA", "NC", "SC"], role: "dispatcher" },
-  { username: "admin", pin: "9602", states: ["GA", "NC", "SC", "FL"], role: "admin" },
-  { username: "tj",    pin: "8278", states: ["GA", "NC", "SC", "FL", "MI", "IN", "OH", "NV", "IL", "MN", "WV", "OR"], role: "admin" }
-];
-
-function json(statusCode, obj) {
+function json(statusCode, obj, extraHeaders) {
   return {
     statusCode,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(obj)
+    headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, extraHeaders || {}),
+    body: JSON.stringify(obj),
   };
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return json(405, { error: "Method Not Allowed" });
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return json(500, { error: 'Sign-in is not available right now' });
   }
+  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  if (event.httpMethod === 'GET') {
+    const r = await auth.requireUser(sb, event);
+    if (!r.user) return json(200, { ok: true, signedIn: false });
+    return json(200, { ok: true, signedIn: true, username: r.user.username, role: r.user.role, states: r.user.states, technician_id: r.user.technician_id });
+  }
+
+  if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
   let payload;
-  try {
-    payload = JSON.parse(event.body || "{}");
-  } catch {
-    return json(400, { error: "Invalid JSON body" });
+  try { payload = JSON.parse(event.body || '{}'); }
+  catch (e) { return json(400, { error: 'Invalid JSON body' }); }
+
+  if (payload.action === 'logout') {
+    return json(200, { ok: true }, { 'Set-Cookie': auth.clearCookieHeader() });
   }
 
-  const username = String(payload.username || "").trim().toLowerCase();
-  const pin     = String(payload.pin     || "").trim();
+  const r = await auth.verifyCredentials(sb, payload.username, payload.pin, { ip: auth.clientIp(event) });
+  if (!r.user) return json(r.status || 401, { error: r.error || 'Invalid username or PIN' });
 
-  if (!username || !pin) {
-    return json(400, { error: "Username and PIN are required" });
-  }
-
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-      const { data, error } = await supabase
-        .from("dispatchers")
-        .select("id, username, role, states, active, technician_id")
-        .ilike("username", username)
-        .eq("pin", pin)
-        .eq("active", true)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      if (!data) {
-        return json(401, { error: "Invalid username or PIN" });
-      }
-
-      try {
-        await supabase.from("dispatchers").update({ last_seen_at: new Date().toISOString() }).eq("id", data.id);
-      } catch (e) {
-        console.error("login.js: last_seen_at update failed:", e.message);
-      }
-
-      return json(200, {
-        ok: true,
-        username: data.username,
-        role:     data.role   || "dispatcher",
-        states:   data.states || [],
-        technician_id: data.technician_id || null
-      });
-    } catch (err) {
-      console.error("login.js: Supabase query failed, falling back to hardcoded users:", err.message);
-    }
-  }
-
-  const user = FALLBACK_USERS.find(
-    u => u.username.toLowerCase() === username && u.pin === pin
-  );
-
-  if (!user) {
-    return json(401, { error: "Invalid username or PIN" });
-  }
-
+  const token = auth.makeToken(r.user);
   return json(200, {
     ok: true,
-    username: user.username,
-    role:     user.role   || "dispatcher",
-    states:   user.states || [],
-    technician_id: null
-  });
+    username: r.user.username,
+    role: r.user.role,
+    states: r.user.states,
+    technician_id: r.user.technician_id,
+  }, { 'Set-Cookie': auth.cookieHeader(token) });
 };

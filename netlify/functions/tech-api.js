@@ -34,7 +34,8 @@
 //                    anyone opening the Inventory board)
 //                    employee from the returned techs list for that state
 //   watchdog         { state }   staff only; state is a value from me.watch.options
-//   push_config      {}   staff only; { configured, publicKey } for subscribing this phone
+//   notify_tech      { tech, title, body, wo }   dispatch board login (or staff); pushes to that technician's phone if Dispatch alerts are on
+//   push_config      {} ;  staff, and technicians for Dispatch alerts; { configured, publicKey } for subscribing this phone
 //   push_status      { endpoint }   staff only; the choices saved for this phone
 //   push_subscribe   { subscription, selections }   staff only; selections are values
 //                    from me.watch.options, expanded to states here
@@ -46,6 +47,7 @@
 
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const boardAuthLib = require('./lib/auth');
 
 const TECH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const STAFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -689,20 +691,15 @@ async function doWatchdog(ctx, body) {
 // The dispatch board signs in with a username and PIN (login.js) and keeps
 // both for the session, the same way its tool settings call does. Publishing
 // from the board must present them; they are checked here against dispatchers.
-async function boardAuth(supabase, body) {
-  const username = String((body && body.username) || '').trim().toLowerCase().replace(/[^a-z0-9.\-]/g, '');
-  const pin = String((body && body.pin) || '').trim();
-  if (!username || !pin) return null;
-  const { data } = await supabase
-    .from('dispatchers')
-    .select('username, role, states, active')
-    .ilike('username', username)
-    .eq('pin', pin)
-    .eq('active', true)
-    .maybeSingle();
-  if (!data || (data.role !== 'admin' && data.role !== 'dispatcher')) return null;
-  const states = data.role === 'admin' ? PUBLISH_BOARD_STATES : (data.states || []).map((x) => String(x).toUpperCase());
-  return { kind: 's', name: data.username, states, role: data.role, key: data.username };
+async function boardAuth(supabase, body, event) {
+  // Signed in by cookie, or by the board's username + PIN in the body
+  // (lib/auth.js: hashed, with lockout).
+  const r = await boardAuthLib.authenticateRequest(supabase, event || { headers: {} }, body || {});
+  if (!r.user) return null;
+  const d = r.user;
+  if (d.role !== 'admin' && d.role !== 'dispatcher') return null;
+  const states = d.role === 'admin' ? PUBLISH_BOARD_STATES : (d.states || []).map((x) => String(x).toUpperCase());
+  return { kind: 's', name: d.username, states, role: d.role, key: d.username };
 }
 
 // ---------- check if a date/state is published ----------
@@ -974,7 +971,14 @@ function cleanEndpoint(v) {
 }
 
 async function doPush(supabase, ctx, action, body) {
-  if (ctx.kind !== 's') return json(403, { ok: false, error: 'Not available for this account.' });
+  // Staff subscribe to Watchdog alerts. Technicians subscribe to "my dispatch"
+  // alerts (a trouble ticket texted to them from the board). Technician rows are
+  // stored with account_key 't:<id>' and states ['TECH'], which is not a real state,
+  // so the Watchdog and morning-summary senders never match them.
+  if (ctx.kind !== 's' && ctx.kind !== 't') return json(403, { ok: false, error: 'Not available for this account.' });
+  const isTech = ctx.kind === 't';
+  const acctKey = isTech ? 't:' + ctx.key : ctx.key;
+  if (isTech && (action === 'push_summary_test')) return json(403, { ok: false, error: 'Not available for this account.' });
   const push = require('./lib/push.js');
 
   if (action === 'push_config') {
@@ -986,7 +990,7 @@ async function doPush(supabase, ctx, action, body) {
     if (!endpoint) return json(200, { ok: true, subscribed: false, selections: [] });
     const { data } = await supabase
       .from('push_subscriptions').select('selections, account_key').eq('endpoint', endpoint).maybeSingle();
-    if (!data || data.account_key !== ctx.key) return json(200, { ok: true, subscribed: false, selections: [] });
+    if (!data || data.account_key !== acctKey) return json(200, { ok: true, subscribed: false, selections: [] });
     return json(200, { ok: true, subscribed: true, selections: data.selections || [] });
   }
 
@@ -996,18 +1000,24 @@ async function doPush(supabase, ctx, action, body) {
     const endpoint = cleanEndpoint(sub.endpoint);
     const keys = sub.keys || {};
     if (!endpoint || !keys.p256dh || !keys.auth) return json(400, { ok: false, error: 'Bad subscription.' });
-    const allowed = watchdogOptionsFor(ctx.role, ctx.states).map((o) => o.value);
-    const picked = (Array.isArray(body.selections) ? body.selections : [])
-      .map((x) => String(x).toUpperCase())
-      .filter((x, i, a) => allowed.indexOf(x) !== -1 && a.indexOf(x) === i);
-    if (!picked.length) return json(400, { ok: false, error: 'Pick at least one area.' });
-    const states = [];
-    picked.forEach((v) => expandWatchSelection(v).forEach((s) => { if (states.indexOf(s) === -1) states.push(s); }));
+    let picked, states;
+    if (isTech) {
+      picked = ['DISPATCH'];
+      states = ['TECH'];
+    } else {
+      const allowed = watchdogOptionsFor(ctx.role, ctx.states).map((o) => o.value);
+      picked = (Array.isArray(body.selections) ? body.selections : [])
+        .map((x) => String(x).toUpperCase())
+        .filter((x, i, a) => allowed.indexOf(x) !== -1 && a.indexOf(x) === i);
+      if (!picked.length) return json(400, { ok: false, error: 'Pick at least one area.' });
+      states = [];
+      picked.forEach((v) => expandWatchSelection(v).forEach((s) => { if (states.indexOf(s) === -1) states.push(s); }));
+    }
     const { error } = await supabase.from('push_subscriptions').upsert({
       endpoint,
       p256dh: String(keys.p256dh).slice(0, 200),
       auth: String(keys.auth).slice(0, 100),
-      account_key: ctx.key,
+      account_key: acctKey,
       states,
       selections: picked,
       user_agent: String(body.ua || '').slice(0, 200) || null,
@@ -1021,7 +1031,7 @@ async function doPush(supabase, ctx, action, body) {
   const endpoint = cleanEndpoint(body.endpoint);
   if (!endpoint) return json(400, { ok: false, error: 'Bad request.' });
   const { data: mine } = await supabase
-    .from('push_subscriptions').select('id').eq('endpoint', endpoint).eq('account_key', ctx.key).maybeSingle();
+    .from('push_subscriptions').select('id').eq('endpoint', endpoint).eq('account_key', acctKey).maybeSingle();
 
   if (action === 'push_unsubscribe') {
     if (mine) await supabase.from('push_subscriptions').delete().eq('id', mine.id);
@@ -1031,14 +1041,54 @@ async function doPush(supabase, ctx, action, body) {
   if (action === 'push_summary_test') {
     // Sends the morning summary to this phone now (ignores the clock).
     if (!mine) return json(404, { ok: false, error: 'This phone is not subscribed yet.' });
-    const sr = await require('./lib/push-summary.js').sendSample(supabase, ctx.key, endpoint);
+    const sr = await require('./lib/push-summary.js').sendSample(supabase, acctKey, endpoint);
     return json(sr.ok ? 200 : 502, sr.ok ? { ok: true } : { ok: false, error: sr.error || 'The sample could not be delivered.' });
   }
 
   // push_test
   if (!mine) return json(404, { ok: false, error: 'This phone is not subscribed yet.' });
-  const r = await push.notifyEndpoint(supabase, endpoint, { title: 'MCR Watchdog', body: 'Test alert. Alerts are working on this phone.' });
+  const r = await push.notifyEndpoint(supabase, endpoint, isTech
+    ? { title: 'MCR Dispatch', body: 'Test alert. Dispatch alerts are working on this phone.' }
+    : { title: 'MCR Watchdog', body: 'Test alert. Alerts are working on this phone.' });
   return json(r.ok ? 200 : 502, r.ok ? { ok: true } : { ok: false, error: r.error || 'The test could not be delivered.' });
+}
+
+// ---------- push to one technician (from the dispatch board) ----------
+// The board's "Text this stop" button also calls this so a technician who has
+// turned on Dispatch alerts in the portal gets a notification on the phone.
+// Authorized the same way as publishing (board username + PIN, or a staff
+// token) and limited to technicians in that login's states.
+async function doNotifyTech(supabase, ctx, body) {
+  if (ctx.kind !== 's' && ctx.kind !== 'a' && ctx.role !== 'admin') return json(403, { ok: false, error: 'Staff or admin only.' });
+  const name = String((body && body.tech) || '').trim().slice(0, 80);
+  if (!name) return json(400, { ok: false, error: 'Technician required.' });
+  const push = require('./lib/push.js');
+  if (!push.pushConfigured()) return json(200, { ok: true, sent: 0, subscribed: false, reason: 'not_configured' });
+  const esc = name.replace(/[\\%_]/g, (m) => '\\' + m);
+  const { data: techs } = await supabase
+    .from('technicians').select('id, name, home_state, additional_states').ilike('name', esc).limit(2);
+  if (!techs || techs.length !== 1) return json(200, { ok: true, sent: 0, subscribed: false, reason: 'no_match' });
+  const t = techs[0];
+  if (ctx.role !== 'admin') {
+    const mine = (ctx.states || []).map((x) => String(x).toUpperCase());
+    const theirs = [t.home_state].concat(t.additional_states || []).filter(Boolean).map((x) => String(x).toUpperCase());
+    // NC and SC are covered by the GA umbrella, like everywhere else.
+    const covered = theirs.some((x) => mine.indexOf(x) !== -1 || ((x === 'NC' || x === 'SC') && mine.indexOf('GA') !== -1));
+    if (!covered) return json(403, { ok: false, error: 'Not your state.' });
+  }
+  const { data: rows } = await supabase
+    .from('push_subscriptions')
+    .select('id, endpoint, p256dh, auth, fail_count')
+    .eq('account_key', 't:' + t.id).limit(10);
+  if (!rows || !rows.length) return json(200, { ok: true, sent: 0, subscribed: false });
+  const title = String((body && body.title) || 'MCR Dispatch').slice(0, 80);
+  const text = String((body && body.body) || '').slice(0, 300);
+  const wo = String((body && body.wo) || '').slice(0, 40);
+  const payload = JSON.stringify({ title, body: text, tag: wo ? 'ticket-' + wo : 'dispatch', url: '/tech-portal.html' });
+  const webpush = push.getWebPush();
+  let sent = 0;
+  for (const r of rows) { if (await push.sendOne(webpush, supabase, r, payload)) sent++; }
+  return json(200, { ok: true, sent, subscribed: true });
 }
 
 async function doChangePassword(supabase, ctx, body) {
@@ -1086,8 +1136,13 @@ exports.handler = async (event) => {
     if (action === 'publish_status') {
       return await doPublishStatus(supabase, {}, body);
     }
+    if (action === 'notify_tech') {
+      const nCtx = (body.token ? await authenticate(supabase, body.token) : null) || (await boardAuth(supabase, body, event));
+      if (!nCtx) return json(401, { ok: false, error: 'Sign in again on the dispatch board, then retry.' });
+      return await doNotifyTech(supabase, nCtx, body);
+    }
     if (action === 'publish_stops') {
-      const pubCtx = (body.token ? await authenticate(supabase, body.token) : null) || (await boardAuth(supabase, body));
+      const pubCtx = (body.token ? await authenticate(supabase, body.token) : null) || (await boardAuth(supabase, body, event));
       if (!pubCtx) return json(401, { ok: false, error: 'Sign in again on the dispatch board, then retry.' });
       return await doPublishStops(supabase, pubCtx, body);
     }

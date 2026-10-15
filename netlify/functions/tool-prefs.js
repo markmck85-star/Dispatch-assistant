@@ -13,6 +13,7 @@
 //   save -> { ok, persisted }
 
 const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
 const PRESETS = new Set(['simple', 'everything']);
 const MAX_IDS = 60;
@@ -58,10 +59,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); }
   catch { return json(400, { ok: false, error: 'Invalid JSON body' }); }
 
-  const username = String(body.username || '').trim().toLowerCase();
-  const pin = String(body.pin || '').trim();
   const action = String(body.action || '');
-  if (!username || !pin) return json(400, { ok: false, error: 'Username and PIN are required' });
   if (action !== 'get' && action !== 'save') return json(400, { ok: false, error: 'Unknown action' });
 
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -69,15 +67,9 @@ exports.handler = async (event) => {
   }
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  const { data: me, error: authErr } = await supabase
-    .from('dispatchers')
-    .select('id, username')
-    .ilike('username', escapeLike(username))
-    .eq('pin', pin)
-    .eq('active', true)
-    .maybeSingle();
-  if (authErr) return json(500, { ok: false, error: authErr.message });
-  if (!me) return json(401, { ok: false, error: 'Invalid username or PIN' });
+  const who = await auth.authenticateRequest(supabase, event, body);
+  if (who.error) return json(who.status || 401, { ok: false, error: who.error });
+  const me = who.user;
 
   if (action === 'get') {
     const { data, error } = await supabase.from('dispatchers').select('tool_prefs').eq('id', me.id).maybeSingle();

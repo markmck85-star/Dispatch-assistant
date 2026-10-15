@@ -24,13 +24,13 @@
  * tampered frontend request can't use the lighter auth to trigger an
  * expensive operation.
  *
- * PINs are checked with plain equality against the `dispatchers` table,
- * matching login.js's own existing pattern -- not hashed. That's already
- * this app's existing security posture for a small internal tool with a
- * handful of known users, not a new weakness introduced here.
+ * PINs are checked through lib/auth.js (hashed, with lockout), the same as
+ * the main sign-in.
  *
  * Fails closed on any Supabase error or missing/inactive/non-admin user.
  */
+
+const auth = require("./lib/auth");
 
 async function verifyQuickAddAdmin(supabase, username, pin) {
   const cleanUsername = String(username || "").trim().toLowerCase();
@@ -40,19 +40,11 @@ async function verifyQuickAddAdmin(supabase, username, pin) {
   }
 
   try {
-    const { data, error } = await supabase
-      .from("dispatchers")
-      .select("username, role, active")
-      .ilike("username", cleanUsername)
-      .eq("pin", cleanPin)
-      .eq("active", true)
-      .maybeSingle();
+    const r = await auth.verifyCredentials(supabase, cleanUsername, cleanPin);
+    if (r.error) return { ok: false, reason: r.status === 429 ? r.error : (r.status === 500 ? "Login check failed." : "Invalid username or PIN.") };
+    if (r.user.role !== "admin") return { ok: false, reason: "This login doesn't have admin access." };
 
-    if (error) return { ok: false, reason: "Login check failed: " + error.message };
-    if (!data) return { ok: false, reason: "Invalid username or PIN." };
-    if (data.role !== "admin") return { ok: false, reason: "This login doesn't have admin access." };
-
-    return { ok: true, username: data.username };
+    return { ok: true, username: r.user.username };
   } catch (err) {
     return { ok: false, reason: "Login check failed: " + err.message };
   }

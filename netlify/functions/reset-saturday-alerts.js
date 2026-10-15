@@ -51,7 +51,7 @@ exports.handler = async () => {
   if (!base) return json(500, { error: 'No site URL available to call get-settings/save-settings' });
 
   try {
-    const res = await fetch(`${base}/.netlify/functions/get-settings?state=NOTIFICATIONS`, { cache: 'no-store' });
+    const res = await fetch(`${base}/.netlify/functions/get-settings?state=NOTIFICATIONS`, { cache: 'no-store', headers: require('./lib/auth').internalHeaders() });
     const data = await res.json();
     const s = data.settings || {};
     let recipients = (s.settings && s.settings.recipients) || s.recipients || [];
@@ -86,7 +86,7 @@ exports.handler = async () => {
     if (changed) {
       await fetch(`${base}/.netlify/functions/save-settings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, require('./lib/auth').internalHeaders()),
         body: JSON.stringify({ state: 'NOTIFICATIONS', settings: { recipients } }),
       });
     }

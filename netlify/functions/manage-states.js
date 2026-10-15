@@ -3,7 +3,7 @@
 // Admin-only management of the states table (which states are active, their
 // time zone, Saturday coverage, and the extra codes a state accepts, e.g. GA
 // accepts NC and SC). Every request includes the admin's username + PIN, the
-// same way manage-dispatchers.js does.
+// same way manage-dispatchers.js does (or the sign-in cookie).
 //
 // POST { adminUsername, adminPin, action, ... }
 //   action 'list'                              -> { ok, states }
@@ -16,6 +16,7 @@
 // from the pickers but keeps its history.
 
 const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
 const COLS = 'code, name, timezone, saturday_coverage, active, accepts_prefixes';
 
@@ -37,21 +38,11 @@ function cleanPrefixes(list, ownCode) {
   return out;
 }
 
-async function requireAdmin(sb, username, pin) {
-  const u = String(username || '').trim().toLowerCase();
-  const p = String(pin || '').trim();
-  if (!u || !p) return { error: 'Username and PIN are required', status: 401 };
-  const { data, error } = await sb
-    .from('dispatchers')
-    .select('id, username, role, active')
-    .ilike('username', u)
-    .eq('pin', p)
-    .eq('active', true)
-    .maybeSingle();
-  if (error) return { error: error.message, status: 500 };
-  if (!data) return { error: 'Invalid username or PIN', status: 401 };
-  if (data.role !== 'admin') return { error: 'State management is restricted to admin accounts', status: 403 };
-  return { user: data };
+async function requireAdmin(sb, event, body) {
+  const r = await auth.authenticateRequest(sb, event, { username: body.adminUsername, pin: body.adminPin });
+  if (r.error) return { error: r.error, status: r.status };
+  if (r.user.role !== 'admin') return { error: 'State management is restricted to admin accounts', status: 403 };
+  return { user: r.user };
 }
 
 exports.handler = async (event) => {
@@ -64,7 +55,7 @@ exports.handler = async (event) => {
   catch (e) { return json(400, { ok: false, error: 'Invalid JSON body' }); }
 
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const gate = await requireAdmin(sb, body.adminUsername, body.adminPin);
+  const gate = await requireAdmin(sb, event, body);
   if (gate.error) return json(gate.status, { ok: false, error: gate.error });
 
   const action = body.action || 'list';

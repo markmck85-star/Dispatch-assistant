@@ -13,6 +13,7 @@
 //      estimated } ] }
 
 const { createClient } = require('@supabase/supabase-js');
+const auth = require('./lib/auth');
 
 const WINDOW_HOURS = 36;
 
@@ -29,22 +30,12 @@ exports.handler = async (event) => {
   let body;
   try { body = JSON.parse(event.body || '{}'); } catch (e) { return json(400, { ok: false, error: 'Invalid JSON' }); }
 
-  const username = String(body.username || '').trim().toLowerCase();
-  const pin = String(body.pin || '').trim();
-  if (!username || !pin) return json(400, { ok: false, error: 'Username and PIN are required.' });
-
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   try {
-    const { data: disp, error: dErr } = await supabase
-      .from('dispatchers')
-      .select('username, role, states, active')
-      .ilike('username', username)
-      .eq('pin', pin)
-      .eq('active', true)
-      .maybeSingle();
-    if (dErr) return json(500, { ok: false, error: 'Login check failed: ' + dErr.message });
-    if (!disp) return json(401, { ok: false, error: 'Invalid username or PIN.' });
+    const who = await auth.authenticateRequest(supabase, event, body);
+    if (who.error) return json(who.status || 401, { ok: false, error: who.error });
+    const disp = who.user;
     if (disp.role === 'tech') return json(403, { ok: false, error: 'This login cannot use the dispatch view.' });
 
     const isAdmin = disp.role === 'admin';
