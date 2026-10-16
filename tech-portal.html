@@ -1005,6 +1005,60 @@
       '<div class="muted">Total stops: ' + j.stops.length + '</div>' + rows + loadHtml + '</div>';
   }
 
+  // 2026-10-16: Done on a restock stop asks for the exact number of forms left on the roll that
+  // was removed (the count the kiosk shows just before it is reset to full). Used for the restock
+  // tracker's usage estimates, so it must be the real number, not an estimate. Never blocks Done.
+  function rollFieldsFor(stop) {
+    if (!stop || stop.ticketKind === 'trouble') return [];
+    var low = String(stop.items || '').toLowerCase();
+    var out = [];
+    if (stop.printers >= 2) {
+      for (var n = 1; n <= stop.printers; n++) out.push({ key: 'P' + n, label: 'Printer ' + n + ' old roll' });
+      return out;
+    }
+    if (low.indexOf('left forms') !== -1) out.push({ key: 'LF', label: 'Left forms old roll' });
+    if (low.indexOf('right forms') !== -1) out.push({ key: 'RF', label: 'Right forms old roll' });
+    return out;
+  }
+
+  // Resolves to: an object of counts (save them), false (done without counts), or null (cancelled).
+  function askLeftovers(stop, fields) {
+    return new Promise(function (resolve) {
+      var ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+      var rows = fields.map(function (f) {
+        return '<label style="margin:10px 0 4px;">' + esc(f.label) + '</label>' +
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" data-k="' + f.key + '" placeholder="forms left" autocomplete="off">';
+      }).join('');
+      ov.innerHTML = '<div class="card" style="max-width:380px;width:100%;margin:0;">' +
+        '<h2 style="margin:0 0 4px;">Forms left on the old roll</h2>' +
+        '<div class="muted">' + esc(stop.siteCode || '') + ' ' + esc(stop.siteName || '') + '</div>' +
+        '<p style="font-size:14px;margin:8px 0 0;">Enter the exact number the kiosk shows before you reset the count to full. Not an estimate. Leave a roll blank if you did not remove one.</p>' +
+        rows +
+        '<div id="loErr" class="err" style="margin-top:8px;"></div>' +
+        '<button type="button" class="primary" id="loSave" style="width:100%;">Save and mark done</button>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:10px;">' +
+          '<button type="button" class="link" id="loSkip">Mark done without counts</button>' +
+          '<button type="button" class="link" id="loCancel">Cancel</button></div></div>';
+      document.body.appendChild(ov);
+      function close(v) { ov.remove(); resolve(v); }
+      ov.querySelector('#loCancel').onclick = function () { close(null); };
+      ov.querySelector('#loSkip').onclick = function () { close(false); };
+      ov.querySelector('#loSave').onclick = function () {
+        var out = {}, bad = false;
+        Array.prototype.forEach.call(ov.querySelectorAll('input[data-k]'), function (inp) {
+          var v = inp.value.trim();
+          if (!v) return;
+          if (!/^\d{1,4}$/.test(v) || parseInt(v, 10) > 2000) { bad = true; return; }
+          out[inp.getAttribute('data-k')] = parseInt(v, 10);
+        });
+        if (bad) { ov.querySelector('#loErr').textContent = 'Numbers only, please. Use whole numbers like 235.'; return; }
+        if (!Object.keys(out).length) { ov.querySelector('#loErr').textContent = 'Enter a count, or tap "Mark done without counts".'; return; }
+        close(out);
+      };
+    });
+  }
+
   async function loadToday() {
     var date = $('todayDate').value || todayIso(0);
     $('todayStatus').textContent = 'Loading...';
@@ -1057,11 +1111,25 @@
         '</div>';
     });
     $('todayList').innerHTML = html;
+    var stopById = {};
+    j.stops.forEach(function (s) { if (s.id) stopById[s.id] = s; });
     Array.prototype.forEach.call($('todayList').querySelectorAll('.done-btn'), function (b) {
       b.onclick = async function () {
+        var stop = stopById[b.getAttribute('data-id')] || {};
+        var extra = {};
+        var fields = rollFieldsFor(stop);
+        if (fields.length) {
+          // Restock stop: ask for the exact number of forms left on the old roll(s).
+          var ans = await askLeftovers(stop, fields);
+          if (ans === null) return;            // cancelled
+          if (ans) extra.leftovers = ans;      // {} / false = marked done without counts
+        }
         b.disabled = true; b.textContent = '…';
-        var r = await call('complete_stop', { id: b.getAttribute('data-id') });
-        if (r.ok) loadToday(); else { b.disabled = false; b.textContent = 'Done'; alert(r.error || 'Could not mark done'); }
+        var r = await call('complete_stop', Object.assign({ id: b.getAttribute('data-id') }, extra));
+        if (r.ok) {
+          if (extra.leftovers && r.leftoversSaved === false) alert('The stop is marked done, but the roll counts did not save. Tell dispatch the numbers.');
+          loadToday();
+        } else { b.disabled = false; b.textContent = 'Done'; alert(r.error || 'Could not mark done'); }
       };
     });
   }

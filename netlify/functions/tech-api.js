@@ -753,13 +753,56 @@ async function doCompleteStop(supabase, ctx, body) {
   const id = body && body.id;
   if (!id) return json(400, { ok: false, error: 'Missing stop.' });
   // Only the assigned tech (or staff) can complete
-  const { data: a } = await supabase.from('assignments').select('id, technician_id').eq('id', id).single();
+  const { data: a } = await supabase.from('assignments').select('id, technician_id, site_id, dispatch_date').eq('id', id).single();
   if (!a) return json(404, { ok: false, error: 'Stop not found.' });
   if (ctx.kind === 't') {
     if (!ctx.tech || ctx.tech.id !== a.technician_id) return json(403, { ok: false, error: 'Not your stop.' });
   }
+
+  // 2026-10-16: optional exact count of forms left on each old roll, typed on the portal's
+  // Done prompt. Saved to restock_leftover_counts (one row per assignment; re-entry replaces it).
+  // Only whole numbers 0-2000 under known roll names are kept. A failure here never blocks
+  // marking the stop done; the reply says whether the counts were saved.
+  let leftoversSaved = null;
+  const rolls = cleanLeftovers(body && body.leftovers);
+  if (rolls) {
+    // Update-or-insert by hand (the table's unique index on assignment_id is partial, which
+    // supabase-js upsert cannot target).
+    let lErr = null;
+    const { data: prior, error: pErr } = await supabase.from('restock_leftover_counts').select('id').eq('assignment_id', a.id).limit(1);
+    if (pErr) lErr = pErr;
+    else if (prior && prior.length) {
+      ({ error: lErr } = await supabase.from('restock_leftover_counts')
+        .update({ rolls, source: 'portal', entered_at: new Date().toISOString() }).eq('id', prior[0].id));
+    } else {
+      ({ error: lErr } = await supabase.from('restock_leftover_counts').insert({
+        site_id: a.site_id,
+        assignment_id: a.id,
+        technician_id: a.technician_id || (ctx.tech && ctx.tech.id) || null,
+        dispatch_date: a.dispatch_date,
+        rolls,
+        source: 'portal'
+      }));
+    }
+    leftoversSaved = !lErr;
+    if (lErr) console.error('[tech-api] leftover counts not saved:', lErr.message);
+  }
+
   await supabase.from('assignments').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', id);
-  return json(200, { ok: true });
+  return json(200, { ok: true, leftoversSaved });
+}
+
+// Roll names the Done prompt can send: LF / RF (left and right forms) and P1-P4 (multi-printer sites).
+function cleanLeftovers(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  ['LF', 'RF', 'P1', 'P2', 'P3', 'P4'].forEach((k) => {
+    const v = raw[k];
+    if (v === undefined || v === null || v === '') return;
+    const n = typeof v === 'number' ? v : (/^\d{1,4}$/.test(String(v).trim()) ? parseInt(String(v).trim(), 10) : NaN);
+    if (Number.isInteger(n) && n >= 0 && n <= 2000) out[k] = n;
+  });
+  return Object.keys(out).length ? out : null;
 }
 
 // A dispatcher/admin who also works stops is linked to their technicians row
@@ -790,10 +833,11 @@ function describeStop(fc, ticket, jLow) {
   let issue = '';
   if (isRestock) issue = 'Maintenance – Consumable Restock';
   else if (ticket.issue_category) issue = ticket.issue_category + (ticket.issue_detail ? ' – ' + ticket.issue_detail : '');
-  const out = { restockBy: null, issue, items: null, counts: [] };
+  const out = { restockBy: null, issue, items: null, counts: [], printers: 0 };
   if (!fc || typeof fc !== 'object') return out;
   out.restockBy = fc.restockBy || null;
   out.items = fc.consumables || null;
+  if (fc.isMultiPrinter) out.printers = 2 + (fc.P3F != null ? 1 : 0) + (fc.P4F != null ? 1 : 0);
   const listed = String(fc.consumables || '').toLowerCase();
   const ribbon = listed.includes('ribbon');
   const leftForms = listed.includes('left forms');
@@ -905,6 +949,7 @@ async function doMyStops(supabase, ctx, body) {
       issue: d.issue,
       items: d.items,
       counts: d.counts,
+      printers: d.printers,
       due: t.ticket_kind === 'trouble' ? (t.sla_ends_at || t.due_at || null) : null
     };
   });
