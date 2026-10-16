@@ -611,7 +611,23 @@ exports.handler = async (event) => {
       return all;
     }
 
-    const histAssignments = siteIds.length ? await fetchAssignments(baselineFrom, nextBiz) : [];
+    const rawAssignments = siteIds.length ? await fetchAssignments(baselineFrom, nextBiz) : [];
+    // Early catch: when a restock is done a day or two before its Restock By, the
+    // board saves a second 'completed' row on the later day so it stays off that
+    // day's list. Those rows are not that day's work, so leave them out of the
+    // stop counts, the heavy-day comparison and each technician's load.
+    const EARLY_CATCH_DAYS = 3;
+    const dayMs = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
+    const completedBySite = {};
+    rawAssignments.forEach((a) => {
+      if (a.status === 'completed') (completedBySite[a.site_id] = completedBySite[a.site_id] || []).push(a.dispatch_date);
+    });
+    const isEarlyCatchRepeat = (a) => a.status === 'completed' &&
+      (completedBySite[a.site_id] || []).some((d) => {
+        const gap = (dayMs(a.dispatch_date) - dayMs(d)) / 86400000;
+        return gap >= 1 && gap <= EARLY_CATCH_DAYS;
+      });
+    const histAssignments = rawAssignments.filter((a) => !isEarlyCatchRepeat(a));
     const byDate = (d) => histAssignments.filter((a) => a.dispatch_date === d);
     const todaysAssignments = byDate(todayStr);
     const prevAssignments = byDate(prevBiz);
