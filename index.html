@@ -4569,6 +4569,78 @@ function distanceMatrixStatus(state) {
                 });
             }
 
+            // 2026-10-16 fix: EARLY CATCHES. A routine restock whose Restock By
+            // is this board's day (or later) can already have been done on an
+            // earlier day -- the dispatcher grabbed it ahead of time (busy
+            // day coming, tech already nearby). That completion is saved
+            // under the EARLIER day's dispatch_date, and this board only ever
+            // read its own date's rows, so building the later day created a
+            // fresh planned row and the stop came back as open work: on the
+            // board, in the published dispatch, and on the technician's phone.
+            // Real case: GA1025 and GA1089, restock-by Fri 10/16, done by
+            // Randy Thu 10/15 afternoon (Salesforce visits imported, Thursday
+            // rows completed), still listed on Friday's board the night before.
+            // Now, for plain restock stops (no ticket of their own), look back
+            // a few days for a COMPLETED routine-restock assignment at the
+            // same site whose date is on/before the stop's Restock By, and
+            // treat the stop as done. Trouble/install/survey completions never
+            // count, and neither does a completion dated AFTER the stop's
+            // Restock By (that is a late finish of an older need). If a
+            // planned row already exists for this board's date it is marked
+            // completed too, so the portal/publish path stops listing it.
+            // Never throws: any failure leaves the board exactly as before.
+            try {
+                const EARLY_CATCH_LOOKBACK_DAYS = 3;
+                const _isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                const _candidates = relevant.filter(it => it && !it.ticketWo && !it.fromTicket && it.restockBy);
+                if (dateStr && _candidates.length > 0) {
+                    const _base = new Date(dateStr + 'T12:00:00');
+                    const _priorDates = [];
+                    for (let k = 1; k <= EARLY_CATCH_LOOKBACK_DAYS; k++) {
+                        const pd = new Date(_base);
+                        pd.setDate(pd.getDate() - k);
+                        _priorDates.push(_isoOf(pd));
+                    }
+                    const _priorByDate = {};
+                    await Promise.all(_priorDates.map(async ds => {
+                        _priorByDate[ds] = await fetchExistingAssignments(ds);
+                    }));
+                    const _isRoutineRestock = (ex) => !ex.ticket
+                        || (ex.ticket.ticketKind === 'maintenance' && ex.ticket.issueCategory === 'Maintenance');
+                    // Only write to rows for today-or-later boards; never rewrite history.
+                    const _realTodayIso = _isoOf(new Date());
+                    relevant = relevant.filter(item => {
+                        if (!item || item.ticketWo || item.fromTicket || !item.restockBy) return true;
+                        const needDs = getItemEffectiveDateStr(item, dateStr);
+                        if (!needDs) return true;
+                        for (const pd of _priorDates) {
+                            const ex = (_priorByDate[pd] || {})[item.code];
+                            if (!ex || ex.status !== 'completed' || !_isRoutineRestock(ex)) continue;
+                            if (needDs < pd) continue; // completed after its Restock By: not an early catch
+                            if (!window.removedStops) window.removedStops = [];
+                            window.removedStops.push({
+                                code: item.code,
+                                tech: ex.techName,
+                                reason: 'completed',
+                                name: (LOCATIONS[item.code] || {}).name || item.code,
+                                snapshot: { code: item.code },
+                                originalIndex: 0,
+                                inQueue: false,
+                                completedOn: pd
+                            });
+                            const today = existingByCode[item.code];
+                            if (today && (today.status === 'planned' || today.status === 'notified') && dateStr >= _realTodayIso) {
+                                syncAssignmentToSupabase(today.techName, item, 'completed', today.assignedBy || 'auto', { dispatchDateOverride: dateStr });
+                            }
+                            return false;
+                        }
+                        return true;
+                    });
+                }
+            } catch (earlyCatchErr) {
+                console.error('[early-catch] check failed (non-fatal):', earlyCatchErr.message);
+            }
+
             const unavailable = dateStr ? getUnavailableTechsForDate(dateStr) : new Set(
                 Object.entries(window.manualUnavailable).filter(([,v]) => v).map(([k]) => k)
             );
