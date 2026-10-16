@@ -67,7 +67,7 @@ The repo has duplicates. Only one copy of each is live.
 | Morning summary push (8:00 AM in each dispatcher's own time zone, once per day) | every 15 min |
 | Notification digests | disabled on purpose |
 
-`netlify.toml` also schedules `check-report-sync-health`, but no file with that name exists in the repo. Verify before relying on it.
+`check-report-sync-health.js` (added 2026-10-16) runs at :15/:35/:55 each hour. If the Salesforce sync has no successful run in 60 minutes it sends one alert (to `ALERT_EMAIL` / `ALERT_SMS_ADDRESS`) and stays quiet until a sync succeeds. It reads the same Blobs records the sync writes (`report-sync` store: `last-success`, `last-failure`, `in-progress`, `stale-alert-sent`).
 
 Netlify does not let you call a scheduled function by URL, so some jobs have an unscheduled twin (for example `pull-shipments-now`).
 
