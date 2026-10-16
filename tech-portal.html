@@ -962,6 +962,49 @@
     d.setDate(d.getDate() + (offset || 0));
     return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   }
+  // 2026-10-16: the Today tab lays stops out like the dispatch summary in the dispatch app
+  // (numbered stops, red WO line, Items, Counts, minimum loadout) instead of repeating the
+  // text of the dispatch email. When the dispatcher published a message, that message is
+  // shown instead and this layout is not used.
+  function renderTodayCard(j) {
+    var tally = { LF: 0, RF: 0, RIB: 0, JP: 0 };
+    var hasTally = false;
+    var rows = j.stops.map(function (s, i) {
+      var items = String(s.items || '');
+      var low = items.toLowerCase();
+      if (s.ticketKind !== 'trouble' && items) {
+        if (low.indexOf('left forms') !== -1) { tally.LF++; hasTally = true; }
+        if (low.indexOf('right forms') !== -1) { tally.RF++; hasTally = true; }
+        if (low.indexOf('ribbon') !== -1) { tally.RIB++; hasTally = true; }
+        if (low.indexOf('journal') !== -1) { tally.JP++; hasTally = true; }
+      }
+      var woLine = s.woNumber
+        ? '<div style="font-size:13px;color:var(--bad);margin-top:2px;">📋 WO ' + esc(s.woNumber) + (s.issue ? ' – ' + esc(s.issue) : '') +
+          (s.due ? ' <b>Due: ' + esc(fmtDT(s.due)) + '</b>' : '') + '</div>'
+        : '';
+      return '<div style="padding:10px 0;' + (i ? 'border-top:1px solid var(--line);' : '') + '">' +
+        '<div><b>' + (i + 1) + '. ' + esc(s.siteCode) + ' – ' + esc(s.siteName) + '</b>' +
+          (s.restockBy ? ' <span class="muted">by ' + esc(s.restockBy) + '</span>' : '') + '</div>' +
+        (s.address ? '<div class="muted">' + esc(s.address) + '</div>' : '') +
+        woLine +
+        (items ? '<div style="font-size:13px;margin-top:2px;">Items: ' + esc(items) + '</div>' : '') +
+        (s.counts && s.counts.length ? '<div style="font-size:13px;margin-top:1px;">Counts: ' + s.counts.map(esc).join(' | ') + '</div>' : '') +
+        (s.address ? '<div style="margin-top:6px"><a target="_blank" rel="noopener" href="https://maps.google.com/?q=' + encodeURIComponent(s.address) + '">Open in Maps</a></div>' : '') +
+        (s.id ? '<div style="margin-top:8px"><button type="button" class="done-btn" data-id="' + esc(s.id) + '">Done</button></div>' : '') +
+        '</div>';
+    }).join('');
+    var load = [];
+    if (tally.LF) load.push('LF×' + tally.LF);
+    if (tally.RF) load.push('RF×' + tally.RF);
+    if (tally.RIB) load.push('RIB×' + tally.RIB);
+    if (tally.JP) load.push('JP×' + tally.JP);
+    var loadHtml = hasTally && load.length
+      ? '<div style="margin-top:8px;padding:6px 10px;border-radius:6px;background:var(--bg);border:1px solid var(--line);font-size:13px;font-weight:600;">📦 Min loadout: ' + load.join('  ') + '</div>'
+      : '';
+    return '<div class="card"><h2 style="margin:0 0 2px;">' + esc(j.techName || 'My stops') + '</h2>' +
+      '<div class="muted">Total stops: ' + j.stops.length + '</div>' + rows + loadHtml + '</div>';
+  }
+
   async function loadToday() {
     var date = $('todayDate').value || todayIso(0);
     $('todayStatus').textContent = 'Loading...';
@@ -999,7 +1042,9 @@
       var msgText = String(j.message).replace(/\s*Please acknowledge receipt\.?\s*$/i, '');
       html += '<div class="card"><div class="msgbody">' + esc(msgText) + '</div></div>';
     }
-    j.stops.forEach(function (s, i) {
+    if (!compact) {
+      html += renderTodayCard(j);
+    } else j.stops.forEach(function (s, i) {
       var kind = s.ticketKind || '';
       var cls = kind === 'trouble' ? 'trouble' : (kind === 'maintenance' || kind === 'restock' ? 'maintenance' : '');
       html += '<div class="wd ' + cls + '" data-id="' + esc(s.id || '') + '">' +

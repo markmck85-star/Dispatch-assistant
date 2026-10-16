@@ -769,6 +769,54 @@ async function staffTechId(supabase, ctx) {
   return ctx.technicianId || null;
 }
 
+// ---------- stop details shown the way the dispatch app's summary shows them ----------
+// The per-state "journal low" cutoff lives in Blobs ("dispatch" store, settings/<STATE>),
+// the same place the dispatch board saves it. Falls back to 3000 like the board does.
+async function journalLowThreshold(region) {
+  try {
+    const { getStore } = require('@netlify/blobs');
+    const v = await getStore('dispatch').get('settings/' + region, { type: 'json' });
+    const n = v && parseInt(v.journalLowThreshold, 10);
+    return n > 0 ? n : 3000;
+  } catch (e) { return 3000; }
+}
+
+// Mirrors the counts rules of the dispatch summary in index.html (LF always, LR only when
+// it matters, RF when above zero, Journal when requested or low). Surfboard and Big Hoku
+// sites use their own variations on the board and are shown here with the standard rules.
+function describeStop(fc, ticket, jLow) {
+  const kind = ticket.ticket_kind || '';
+  const isRestock = kind === 'maintenance' || kind === 'restock';
+  let issue = '';
+  if (isRestock) issue = 'Maintenance – Consumable Restock';
+  else if (ticket.issue_category) issue = ticket.issue_category + (ticket.issue_detail ? ' – ' + ticket.issue_detail : '');
+  const out = { restockBy: null, issue, items: null, counts: [] };
+  if (!fc || typeof fc !== 'object') return out;
+  out.restockBy = fc.restockBy || null;
+  out.items = fc.consumables || null;
+  const listed = String(fc.consumables || '').toLowerCase();
+  const ribbon = listed.includes('ribbon');
+  const leftForms = listed.includes('left forms');
+  const journalReq = listed.includes('journal');
+  const num = (v) => typeof v === 'number' && !isNaN(v);
+  const journalLow = num(fc.Journal) && fc.Journal < jLow;
+  const parts = [];
+  if (fc.isMultiPrinter) {
+    ['P1F', 'P1R', 'P2F', 'P2R', 'P3F', 'P3R', 'P4F', 'P4R'].forEach(k => { if (num(fc[k])) parts.push(k + ': ' + fc[k]); });
+    if (num(fc.Journal)) parts.push('J: ' + fc.Journal);
+  } else {
+    if (num(fc.LF)) parts.push('LF: ' + fc.LF);
+    if (!ribbon && num(fc.LR) && ((num(fc.LF) && fc.LR < fc.LF) || (leftForms && fc.LR < 800))) parts.push('LR: ' + fc.LR + ' ⚠️');
+    if (num(fc.RF) && fc.RF > 0) parts.push('RF: ' + fc.RF);
+    if ((journalReq || journalLow) && num(fc.Journal)) {
+      parts.push(fc.Journal < 850 ? 'J: ' + fc.Journal + ' — Journal Paper critically low or out'
+        : fc.Journal < jLow ? 'J: ' + fc.Journal + ' — Journal Paper low' : 'J: ' + fc.Journal);
+    }
+  }
+  out.counts = parts;
+  return out;
+}
+
 // ---------- my stops (tech or staff, own assignments only) ----------
 async function doMyStops(supabase, ctx, body) {
   const date = String((body && body.date) || '').trim();
@@ -814,7 +862,7 @@ async function doMyStops(supabase, ctx, body) {
 
   const { data: assigns, error } = await supabase
     .from('assignments')
-    .select('id, site_id, ticket_id, sequence_order, status')
+    .select('id, site_id, ticket_id, sequence_order, status, restock_form_counts')
     .eq('dispatch_date', date)
     .eq('technician_id', techId)
     .in('status', ['planned', 'notified'])
@@ -826,17 +874,24 @@ async function doMyStops(supabase, ctx, body) {
   const siteById = {};
   const ticketById = {};
   if (siteIds.length) {
-    const { data } = await supabase.from('sites').select('id, site_code, name, address').in('id', siteIds);
+    const { data } = await supabase.from('sites').select('id, site_code, name, address, state').in('id', siteIds);
     (data || []).forEach(s => { siteById[s.id] = s; });
   }
   if (ticketIds.length) {
-    const { data } = await supabase.from('tickets').select('id, wo_number, ticket_kind, description').in('id', ticketIds);
+    const { data } = await supabase.from('tickets').select('id, wo_number, ticket_kind, description, issue_category, issue_detail, sla_ends_at, due_at').in('id', ticketIds);
     (data || []).forEach(t => { ticketById[t.id] = t; });
+  }
+
+  // "Journal low" cutoff is a per-state setting on the dispatch board (default 3000).
+  const jThreshold = {};
+  for (const reg of new Set(Object.values(siteById).map(x => pubRegion(x.state)).filter(Boolean))) {
+    jThreshold[reg] = await journalLowThreshold(reg);
   }
 
   const stops = (assigns || []).map(a => {
     const s = siteById[a.site_id] || {};
     const t = ticketById[a.ticket_id] || {};
+    const d = describeStop(a.restock_form_counts, t, jThreshold[pubRegion(s.state)] || 3000);
     return {
       id: a.id,
       seq: a.sequence_order,
@@ -845,10 +900,15 @@ async function doMyStops(supabase, ctx, body) {
       address: s.address,
       woNumber: t.wo_number || null,
       ticketKind: t.ticket_kind || null,
-      note: t.description || null
+      note: t.description || null,
+      restockBy: d.restockBy,
+      issue: d.issue,
+      items: d.items,
+      counts: d.counts,
+      due: t.ticket_kind === 'trouble' ? (t.sla_ends_at || t.due_at || null) : null
     };
   });
-  return json(200, { ok: true, date, stops, message });
+  return json(200, { ok: true, date, stops, message, techName: techName || '' });
 }
 
 // ---------- dispatch summary (staff only, read only) ----------
@@ -1126,6 +1186,8 @@ exports.handler = async (event) => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   const action = String(body.action || '');
+  // 2026-10-16: my_stops reads the per-state "journal low" setting from Blobs.
+  try { require('@netlify/blobs').connectLambda(event); } catch (e) { /* not available: the default is used */ }
 
   try {
     if (action === 'login') return await doLogin(supabase, body);

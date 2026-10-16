@@ -7969,11 +7969,10 @@ function distanceMatrixStatus(state) {
             const sameDayItems = allItems.filter(i => i.restockUrgent || i.urgent);
             const rightFormItems = allItems.filter(i => i.hasRightForms);
 
-            if (sameDayItems.length > 0) {
-                html += `<div style="background:#fdeaea;border:1px solid #e24b4a;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;">
-                    <strong>🚨 SAME DAY — Action Required:</strong> ${sameDayItems.map(i => i.code).join(', ')}
-                </div>`;
-            }
+            // 2026-10-16: the "SAME DAY -- Action Required" banner was removed from
+            // this summary on purpose. Dispatchers already know which restocks are
+            // due today, and trouble tickets carry their own marking in the list.
+            // (sameDayItems is still used further down for the tomorrow section.)
             if (rightFormItems.length > 0) {
                 html += `<div style="background:#eaf3de;border:1px solid #639922;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;">
                     <strong>📋 Previous Year Right Forms Required:</strong> ${rightFormItems.map(i => i.code).join(', ')}
