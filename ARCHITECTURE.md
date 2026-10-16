@@ -8,11 +8,10 @@ The repo has duplicates. Only one copy of each is live.
 
 - `netlify.toml` publishes the **repo root** (`publish = "."`). The live web pages are the `.html` files **in the root**: `index.html` (dispatch board), `state.html` (state console), `calendar.html`, `tech-portal.html`, and so on.
 - Netlify functions are deployed from **`netlify/functions/`** (`functions = "netlify/functions"`). The live backend is the `.js` / `.mjs` files **in that folder** and its `lib/` subfolder.
-- Some files exist in both places and have drifted apart:
-  - `netlify/functions/*.html` (index, state, calendar, ga-inventory-board, inventory-recover, closing-email-reconstructor) are **stale copies**. Do not edit or base work on them. On 2026-10-16 an edit made from the stale `index.html` reverted newer changes in the live one.
-  - Root-level `.js` files with a twin in `netlify/functions/` (login, gate, digest-panel, manage-dispatchers, send-inventory-set, update-check, and others) are **not** the deployed functions. The `netlify/functions/` version is what runs.
+- Duplicate copies were removed on 2026-10-16 (stale `.html` files inside `netlify/functions/`, and root-level `.js` files that were copies of functions). Do not recreate them.
+- Exception: `digest-panel.js` and `update-check.js` in the **root** are live **browser scripts** that pages load with `<script src>`. They share a name with files in `netlify/functions/` (a function, not a script); the two are unrelated, so edit each in its own place.
 - Rule: edit the root for pages, `netlify/functions/` for backend, and always start from a fresh copy of `main`, never from an earlier download.
-- `_redirects` returns 404 for server code and config that would otherwise be downloadable from the published root (`/netlify/*`, `netlify.toml`, `package.json`, some root `.js` files). A root `.js` file that is not listed there is publicly downloadable.
+- `_redirects` returns 404 for server code and config that would otherwise be downloadable from the published root (`/netlify/*`, `netlify.toml`, `package.json`, some root `.js` files). Any other file added to the root is publicly downloadable, so do not put server code there.
 
 ## Stack
 
