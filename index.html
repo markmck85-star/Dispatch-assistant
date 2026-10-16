@@ -583,8 +583,8 @@
             <p>Same username and PIN as the Admin Panel. The board will open on your home state.</p>
             <label for="boardLoginUser">Username</label>
             <input id="boardLoginUser" type="text" autocomplete="username" autocapitalize="none">
-            <label for="boardLoginPin">PIN or passphrase</label>
-            <input id="boardLoginPin" type="password" maxlength="64" autocomplete="current-password">
+            <label for="boardLoginPin">PIN</label>
+            <input id="boardLoginPin" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password">
             <button type="button" onclick="submitBoardLogin()">Sign in</button>
             <div id="boardLoginError"></div>
         </div>
@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.10 (publish in Messages)</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-216</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-215</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -1237,15 +1237,7 @@
                     if (all.length >= 5 && all.length <= 9 && all.length % 2 === 1) inNums = all;
                 }
 
-                if (inNums) {
-                    const v = inNums;
-                    counts[code] = { LF: v[0], LR: v[1], RF: v[2], RR: v[3], Journal: v[v.length - 1],
-                        P1F: v[0], P1R: v[1], P2F: v[2], P2R: v[3],
-                        P3F: v.length >= 7 ? v[4] : null, P3R: v.length >= 7 ? v[5] : null,
-                        P4F: v.length >= 9 ? v[6] : null, P4R: v.length >= 9 ? v[7] : null,
-                        isMultiPrinter: true, consumables: consumablesStr, restockBy: dateMatch[1],
-                        hasRightForms: /right forms/i.test(consumablesStr) };
-                } else if (isSurfboard(code)) {
+                if (isSurfboard(code)) {
                     // Surfboard: single printer — columns are LF, LR(ribbon), Journal
                     counts[code] = {
                         LF: nums[0], LR: nums[1], RF: null, RR: null,
@@ -1280,6 +1272,14 @@
                     // Use earliest restockBy date
                     if (dateMatch[1] < existing.restockBy) existing.restockBy = dateMatch[1];
                     counts[code] = existing;
+                } else if (inNums) {
+                    const v = inNums;
+                    counts[code] = { LF: v[0], LR: v[1], RF: v[2], RR: v[3], Journal: v[v.length - 1],
+                        P1F: v[0], P1R: v[1], P2F: v[2], P2R: v[3],
+                        P3F: v.length >= 7 ? v[4] : null, P3R: v.length >= 7 ? v[5] : null,
+                        P4F: v.length >= 9 ? v[6] : null, P4R: v.length >= 9 ? v[7] : null,
+                        isMultiPrinter: true, consumables: consumablesStr, restockBy: dateMatch[1],
+                        hasRightForms: /right forms/i.test(consumablesStr) };
                 } else {
                     // Kahuna (SK/BK): dual printer — columns are LF, LR, RF, RR, Journal
                     counts[code] = {
@@ -2817,12 +2817,7 @@ function distanceMatrixStatus(state) {
         function switchBoardUser() {
             sessionStorage.removeItem('dispatchUser');
             sessionStorage.removeItem('dispatchAdminPin');
-            let reloaded = false;
-            const again = function() { if (!reloaded) { reloaded = true; window.location.reload(); } };
-            try {
-                fetch('/.netlify/functions/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'logout' }) }).then(again, again);
-                setTimeout(again, 1500);
-            } catch (e) { again(); }
+            window.location.reload();
         }
 
         function ensureBoardLogin() {
@@ -2861,19 +2856,13 @@ function distanceMatrixStatus(state) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username: username, pin: pin })
                 });
-                let data = await res.json();
-                let loginOk = res.ok;
-                let pinUsed = pin;
-                if (!loginOk && data.mustChange && window.mcrForceChange) {
-                    try { data = await window.mcrForceChange(username, pin); loginOk = true; pinUsed = ''; }
-                    catch (ce) { err.textContent = ce.message; return; }
-                }
-                if (!loginOk) {
+                const data = await res.json();
+                if (!res.ok) {
                     err.textContent = data.error || 'Login failed';
                     return;
                 }
                 sessionStorage.setItem('dispatchUser', JSON.stringify(data));
-                sessionStorage.setItem('dispatchAdminPin', pinUsed);
+                sessionStorage.setItem('dispatchAdminPin', pin);
                 applyDispatcherSession(data);
                 document.getElementById('boardLoginOverlay').classList.remove('active');
                 if (window.__resolveBoardLogin) window.__resolveBoardLogin(data);
@@ -3909,28 +3898,17 @@ function distanceMatrixStatus(state) {
                         }
                         const nums = [], nj_start = ni + 1;
                         let consumables = '', restockBy = '', nj = nj_start;
-                        // Indiana rows have 2-4 printers (5, 7 or 9 numbers, Journal last, blanks omitted)
-                        const isINRow = /^IN\d/i.test(siteCode);
-                        const numCap = isINRow ? 9 : 5;
                         while (nj < allLines.length) {
                             const l = allLines[nj];
                             if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(l)) { restockBy = l; nj++; continue; }
-                            if ((isINRow ? /^-?\d{1,4}$/ : /^\d{1,4}$/).test(l) && nums.length < numCap) { nums.push(parseInt(l)); }
+                            if (/^\d{1,4}$/.test(l) && nums.length < 5) { nums.push(parseInt(l)); }
                             else if (/journal|forms|ribbon|p\d forms/i.test(l)) { consumables = l; }
                             else if (STATE_TOKENS.has(l) || /\b[A-Z]{2}\d{3,5}\b/.test(l) || /[-–]\s*\d{3,4}\s*$/.test(l)) { break; }
                             nj++;
                         }
                         if (nums.length >= 2 && restockBy && !window.parsedFormCounts[siteCode]) {
                             const isSB = isSurfboard(siteCode);
-                            const inOk = isINRow && nums.length >= 5 && nums.length % 2 === 1;
-                            window.parsedFormCounts[siteCode] = inOk ? {
-                                LF: nums[0], LR: nums[1], RF: nums[2], RR: nums[3], Journal: nums[nums.length - 1],
-                                P1F: nums[0], P1R: nums[1], P2F: nums[2], P2R: nums[3],
-                                P3F: nums.length >= 7 ? nums[4] : null, P3R: nums.length >= 7 ? nums[5] : null,
-                                P4F: nums.length >= 9 ? nums[6] : null, P4R: nums.length >= 9 ? nums[7] : null,
-                                isMultiPrinter: true, consumables: consumables, restockBy: restockBy,
-                                hasRightForms: /right forms/i.test(consumables)
-                            } : isSB ? {
+                            window.parsedFormCounts[siteCode] = isSB ? {
                                 LF: nums[0], LR: nums[1], RF: null, RR: null,
                                 Journal: nums[2] !== undefined ? nums[2] : null,
                                 consumables: consumables, restockBy: restockBy,
@@ -4126,49 +4104,6 @@ function distanceMatrixStatus(state) {
             // one from availability/fallback rules.
             const existingByCode = await fetchExistingAssignments(dateStr);
             window.removedStops = [];
-
-            // 2026-10-16: EARLY-CATCH lookup (see the early-catch block further
-            // down for the full story). Done up here so that BOTH places that
-            // decide a stop is finished can tell "finished earlier" (an early
-            // catch -- belongs to a previous day's route) from "finished today".
-            const EARLY_CATCH_LOOKBACK_DAYS = 3;
-            const _ecIso = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-            const _ecPriorDates = [];
-            const _ecPriorByDate = {};
-            try {
-                if (dateStr && relevant.length > 0) {
-                    const _ecBase = new Date(dateStr + 'T12:00:00');
-                    for (let k = 1; k <= EARLY_CATCH_LOOKBACK_DAYS; k++) {
-                        const pd = new Date(_ecBase);
-                        pd.setDate(pd.getDate() - k);
-                        _ecPriorDates.push(_ecIso(pd));
-                    }
-                    await Promise.all(_ecPriorDates.map(async ds => {
-                        _ecPriorByDate[ds] = await fetchPriorAssignmentsCached(ds);
-                    }));
-                }
-            } catch (ecErr) {
-                console.error('[early-catch] prior-day lookup failed (non-fatal):', ecErr.message);
-            }
-            const _ecIsRoutineRestock = (ex) => !ex.ticket
-                || (ex.ticket.ticketKind === 'maintenance' && ex.ticket.issueCategory === 'Maintenance');
-            // Returns the earlier day (YYYY-MM-DD) this plain restock stop was already
-            // finished on, or '' if it was not. Trouble/install/survey completions never
-            // count, and a completion dated AFTER the stop's Restock By is a late finish
-            // of an older need, not an early catch.
-            const earlyCatchDateFor = (item, restockByStr) => {
-                if (!item || item.ticketWo || item.fromTicket || !restockByStr) return '';
-                const needDs = getItemEffectiveDateStr({ restockBy: restockByStr }, dateStr);
-                if (!needDs) return '';
-                for (const pd of _ecPriorDates) {
-                    const ex = (_ecPriorByDate[pd] || {})[item.code];
-                    if (!ex || ex.status !== 'completed' || !_ecIsRoutineRestock(ex)) continue;
-                    if (needDs < pd) continue;
-                    return pd;
-                }
-                return '';
-            };
-
             relevant = relevant.filter(item => {
                 const existing = existingByCode[item.code];
                 if (existing && (existing.status === 'completed' || existing.status === 'removed')) {
@@ -4186,15 +4121,7 @@ function distanceMatrixStatus(state) {
                     // (still not re-added as an active stop today) without
                     // being surfaced in the removed/completed log either.
                     if (!existing.movedElsewhere) {
-                        // 2026-10-16: a row already marked completed for THIS date can
-                        // still be an early catch (the early-catch check below marks
-                        // it completed so the portal drops it) -- tag it so it keeps
-                        // being treated as an earlier day's work on every reload.
-                        const _fcForEc = (window.parsedFormCounts && window.parsedFormCounts[item.code]) || {};
-                        const _ecDate = existing.status === 'completed'
-                            ? earlyCatchDateFor(item, item.restockBy || _fcForEc.restockBy)
-                            : '';
-                        window.removedStops.push(Object.assign({
+                        window.removedStops.push({
                             code: item.code,
                             tech: existing.techName,
                             reason: existing.status === 'completed' ? 'completed' : 'canceled',
@@ -4202,7 +4129,7 @@ function distanceMatrixStatus(state) {
                             snapshot: { code: item.code },
                             originalIndex: 0,
                             inQueue: false
-                        }, _ecDate ? { completedOn: _ecDate } : {}));
+                        });
                     }
                     return false;
                 }
@@ -4618,55 +4545,6 @@ function distanceMatrixStatus(state) {
                     }
                     return true;
                 });
-            }
-
-            // 2026-10-16 fix: EARLY CATCHES. A routine restock whose Restock By
-            // is this board's day (or later) can already have been done on an
-            // earlier day -- the dispatcher grabbed it ahead of time (busy
-            // day coming, tech already nearby). That completion is saved
-            // under the EARLIER day's dispatch_date, and this board only ever
-            // read its own date's rows, so building the later day created a
-            // fresh planned row and the stop came back as open work: on the
-            // board, in the published dispatch, and on the technician's phone.
-            // Real case: GA1025 and GA1089, restock-by Fri 10/16, done by
-            // Randy Thu 10/15 afternoon (Salesforce visits imported, Thursday
-            // rows completed), still listed on Friday's board the night before.
-            // Now, for plain restock stops (no ticket of their own), look back
-            // a few days for a COMPLETED routine-restock assignment at the
-            // same site whose date is on/before the stop's Restock By, and
-            // treat the stop as done. Trouble/install/survey completions never
-            // count, and neither does a completion dated AFTER the stop's
-            // Restock By (that is a late finish of an older need). If a
-            // planned row already exists for this board's date it is marked
-            // completed too, so the portal/publish path stops listing it.
-            // Never throws: any failure leaves the board exactly as before.
-            try {
-                // Only write to rows for today-or-later boards; never rewrite history.
-                const _realTodayIso = _ecIso(new Date());
-                relevant = relevant.filter(item => {
-                    if (!item || item.ticketWo || item.fromTicket || !item.restockBy) return true;
-                    const pd = earlyCatchDateFor(item, item.restockBy);
-                    if (!pd) return true;
-                    const ex = (_ecPriorByDate[pd] || {})[item.code];
-                    if (!window.removedStops) window.removedStops = [];
-                    window.removedStops.push({
-                        code: item.code,
-                        tech: ex ? ex.techName : '',
-                        reason: 'completed',
-                        name: (LOCATIONS[item.code] || {}).name || item.code,
-                        snapshot: { code: item.code },
-                        originalIndex: 0,
-                        inQueue: false,
-                        completedOn: pd
-                    });
-                    const today = existingByCode[item.code];
-                    if (today && (today.status === 'planned' || today.status === 'notified') && dateStr >= _realTodayIso) {
-                        syncAssignmentToSupabase(today.techName, item, 'completed', today.assignedBy || 'auto', { dispatchDateOverride: dateStr });
-                    }
-                    return false;
-                });
-            } catch (earlyCatchErr) {
-                console.error('[early-catch] check failed (non-fatal):', earlyCatchErr.message);
             }
 
             const unavailable = dateStr ? getUnavailableTechsForDate(dateStr) : new Set(
@@ -5492,17 +5370,8 @@ function distanceMatrixStatus(state) {
                     byTech[tech].forEach(r => {
                         const icon  = r.reason === 'completed' ? '&#x2713;' : r.reason === 'canceled' ? '&#x2717;' : '&#x2192;';
                         const color = r.reason === 'completed' ? '#4caf50' : r.reason === 'canceled' ? '#e57373' : '#f0a500';
-                        let dateSuffix = r.targetDateLabel ? ` <span style="color:#f0a500;">(&rarr; ${r.targetDateLabel})</span>` : '';
-                        // 2026-10-16: an early catch was finished on an earlier day --
-                        // say which day, and offer no Undo (there is nothing here to
-                        // restore; the real completion lives on that earlier day).
-                        let undoBtn = `<button onclick="undoStop(${r.globalIdx})" style="flex-shrink:0;font-size:11px;padding:3px 10px;background:#3a3a3a;color:#ddd;border:1px solid #666;border-radius:4px;cursor:pointer;">&#x21A9; Undo</button>`;
-                        if (r.completedOn) {
-                            const cp = String(r.completedOn).split('-');
-                            if (cp.length === 3) dateSuffix = ` <span style="color:#4caf50;">(done ${parseInt(cp[1], 10)}/${parseInt(cp[2], 10)})</span>`;
-                            undoBtn = '';
-                        }
-                        s += `<div style="font-size:12px;color:#888;padding:3px 0;display:flex;align-items:center;justify-content:space-between;gap:6px;"><span><span style="color:${color};font-weight:bold;">${icon}</span><span style="margin-left:5px;">${r.code} &mdash; ${r.name}${dateSuffix}</span></span>${undoBtn}</div>`;
+                        const dateSuffix = r.targetDateLabel ? ` <span style="color:#f0a500;">(&rarr; ${r.targetDateLabel})</span>` : '';
+                        s += `<div style="font-size:12px;color:#888;padding:3px 0;display:flex;align-items:center;justify-content:space-between;gap:6px;"><span><span style="color:${color};font-weight:bold;">${icon}</span><span style="margin-left:5px;">${r.code} &mdash; ${r.name}${dateSuffix}</span></span><button onclick="undoStop(${r.globalIdx})" style="flex-shrink:0;font-size:11px;padding:3px 10px;background:#3a3a3a;color:#ddd;border:1px solid #666;border-radius:4px;cursor:pointer;">&#x21A9; Undo</button></div>`;
                     });
                     s += `</div>`;
                 });
@@ -5845,31 +5714,10 @@ function distanceMatrixStatus(state) {
         // branches on its result. Errors are logged to console only.
         function syncAssignmentToSupabase(tech, item, status, assignedBy, opts) {
             opts = opts || {};
-            let dispatchDate = opts.dispatchDateOverride || (function() {
+            const dispatchDate = opts.dispatchDateOverride || (function() {
                 const dateInput = document.getElementById('dispatchDate');
                 return dateInput && dateInput.value ? dateInput.value : '';
             })();
-            // 2026-10-15 fix: a manual assignment made while viewing one day's
-            // board for a stop that really belongs to a LATER day (restockBy
-            // after the viewed date -- the dashed "pushed to" pins, and the
-            // tomorrow-bucket stops) used to be saved under the VIEWED date.
-            // The target day's board only reads its own date's rows, so those
-            // assignments vanished and auto-dispatch took over when the date
-            // was switched. Found when Gina assigned Friday's GA calls while
-            // the board was still on Thursday: her ten manual rows sat on
-            // Thursday and Friday's board rebuilt itself from auto-dispatch.
-            // Callers that pass dispatchDateOverride are untouched. Only
-            // planned/notified saves are redirected, and only forward (never
-            // to an earlier, overdue restockBy date), so Done/Remove on a
-            // normal same-day stop behave exactly as before.
-            let redirectedTo = '';
-            if (!opts.dispatchDateOverride && dispatchDate && item && (status === 'planned' || status === 'notified')) {
-                const effDate = getItemEffectiveDateStr(item, dispatchDate);
-                if (effDate && effDate > dispatchDate) {
-                    dispatchDate = effDate;
-                    redirectedTo = effDate;
-                }
-            }
             if (!dispatchDate || !item || !item.code || !tech) return;
             const payload = {
                 dispatchDate: dispatchDate,
@@ -5913,14 +5761,7 @@ function distanceMatrixStatus(state) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             }).then(r => r.json()).then(data => {
-                if (!data.ok) { console.error('[save-assignment] sync rejected:', data.error); return; }
-                if (redirectedTo && typeof showToast === 'function') {
-                    try {
-                        const [ry, rm, rd] = redirectedTo.split('-').map(Number);
-                        const lbl = new Date(ry, rm - 1, rd).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
-                        showToast('Saved to the ' + lbl + ' board', 3500);
-                    } catch (e) {}
-                }
+                if (!data.ok) console.error('[save-assignment] sync rejected:', data.error);
             }).catch(err => console.error('[save-assignment] sync failed (non-fatal):', err.message));
         }
 
@@ -5955,18 +5796,6 @@ function distanceMatrixStatus(state) {
             }
         }
 
-        // 2026-10-16: earlier days' assignments change rarely, and the board
-        // rebuilds every ~20s -- cache each prior day for a minute so the
-        // early-catch check does not add extra server calls on every refresh.
-        async function fetchPriorAssignmentsCached(ds) {
-            window.__priorAssignCache = window.__priorAssignCache || {};
-            const c = window.__priorAssignCache[ds];
-            if (c && Date.now() - c.at < 60000) return c.data;
-            const data = await fetchExistingAssignments(ds);
-            window.__priorAssignCache[ds] = { at: Date.now(), data };
-            return data;
-        }
-
         function removeStop(tech, index, reason) {
             const assignments = window.currentAssignments;
             const item = assignments[tech][index];
@@ -5983,7 +5812,34 @@ function distanceMatrixStatus(state) {
             });
             assignments[tech].splice(index, 1);
             syncAssignmentToSupabase(tech, item, reason === 'completed' ? 'completed' : 'removed', 'manual');
+            // 2026-10-16: Cancel on a real ticket-backed stop also flags the
+            // ticket itself as manually resolved. Before this, Cancel only
+            // changed the assignment row, so the ticket stayed open and kept
+            // showing on the watchdog log (found via WO 00155238, Houston
+            // County: Neumo issued and cancelled it, then reissued).
+            // Cancel only, deliberately: Done leaves the ticket alone because
+            // the closed-ticket report closes it, and a mistaken Done should
+            // not hide a still-open trouble ticket from the watchdog.
+            // Fire-and-forget, non-fatal, same as the assignment sync.
+            if (reason === 'canceled') markTicketResolvedFromBoard(item, false);
             renderReviewBoard(true);
+        }
+
+        // 2026-10-16: helper for removeStop (Cancel) and undoStop. Only acts on
+        // genuine ticket-backed stops (item.fromTicket && item.ticketWo, the
+        // same test the send/notify code uses), never bulk restock stops.
+        function markTicketResolvedFromBoard(item, undo) {
+            if (!item || !item.fromTicket || !item.ticketWo) return;
+            const body = undo
+                ? { wo_number: item.ticketWo, undo: true }
+                : { wo_number: item.ticketWo, note: 'canceled on board' };
+            fetch('/.netlify/functions/mark-ticket-resolved', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            }).then(r => r.json()).then(data => {
+                if (!data.ok) console.error('[mark-ticket-resolved] board sync rejected:', data.error);
+            }).catch(err => console.error('[mark-ticket-resolved] board sync failed (non-fatal):', err.message));
         }
 
         // 2026-08-27: added alongside pushToTomorrow -- that function can only
@@ -6238,13 +6094,10 @@ function distanceMatrixStatus(state) {
             // stripped-down {code} version used elsewhere), so it's already
             // everything syncAssignmentToSupabase needs to properly restore
             // the persisted status back to 'planned'.
-            // 2026-10-15: pin to the viewed date explicitly -- the snapshot can
-            // carry a later restockBy (tomorrow-bucket stop), and the default
-            // now follows that date forward, which would fight the
-            // targetDateStr cleanup below.
-            syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual', {
-                dispatchDateOverride: (document.getElementById('dispatchDate') || {}).value || ''
-            });
+            syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual');
+            // 2026-10-16: undoing a Cancel also un-resolves the ticket (see
+            // removeStop). Only a 'canceled' entry ever resolved it.
+            if (entry.reason === 'canceled') markTicketResolvedFromBoard(entry.snapshot, true);
             // 2026-08-27: a pushed-to-date entry (pushToTomorrow/pushToDate)
             // creates TWO rows -- the original day's (now 'removed', just
             // restored to 'planned' above) and a separate 'planned' row on
@@ -6700,45 +6553,9 @@ function distanceMatrixStatus(state) {
             }
         }
 
-        // 2026-10-16: a code can look "unknown" only because THIS browser's copy
-        // of the location list is out of date -- someone else (or this same
-        // dispatcher on another device) already added the site. Real case:
-        // GA1140 was added by one dispatcher, yet the add-site prompt kept
-        // reappearing every board refresh (~20s) in another browser, blank and
-        // un-prefilled, though the database had the site with name + address.
-        // Before asking anyone to add it, pull a fresh copy of every state's
-        // locations (at most once per code per minute, so a genuinely unknown
-        // code does not hammer the server on every refresh). Codes the server
-        // knows are merged in silently and the board is rebuilt once so the
-        // stop appears; only codes still missing get the prompt.
-        async function showAddLocationPromptQueue(codes) {
+        function showAddLocationPromptQueue(codes) {
             if (!codes || codes.length === 0) return;
-            let pending = codes;
-            try {
-                window.__locRecheckAt = window.__locRecheckAt || {};
-                const now = Date.now();
-                const due = codes.filter(c => !(now - (window.__locRecheckAt[c] || 0) < 60000));
-                if (due.length > 0) {
-                    due.forEach(c => { window.__locRecheckAt[c] = now; });
-                    await loadRemoteLocations();
-                    pending = codes.filter(c => !LOCATIONS[c]);
-                    const resolved = codes.filter(c => LOCATIONS[c]);
-                    if (resolved.length > 0 && !window.__reprocessAfterLocRecheck) {
-                        window.__reprocessAfterLocRecheck = true;
-                        try { await processDispatch(true); }
-                        finally { window.__reprocessAfterLocRecheck = false; }
-                    }
-                } else {
-                    // Rechecked within the last minute: do not hit the server again,
-                    // just prompt for whatever is still missing.
-                    pending = codes.filter(c => !LOCATIONS[c]);
-                }
-            } catch (e) {
-                console.warn('[add-location] recheck failed, prompting as before:', e && e.message);
-                pending = codes.filter(c => !LOCATIONS[c]);
-            }
-            if (pending.length === 0) return;
-            const [first, ...rest] = pending;
+            const [first, ...rest] = codes;
             showAddLocationPrompt(first, () => {
                 if (rest.length > 0) setTimeout(() => showAddLocationPromptQueue(rest), 300);
             });
@@ -7687,19 +7504,6 @@ function distanceMatrixStatus(state) {
                 if (ackUrl) txt += '\n\nTap to confirm you got this: ' + ackUrl;
 
                 sendPlainMessage(tech, txt, wo ? ('MCR Dispatch — ' + wo) : 'MCR Dispatch — assigned stop');
-
-                // Also push it to the technician's phone if they turned on Dispatch alerts in
-                // the portal. Never blocks or breaks the text above.
-                try {
-                    const pushBody = site + (wo ? ' - ' + wo : '') + '\n' + issue + (sla ? '\nSLA ends: ' + sla : '');
-                    fetch('/.netlify/functions/tech-api', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(Object.assign({ action: 'notify_tech', tech: tech, title: 'New trouble ticket', body: pushBody, wo: item.ticketWo || '' }, boardAuthFields()))
-                    }).then(r => r.json()).then(j => {
-                        if (j && j.ok && j.sent > 0 && typeof showToast === 'function') showToast('Also sent as a phone alert to ' + first, 5000);
-                    }).catch(() => {});
-                } catch (e2) {}
             } catch (e) {
                 alert('Text this stop failed: ' + (e && e.message ? e.message : e));
             }
@@ -9372,12 +9176,6 @@ ${content}
             const completedByTech = {};
             (window.removedStops || []).forEach(r => {
                 if (r.reason !== 'completed' || !r.tech || !r.code) return;
-                // 2026-10-16: early catches (finished on an earlier day, see the
-                // early-catch check in _processDispatchCore) are not part of
-                // THIS day's path -- drawing them put a solid connector from
-                // yesterday's stop to today's first stop and an "N done" chip
-                // on a tech who hadn't done anything yet today.
-                if (r.completedOn) return;
                 if (!completedByTech[r.tech]) completedByTech[r.tech] = [];
                 completedByTech[r.tech].push(r);
             });
