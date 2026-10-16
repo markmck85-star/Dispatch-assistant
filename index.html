@@ -6660,9 +6660,45 @@ function distanceMatrixStatus(state) {
             }
         }
 
-        function showAddLocationPromptQueue(codes) {
+        // 2026-10-16: a code can look "unknown" only because THIS browser's copy
+        // of the location list is out of date -- someone else (or this same
+        // dispatcher on another device) already added the site. Real case:
+        // GA1140 was added by one dispatcher, yet the add-site prompt kept
+        // reappearing every board refresh (~20s) in another browser, blank and
+        // un-prefilled, though the database had the site with name + address.
+        // Before asking anyone to add it, pull a fresh copy of every state's
+        // locations (at most once per code per minute, so a genuinely unknown
+        // code does not hammer the server on every refresh). Codes the server
+        // knows are merged in silently and the board is rebuilt once so the
+        // stop appears; only codes still missing get the prompt.
+        async function showAddLocationPromptQueue(codes) {
             if (!codes || codes.length === 0) return;
-            const [first, ...rest] = codes;
+            let pending = codes;
+            try {
+                window.__locRecheckAt = window.__locRecheckAt || {};
+                const now = Date.now();
+                const due = codes.filter(c => !(now - (window.__locRecheckAt[c] || 0) < 60000));
+                if (due.length > 0) {
+                    due.forEach(c => { window.__locRecheckAt[c] = now; });
+                    await loadRemoteLocations();
+                    pending = codes.filter(c => !LOCATIONS[c]);
+                    const resolved = codes.filter(c => LOCATIONS[c]);
+                    if (resolved.length > 0 && !window.__reprocessAfterLocRecheck) {
+                        window.__reprocessAfterLocRecheck = true;
+                        try { await processDispatch(true); }
+                        finally { window.__reprocessAfterLocRecheck = false; }
+                    }
+                } else {
+                    // Rechecked within the last minute: do not hit the server again,
+                    // just prompt for whatever is still missing.
+                    pending = codes.filter(c => !LOCATIONS[c]);
+                }
+            } catch (e) {
+                console.warn('[add-location] recheck failed, prompting as before:', e && e.message);
+                pending = codes.filter(c => !LOCATIONS[c]);
+            }
+            if (pending.length === 0) return;
+            const [first, ...rest] = pending;
             showAddLocationPrompt(first, () => {
                 if (rest.length > 0) setTimeout(() => showAddLocationPromptQueue(rest), 300);
             });
