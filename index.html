@@ -5736,10 +5736,31 @@ function distanceMatrixStatus(state) {
         // branches on its result. Errors are logged to console only.
         function syncAssignmentToSupabase(tech, item, status, assignedBy, opts) {
             opts = opts || {};
-            const dispatchDate = opts.dispatchDateOverride || (function() {
+            let dispatchDate = opts.dispatchDateOverride || (function() {
                 const dateInput = document.getElementById('dispatchDate');
                 return dateInput && dateInput.value ? dateInput.value : '';
             })();
+            // 2026-10-15 fix: a manual assignment made while viewing one day's
+            // board for a stop that really belongs to a LATER day (restockBy
+            // after the viewed date -- the dashed "pushed to" pins, and the
+            // tomorrow-bucket stops) used to be saved under the VIEWED date.
+            // The target day's board only reads its own date's rows, so those
+            // assignments vanished and auto-dispatch took over when the date
+            // was switched. Found when Gina assigned Friday's GA calls while
+            // the board was still on Thursday: her ten manual rows sat on
+            // Thursday and Friday's board rebuilt itself from auto-dispatch.
+            // Callers that pass dispatchDateOverride are untouched. Only
+            // planned/notified saves are redirected, and only forward (never
+            // to an earlier, overdue restockBy date), so Done/Remove on a
+            // normal same-day stop behave exactly as before.
+            let redirectedTo = '';
+            if (!opts.dispatchDateOverride && dispatchDate && item && (status === 'planned' || status === 'notified')) {
+                const effDate = getItemEffectiveDateStr(item, dispatchDate);
+                if (effDate && effDate > dispatchDate) {
+                    dispatchDate = effDate;
+                    redirectedTo = effDate;
+                }
+            }
             if (!dispatchDate || !item || !item.code || !tech) return;
             const payload = {
                 dispatchDate: dispatchDate,
@@ -5783,7 +5804,14 @@ function distanceMatrixStatus(state) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             }).then(r => r.json()).then(data => {
-                if (!data.ok) console.error('[save-assignment] sync rejected:', data.error);
+                if (!data.ok) { console.error('[save-assignment] sync rejected:', data.error); return; }
+                if (redirectedTo && typeof showToast === 'function') {
+                    try {
+                        const [ry, rm, rd] = redirectedTo.split('-').map(Number);
+                        const lbl = new Date(ry, rm - 1, rd).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+                        showToast('Saved to the ' + lbl + ' board', 3500);
+                    } catch (e) {}
+                }
             }).catch(err => console.error('[save-assignment] sync failed (non-fatal):', err.message));
         }
 
@@ -6089,7 +6117,13 @@ function distanceMatrixStatus(state) {
             // stripped-down {code} version used elsewhere), so it's already
             // everything syncAssignmentToSupabase needs to properly restore
             // the persisted status back to 'planned'.
-            syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual');
+            // 2026-10-15: pin to the viewed date explicitly -- the snapshot can
+            // carry a later restockBy (tomorrow-bucket stop), and the default
+            // now follows that date forward, which would fight the
+            // targetDateStr cleanup below.
+            syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual', {
+                dispatchDateOverride: (document.getElementById('dispatchDate') || {}).value || ''
+            });
             // 2026-08-27: a pushed-to-date entry (pushToTomorrow/pushToDate)
             // creates TWO rows -- the original day's (now 'removed', just
             // restored to 'planned' above) and a separate 'planned' row on
