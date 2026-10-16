@@ -5464,8 +5464,17 @@ function distanceMatrixStatus(state) {
                     byTech[tech].forEach(r => {
                         const icon  = r.reason === 'completed' ? '&#x2713;' : r.reason === 'canceled' ? '&#x2717;' : '&#x2192;';
                         const color = r.reason === 'completed' ? '#4caf50' : r.reason === 'canceled' ? '#e57373' : '#f0a500';
-                        const dateSuffix = r.targetDateLabel ? ` <span style="color:#f0a500;">(&rarr; ${r.targetDateLabel})</span>` : '';
-                        s += `<div style="font-size:12px;color:#888;padding:3px 0;display:flex;align-items:center;justify-content:space-between;gap:6px;"><span><span style="color:${color};font-weight:bold;">${icon}</span><span style="margin-left:5px;">${r.code} &mdash; ${r.name}${dateSuffix}</span></span><button onclick="undoStop(${r.globalIdx})" style="flex-shrink:0;font-size:11px;padding:3px 10px;background:#3a3a3a;color:#ddd;border:1px solid #666;border-radius:4px;cursor:pointer;">&#x21A9; Undo</button></div>`;
+                        let dateSuffix = r.targetDateLabel ? ` <span style="color:#f0a500;">(&rarr; ${r.targetDateLabel})</span>` : '';
+                        // 2026-10-16: an early catch was finished on an earlier day --
+                        // say which day, and offer no Undo (there is nothing here to
+                        // restore; the real completion lives on that earlier day).
+                        let undoBtn = `<button onclick="undoStop(${r.globalIdx})" style="flex-shrink:0;font-size:11px;padding:3px 10px;background:#3a3a3a;color:#ddd;border:1px solid #666;border-radius:4px;cursor:pointer;">&#x21A9; Undo</button>`;
+                        if (r.completedOn) {
+                            const cp = String(r.completedOn).split('-');
+                            if (cp.length === 3) dateSuffix = ` <span style="color:#4caf50;">(done ${parseInt(cp[1], 10)}/${parseInt(cp[2], 10)})</span>`;
+                            undoBtn = '';
+                        }
+                        s += `<div style="font-size:12px;color:#888;padding:3px 0;display:flex;align-items:center;justify-content:space-between;gap:6px;"><span><span style="color:${color};font-weight:bold;">${icon}</span><span style="margin-left:5px;">${r.code} &mdash; ${r.name}${dateSuffix}</span></span>${undoBtn}</div>`;
                     });
                     s += `</div>`;
                 });
@@ -9287,6 +9296,12 @@ ${content}
             const completedByTech = {};
             (window.removedStops || []).forEach(r => {
                 if (r.reason !== 'completed' || !r.tech || !r.code) return;
+                // 2026-10-16: early catches (finished on an earlier day, see the
+                // early-catch check in _processDispatchCore) are not part of
+                // THIS day's path -- drawing them put a solid connector from
+                // yesterday's stop to today's first stop and an "N done" chip
+                // on a tech who hadn't done anything yet today.
+                if (r.completedOn) return;
                 if (!completedByTech[r.tech]) completedByTech[r.tech] = [];
                 completedByTech[r.tech].push(r);
             });
