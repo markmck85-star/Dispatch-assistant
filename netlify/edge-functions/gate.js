@@ -22,7 +22,6 @@ const PUBLIC = new Set([
   'login',                          // the sign-in itself
   'tech-api',                       // technician portal: its own sign-in
   'confirm-receipt',                // /ack link technicians tap (signed token inside)
-  'get-watchdog-log',               // open by design (watchdog page)
   'mailgun-inbound',                // Mailgun webhook
   'mcp-server',                     // has its own shared secret
   'salesforce-report-sync-background', // called by its own scheduler
