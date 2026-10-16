@@ -1,5 +1,5 @@
 /**
- * get-watchdog-log.js — v5, 2026-09-29
+ * get-watchdog-log.js — v6, 2026-10-16
  *
  * Netlify Function — surfaces every open ticket the SMS watchdog already
  * alerts dispatchers about, for a given state, so the same tickets are
@@ -48,6 +48,17 @@
  *      now taken from the matched site's own state when there is one,
  *      then a site code found anywhere in site_text, then the old
  *      prefix test, then attributes.routedState as a last resort.
+ *
+ * v6 (2026-10-16): MANUALLY RESOLVED TICKETS NO LONGER SHOW. Found via
+ * WO 00155238 (GA1066 Houston County): Neumo issued it, cancelled it
+ * immediately, then reissued as WO 00155239. The reissue closed normally
+ * off the closed-ticket report, but the cancelled original was cleared by
+ * hand on the board, which sets tickets.manually_resolved_at (see
+ * mark-ticket-resolved.js) and deliberately leaves tickets.status alone
+ * so Salesforce-confirmed and locally-confirmed stay distinct signals.
+ * This function only filtered on status = 'open', so the ticket vanished
+ * from the board and state console but stayed here indefinitely. Tickets
+ * with manually_resolved_at set are now excluded.
  *
  * GET /.netlify/functions/get-watchdog-log?state=CO
  * -> { entries: [ { ticketId, woNumber, siteText, siteCode, siteName,
@@ -125,11 +136,16 @@ exports.handler = async (event) => {
     //
     // sites(site_code, name, state): the real matched site, when there is
     // one -- see the v4/v5 header notes.
+    //
+    // manually_resolved_at IS NULL: a ticket a dispatcher has cleared by
+    // hand (completed or cancelled on the board) is done as far as the
+    // watchdog is concerned -- see the v6 header note.
     const { data, error } = await supabase
       .from("tickets")
       .select("id, wo_number, site_text, site_id, ticket_kind, needs_review, issue_category, issue_detail, description, address, due_at, sla_ends_at, earliest_start_at, received_at, status, attributes, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at, sites(site_code, name, state)")
       .or("ticket_kind.in.(trouble,install,site_survey),needs_review.eq.true")
       .eq("status", "open")
+      .is("manually_resolved_at", null)
       .order("received_at", { ascending: false });
 
     if (error) return json(500, { error: error.message });
