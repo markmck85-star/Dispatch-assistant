@@ -115,8 +115,18 @@ exports.handler = async (event) => {
       }
     }
 
+    // Keep the per-site usage rates current (site_usage_rates, see the 2026-10-17 migration).
+    // Never blocks or fails the run.
+    let ratesSites = null;
+    if (!dry) {
+      try {
+        const { data: rn, error: rErr } = await supabase.rpc('refresh_site_usage_rates');
+        if (!rErr) ratesSites = rn;
+      } catch (e) { /* leave null */ }
+    }
+
     return json(200, {
-      ok: true, dry, days,
+      ok: true, dry, days, ratesSites,
       notesWithPhrase: visits.length,
       readable: candidates.size,
       unreadable,
