@@ -79,8 +79,10 @@ function load(){
     if(r.status===401){location.href='/';throw 0}return r.json()}).then(function(j){
     if(j.error)throw new Error(j.error);rows=j.rows;nearOn=!!j.near;
     var ns=document.getElementById('near'),nv=ns.value,seen={};
-    ns.innerHTML='<option value="">Any stop</option>'+(j.stops||[]).filter(function(x){return !seen[x.siteCode]&&(seen[x.siteCode]=1)}).map(function(x){return '<option value="'+esc(x.siteCode)+'">'+esc(x.name||x.siteCode)+(x.tech?' ('+esc(x.tech)+')':'')+'</option>'}).join('');
-    if(nv&&!seen[nv])ns.insertAdjacentHTML('beforeend','<option value="'+esc(nv)+'">'+esc(nv)+'</option>');
+    var stopsHtml=(j.stops||[]).filter(function(x){return !seen[x.siteCode]&&(seen[x.siteCode]=1)}).map(function(x){return '<option value="'+esc(x.siteCode)+'">'+esc(x.name||x.siteCode)+(x.tech?' ('+esc(x.tech)+')':'')+'</option>'}).join('');
+    var techHtml=(j.techs||[]).map(function(t){return '<option value="tech:'+esc(t.id)+'">'+esc(t.name)+' (home)</option>'}).join('');
+    ns.innerHTML='<option value="">Any stop</option>'+(stopsHtml?'<optgroup label="Near a stop">'+stopsHtml+'</optgroup>':'')+(techHtml?'<optgroup label="Near a technician\'s home">'+techHtml+'</optgroup>':'');
+    if(nv&&!seen[nv]&&nv.indexOf('tech:')!==0)ns.insertAdjacentHTML('beforeend','<option value="'+esc(nv)+'">'+esc(nv)+'</option>');
     ns.value=nv;
     if(nearOn&&sortK==='distMiles'&&false){}
     var s=document.getElementById('st'),cur=s.value,set={};rows.forEach(function(x){set[x.state]=1});
