@@ -20,6 +20,7 @@ const COOKIE_NAME = 'mcr_auth';
 // Functions anyone can reach. Each has a reason; revisit one at a time.
 const PUBLIC = new Set([
   'login',                          // the sign-in itself
+  'sms-optin',                      // consent form on the company website (insert only)
   'tech-api',                       // technician portal: its own sign-in
   'confirm-receipt',                // /ack link technicians tap (signed token inside)
   'mailgun-inbound',                // Mailgun webhook
