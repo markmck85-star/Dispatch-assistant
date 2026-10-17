@@ -530,6 +530,66 @@ function followingMonday(saturdayIso) {
   return isoDate(d);
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Site access hours (2026-10-17). Neumo's ticket email carries the site's
+// Operating Hours; the server keeps them on the ticket. Same logic as
+// netlify/functions/lib/site-access-info.js (kept in step by hand).
+// ═══════════════════════════════════════════════════════════════════════
+const DAY_ALIASES = [
+  ['sun', 'sunday'], ['mon', 'monday'], ['tue', 'tues', 'tuesday'], ['wed', 'weds', 'wednesday'],
+  ['thu', 'thur', 'thurs', 'thursday'], ['fri', 'friday'], ['sat', 'saturday'],
+];
+function dayIndex(tok) {
+  const t = tok.toLowerCase();
+  for (let i = 0; i < 7; i++) if (DAY_ALIASES[i].includes(t)) return i;
+  return -1;
+}
+
+function hoursForDay(hoursText, weekdayIdx) {
+  if (!hoursText || typeof hoursText !== 'string') return null;
+  // Segments look like "Tues 9am – 6:30pm", "Wed/Thur/Fri 9am – 5pm", "Mon-Fri 8-5", "Sat Closed".
+  const segs = hoursText.split(/[,;]|\band\b/i).map(s => s.trim()).filter(Boolean);
+  let found = null;
+  for (const seg of segs) {
+    const m = seg.match(/^((?:[A-Za-z]+)(?:\s*[\/&-]\s*[A-Za-z]+)*)\s*:?\s*(.+)$/);
+    if (!m) return null;
+    const days = new Set();
+    const dayPart = m[1];
+    const parts = dayPart.split(/\s*([\/&-])\s*/);
+    // parts: tok, sep, tok, sep, tok ...
+    let prev = null, sep = null;
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) { sep = parts[i]; continue; }
+      const idx = dayIndex(parts[i]);
+      if (idx < 0) return null; // unrecognised day word: do not guess
+      if (sep === '-' && prev !== null) {
+        for (let d = prev; ; d = (d + 1) % 7) { days.add(d); if (d === idx) break; }
+      } else days.add(idx);
+      prev = idx; sep = null;
+    }
+    if (days.has(weekdayIdx)) found = m[2].trim().replace(/\s*[–—-]\s*/g, '-').replace(/\s+/g, ' ');
+  }
+  return found || 'Closed';
+}
+
+
+function siteAccessInfo(t) {
+  const hours = t && t.operatingHours ? t.operatingHours : null;
+  const dayIdx = new Date(TARGET_DAY + 'T12:00:00').getDay();
+  const today = hours ? hoursForDay(hours, dayIdx) : null; // null = could not read, show full text
+  return { hours, today, phone: t && t.sitePhone ? t.sitePhone : null, tz: (t && t.siteTimeZone) || null };
+}
+
+function fmtSlaForSite(t) {
+  if (!t.computedSlaDeadline) return '';
+  const tz = (t.siteTimeZone) || ((SAT_STATES.find(x => x.code === t.state) || {}).timezone) || undefined;
+  try {
+    return new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: tz, timeZoneName: 'short' });
+  } catch (e) {
+    return new Date(t.computedSlaDeadline).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  }
+}
+
 function closedSaturdayFlag(address) {
   if (!address) return null;
   const a = address.toLowerCase();
@@ -1476,12 +1536,22 @@ function renderStopCard(t) {
   const reviewBadge = t.needsReview
     ? `<span onclick="showSiteHistory('${loc ? loc.code : ''}')" style="cursor:pointer;display:inline-block;background:#c98a1e;color:#1a1a1a;font-weight:700;font-size:11px;border-radius:4px;padding:2px 6px;margin-top:5px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
     : '';
+  const acc = siteAccessInfo(t);
+  let accessHtml = '';
+  if (acc.hours) {
+    const todayTxt = acc.today === 'Closed' ? 'Closed today' : (acc.today ? 'Open today ' + acc.today : '');
+    const warn = acc.today === 'Closed' ? ' style="color:#f0a500;"' : '';
+    accessHtml = `<div class="meta"${warn}>${todayTxt ? '<b>' + escapeHtml(todayTxt) + '</b> · ' : ''}Hours: ${escapeHtml(acc.hours)}${acc.phone ? ' · ' + escapeHtml(acc.phone) : ''}</div>`;
+  } else if (acc.phone) {
+    accessHtml = `<div class="meta">${escapeHtml(acc.phone)}</div>`;
+  }
   const canManage = !!loc; // Reassign/Mon/Done/Cancel all need a real assignment, which needs a real site match
 
   return `<div class="stop-card" data-idx="${t._idx}">
     <span class="site" data-code="${loc ? loc.code : ''}">[${t.state}] ${escapeHtml(siteLabel)}</span>
     <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}${notifiedStr}${receivedStr}</div>
     ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
+    ${accessHtml}
     ${reviewBadge}
     ${closed ? '<div class="closed-badge">Closed on Saturdays — verify before dispatching</div>' : ''}
     ${!a && loc ? '<div class="suggest">Suggested tech is the closest on-call house — nothing is saved until you Assign.</div>' : ''}
@@ -1946,6 +2016,15 @@ function buildMessageText() {
     : '';
   msg += `⚡ URGENT - Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
   msg += `1. ${t.woNumber ? 'WO ' + t.woNumber + ' – ' : ''}${t.issueCategory || t.issueDetail || 'Trouble ticket'}\n`;
+  const slaMsg = fmtSlaForSite(t);
+  if (slaMsg) msg += `   SLA: ${slaMsg}\n`;
+  const acc = siteAccessInfo(t);
+  if (acc.hours) {
+    if (acc.today && acc.today !== 'Closed') msg += `   Site hours today: ${acc.today} (all: ${acc.hours})\n`;
+    else if (acc.today === 'Closed') msg += `   Site hours: closed today per listed hours (all: ${acc.hours})\n`;
+    else msg += `   Site hours: ${acc.hours}\n`;
+  }
+  if (acc.phone) msg += `   Site phone: ${acc.phone}\n`;
   if (closed) msg += `\n⚠️ This site is closed on Saturdays -- verify before dispatching, may just be a remote-monitoring false alarm.\n`;
   msg += `\nPlease acknowledge receipt.`;
   document.getElementById('msgText').value = msg;

@@ -210,6 +210,10 @@ exports.handler = async (event) => {
           slaEndsAt: t.sla_ends_at,
           earliestStartAt: t.earliest_start_at,
           computedSlaDeadline,
+          // 2026-10-17: site access details captured from the ticket email (null when it had none)
+          operatingHours: (t.attributes && t.attributes.operatingHours) || null,
+          sitePhone: (t.attributes && t.attributes.sitePhone) || null,
+          siteTimeZone: (t.attributes && t.attributes.siteTimeZone) || null,
           receivedAt: t.received_at,
           loomisMeetStatus: t.loomis_meet_status || null,
           loomisMeetConfirmedAt: t.loomis_meet_confirmed_at || null,

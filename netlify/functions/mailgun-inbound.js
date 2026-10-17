@@ -16,6 +16,7 @@ const { getStore, connectLambda } = require("@netlify/blobs");
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
 const { addressesLooselyMatch, findSiteByAddress } = require("./lib/address-match");
+const { parseSiteAccess } = require("./lib/site-access-info.js");
 const {
   createPlaceholderSite,
   findPlaceholderByAddress,
@@ -1498,6 +1499,8 @@ function parseEmailBody(text, receivedAt, subject) {
       earliestStartRaw: earliestStartRaw || null,
       dueDateRaw: dueDateRaw || null,
       sstType,
+      // 2026-10-17: access details (Operating Hours, Phone, Time Zone) ride along into tickets.attributes.
+      siteAccess: parseSiteAccess(text),
       ticketKind: isSiteSurvey ? 'site_survey' : (isInstallCategory ? 'install' : 'trouble'),
       isLineItemAddition,
     };
@@ -2580,7 +2583,11 @@ exports.handler = async (event) => {
           // rawSiteCode/rawIssue, and null for the vast majority of
           // tickets where this routing convention doesn't apply, which
           // fits a jsonb bag better than a mostly-empty new column.
-          attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null, routedState, rawSstType: parsed.sstType || null },
+          attributes: { fromSubject: !!parsed.fromSubject, rawSiteCode, rawIssue: parsed.issue || null, routedState, rawSstType: parsed.sstType || null,
+            // 2026-10-17: only set when the email carried them
+            ...(parsed.siteAccess && parsed.siteAccess.operatingHours ? { operatingHours: parsed.siteAccess.operatingHours } : {}),
+            ...(parsed.siteAccess && parsed.siteAccess.sitePhone ? { sitePhone: parsed.siteAccess.sitePhone } : {}),
+            ...(parsed.siteAccess && parsed.siteAccess.siteTimeZone ? { siteTimeZone: parsed.siteAccess.siteTimeZone } : {}) },
           source: 'email',
           inbound_email_id: inboundEmailId,
         };
