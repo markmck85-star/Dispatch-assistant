@@ -28,7 +28,7 @@ function parseLeftoverCounts(note) {
   // ("Old forms at 12%") is a percentage, never matches, and so is never read as a count.
   const TAIL = '(?:\\s*prior(?:\\s+to\\s+(?:the\\s+)?restock)?\\b|\\s*(?:count|remaining)\\b|\\s+and\\b|\\s*<\\s*\\d+\\s*%|(?=\\s*(?:[.,;!]|$)))';
   const CONN = '(?:\\s*(?:was|is|were))?(?:\\s*(?:at|:))?';
-  const A = new RegExp('\\b(left|right)\\b[^.\\n]{0,25}?\\bforms?(?:\\s+count)?' + CONN + '\\s*(-?\\d{1,4})' + TAIL, 'gi');
+  const A = new RegExp('\\b(left|right)\\b[^.\\n]{0,25}?\\bforms?(?:,?\\s+count)?' + CONN + '\\s*(-?\\d{1,4})' + TAIL, 'gi');
   let m;
   while ((m = A.exec(text)) !== null) {
     const key = m[1].toLowerCase() === 'left' ? 'LF' : 'RF';
@@ -38,7 +38,7 @@ function parseLeftoverCounts(note) {
   if (Object.keys(out).length) return out;
 
   // B: a count with no side beside it. Use the rest of the note to place it.
-  const B = new RegExp('\\bforms?(?:\\s+count)?' + CONN + '\\s*(-?\\d{1,4})' + TAIL, 'i');
+  const B = new RegExp('\\bforms?(?:,?\\s+count)?' + CONN + '\\s*(-?\\d{1,4})' + TAIL, 'i');
   m = B.exec(text);
   if (m) {
     const n = parseInt(m[1], 10);
