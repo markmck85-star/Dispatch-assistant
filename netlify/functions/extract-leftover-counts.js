@@ -15,6 +15,9 @@
 //
 // A row from here has assignment_id null and source 'closing_note'. rolls uses the portal's
 // keys: LF / RF, plus F when the note gave a count but not which printer side.
+// Florida and North Carolina techs pull about 100 forms off the roll before installing it
+// (so they do not rub the back of the surfboard), which makes their count a guess; those
+// rows get source 'closing_note_approx' so anything using the counts can leave them out.
 //
 // Never throws: a scheduled function that errors repeatedly only adds noise.
 
@@ -29,6 +32,7 @@ const STATE_TZ = {
   TX: 'America/Chicago', AL: 'America/Chicago',
   MI: 'America/Detroit', IN: 'America/Indiana/Indianapolis',
 };
+const APPROX_STATES = new Set(['FL', 'NC']);
 function localDate(iso, state) {
   const tz = STATE_TZ[String(state || '').toUpperCase()] || 'America/New_York';
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
@@ -59,7 +63,7 @@ exports.handler = async (event) => {
         .not('site_id', 'is', null)
         .not('started_at', 'is', null)
         .gte('started_at', since)
-        .ilike('closing_note', '%prior to%restock%')
+        .or('closing_note.ilike.%prior to%restock%,closing_note.ilike.%forms at%,closing_note.ilike.%form count%')
         .order('started_at', { ascending: true })
         .range(from, from + 999);
       if (error) return json(500, { ok: false, error: error.message });
@@ -82,7 +86,7 @@ exports.handler = async (event) => {
         technician_id: v.technician_id || null,
         dispatch_date: date,
         rolls,
-        source: 'closing_note',
+        source: APPROX_STATES.has(String(v.state || '').toUpperCase()) ? 'closing_note_approx' : 'closing_note',
       });
     }
 
