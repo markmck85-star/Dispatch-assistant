@@ -4616,7 +4616,9 @@ function distanceMatrixStatus(state) {
                         // is an early catch: it is part of this day's real route and
                         // mileage, not a faded "pushed to later" pin. (Indiana Thu/Fri
                         // planner pulls Friday stops onto Thursday this way.)
-                        if (!item.isSameDay && d.getTime() > today.getTime()) {
+                        // 2026-10-17: also covers a Restock By EARLIER than this board's date
+                        // (pushed forward from a past day onto this one).
+                        if (!item.isSameDay && d.getTime() !== today.getTime()) {
                             const _ex = existingByCode[item.code];
                             if (_ex && (_ex.status === 'planned' || _ex.status === 'notified')) item.isSameDay = true;
                         }
@@ -4656,6 +4658,13 @@ function distanceMatrixStatus(state) {
                 relevant = relevant.filter(item => {
                     const itemDs = getItemEffectiveDateStr(item, dateStr);
                     if (!itemDs || itemDs === dateStr) return true;
+                    // 2026-10-17: a stop the dispatcher has an ACTIVE row for on THIS board's
+                    // date wins over what happened on its older Restock By date. Real case:
+                    // two restocks pushed from Friday to Saturday still carried Friday's date
+                    // in the pasted list, were checked against Friday's removed/completed row,
+                    // and dropped to the bottom list on every refresh even after Undo.
+                    const _todayRow = existingByCode[item.code];
+                    if (_todayRow && (_todayRow.status === 'planned' || _todayRow.status === 'notified')) return true;
                     const existing = (otherDateAssignments[itemDs] || {})[item.code];
                     if (existing && (existing.status === 'completed' || existing.status === 'removed')) {
                         if (!existing.movedElsewhere) {
