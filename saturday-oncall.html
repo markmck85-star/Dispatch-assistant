@@ -596,6 +596,7 @@ function isTestingStation(t) {
 }
 
 async function loadTickets() {
+  const prevTickets = ticketsByState || {};
   ticketsByState = {};
   await Promise.all(SAT_STATES.map(async (s) => {
     try {
@@ -606,7 +607,7 @@ async function loadTickets() {
         .filter(t => !isTestingStation(t))
         .filter(isDueTodayOrEarlier)
         .map(t => Object.assign({}, t, { state: t.state || s.code }));
-    } catch (e) { ticketsByState[s.code] = []; }
+    } catch (e) { ticketsByState[s.code] = prevTickets[s.code] || []; } // failed fetch keeps the last good list
   }));
 }
 
@@ -2089,10 +2090,21 @@ function escapeHtml(s) {
   // Refresh assignments so a tech tapping "confirm receipt" shows up
   // on the board without a manual reload.
   if (!PREVIEW) {
+    // 2026-10-17: the ticket list itself is re-pulled about once a minute too.
+    // Before this it only loaded at page open, so a ticket that arrived while
+    // the page sat open never showed until a manual reload.
+    let pollTick = 0;
     setInterval(async () => {
+      pollTick++;
       const before = JSON.stringify(assignmentsByKey);
+      const ticketsBefore = JSON.stringify(Object.values(ticketsByState).map(l => l.map(t => t.ticketId)));
       await loadAssignments();
-      if (JSON.stringify(assignmentsByKey) !== before) {
+      let ticketsChanged = false;
+      if (pollTick % 3 === 0) {
+        await loadTickets();
+        ticketsChanged = JSON.stringify(Object.values(ticketsByState).map(l => l.map(t => t.ticketId))) !== ticketsBefore;
+      }
+      if (ticketsChanged || JSON.stringify(assignmentsByKey) !== before) {
         renderTicketList();
         renderMap();
         if (typeof refreshSatAiBarState === "function") refreshSatAiBarState();
