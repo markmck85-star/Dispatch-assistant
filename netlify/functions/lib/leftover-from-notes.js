@@ -20,9 +20,9 @@ function parseLeftoverCounts(note) {
 
   // A: the side is named right next to the count.
   // What may follow the number: "prior to restock", a bare "prior", "count", "remaining",
-  // a "<25%" low-level tag, or the end of the sentence. A "%" straight after the number
+  // "and ..." (Ohio style: "left forms at 124 and left ribbon at 284"), a "<25%" low-level tag, or the end of the sentence. A "%" straight after the number
   // ("Old forms at 12%") is a percentage, never matches, and so is never read as a count.
-  const TAIL = '(?:\\s*prior(?:\\s+to\\s+(?:the\\s+)?restock)?\\b|\\s*(?:count|remaining)\\b|\\s*<\\s*\\d+\\s*%|(?=\\s*(?:[.,;!]|$)))';
+  const TAIL = '(?:\\s*prior(?:\\s+to\\s+(?:the\\s+)?restock)?\\b|\\s*(?:count|remaining)\\b|\\s+and\\b|\\s*<\\s*\\d+\\s*%|(?=\\s*(?:[.,;!]|$)))';
   const CONN = '(?:\\s*(?:was|is|were))?(?:\\s*(?:at|:))?';
   const A = new RegExp('\\b(left|right)\\b[^.\\n]{0,25}?\\bforms?(?:\\s+count)?' + CONN + '\\s*(\\d{1,4})' + TAIL, 'gi');
   let m;
