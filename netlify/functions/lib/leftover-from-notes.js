@@ -1,0 +1,44 @@
+// leftover-from-notes.js -- 2026-10-17
+//
+// Reads the "forms left before the restock" number out of a closing note.
+// Georgia techs already write it, in three wordings seen in the data:
+//   "The left form count was 142 prior to restock."   (ClosePilot wording)
+//   "Forms at 244 prior to restock."                  (side named elsewhere in the note, e.g. "left red 2027 forms")
+//   "Form count 92 prior to restock"                  (no side at all)
+// Returns { LF, RF, F } with only the keys found. F means a count was given but the
+// printer side could not be told from the note. Only whole numbers 0-2000 count; a fraction
+// of a roll ("about 1/8") is never turned into a number.
+
+function parseLeftoverCounts(note) {
+  const out = {};
+  if (!note || typeof note !== 'string') return out;
+  const text = note.replace(/\s+/g, ' ');
+
+  const ok = (n) => Number.isInteger(n) && n >= 0 && n <= 2000;
+
+  // A: the side is named right next to the count.
+  const A = /\b(left|right)\b[^.\n]{0,25}?\bforms?(?:\s+count)?\s*(?:was|is|at|were|:)?\s*(\d{1,4})\s*prior to (?:the )?restock/gi;
+  let m;
+  while ((m = A.exec(text)) !== null) {
+    const key = m[1].toLowerCase() === 'left' ? 'LF' : 'RF';
+    const n = parseInt(m[2], 10);
+    if (out[key] === undefined && ok(n)) out[key] = n;
+  }
+  if (Object.keys(out).length) return out;
+
+  // B: a count with no side beside it. Use the rest of the note to place it.
+  const B = /\bforms?(?:\s+count)?\s*(?:was|is|at|were|:)?\s*(\d{1,4})\s*prior to (?:the )?restock/i;
+  m = B.exec(text);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (ok(n)) {
+      const hasLeft = /\bleft\b/i.test(text);
+      const hasRight = /\bright\b/i.test(text);
+      const key = hasLeft && !hasRight ? 'LF' : (hasRight && !hasLeft ? 'RF' : 'F');
+      out[key] = n;
+    }
+  }
+  return out;
+}
+
+module.exports = { parseLeftoverCounts };

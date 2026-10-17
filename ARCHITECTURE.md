@@ -63,11 +63,14 @@ The repo has duplicates. Only one copy of each is live.
 | Shipments mailbox pull | every 20 min |
 | Closings sync | every 2 h |
 | Inventory date-text check | every 10 min |
+| Closing-note forms-left reader (`extract-leftover-counts`) | hourly at :25 |
 | Saturday alert reset | hourly |
 | Morning summary push (8:00 AM in each dispatcher's own time zone, once per day) | every 15 min |
 | Notification digests | disabled on purpose |
 
 `check-report-sync-health.js` (added 2026-10-16) runs at :15/:35/:55 each hour. If the Salesforce sync has no successful run in 60 minutes it sends one alert (to `ALERT_EMAIL` / `ALERT_SMS_ADDRESS`) and stays quiet until a sync succeeds. It reads the same Blobs records the sync writes (`report-sync` store: `last-success`, `last-failure`, `in-progress`, `stale-alert-sent`).
+
+`extract-leftover-counts` (added 2026-10-17) reads the exact forms-left number out of closing notes ("The left form count was 142 prior to restock") into `restock_leftover_counts` (`source = 'closing_note'`, no assignment). Rows typed in the portal Done prompt (`source = 'portal'`) win: a site and day that already has a row is skipped. Parser: `lib/leftover-from-notes.js`. Backfill by hand while logged in: `/.netlify/functions/extract-leftover-counts?days=400` (add `&dry=1` to preview).
 
 Netlify does not let you call a scheduled function by URL, so some jobs have an unscheduled twin (for example `pull-shipments-now`).
 

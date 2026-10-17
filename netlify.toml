@@ -8,6 +8,10 @@
 [functions."check-report-sync-health"]
   schedule = "15,35,55 * * * *"
 
+# 2026-10-17: reads the exact forms-left number out of closing notes into restock_leftover_counts.
+[functions."extract-leftover-counts"]
+  schedule = "25 * * * *"
+
 [functions."pull-mailbox"]
   timeout = 26
 
