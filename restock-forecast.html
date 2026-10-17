@@ -39,45 +39,61 @@ td.n,th.n{text-align:right}
   <label>Date <input type="date" id="d"></label>
   <label>State <select id="st"><option value="">All</option></select></label>
   <label>Show <select id="lim"><option value="150">Below 150</option><option value="250">Below 250</option><option value="9999">All sites</option></select></label>
+  <button id="today" type="button">Today</button>
+  <button id="nextbiz" type="button">Next business day</button>
+  <label>Near <select id="near"><option value="">Any stop</option></select></label>
+  <label>Within <select id="rad"><option value="25">25 mi</option><option value="50" selected>50 mi</option><option value="100">100 mi</option><option value="200">200 mi</option></select></label>
   <button id="go">Refresh</button>
 </div>
 <div class="scroll"><table>
 <thead><tr>
 <th data-k="siteCode">Site</th><th data-k="state">State</th>
 <th class="n" data-k="formsPerDay">Forms/day</th><th data-k="lastRestock">Last restock</th>
-<th class="n" data-k="estCount">Est. count</th><th>On board</th>
+<th class="n" id="distTh" data-k="distMiles" style="display:none">Distance</th><th class="n" data-k="estCount">Est. count</th><th>On board</th>
 </tr></thead>
-<tbody id="tb"><tr><td colspan="6">Loading…</td></tr></tbody></table></div>
+<tbody id="tb"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
 <p class="note">Estimates are good to about a day. Friday and holiday-weekend restocks tend to leave more forms behind, so those sites may run a little higher than shown. Florida and North Carolina are left out because their counts are only percentages.</p>
 </div>
 <script>
-var rows=[],sortK='estCount',asc=true;
+var rows=[],sortK='estCount',asc=true,nearOn=false;
 function nextBiz(){var t=new Date();t.setDate(t.getDate()+1);while(t.getDay()==0||t.getDay()==6)t.setDate(t.getDate()+1);
  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function fmt(d){if(!d)return '';var p=d.split('-');return p[1]+'/'+p[2]}
 function render(){
+  document.getElementById('distTh').style.display=nearOn?'':'none';
   var st=document.getElementById('st').value,lim=+document.getElementById('lim').value;
   var r=rows.filter(function(x){return (!st||x.state===st)&&x.estCount<lim});
   r.sort(function(a,b){var x=a[sortK],y=b[sortK];return (x<y?-1:x>y?1:0)*(asc?1:-1)});
   document.getElementById('tb').innerHTML=r.length?r.map(function(x){
     var c=x.estCount<60?'low':x.estCount<120?'mid':'ok';
     return '<tr><td><b>'+esc(x.siteCode)+'</b> '+esc(x.name)+'</td><td>'+esc(x.state)+'</td><td class="n">'+x.formsPerDay.toFixed(1)+
-    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td><td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td><td>'+
-    (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="6">No sites in this range.</td></tr>';
+    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td>'+(nearOn?'<td class="n">'+(x.distApprox?'~':'')+(x.distMiles!=null?x.distMiles.toFixed(0)+' mi':'')+(x.driveMin!=null?' ('+x.driveMin.toFixed(0)+' min)':'')+'</td>':'')+'<td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td><td>'+
+    (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="7">No sites in this range.</td></tr>';
 }
 function load(){
   var d=document.getElementById('d').value;
-  document.getElementById('tb').innerHTML='<tr><td colspan="6">Loading…</td></tr>';
-  fetch('/.netlify/functions/get-restock-forecast?date='+d,{credentials:'same-origin'}).then(function(r){
+  var nr=document.getElementById('near').value,rad=document.getElementById('rad').value;
+  document.getElementById('tb').innerHTML='<tr><td colspan="7">Loading…</td></tr>';
+  fetch('/.netlify/functions/get-restock-forecast?date='+d+(nr?'&near='+encodeURIComponent(nr)+'&radius='+rad:''),{credentials:'same-origin'}).then(function(r){
     if(r.status===401){location.href='/';throw 0}return r.json()}).then(function(j){
-    if(j.error)throw new Error(j.error);rows=j.rows;
+    if(j.error)throw new Error(j.error);rows=j.rows;nearOn=!!j.near;
+    var ns=document.getElementById('near'),nv=ns.value,seen={};
+    ns.innerHTML='<option value="">Any stop</option>'+(j.stops||[]).filter(function(x){return !seen[x.siteCode]&&(seen[x.siteCode]=1)}).map(function(x){return '<option value="'+esc(x.siteCode)+'">'+esc(x.name||x.siteCode)+(x.tech?' ('+esc(x.tech)+')':'')+'</option>'}).join('');
+    if(nv&&!seen[nv])ns.insertAdjacentHTML('beforeend','<option value="'+esc(nv)+'">'+esc(nv)+'</option>');
+    ns.value=nv;
+    if(nearOn&&sortK==='distMiles'&&false){}
     var s=document.getElementById('st'),cur=s.value,set={};rows.forEach(function(x){set[x.state]=1});
     s.innerHTML='<option value="">All</option>'+Object.keys(set).sort().map(function(k){return '<option>'+k+'</option>'}).join('');s.value=cur;
     render();
-  }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="6">Could not load: '+esc(e.message)+'</td></tr>'});
+  }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="7">Could not load: '+esc(e.message)+'</td></tr>'});
 }
 document.getElementById('d').value=nextBiz();
+function iso(t){return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')}
+document.getElementById('today').onclick=function(){document.getElementById('d').value=iso(new Date());load()};
+document.getElementById('nextbiz').onclick=function(){document.getElementById('d').value=nextBiz();load()};
+document.getElementById('near').onchange=function(){sortK='estCount';asc=true;load()};
+document.getElementById('rad').onchange=load;
 document.getElementById('go').onclick=load;
 document.getElementById('d').onchange=load;
 document.getElementById('st').onchange=render;document.getElementById('lim').onchange=render;
