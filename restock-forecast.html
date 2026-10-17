@@ -63,7 +63,7 @@ function render(){
   document.getElementById('tb').innerHTML=r.length?r.map(function(x){
     var c=x.estCount<60?'low':x.estCount<120?'mid':'ok';
     return '<tr><td><b>'+esc(x.siteCode)+'</b> '+esc(x.name)+'</td><td>'+esc(x.state)+'</td><td class="n">'+x.formsPerDay.toFixed(1)+
-    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td><td class="n"><span class="pill '+c+'">'+x.estCount+'</span></td><td>'+
+    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td><td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td><td>'+
     (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="6">No sites in this range.</td></tr>';
 }
 function load(){
