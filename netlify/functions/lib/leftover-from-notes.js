@@ -19,8 +19,12 @@ function parseLeftoverCounts(note) {
   const ok = (n) => Number.isInteger(n) && n >= 0 && n <= 2000;
 
   // A: the side is named right next to the count.
-  const TAIL = '(?:\\s*prior to (?:the )?restock|(?=\\s*(?:[.,;!]|$)))';
-  const A = new RegExp('\\b(left|right)\\b[^.\\n]{0,25}?\\bforms?(?:\\s+count)?\\s*(?:was|is|at|were|:)?\\s*(\\d{1,4})' + TAIL, 'gi');
+  // What may follow the number: "prior to restock", a bare "prior", "count", "remaining",
+  // a "<25%" low-level tag, or the end of the sentence. A "%" straight after the number
+  // ("Old forms at 12%") is a percentage, never matches, and so is never read as a count.
+  const TAIL = '(?:\\s*prior(?:\\s+to\\s+(?:the\\s+)?restock)?\\b|\\s*(?:count|remaining)\\b|\\s*<\\s*\\d+\\s*%|(?=\\s*(?:[.,;!]|$)))';
+  const CONN = '(?:\\s*(?:was|is|were))?(?:\\s*(?:at|:))?';
+  const A = new RegExp('\\b(left|right)\\b[^.\\n]{0,25}?\\bforms?(?:\\s+count)?' + CONN + '\\s*(\\d{1,4})' + TAIL, 'gi');
   let m;
   while ((m = A.exec(text)) !== null) {
     const key = m[1].toLowerCase() === 'left' ? 'LF' : 'RF';
@@ -30,7 +34,7 @@ function parseLeftoverCounts(note) {
   if (Object.keys(out).length) return out;
 
   // B: a count with no side beside it. Use the rest of the note to place it.
-  const B = new RegExp('\\bforms?(?:\\s+count)?\\s*(?:was|is|at|were|:)?\\s*(\\d{1,4})' + TAIL, 'i');
+  const B = new RegExp('\\bforms?(?:\\s+count)?' + CONN + '\\s*(\\d{1,4})' + TAIL, 'i');
   m = B.exec(text);
   if (m) {
     const n = parseInt(m[1], 10);
