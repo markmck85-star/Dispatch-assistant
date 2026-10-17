@@ -32,9 +32,14 @@ exports.handler = async (event) => {
     const est = await supabase.rpc("estimate_site_counts", { on_date: date });
     if (est.error) return json(500, { error: "Forecast failed: " + est.error.message });
 
-    const sites = await supabase.from("sites").select("site_code, name");
+    const sites = await supabase.from("sites").select("id, site_code, name");
     const names = {};
-    (sites.data || []).forEach((s) => { names[s.site_code] = s.name; });
+    const idToCode = {};
+    (sites.data || []).forEach((s) => { names[s.site_code] = s.name; idToCode[s.id] = s.site_code; });
+    // v2: sites with only 2 clean intervals are included but flagged low confidence
+    const rates = await supabase.from("site_usage_rates").select("site_id, intervals");
+    const intervals = {};
+    (rates.data || []).forEach((r) => { intervals[idToCode[r.site_id]] = r.intervals; });
 
     const asg = await supabase
       .from("assignments")
@@ -55,6 +60,7 @@ exports.handler = async (event) => {
       lastRestock: r.last_forms_restock,
       daysSince: r.days_since,
       estCount: r.est_count,
+      lowConfidence: (intervals[r.site_code] || 0) < 3,
       planned: planned[r.site_code] || null,
     }));
     rows.sort((a, b) => a.estCount - b.estCount);
