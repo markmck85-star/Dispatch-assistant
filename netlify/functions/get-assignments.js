@@ -51,7 +51,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("assignments")
-      .select("status, assigned_by, sequence_order, locked, restock_form_counts, received_at, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review)")
+      .select("status, assigned_by, sequence_order, locked, restock_form_counts, received_at, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review, attributes)")
       .eq("dispatch_date", dispatchDate);
 
     if (error) return json(500, { error: "Query failed: " + error.message });
@@ -144,6 +144,9 @@ exports.handler = async (event) => {
             earliestStartAt: t.earliest_start_at,
             computedSlaDeadline,
             needsReview: !!t.needs_review,
+            // 2026-10-17: site access details from the ticket email (Indiana sends them; null elsewhere)
+            operatingHours: (t.attributes && t.attributes.operatingHours) || null,
+            sitePhone: (t.attributes && t.attributes.sitePhone) || null,
             lineItems: lineItemsByTicketId[t.id] || [],
           } : null,
         };
