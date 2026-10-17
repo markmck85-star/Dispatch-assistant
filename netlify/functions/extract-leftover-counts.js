@@ -9,9 +9,10 @@
 // skipped when its site and date already have a row, so nothing doubles up, and a count typed
 // in the portal is never overwritten by one read from a note.
 //
-// By hand (logged-in dispatcher):
-//   /.netlify/functions/extract-leftover-counts?days=400      backfill the last 400 days
-//   /.netlify/functions/extract-leftover-counts?days=30&dry=1 show what would be added, write nothing
+// By hand (logged-in dispatcher). Netlify blocks URL calls to a scheduled function, so use the
+// unscheduled twin extract-leftover-counts-now.js, which runs this same handler:
+//   /.netlify/functions/extract-leftover-counts-now?days=400      backfill the last 400 days
+//   /.netlify/functions/extract-leftover-counts-now?days=30&dry=1 show what would be added, write nothing
 //
 // A row from here has assignment_id null and source 'closing_note'. rolls uses the portal's
 // keys: LF / RF, plus F when the note gave a count but not which printer side.
