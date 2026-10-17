@@ -1539,9 +1539,9 @@ function renderStopCard(t) {
   const acc = siteAccessInfo(t);
   let accessHtml = '';
   if (acc.hours) {
-    const todayTxt = acc.today === 'Closed' ? 'Closed today' : (acc.today ? 'Open today ' + acc.today : '');
+    const todayTxt = acc.today === 'Closed' ? 'Closed today' : (acc.today ? 'Open today ' + acc.today : 'Hours: ' + acc.hours);
     const warn = acc.today === 'Closed' ? ' style="color:#f0a500;"' : '';
-    accessHtml = `<div class="meta"${warn}>${todayTxt ? '<b>' + escapeHtml(todayTxt) + '</b> · ' : ''}Hours: ${escapeHtml(acc.hours)}${acc.phone ? ' · ' + escapeHtml(acc.phone) : ''}</div>`;
+    accessHtml = `<div class="meta"${warn}><b>${escapeHtml(todayTxt)}</b>${acc.phone ? ' · ' + escapeHtml(acc.phone) : ''}</div>`;
   } else if (acc.phone) {
     accessHtml = `<div class="meta">${escapeHtml(acc.phone)}</div>`;
   }
@@ -2014,15 +2014,15 @@ function buildMessageText() {
   let msg = PREVIEW
     ? `TEST MESSAGE — DO NOT DISPATCH. This is a demo from the Saturday on-call page. There is no real ticket.\n\n`
     : '';
-  msg += `⚡ URGENT - Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
+  msg += `Hey ${firstName}, a trouble ticket for ${siteName} just came in:\n\n`;
   msg += `1. ${t.woNumber ? 'WO ' + t.woNumber + ' – ' : ''}${t.issueCategory || t.issueDetail || 'Trouble ticket'}\n`;
   const slaMsg = fmtSlaForSite(t);
   if (slaMsg) msg += `   SLA: ${slaMsg}\n`;
   const acc = siteAccessInfo(t);
   if (acc.hours) {
-    if (acc.today && acc.today !== 'Closed') msg += `   Site hours today: ${acc.today} (all: ${acc.hours})\n`;
-    else if (acc.today === 'Closed') msg += `   Site hours: closed today per listed hours (all: ${acc.hours})\n`;
-    else msg += `   Site hours: ${acc.hours}\n`;
+    if (acc.today && acc.today !== 'Closed') msg += `   Site hours: ${acc.today}\n`;
+    else if (acc.today === 'Closed') msg += `   Site hours: closed today per listed hours\n`;
+    else msg += `   Site hours: ${acc.hours}\n`; // unreadable format: show what the email said
   }
   if (acc.phone) msg += `   Site phone: ${acc.phone}\n`;
   if (closed) msg += `\n⚠️ This site is closed on Saturdays -- verify before dispatching, may just be a remote-monitoring false alarm.\n`;

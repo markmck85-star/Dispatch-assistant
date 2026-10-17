@@ -5400,7 +5400,7 @@ function distanceMatrixStatus(state) {
                         ? `<div style="font-size:11px;color:#2e7d32;margin-top:3px;font-weight:600;">✓ ${((tech||'').split(' ')[0]||'Tech')} confirmed receipt ${new Date(item.receivedAt).toLocaleString('en-US',{weekday:'short',hour:'numeric',minute:'2-digit'})}</div>`
                         : '';
                     const ticketInfoStr = (item.fromTicket || item.ticketWo || item.ticketSlaEnd || item.ticketNeedsReview)
-                        ? `<div style="font-size:12px;color:#c0392b;margin-top:4px;line-height:1.35;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? `<br><strong style="font-size:13px;">SLA / Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : (item.ticketNeedsReview ? '<br><strong>SLA on the other ticket — tap the amber badge</strong>' : '')}${(() => { const a = siteAccessText(item); if (!a) return ''; const t = a.today === 'Closed' ? 'Closed today' : (a.today ? 'Open today ' + a.today : ''); return '<br>' + (t ? '<strong>' + t + '</strong> · ' : '') + (a.hours ? 'Hours: ' + a.hours : '') + (a.phone ? (a.hours ? ' · ' : '') + a.phone : ''); })()}</div>`
+                        ? `<div style="font-size:12px;color:#c0392b;margin-top:4px;line-height:1.35;">📋 WO ${item.ticketWo || '—'}${item.ticketIssue ? ' – ' + item.ticketIssue : ''}${item.ticketSlaEnd ? `<br><strong style="font-size:13px;">SLA / Due: ${formatServerSlaTime(item.ticketSlaEnd, item.code)}</strong>` : (item.ticketNeedsReview ? '<br><strong>SLA on the other ticket — tap the amber badge</strong>' : '')}${(() => { const a = siteAccessText(item); if (!a) return ''; const t = a.today === 'Closed' ? 'Closed today' : (a.today ? 'Open today ' + a.today : ''); return '<br>' + (t ? '<strong>' + t + '</strong>' : (a.hours ? 'Hours: ' + a.hours : '')) + (a.phone ? ((t || a.hours) ? ' · ' : '') + a.phone : ''); })()}</div>`
                         : '';
                     // 2026-09-08: same line-item badge added to the state
                     // console -- brought here too so the actual working
@@ -7596,7 +7596,7 @@ function distanceMatrixStatus(state) {
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                     msg = `⚡ URGENT - Hey ${info.firstName}, a trouble ticket for ${loc.name} just came in:\n\n`;
                     msg += `1. ${woStr}${issueStr}${reassignNote}\n`;
-                    { const a = siteAccessText(item, pickerIso); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours today: ${a.today} (all: ${a.hours})\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours (all: ${a.hours})\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
+                    { const a = siteAccessText(item, pickerIso); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours: ${a.today}\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
                     const warnings = checkConsumables(item.code);
                     if (warnings.length > 0) warnings.forEach(w => { msg += `   ${w}\n`; });
                 } else {
@@ -7621,7 +7621,7 @@ function distanceMatrixStatus(state) {
                             ? (item.restockOverdue ? ` - Consumable Restock 🔴 OVERDUE (was due ${item.restockBy})` : ' - Consumable Restock ⚡ SAME DAY')
                             : ' - Consumable Restock');
                         msg += `${i + 1}. ${prefix}${loc.name}${stopType}${reassignNote}\n`;
-                        if (item.urgent) { const a = siteAccessText(item, getItemEffectiveDateStr(item, pickerIso)); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours today: ${a.today} (all: ${a.hours})\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours (all: ${a.hours})\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
+                        if (item.urgent) { const a = siteAccessText(item, getItemEffectiveDateStr(item, pickerIso)); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours: ${a.today}\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
 
                         // Append consumables detail for restock stops
                         if (!item.urgent) {
