@@ -267,6 +267,60 @@ function zonedTimeToUtc(year, month, day, hour, minute, second, tz) {
   return new Date(guess.getTime() - (asIfUtc - guess.getTime()));
 }
 
+// 2026-10-17: ON-CALL-AWARE DEFAULT TECH for the auto-add below.
+// Found via WO 00155434 (GA1047 Dunwoody), received 3:59 AM on a Saturday:
+// the auto-add always used the site's primary tech (Randy), who was not on
+// the Saturday on-call list, so the Saturday page showed an assignment
+// nobody had chosen. If the target board date has on_call_schedule rows for
+// the site's state, the new row now goes to the CLOSEST on-call tech by
+// drive time (tech_site_distances, same table the Saturday page uses); a
+// dispatcher can still reassign. Returns null when the date has no on-call
+// schedule for that state (every ordinary weekday) or on any error, and the
+// caller keeps the old primary-tech behaviour. NC and SC sites roll up to the
+// GA rotation, same as the GA / NC / SC region everywhere else.
+async function pickOnCallTechId(supabase, siteId, siteState, dateStr) {
+  try {
+    const st = String(siteState || '').toUpperCase();
+    const schedState = (st === 'NC' || st === 'SC') ? 'GA' : st;
+    if (!schedState || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return null;
+    const { data: rows, error } = await supabase
+      .from('on_call_schedule')
+      .select('technician_id')
+      .eq('state', schedState)
+      .eq('day', dateStr);
+    if (error) { console.error('[mailgun-inbound] on-call lookup failed:', error.message); return null; }
+    const ids = [...new Set((rows || []).map(r => r.technician_id).filter(Boolean))];
+    if (!ids.length) return null;
+    if (ids.length === 1) return ids[0];
+    const { data: dist, error: distErr } = await supabase
+      .from('tech_site_distances')
+      .select('technician_id, mode, duration_min, distance_mi')
+      .eq('site_id', siteId)
+      .in('technician_id', ids);
+    if (distErr) console.error('[mailgun-inbound] on-call distance lookup failed:', distErr.message);
+    const best = {};
+    for (const r of (dist || [])) {
+      const cur = best[r.technician_id];
+      if (!cur || (cur.mode !== 'driving' && r.mode === 'driving')) best[r.technician_id] = r;
+    }
+    let pick = null;
+    let pickMin = Infinity;
+    for (const id of ids) {
+      // No driving time (straight-line estimate only): rough 2 min per mile, so
+      // such a tech can still be compared instead of always ranking last.
+      const b = best[id];
+      const m = !b ? Infinity
+        : (b.duration_min != null ? Number(b.duration_min)
+          : (b.distance_mi != null ? Number(b.distance_mi) * 2 : Infinity));
+      if (pick === null || m < pickMin) { pick = id; pickMin = m; }
+    }
+    return pick;
+  } catch (e) {
+    console.error('[mailgun-inbound] pickOnCallTechId failed:', e.message);
+    return null;
+  }
+}
+
 function todayStrForSiteCode(siteCode) {
   const tz = getTimezoneForSiteCode(siteCode);
   const p = getZonedParts(new Date(), tz);
@@ -401,7 +455,7 @@ async function autoAddTicketToBoard({
         if (['trouble', 'maintenance', 'install', 'site_survey'].includes(ticketKind || 'trouble') && siteId) {
           try {
             const { data: siteDetail, error: siteDetailErr } = await supabase
-              .from('sites').select('primary_tech_id').eq('id', siteId).maybeSingle();
+              .from('sites').select('primary_tech_id, state').eq('id', siteId).maybeSingle();
             if (siteDetailErr) console.error('[mailgun-inbound] site detail lookup failed:', siteDetailErr.message);
             else if (siteDetail && siteDetail.primary_tech_id) {
               let dispatchDateStr;
@@ -533,12 +587,15 @@ async function autoAddTicketToBoard({
                 if (absorbErr) console.error('[mailgun-inbound] absorb-stale-assignment failed:', absorbErr.message);
                 else console.log(`[mailgun-inbound] Moved stale planned entry from ${staleOpenAssignment.dispatch_date} to ${dispatchDateStr} for new ticket ${woNum} instead of creating a duplicate`);
               } else if (!existingAssignment) {
+                // 2026-10-17: on a date with an on-call schedule, the
+                // closest on-call tech beats the site's own default.
+                const onCallTechId = await pickOnCallTechId(supabase, siteId, siteDetail.state, dispatchDateStr);
                 const { error: insertErr } = await supabase
                   .from('assignments')
                   .insert({
                     dispatch_date: dispatchDateStr,
                     site_id: siteId,
-                    technician_id: siteDetail.primary_tech_id,
+                    technician_id: onCallTechId || siteDetail.primary_tech_id,
                     assigned_by: 'auto',
                     status: 'planned',
                     ticket_id: newTicketId,
