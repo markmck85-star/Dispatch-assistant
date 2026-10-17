@@ -413,13 +413,19 @@
     $('summStatus').textContent = 'Loading...';
     $('summList').innerHTML = '';
     var j = await call('dispatch_summary', { state: $('summState').value, date: $('summDate').value });
+    // Site name opens the restock forecast filtered to sites near this stop (staff only).
+    var forecastLink = function (st) {
+      if (!st.siteCode) return esc(st.siteName);
+      return '<a href="/restock-forecast?near=' + encodeURIComponent(st.siteCode) + '&date=' + encodeURIComponent($('summDate').value) +
+        '" title="Restock forecast for sites near here" style="color:inherit;text-decoration:underline dotted">' + esc(st.siteName) + '</a>';
+    };
     if (seq !== SUMM_SEQ) return;
     if (!j.ok) { $('summStatus').textContent = ''; $('summList').innerHTML = '<div class="err">' + esc(j.error || 'Could not load the summary.') + '</div>'; return; }
     var techs = j.techs || [];
     var open = j.openTroubles || [];
     var openHtml = open.length ? '<div class="card"><h2>Open trouble tickets, not assigned <span class="muted">(' + open.length + ')</span></h2>' +
       open.map(function (s) {
-        return '<div class="stop"><b>' + esc(s.siteName) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
+        return '<div class="stop"><b>' + forecastLink(s) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
           (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
           '<br>' + (s.outOfService ? '<span class="tag alert">Out of service</span>' : '') +
           (s.woNumber ? '<span class="tag">' + esc(s.woNumber) + '</span>' : '') +
@@ -436,7 +442,7 @@
     $('summList').innerHTML = openHtml + techs.map(function (g) {
       return '<div class="card"><h2>' + esc(g.tech) + ' <span class="muted">(' + g.stops.length + ')</span></h2>' +
         g.stops.map(function (s, i) {
-          return '<div class="stop"><b>' + (i + 1) + '. ' + esc(s.siteName) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
+          return '<div class="stop"><b>' + (i + 1) + '. ' + forecastLink(s) + '</b> <span class="muted">' + esc(s.siteCode) + '</span>' +
             (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
             '<br>' + (s.ticketKind === 'trouble' ? '<span class="tag alert">Trouble ticket</span>' : (s.ticketKind === 'maintenance' ? '<span class="tag restock">Restock</span>' : '')) +
             (s.woNumber ? '<span class="tag">' + esc(s.woNumber) + '</span>' : '') +

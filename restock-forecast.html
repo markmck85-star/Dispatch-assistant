@@ -89,6 +89,9 @@ function load(){
   }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="7">Could not load: '+esc(e.message)+'</td></tr>'});
 }
 document.getElementById('d').value=nextBiz();
+(function(){var q=new URLSearchParams(location.search),dd=q.get('date'),nn=q.get('near');
+ if(dd&&/^\d{4}-\d{2}-\d{2}$/.test(dd))document.getElementById('d').value=dd;
+ if(nn&&/^[A-Za-z0-9]{3,12}$/.test(nn)){var o=document.getElementById('near');o.insertAdjacentHTML('beforeend','<option value="'+nn.toUpperCase()+'">'+nn.toUpperCase()+'</option>');o.value=nn.toUpperCase();}})();
 function iso(t){return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')}
 document.getElementById('today').onclick=function(){document.getElementById('d').value=iso(new Date());load()};
 document.getElementById('nextbiz').onclick=function(){document.getElementById('d').value=nextBiz();load()};
