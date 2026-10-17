@@ -49,32 +49,34 @@ td.n,th.n{text-align:right}
 <thead><tr>
 <th data-k="siteCode">Site</th><th data-k="state">State</th>
 <th class="n" data-k="formsPerDay">Forms/day</th><th data-k="lastRestock">Last restock</th>
-<th class="n" id="distTh" data-k="distMiles" style="display:none">Distance</th><th class="n" data-k="estCount">Est. count</th><th>On board</th>
+<th class="n" id="distTh" data-k="distMiles" style="display:none">Distance</th><th class="n" id="detTh" data-k="detourMi" style="display:none" title="Extra miles to add this site to the technician's route for the day">Detour</th><th class="n" data-k="estCount">Est. count</th><th>On board</th>
 </tr></thead>
-<tbody id="tb"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
+<tbody id="tb"><tr><td colspan="8">Loading…</td></tr></tbody></table></div>
 <p class="note">Estimates are good to about a day. Friday and holiday-weekend restocks tend to leave more forms behind, so those sites may run a little higher than shown. Florida and North Carolina are left out because their counts are only percentages.</p>
 </div>
 <script>
-var rows=[],sortK='estCount',asc=true,nearOn=false;
+var rows=[],sortK='estCount',asc=true,nearOn=false,hasDet=false;
 function nextBiz(){var t=new Date();t.setDate(t.getDate()+1);while(t.getDay()==0||t.getDay()==6)t.setDate(t.getDate()+1);
  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function fmt(d){if(!d)return '';var p=d.split('-');return p[1]+'/'+p[2]}
 function render(){
   document.getElementById('distTh').style.display=nearOn?'':'none';
+  hasDet=nearOn&&rows.some(function(x){return x.detourMi!=null});
+  document.getElementById('detTh').style.display=hasDet?'':'none';
   var st=document.getElementById('st').value,lim=+document.getElementById('lim').value;
   var r=rows.filter(function(x){return (!st||x.state===st)&&x.estCount<lim});
-  r.sort(function(a,b){var x=a[sortK],y=b[sortK];return (x<y?-1:x>y?1:0)*(asc?1:-1)});
+  r.sort(function(a,b){var x=a[sortK],y=b[sortK];if(x==null)x=1e9;if(y==null)y=1e9;return (x<y?-1:x>y?1:0)*(asc?1:-1)});
   document.getElementById('tb').innerHTML=r.length?r.map(function(x){
     var c=x.estCount<60?'low':x.estCount<120?'mid':'ok';
     return '<tr><td><b>'+esc(x.siteCode)+'</b> '+esc(x.name)+'</td><td>'+esc(x.state)+'</td><td class="n">'+x.formsPerDay.toFixed(1)+
-    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td>'+(nearOn?'<td class="n">'+(x.distApprox?'~':'')+(x.distMiles!=null?x.distMiles.toFixed(0)+' mi':'')+(x.driveMin!=null?' ('+x.driveMin.toFixed(0)+' min)':'')+'</td>':'')+'<td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td><td>'+
-    (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="7">No sites in this range.</td></tr>';
+    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td>'+(nearOn?'<td class="n">'+(x.distApprox?'~':'')+(x.distMiles!=null?x.distMiles.toFixed(0)+' mi':'')+(x.driveMin!=null?' ('+x.driveMin.toFixed(0)+' min)':'')+'</td>':'')+(hasDet?'<td class="n">'+(x.detourMi!=null?(x.detourApprox?'~':'')+'+'+x.detourMi.toFixed(0)+' mi':'')+'</td>':'')+'<td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td><td>'+
+    (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="8">No sites in this range.</td></tr>';
 }
 function load(){
   var d=document.getElementById('d').value;
   var nr=document.getElementById('near').value,rad=document.getElementById('rad').value;
-  document.getElementById('tb').innerHTML='<tr><td colspan="7">Loading…</td></tr>';
+  document.getElementById('tb').innerHTML='<tr><td colspan="8">Loading…</td></tr>';
   fetch('/.netlify/functions/get-restock-forecast?date='+d+(nr?'&near='+encodeURIComponent(nr)+'&radius='+rad:''),{credentials:'same-origin'}).then(function(r){
     if(r.status===401){location.href='/';throw 0}return r.json()}).then(function(j){
     if(j.error)throw new Error(j.error);rows=j.rows;nearOn=!!j.near;
@@ -88,7 +90,7 @@ function load(){
     var s=document.getElementById('st'),cur=s.value,set={};rows.forEach(function(x){set[x.state]=1});
     s.innerHTML='<option value="">All</option>'+Object.keys(set).sort().map(function(k){return '<option>'+k+'</option>'}).join('');s.value=cur;
     render();
-  }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="7">Could not load: '+esc(e.message)+'</td></tr>'});
+  }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="8">Could not load: '+esc(e.message)+'</td></tr>'});
 }
 document.getElementById('d').value=nextBiz();
 (function(){var q=new URLSearchParams(location.search),dd=q.get('date'),nn=q.get('near');
