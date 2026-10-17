@@ -5785,7 +5785,12 @@ function distanceMatrixStatus(state) {
         function syncTroubleOnlyDefault(dateStr) {
             if (window.troubleOnlyManuallySet) return;
             const d = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
-            window.troubleOnlyFilter = d.getDay() === 6; // Saturday
+            // 2026-10-17 (Mark): the Saturday auto-ON is gone. It predates the
+            // Saturday on-call page, which now covers trouble-only duty, and it
+            // hid ordinary restocks a dispatcher had deliberately moved to
+            // Saturday (two of Gina's showed as "0 of 2"). The toggle itself
+            // stays for anyone who wants it; it just starts off every day.
+            window.troubleOnlyFilter = false;
             setTroubleOnlyButtonUI();
         }
 

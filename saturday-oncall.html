@@ -160,6 +160,9 @@
     <div class="section-title">Trouble Tickets</div>
     <div id="ticketList"><div class="empty">Loading&hellip;</div></div>
 
+    <div class="section-title" id="restockTitle" style="display:none;">Restocks Moved to Today</div>
+    <div id="restockList"></div>
+
     <div class="section-title">On-Call Technicians</div>
     <div id="techPanels"><div class="empty">Loading&hellip;</div></div>
   </div>
@@ -458,6 +461,7 @@ let LOCATIONS_BY_STATE = {};    // { GA: {code: {...}}, ... }
 let TECHS_BY_STATE = {};        // { GA: {slug: {...}}, ... }
 let assignmentsByKey = {};      // { <woNumber or siteCode>: {techName, status} }
 let activeStateFilter = null;   // null = overview, else a state code
+let restockAssignments = [];    // planned/notified non-trouble stops on TARGET_DAY (read-only section)
 let satMap = null;
 let mapMarkers = [];
 let satMapBounds = null;
@@ -658,6 +662,15 @@ async function loadAssignments() {
       const key = (a.ticket && a.ticket.woNumber) || a.siteCode;
       if (key) assignmentsByKey[key] = { techName: a.techName, status: a.status, receivedAt: a.receivedAt || null };
     });
+    // 2026-10-17: ordinary restocks a dispatcher moved onto this day. Not
+    // trouble tickets, so they never appear in the ticket list above; shown
+    // read-only in their own section. Anything pushed to Monday has Monday's
+    // date, so it never lands here.
+    restockAssignments = (data.assignments || []).filter(a =>
+      covered.has(a.state)
+      && (a.status === 'planned' || a.status === 'notified')
+      && (!a.ticket || !['trouble', 'install', 'site_survey'].includes(a.ticket.ticketKind))
+    );
   } catch (e) { /* leave assignmentsByKey empty -- ticket list just shows nothing assigned */ }
   if (PREVIEW) {
     Object.assign(assignmentsByKey, previewKeep);
@@ -1365,7 +1378,33 @@ window.addEventListener('popstate', function () {
 // volume is sparse enough that an empty "Randy Thomas (0)" card every week
 // would just be noise.
 // ═══════════════════════════════════════════════════════════════════════
+// Read-only list of restock stops sitting on today's board, grouped by tech.
+function renderRestockSection() {
+  const titleEl = document.getElementById('restockTitle');
+  const listEl = document.getElementById('restockList');
+  if (!titleEl || !listEl) return;
+  const rows = restockAssignments.filter(a => !activeStateFilter || a.state === activeStateFilter);
+  if (!rows.length) { titleEl.style.display = 'none'; listEl.innerHTML = ''; return; }
+  const groups = {};
+  rows.forEach(a => { (groups[a.state + '::' + a.techName] = groups[a.state + '::' + a.techName] || []).push(a); });
+  let html = '';
+  for (const [gk, list] of Object.entries(groups)) {
+    const [state, techName] = gk.split('::');
+    html += `<div class="placard" style="border-left-color:#5f7a8a;"><div class="placard-head">${escapeHtml(techName)} <span class="count">(${list.length}) — ${escapeHtml(state)}</span></div>`;
+    html += list.map(a => {
+      const loc = (LOCATIONS_BY_STATE[a.state] || {})[a.siteCode];
+      const name = loc ? loc.name : a.siteCode;
+      const wo = a.ticket && a.ticket.woNumber ? ' — WO ' + escapeHtml(a.ticket.woNumber) : '';
+      return `<div class="stop-card"><span class="site">[${escapeHtml(a.state)}] ${escapeHtml(a.siteCode)} ${escapeHtml(name)}</span><div class="meta">Restock${wo}${a.status === 'notified' ? ' — notified' : ''}</div></div>`;
+    }).join('');
+    html += `</div>`;
+  }
+  titleEl.style.display = '';
+  listEl.innerHTML = html;
+}
+
 function renderTicketList() {
+  try { renderRestockSection(); } catch (err) { console.error('saturday restocks', err); }
   const el = document.getElementById('ticketList');
   const states = activeStateFilter ? [activeStateFilter] : SAT_STATES.map(s => s.code);
   const rows = [];
