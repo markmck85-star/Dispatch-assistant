@@ -123,6 +123,8 @@ exports.handler = async (event) => {
         const { data: rn, error: rErr } = await supabase.rpc('refresh_site_usage_rates');
         if (!rErr) ratesSites = rn;
       } catch (e) { /* leave null */ }
+      // Same for the per-site "Neumo calls it at" counts built from the dispatch lists.
+      try { await supabase.rpc('refresh_site_restock_thresholds'); } catch (e) { /* ignore */ }
     }
 
     return json(200, {

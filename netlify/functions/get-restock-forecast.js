@@ -88,7 +88,17 @@ exports.handler = async (event) => {
       }
     });
 
+    // v5: what count Neumo has actually called each site at, by the weekday of the list
+    // (site_restock_thresholds, rebuilt from the dispatch-list emails after each reader run).
+    const thrRows = await fetchAll(() => supabase.from("site_restock_thresholds").select("site_id, mid_median, mid_n, thu_median, thu_n, fri_median, fri_n").order("site_id"));
+    const thr = {};
+    thrRows.forEach((t) => { thr[idToCode[t.site_id]] = t; });
+    const rnd = (v) => (v == null ? null : Math.round(Number(v)));
+
     const rows = (est.data || []).map((r) => ({
+      thrMid: rnd((thr[r.site_code] || {}).mid_median), thrMidN: (thr[r.site_code] || {}).mid_n || 0,
+      thrThu: rnd((thr[r.site_code] || {}).thu_median), thrThuN: (thr[r.site_code] || {}).thu_n || 0,
+      thrFri: rnd((thr[r.site_code] || {}).fri_median), thrFriN: (thr[r.site_code] || {}).fri_n || 0,
       siteCode: r.site_code,
       name: names[r.site_code] || "",
       state: r.state,

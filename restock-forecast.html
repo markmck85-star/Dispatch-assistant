@@ -29,7 +29,7 @@ td.n,th.n{text-align:right}
 .lc{font-size:11px;color:var(--muted);font-style:italic}
 .pl{font-size:12px;color:var(--ok-tc)}
 .note{color:var(--muted);font-size:12px;margin-top:12px}
-</style>
+.thr{font-size:12px;white-space:nowrap}.thr.few{color:var(--muted,#888)}.cn{font-size:10px;color:var(--muted,#888)}</style>
 </head>
 <body>
 <div class="wrap">
@@ -50,10 +50,11 @@ td.n,th.n{text-align:right}
 <thead><tr>
 <th data-k="siteCode">Site</th><th data-k="state">State</th>
 <th class="n" data-k="formsPerDay">Forms/day</th><th data-k="lastRestock">Last restock</th>
-<th class="n" id="distTh" data-k="distMiles" style="display:none">Distance</th><th class="n" id="detTh" data-k="detourMi" style="display:none" title="Extra miles to add this site to the technician's route for the day">Detour</th><th class="n" data-k="estCount">Est. count</th><th>On board</th>
+<th class="n" id="distTh" data-k="distMiles" style="display:none">Distance</th><th class="n" id="detTh" data-k="detourMi" style="display:none" title="Extra miles to add this site to the technician's route for the day">Detour</th><th class="n" data-k="estCount">Est. count</th><th class="n thr" data-k="thrMid" title="Typical form count Neumo has called this site at on lists sent Monday to Wednesday">Calls at<br>Mon-Wed</th><th class="n thr" data-k="thrThu" title="Typical count on Thursday lists">Calls at<br>Thu</th><th class="n thr" data-k="thrFri" title="Typical count on Friday lists (restock the following Monday)">Calls at<br>Fri</th><th>On board</th>
 </tr></thead>
-<tbody id="tb"><tr><td colspan="8">Loading…</td></tr></tbody></table></div>
+<tbody id="tb"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 <p class="note">Estimates are good to about a day. Friday and holiday-weekend restocks tend to leave more forms behind, so those sites may run a little higher than shown. Florida and North Carolina are left out because their counts are only percentages.</p>
+<p class="note">"Calls at" is the typical form count a site had when it was put on the dispatch list, by the day the list was sent (the number in brackets is how many lists it is based on). Treat any figure based on fewer than three lists as a rough guide.</p>
 </div>
 <script>
 var rows=[],sortK='estCount',asc=true,nearOn=false,hasDet=false;
@@ -61,6 +62,7 @@ function nextBiz(){var t=new Date();t.setDate(t.getDate()+1);while(t.getDay()==0
  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function fmt(d){if(!d)return '';var p=d.split('-');return p[1]+'/'+p[2]}
+function thrCell(v,n){if(v==null)return '<td class="n thr"></td>';return '<td class="n thr'+(n<3?' few':'')+'" title="'+n+' past list'+(n==1?'':'s')+(n<3?' (too few to trust)':'')+'">'+v+' <span class="cn">('+n+')</span></td>'}
 function render(){
   document.getElementById('distTh').style.display=nearOn?'':'none';
   hasDet=nearOn&&rows.some(function(x){return x.detourMi!=null});
@@ -71,13 +73,13 @@ function render(){
   document.getElementById('tb').innerHTML=r.length?r.map(function(x){
     var c=x.estCount<60?'low':x.estCount<120?'mid':'ok';
     return '<tr><td><a href="#" class="sl" data-code="'+esc(x.siteCode)+'" title="Show sites near this one"><b>'+esc(x.siteCode)+'</b> '+esc(x.name)+'</a></td><td>'+esc(x.state)+'</td><td class="n">'+x.formsPerDay.toFixed(1)+
-    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td>'+(nearOn?'<td class="n">'+(x.distApprox?'~':'')+(x.distMiles!=null?x.distMiles.toFixed(0)+' mi':'')+(x.driveMin!=null?' ('+x.driveMin.toFixed(0)+' min)':'')+'</td>':'')+(hasDet?'<td class="n">'+(x.detourMi!=null?(x.detourApprox?'~':'')+'+'+x.detourMi.toFixed(0)+' mi':'')+'</td>':'')+'<td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td><td>'+
-    (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="8">No sites in this range.</td></tr>';
+    '</td><td>'+fmt(x.lastRestock)+' ('+x.daysSince+'d)</td>'+(nearOn?'<td class="n">'+(x.distApprox?'~':'')+(x.distMiles!=null?x.distMiles.toFixed(0)+' mi':'')+(x.driveMin!=null?' ('+x.driveMin.toFixed(0)+' min)':'')+'</td>':'')+(hasDet?'<td class="n">'+(x.detourMi!=null?(x.detourApprox?'~':'')+'+'+x.detourMi.toFixed(0)+' mi':'')+'</td>':'')+'<td class="n"><span class="pill '+c+'">'+x.estCount+'</span>'+(x.lowConfidence?' <span class="lc" title="Based on only two past restocks">low confidence</span>':'')+'</td>'+thrCell(x.thrMid,x.thrMidN)+thrCell(x.thrThu,x.thrThuN)+thrCell(x.thrFri,x.thrFriN)+'<td>'+
+    (x.planned?'<span class="pl">✓ planned</span>':'')+'</td></tr>'}).join(''):'<tr><td colspan="11">No sites in this range.</td></tr>';
 }
 function load(){
   var d=document.getElementById('d').value;
   var nr=document.getElementById('near').value,rad=document.getElementById('rad').value;
-  document.getElementById('tb').innerHTML='<tr><td colspan="8">Loading…</td></tr>';
+  document.getElementById('tb').innerHTML='<tr><td colspan="11">Loading…</td></tr>';
   fetch('/.netlify/functions/get-restock-forecast?date='+d+(nr?'&near='+encodeURIComponent(nr)+'&radius='+rad:''),{credentials:'same-origin'}).then(function(r){
     if(r.status===401){location.href='/';throw 0}return r.json()}).then(function(j){
     if(j.error)throw new Error(j.error);rows=j.rows;nearOn=!!j.near;
@@ -91,7 +93,7 @@ function load(){
     var s=document.getElementById('st'),cur=s.value,set={};rows.forEach(function(x){set[x.state]=1});
     s.innerHTML='<option value="">All</option>'+Object.keys(set).sort().map(function(k){return '<option>'+k+'</option>'}).join('');s.value=cur;
     render();
-  }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="8">Could not load: '+esc(e.message)+'</td></tr>'});
+  }).catch(function(e){if(e)document.getElementById('tb').innerHTML='<tr><td colspan="11">Could not load: '+esc(e.message)+'</td></tr>'});
 }
 document.getElementById('d').value=nextBiz();
 (function(){var q=new URLSearchParams(location.search),dd=q.get('date'),nn=q.get('near');
