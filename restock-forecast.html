@@ -67,7 +67,7 @@ function nextBiz(){var t=new Date();t.setDate(t.getDate()+1);while(t.getDay()==0
  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function fmt(d){if(!d)return '';var p=d.split('-');return p[1]+'/'+p[2]}
-function listCell(x){if(!x.listFlag)return '<td></td>';var t="Neumo usually lists this site at about "+x.callAt+" on this weekday's list ("+x.callN+" lists)";return x.listFlag==='likely'?'<td title="'+t+'"><span class="pill low">likely listed</span></td>':'<td title="'+t+'"><span class="pill mid">next day</span></td>'}
+function listCell(x){if(!x.listFlag)return '<td></td>';var t="Neumo usually lists this site at about "+x.callAt+" on this weekday's list ("+x.callN+" lists)";var rb=x.ribbonLikely?' <span class="muted" title="Its last forms listing had no ribbon, and ribbon goes on about every other forms listing">+ ribbon</span>':'';return x.listFlag==='likely'?'<td title="'+t+'"><span class="pill low">likely listed</span>'+rb+'</td>':'<td title="'+t+'"><span class="pill mid">next day</span>'+rb+'</td>'}
 function thrCell(v,n){if(v==null)return '<td class="n thr"></td>';return '<td class="n thr'+(n<3?' few':'')+'" title="'+n+' past list'+(n==1?'':'s')+(n<3?' (too few to trust)':'')+'">'+v+' <span class="cn">('+n+')</span></td>'}
 var shown=[];
 function render(){
@@ -127,16 +127,17 @@ function mdy(d){var p=d.split('-');return (+p[1])+'/'+(+p[2])+'/'+p[0]}
 function buildList(){
   var d=document.getElementById('d').value,flagged=shown.filter(function(x){return x.listFlag});
   function sect(flag,by){var r=flagged.filter(function(x){return x.listFlag===flag}).sort(function(a,b){return a.state<b.state?-1:a.state>b.state?1:(a.name<b.name?-1:a.name>b.name?1:0)});
-    return {rows:r.map(function(x){return {state:x.state,loc:(x.name||x.siteCode)+' - '+x.siteCode,lf:x.estCount,by:mdy(by)}})}}
+    return {rows:r.map(function(x){return {state:x.state,loc:(x.name||x.siteCode)+' - '+x.siteCode,lf:x.estCount,rib:!!x.ribbonLikely,by:mdy(by)}})}}
   return {date:d,a:sect('likely',d),b:sect('next',addBiz(d))};
 }
 var HEAD=['State','Location','LF','LR','RF','RR','Journal','Consumables Needed','Restock By:'];
+function cons(r){return r.rib?'Left Forms & Ribbon (est.)':'Left Forms'}
 function listTable(sec){return '<table><thead><tr>'+HEAD.map(function(h){return '<th>'+h+'</th>'}).join('')+'</tr></thead><tbody>'+
-  sec.rows.map(function(r){return '<tr><td>'+esc(r.state)+'</td><td class="loc">'+esc(r.loc)+'</td><td>'+r.lf+'</td><td></td><td></td><td></td><td></td><td>Left Forms</td><td>'+r.by+'</td></tr>'}).join('')+'</tbody></table>'}
+  sec.rows.map(function(r){return '<tr><td>'+esc(r.state)+'</td><td class="loc">'+esc(r.loc)+'</td><td>'+r.lf+'</td><td></td><td></td><td></td><td></td><td>'+cons(r)+'</td><td>'+r.by+'</td></tr>'}).join('')+'</tbody></table>'}
 function renderList(){
   var L=buildList(),el=document.getElementById('lv');
   var dn=new Date(L.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'numeric',day:'numeric'});
-  el.innerHTML='<div class="lv"><h2>Projected dispatch list for '+esc(dn)+' <span class="muted" style="font-weight:400">(estimate from usage rates, not the list from Neumo; LF is the estimated count)</span></h2>'+
+  el.innerHTML='<div class="lv"><h2>Projected dispatch list for '+esc(dn)+' <span class="muted" style="font-weight:400">(estimate from usage rates, not the list from Neumo; LF is the estimated count; ribbon is a guess from the last listing)</span></h2>'+
    (L.a.rows.length?listTable(L.a):'<p class="muted">No sites are projected to be at their usual call point.</p>')+
    (L.b.rows.length?'<div><span class="hl">ONE DAY OUT: LIKELY ON THE NEXT LIST</span></div>'+listTable(L.b):'')+'</div>';
 }
@@ -145,10 +146,10 @@ function setMode(on){listMode=on;document.getElementById('lv').style.display=on?
 document.getElementById('view').onclick=function(){setMode(!listMode)};
 document.getElementById('copy').onclick=function(){
   var L=buildList(),dn=new Date(L.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'numeric',day:'numeric'});
-  var title='Projected dispatch list for '+dn+' (estimate from usage rates, not the list from Neumo; LF is the estimated count)';
-  var txt=title+'\n\n'+HEAD.join('\t')+'\n'+L.a.rows.map(function(r){return [r.state,r.loc,r.lf,'','','','','Left Forms',r.by].join('\t')}).join('\n');
+  var title='Projected dispatch list for '+dn+' (estimate from usage rates, not the list from Neumo; LF is the estimated count; ribbon is a guess from the last listing)';
+  var txt=title+'\n\n'+HEAD.join('\t')+'\n'+L.a.rows.map(function(r){return [r.state,r.loc,r.lf,'','','','',cons(r),r.by].join('\t')}).join('\n');
   var html='<p>'+esc(title)+'</p>'+listTable(L.a).replace('<table>','<table border="1" cellpadding="4" style="border-collapse:collapse;text-align:center">');
-  if(L.b.rows.length){txt+='\n\nONE DAY OUT: LIKELY ON THE NEXT LIST\n'+HEAD.join('\t')+'\n'+L.b.rows.map(function(r){return [r.state,r.loc,r.lf,'','','','','Left Forms',r.by].join('\t')}).join('\n');
+  if(L.b.rows.length){txt+='\n\nONE DAY OUT: LIKELY ON THE NEXT LIST\n'+HEAD.join('\t')+'\n'+L.b.rows.map(function(r){return [r.state,r.loc,r.lf,'','','','',cons(r),r.by].join('\t')}).join('\n');
     html+='<p style="background:#fff176;display:inline-block"><b>ONE DAY OUT: LIKELY ON THE NEXT LIST</b></p>'+listTable(L.b).replace('<table>','<table border="1" cellpadding="4" style="border-collapse:collapse;text-align:center">')}
   var b=document.getElementById('copy'),done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy list'},1500)};
   function plain(){if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,function(){prompt('Copy this list:',txt)});else prompt('Copy this list:',txt)}

@@ -90,7 +90,7 @@ exports.handler = async (event) => {
 
     // v5: what count Neumo has actually called each site at, by the weekday of the list
     // (site_restock_thresholds, rebuilt from the dispatch-list emails after each reader run).
-    const thrRows = await fetchAll(() => supabase.from("site_restock_thresholds").select("site_id, mid_median, mid_n, thu_median, thu_n, fri_median, fri_n").order("site_id"));
+    const thrRows = await fetchAll(() => supabase.from("site_restock_thresholds").select("site_id, mid_median, mid_n, thu_median, thu_n, fri_median, fri_n, last_forms_by, last_ribbon").order("site_id"));
     const thr = {};
     thrRows.forEach((t) => { thr[idToCode[t.site_id]] = t; });
     const rnd = (v) => (v == null ? null : Math.round(Number(v)));
@@ -110,8 +110,13 @@ exports.handler = async (event) => {
       return { callAt, callN, listFlag: flag };
     };
 
+    // v7: ribbon goes on every other forms listing (about 90% of the time in the list history,
+    // whatever the gap), so a site whose last forms listing had no ribbon is likely to get it next.
+    const ribbonHint = (t) => (t && t.last_ribbon != null ? { ribbonLikely: t.last_ribbon === false, lastRibbonBy: t.last_forms_by } : {});
+
     const rows = (est.data || []).map((r) => ({
       ...listFlag(r, thr[r.site_code]),
+      ...ribbonHint(thr[r.site_code]),
       thrMid: rnd((thr[r.site_code] || {}).mid_median), thrMidN: (thr[r.site_code] || {}).mid_n || 0,
       thrThu: rnd((thr[r.site_code] || {}).thu_median), thrThuN: (thr[r.site_code] || {}).thu_n || 0,
       thrFri: rnd((thr[r.site_code] || {}).fri_median), thrFriN: (thr[r.site_code] || {}).fri_n || 0,
