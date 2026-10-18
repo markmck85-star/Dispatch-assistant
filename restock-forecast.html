@@ -161,6 +161,7 @@ document.getElementById('go').onclick=load;
 document.getElementById('d').onchange=load;
 document.getElementById('st').onchange=render;document.getElementById('lim').onchange=render;
 Array.prototype.forEach.call(document.querySelectorAll('th[data-k]'),function(th){th.onclick=function(){var k=th.dataset.k;asc=(sortK===k)?!asc:true;sortK=k;render()}});
+setMode(true);
 load();
 </script>
 </body>
