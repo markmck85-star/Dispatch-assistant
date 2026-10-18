@@ -25,6 +25,10 @@
  * and the sheet's In Transit cell for that item is empty or 0. Any number there
  * (even a different one) is accepted: this checks "left blank", not the quantity.
  */
+// 2026-10-18: OFF for now. Without carrier tracking the app cannot tell when a shipment was picked
+// up, so a tech who already collected it and counted it (correctly leaving In Transit blank) got
+// flagged and texted. Turn back on once UPS tracking gives a real delivered time.
+const TRANSIT_CHECK_ENABLED = false;
 const SHIPPED_WINDOW_DAYS = 7;
 const REQUEST_WINDOW_DAYS = 14;
 const CHECKED_KINDS = new Set(["forms", "ribbon", "journal"]);
@@ -59,6 +63,7 @@ function isBlank(v) {
  */
 function transitProblems(items, sheetDate, shipments) {
   const out = [];
+  if (!TRANSIT_CHECK_ENABLED) return out;
   if (!sheetDate || !/^\d{4}-\d{2}-\d{2}$/.test(sheetDate)) return out;
   const seenCode = new Set();
   for (const it of items || []) {
