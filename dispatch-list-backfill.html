@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Load Old Dispatch Lists</title>
+<style>
+:root{--bg:#f5f3ef;--card:#fff;--text:#2c2c2a;--muted:#73726c;--border:rgba(0,0,0,.12);--accent:#BA7517;--ok:#3B6D11;--bad:#A32D2D;}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1a18;--card:#2c2c28;--text:#e4e2dc;--muted:#a8a8a2;--border:rgba(255,255,255,.14);--accent:#FAC775;--ok:#C0DD97;--bad:#F7C1C1;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif;padding:16px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+a.back{color:var(--accent);text-decoration:none;font-size:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px}
+button,input[type=file]{font:inherit;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text)}
+button{cursor:pointer}button:disabled{opacity:.5;cursor:default}
+.bar{height:10px;background:var(--border);border-radius:6px;overflow:hidden;margin:8px 0}
+.bar i{display:block;height:100%;width:0;background:var(--accent)}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted);font-size:12px}
+ol{margin:6px 0 0 18px;padding:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p><a class="back" href="/">← Dispatch board</a></p>
+<h1>Load old dispatch lists</h1>
+<p class="sub">Adds past Neumo dispatch lists to the history behind the "Calls at" columns on the Restock Forecast. It does not touch the board, tickets or texts.</p>
+
+<div class="card">
+  <ol>
+    <li>Choose the saved list files (.eml). Select them all at once.</li>
+    <li>Check the summary, then press Load.</li>
+  </ol>
+  <p><input type="file" id="f" accept=".eml,message/rfc822" multiple></p>
+  <p id="sum" class="muted">Nothing chosen yet.</p>
+  <p><button id="go" disabled>Load into the app</button></p>
+  <div class="bar"><i id="pb"></i></div>
+  <p id="msg"></p>
+</div>
+<p class="muted">Lists from before February 2026 are saved but not used for the call counts. Loading the same file twice is harmless.</p>
+</div>
+<script>
+// ---- Minimal .eml reader (runs in the browser; nothing is uploaded except the table rows) ----
+function bytesToLatin1(b){var s='',i,n=b.length;for(i=0;i<n;i+=8192)s+=String.fromCharCode.apply(null,b.subarray(i,Math.min(n,i+8192)));return s}
+function latin1ToBytes(s){var b=new Uint8Array(s.length);for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i)&255;return b}
+function splitEntity(raw){
+  var m=raw.match(/\r?\n\r?\n/);var hEnd=m?m.index:raw.length;
+  var head=raw.slice(0,hEnd),body=m?raw.slice(hEnd+m[0].length):'';
+  head=head.replace(/\r?\n[ \t]+/g,' ');var h={};
+  head.split(/\r?\n/).forEach(function(l){var i=l.indexOf(':');if(i>0){var k=l.slice(0,i).toLowerCase();if(!(k in h))h[k]=l.slice(i+1).trim()}});
+  return {h:h,body:body};
+}
+function param(v,name){var m=new RegExp(name+'\\s*=\\s*(?:"([^"]*)"|([^;\\s]+))','i').exec(v||'');return m?(m[1]||m[2]):''}
+function qpDecode(s){s=s.replace(/=\r?\n/g,'');var out=[];for(var i=0;i<s.length;i++){var c=s[i];
+  if(c==='='&&/^[0-9A-Fa-f]{2}$/.test(s.substr(i+1,2))){out.push(parseInt(s.substr(i+1,2),16));i+=2}else out.push(s.charCodeAt(i)&255)}return new Uint8Array(out)}
+function decodeBody(ent){
+  var enc=(ent.h['content-transfer-encoding']||'').toLowerCase(),bytes;
+  if(enc==='base64'){try{bytes=latin1ToBytes(atob(ent.body.replace(/[^A-Za-z0-9+\/=]/g,'')))}catch(e){bytes=new Uint8Array(0)}}
+  else if(enc==='quoted-printable')bytes=qpDecode(ent.body);
+  else bytes=latin1ToBytes(ent.body);
+  var cs=(param(ent.h['content-type'],'charset')||'utf-8').toLowerCase();
+  try{return new TextDecoder(cs).decode(bytes)}catch(e){return new TextDecoder('utf-8').decode(bytes)}
+}
+function collectHtml(raw,out,depth){
+  if(depth>6)return;var ent=splitEntity(raw),ct=(ent.h['content-type']||'text/plain').toLowerCase();
+  if(/attachment/i.test(ent.h['content-disposition']||'')&&!/rfc822/.test(ct))return;
+  if(ct.indexOf('multipart/')===0){var b=param(ent.h['content-type'],'boundary');if(!b)return;
+    ent.body.split('--'+b).slice(1).forEach(function(p){if(p.indexOf('--')===0&&p.length<8)return;collectHtml(p.replace(/^\r?\n/,''),out,depth+1)});return}
+  if(ct.indexOf('message/rfc822')===0){collectHtml(decodeBody(ent),out,depth+1);return}
+  if(ct.indexOf('text/html')===0)out.push(decodeBody(ent));
+}
+function num(t){t=(t||'').replace(/[,\s]/g,'');return /^-?\d+$/.test(t)?parseInt(t,10):null}
+function toDay(t){var m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((t||'').trim());return m?m[3]+'-'+('0'+m[1]).slice(-2)+'-'+('0'+m[2]).slice(-2):null}
+function parseRows(html){
+  var doc=new DOMParser().parseFromString(html,'text/html'),rows=[],map=null;
+  Array.prototype.forEach.call(doc.querySelectorAll('tr'),function(tr){
+    if(tr.querySelector('table'))return;
+    var cells=Array.prototype.map.call(tr.children,function(c){return (c.textContent||'').replace(/\s+/g,' ').trim()});
+    if(cells.length<5)return;
+    var low=cells.map(function(c){return c.toLowerCase()});
+    if(low.indexOf('location')>=0&&low.some(function(c){return c.indexOf('restock')===0})){
+      map={loc:low.indexOf('location'),lf:low.indexOf('lf'),lr:low.indexOf('lr'),rf:low.indexOf('rf'),rr:low.indexOf('rr'),
+        jr:low.indexOf('journal'),con:low.findIndex(function(c){return c.indexOf('consumables')===0}),by:low.findIndex(function(c){return c.indexOf('restock')===0})};
+      if(map.lf<0&&map.rf<0)map=null; return}
+    if(!map)return;
+    var cm=/\b([A-Z]{2}\d{3,5})\b/.exec(cells[map.loc]||'');if(!cm)return;
+    var by=toDay(cells[map.by]);if(!by)return;
+    // Some rows leave the printer count cells out, which shifts everything left; trust only full-width rows
+    if(cells.length<map.by+1)return;
+    rows.push([cm[1],num(cells[map.lf]),num(cells[map.lr]),num(cells[map.rf]),num(cells[map.rr]),num(cells[map.jr]),cells[map.con]||'',by]);
+  });
+  return rows;
+}
+function nyDay(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York'}).format(d)}
+function parseEml(text){
+  var top=splitEntity(text),subject=(top.h['subject']||'').replace(/=\?[^?]+\?[bBqQ]\?[^?]*\?=/g,function(m){return m}),
+      dm=/Dispatch List for\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i.exec(subject),sent=top.h['date']?new Date(top.h['date']):null;
+  if(sent&&isNaN(sent))sent=null;
+  var day=null;
+  if(dm){var y=+dm[3];if(y<100)y+=2000;day=y+'-'+('0'+dm[1]).slice(-2)+'-'+('0'+dm[2]).slice(-2)}
+  else if(sent)day=nyDay(sent);
+  var htmls=[];collectHtml(text,htmls,0);
+  var rows=[];htmls.forEach(function(h){rows=rows.concat(parseRows(h))});
+  return {listDay:day,sentAt:sent?sent.toISOString():null,subject:subject,rows:rows};
+}
+// ---- UI ----
+var lists=[],fileInput=document.getElementById('f'),go=document.getElementById('go'),sum=document.getElementById('sum'),msg=document.getElementById('msg'),pb=document.getElementById('pb');
+function setMsg(t,c){msg.className=c||'';msg.textContent=t}
+fileInput.onchange=async function(){
+  lists=[];setMsg('');pb.style.width='0';go.disabled=true;var files=Array.prototype.slice.call(fileInput.files),noRows=0,bad=0;
+  for(var i=0;i<files.length;i++){
+    sum.textContent='Reading '+(i+1)+' of '+files.length+'…';
+    try{var buf=new Uint8Array(await files[i].arrayBuffer()),r=parseEml(bytesToLatin1(buf));
+      if(!r.listDay){bad++;continue}if(!r.rows.length){noRows++;continue}lists.push(r)}catch(e){bad++}
+  }
+  var rowsN=lists.reduce(function(a,l){return a+l.rows.length},0),days={};lists.forEach(function(l){days[l.listDay]=1});
+  var ds=Object.keys(days).sort();
+  sum.innerHTML='<b>'+files.length+'</b> files chosen. <b class="ok">'+lists.length+'</b> contain list tables ('+Object.keys(days).length+' different days'+(ds.length?', '+ds[0]+' to '+ds[ds.length-1]:'')+', '+rowsN+' site rows).'+
+    ' <span class="muted">'+noRows+' had no list table; '+bad+' could not be read.</span>';
+  go.disabled=!lists.length;
+};
+go.onclick=async function(){
+  go.disabled=true;fileInput.disabled=true;var done=0,saved=0,thr=null;
+  for(var i=0;i<lists.length;i+=15){
+    var batch=lists.slice(i,i+15),last=i+15>=lists.length;
+    try{var res=await fetch('/.netlify/functions/import-dispatch-list-history',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({lists:batch,refresh:last})});
+      if(res.status===401||res.status===403){setMsg('Sign in as an admin first, then try again.','bad');fileInput.disabled=false;go.disabled=false;return}
+      var j=await res.json();if(!res.ok||j.error)throw new Error(j.error||('HTTP '+res.status));saved+=j.rowsSaved;if(j.thresholdSites!=null)thr=j.thresholdSites}
+    catch(e){setMsg('Stopped after '+done+' lists: '+e.message+'. Nothing is lost; you can run it again.','bad');fileInput.disabled=false;go.disabled=false;return}
+    done+=batch.length;pb.style.width=Math.round(done/lists.length*100)+'%';setMsg('Loaded '+done+' of '+lists.length+' lists…');
+  }
+  setMsg('Done. '+done+' lists, '+saved+' site rows saved'+(thr!=null?'; the call counts now cover '+thr+' sites.':'.')+' Reload the Restock Forecast to see them.','ok');fileInput.disabled=false;
+};
+</script>
+</body>
+</html>

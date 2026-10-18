@@ -56,6 +56,7 @@ const ADMIN_ONLY = new Set([
   'pull-shipments-now', 'pull-mailbox', 'pull-shipments-mailbox', 'pull-state-closings', 'closings-sync',
   'bluefolder-sync', 'bluefolder-service-requests-sync', 'match-mailbox-closings', 'match-meet-replies',
   'send-morning-summary', 'send-notification-digests',
+  'import-dispatch-list-history',   // old dispatch lists -> thresholds only; never touches the board
 ]);
 
 // What a technician (role "tech") sign-in may call: the mileage log page.
