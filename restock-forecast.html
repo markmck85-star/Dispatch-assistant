@@ -45,6 +45,7 @@ td.n,th.n{text-align:right}
   <button id="tomorrow" type="button" title="Next business day, only sites at or near the count Neumo usually lists them at">Tomorrow's likely list</button>
   <button id="view" type="button" title="Show the projected list in the same layout as the daily list from Neumo">List view</button>
   <button id="copy" type="button">Copy list</button>
+  <button id="prt" type="button">Print / PDF</button>
   <label>Near <select id="near"><option value="">Any stop</option></select></label>
   <label>Within <select id="rad"><option value="25">25 mi</option><option value="50" selected>50 mi</option><option value="100">100 mi</option><option value="200">200 mi</option></select></label>
   <button id="go">Refresh</button>
@@ -156,6 +157,23 @@ document.getElementById('copy').onclick=function(){
   if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
     navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([txt],{type:'text/plain'})})]).then(done,plain)}
   else plain();
+};
+document.getElementById('prt').onclick=function(){
+  var L=buildList(),dn=new Date(L.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'numeric',day:'numeric',year:'numeric'});
+  var body='<p class="note">Estimate from usage rates, not the list from Neumo. LF is the estimated count; ribbon is a guess from the last listing.</p>'+
+    (L.a.rows.length?listTable(L.a):'<p>No sites are projected to be at their usual call point.</p>')+
+    (L.b.rows.length?'<p><span class="hl">ONE DAY OUT: LIKELY ON THE NEXT LIST</span></p>'+listTable(L.b):'');
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Projected dispatch list '+esc(dn)+'</title><style>'+
+   'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px;font-size:13px;color:#222;background:#fff;max-width:1000px;margin:0 auto}'+
+   '.bar button{display:block;width:100%;padding:14px;background:#007bff;color:#fff;border:none;border-radius:8px;font-size:17px;font-weight:600;margin-bottom:10px;cursor:pointer}.bar button.back{background:#555}'+
+   'h1{font-size:20px;margin:0 0 4px}.note{color:#555;margin:0 0 10px}.hl{background:#fff176;padding:1px 6px;font-weight:600;font-size:12px}'+
+   'table{border-collapse:collapse;width:100%;margin-bottom:10px}th,td{border:1px solid #bbb;padding:4px 6px;text-align:center}td.loc{text-align:left}th{background:#f0f0f0}tr{break-inside:avoid}'+
+   '@media print{.bar{display:none}body{padding:0}}</style></head><body>'+
+   '<div class="bar"><button class="back" onclick="(function(){try{window.close()}catch(e){}})()">Close</button><button onclick="window.print()">Save as PDF / Print</button></div>'+
+   '<h1>Projected dispatch list for '+esc(dn)+'</h1>'+body+'</body></html>';
+  var url=URL.createObjectURL(new Blob([html],{type:'text/html'})),w=window.open(url,'_blank');
+  if(!w){URL.revokeObjectURL(url);alert('Pop-up blocked. Allow pop-ups for this site and try again.');return}
+  setTimeout(function(){URL.revokeObjectURL(url)},10000);
 };
 document.getElementById('go').onclick=load;
 document.getElementById('d').onchange=load;
