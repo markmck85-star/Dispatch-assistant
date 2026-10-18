@@ -95,7 +95,23 @@ exports.handler = async (event) => {
     thrRows.forEach((t) => { thr[idToCode[t.site_id]] = t; });
     const rnd = (v) => (v == null ? null : Math.round(Number(v)));
 
+    // v6: compare each site's estimated count with the count Neumo usually lists it at on that
+    // weekday's list. Needs at least 3 past lists for that weekday; weekends have no list.
+    const dow = new Date(date + "T12:00:00Z").getUTCDay();
+    const dayKey = { 1: "Mid", 2: "Mid", 3: "Mid", 4: "Thu", 5: "Fri" }[dow] || null;
+    const listFlag = (r, t) => {
+      if (!dayKey || !t) return {};
+      const callAt = rnd(t[{ Mid: "mid_median", Thu: "thu_median", Fri: "fri_median" }[dayKey]]);
+      const callN = t[{ Mid: "mid_n", Thu: "thu_n", Fri: "fri_n" }[dayKey]] || 0;
+      if (callAt == null || callN < 3) return { callN };
+      const est = Number(r.est_count), perDay = Number(r.forms_per_day) || 0;
+      // likely = already at or under the usual call point; next day = one more day of use gets it there
+      const flag = est <= callAt ? "likely" : est <= callAt + perDay ? "next" : null;
+      return { callAt, callN, listFlag: flag };
+    };
+
     const rows = (est.data || []).map((r) => ({
+      ...listFlag(r, thr[r.site_code]),
       thrMid: rnd((thr[r.site_code] || {}).mid_median), thrMidN: (thr[r.site_code] || {}).mid_n || 0,
       thrThu: rnd((thr[r.site_code] || {}).thu_median), thrThuN: (thr[r.site_code] || {}).thu_n || 0,
       thrFri: rnd((thr[r.site_code] || {}).fri_median), thrFriN: (thr[r.site_code] || {}).fri_n || 0,
