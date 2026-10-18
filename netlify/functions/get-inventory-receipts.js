@@ -257,7 +257,7 @@ function matchInventory(roster, inventoryMail) {
         matchedBy: hit.matchedBy,
       });
     } else {
-      missing.push({ name: tech.name, state: tech.home_state, email: tech.email || null });
+      missing.push({ name: tech.name, state: tech.home_state, email: tech.email || null, phone: tech.phone || null });
     }
   }
   return { received, missing, unmatched };
@@ -353,7 +353,7 @@ exports.handler = async (event) => {
 
   const { data: techs, error: tErr } = await supabase
     .from("technicians")
-    .select("id, name, home_state, email, active, is_contractor")
+    .select("id, name, home_state, email, phone, active, is_contractor")
     .eq("active", true)
     .order("home_state", { ascending: true })
     .order("name", { ascending: true });

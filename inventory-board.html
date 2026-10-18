@@ -246,8 +246,9 @@
     <section class="panel" id="submissions">
       <h2>Submissions</h2>
       <details class="grp" id="grpMissing" open>
-        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span><span class="hint">Expand to see who has not sent a sheet yet</span>
+        <summary>Missing <span class="count bad" id="cntMissing">&ndash;</span><span class="hint">Who has not sent a sheet yet, by state</span>
           <button class="mini" type="button" onclick="event.preventDefault(); event.stopPropagation(); copyMissing();">Copy emails</button>
+          <button class="mini" id="copyMissList" type="button" onclick="event.preventDefault(); event.stopPropagation(); copyMissingList();">Copy list</button>
         </summary>
         <div class="people" id="missBody"><div class="note">Loading&hellip;</div></div>
       </details>
@@ -476,13 +477,32 @@ function restoreGroups() {
     });
   });
 }
+function missingByState(miss) {
+  const by = {};
+  miss.forEach((t) => { const k = t.state || "?"; (by[k] = by[k] || []).push(t); });
+  return Object.keys(by).sort().map((k) => ({ state: k, techs: by[k].sort((a, b) => String(a.name).localeCompare(String(b.name))) }));
+}
 function missingRowsHtml(miss) {
   if (!miss.length) return '<div class="note">Nobody missing.</div>';
-  return miss.map((t) => {
-    const mail = t.email ? '<a href="mailto:' + esc(t.email) + '">' + esc(t.email) + "</a>" : '<span class="hint">No mailbox</span>';
-    return '<article class="person"><div><div class="who">' + esc(t.name) + '</div>' + mail +
-      '</div><span class="tag">' + esc(t.state || "—") + "</span></article>";
-  }).join("");
+  return missingByState(miss).map((g) =>
+    '<div class="note" style="margin:10px 0 2px;font-weight:600;">' + esc(g.state) + " &middot; " + g.techs.length + " not in yet</div>" +
+    g.techs.map((t) => {
+      const mail = t.email ? '<a href="mailto:' + esc(t.email) + '">' + esc(t.email) + "</a>" : '<span class="hint">No mailbox</span>';
+      const ph = t.phone ? ' <a href="tel:' + esc(String(t.phone).replace(/[^0-9+]/g, "")) + '">' + esc(t.phone) + "</a>" : "";
+      return '<article class="person"><div><div class="who">' + esc(t.name) + "</div>" + mail + (t.email && t.phone ? " &middot;" : "") + ph +
+        '</div><span class="tag">' + esc(t.state || "—") + "</span></article>";
+    }).join("")
+  ).join("");
+}
+function copyMissingList() {
+  const miss = window.BOARD_MISS || [];
+  if (!miss.length) return;
+  const since = (document.getElementById("since") || {}).value || "";
+  const txt = "Inventory sheets not received" + (since ? " (count since " + since + ")" : "") + ":\n" +
+    missingByState(miss).map((g) => g.state + " (" + g.techs.length + "): " + g.techs.map((t) => t.name).join(", ")).join("\n");
+  const b = document.getElementById("copyMissList"), done = () => { if (b) { b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy list"; }, 1500); } };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, () => window.prompt("Copy this list", txt));
+  else window.prompt("Copy this list", txt);
 }
 function copyMissing() {
   const emails = (window.BOARD_MISS || []).map((t) => t.email).filter(Boolean);
