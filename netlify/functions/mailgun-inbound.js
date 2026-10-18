@@ -44,6 +44,15 @@ const { parseInventoryWorkbookBuffer, isInventorySheet, inspectInventoryAttachme
 // matching this file's existing preference for small inline parsers
 // (see parseMailgunBody's own boundary auto-detection, reused here)
 // over pulling in something like `busboy`.
+// The multipart headers are read as latin1 so byte offsets stay exact, but a file name with a
+// long dash or other non-ASCII character arrives as UTF-8 bytes and would show as "â" junk.
+// Re-read such a name as UTF-8; leave it alone if it is not valid UTF-8.
+function fixFilenameEncoding(name) {
+  if (!/[\u0080-\u00ff]/.test(name)) return name;
+  const fixed = Buffer.from(name, "latin1").toString("utf8");
+  return fixed.includes("\ufffd") ? name : fixed;
+}
+
 function extractAttachments(rawBuffer) {
   const latin1 = rawBuffer.toString("latin1");
   const boundaryMatch = latin1.match(/^--([^\r\n]+)/);
@@ -87,7 +96,7 @@ function extractAttachments(rawBuffer) {
     const contentTypeMatch = partStr.match(/Content-Type:\s*([^\r\n]+)/i);
     attachments.push({
       fieldName: nameMatch[1],
-      filename: filenameMatch[1],
+      filename: fixFilenameEncoding(filenameMatch[1]),
       contentType: contentTypeMatch ? contentTypeMatch[1].trim() : null,
       content,
     });
