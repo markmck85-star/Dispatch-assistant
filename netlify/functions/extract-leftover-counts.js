@@ -39,6 +39,21 @@ function localDate(iso, state) {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
 }
 
+function byState(rows) {
+  const o = {};
+  rows.forEach((r) => { o[r._state || '?'] = (o[r._state || '?'] || 0) + 1; });
+  return o;
+}
+// evenly spread sample so every state shows up in a dry run
+function spread(rows, n) {
+  const by = {};
+  rows.forEach((r) => { (by[r._state || '?'] = by[r._state || '?'] || []).push(r); });
+  const out = [];
+  const states = Object.keys(by);
+  for (let i = 0; out.length < n && i < 50; i++) states.forEach((st) => { if (by[st][i] && out.length < n) out.push(by[st][i]); });
+  return out;
+}
+
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
 }
@@ -64,7 +79,7 @@ exports.handler = async (event) => {
         .not('site_id', 'is', null)
         .not('started_at', 'is', null)
         .gte('started_at', since)
-        .or('closing_note.ilike.%prior to%restock%,closing_note.ilike.%forms at%,closing_note.ilike.%form count%')
+        .ilike('closing_note', '%form%') // wide net; parseLeftoverCounts decides what is a count (2026-10-18)
         .order('started_at', { ascending: true })
         .range(from, from + 999);
       if (error) return json(500, { ok: false, error: error.message });
@@ -88,6 +103,7 @@ exports.handler = async (event) => {
         dispatch_date: date,
         rolls,
         source: APPROX_STATES.has(String(v.state || '').toUpperCase()) ? 'closing_note_approx' : 'closing_note',
+        _state: String(v.state || '').toUpperCase(), _note: String(v.closing_note || '').replace(/\s+/g, ' ').slice(0, 220),
       });
     }
 
@@ -108,7 +124,7 @@ exports.handler = async (event) => {
     let added = 0;
     if (!dry) {
       for (let i = 0; i < fresh.length; i += 200) {
-        const chunk = fresh.slice(i, i + 200);
+        const chunk = fresh.slice(i, i + 200).map(({ _state, _note, ...row }) => row);
         const { error } = await supabase.from('restock_leftover_counts').insert(chunk);
         if (error) return json(500, { ok: false, error: error.message, added });
         added += chunk.length;
@@ -136,6 +152,9 @@ exports.handler = async (event) => {
       added: dry ? 0 : added,
       wouldAdd: dry ? fresh.length : undefined,
       sample: dry ? fresh.slice(0, 5).map(r => ({ date: r.dispatch_date, rolls: r.rolls })) : undefined,
+      // dry run only: what would be added, per state, plus a spread of examples with the note text
+      wouldAddByState: dry ? byState(fresh) : undefined,
+      examples: dry ? spread(fresh, 40).map(r => ({ state: r._state, date: r.dispatch_date, rolls: r.rolls, note: r._note })) : undefined,
     });
   } catch (e) {
     console.error('[extract-leftover-counts] error:', e.message);
