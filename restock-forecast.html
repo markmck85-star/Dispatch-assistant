@@ -29,7 +29,7 @@ td.n,th.n{text-align:right}
 .lc{font-size:11px;color:var(--muted);font-style:italic}
 .pl{font-size:12px;color:var(--ok-tc)}
 .note{color:var(--muted);font-size:12px;margin-top:12px}
-.thr{font-size:12px;white-space:nowrap}.thr.few{color:var(--muted,#888)}.cn{font-size:10px;color:var(--muted,#888)}</style>
+.thr{font-size:12px;white-space:nowrap}.thr.few{color:var(--muted,#888)}.cn{font-size:10px;color:var(--muted,#888)}.lv{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto}.lv h2{font-size:14px;margin:0 0 8px}.lv .hl{display:inline-block;background:#fff176;color:#222;padding:1px 6px;font-weight:600;font-size:12px;margin:10px 0 6px}.lv table{min-width:640px}.lv th{cursor:default;text-align:center;color:var(--text);font-size:12px;text-transform:none;letter-spacing:0}.lv td{text-align:center}.lv td.loc{text-align:left}</style>
 </head>
 <body>
 <div class="wrap">
@@ -43,6 +43,7 @@ td.n,th.n{text-align:right}
   <button id="today" type="button">Today</button>
   <button id="nextbiz" type="button">Next business day</button>
   <button id="tomorrow" type="button" title="Next business day, only sites at or near the count Neumo usually lists them at">Tomorrow's likely list</button>
+  <button id="view" type="button" title="Show the projected list in the same layout as the daily list from Neumo">List view</button>
   <button id="copy" type="button">Copy list</button>
   <label>Near <select id="near"><option value="">Any stop</option></select></label>
   <label>Within <select id="rad"><option value="25">25 mi</option><option value="50" selected>50 mi</option><option value="100">100 mi</option><option value="200">200 mi</option></select></label>
@@ -56,6 +57,7 @@ td.n,th.n{text-align:right}
 <th class="n" id="distTh" data-k="distMiles" style="display:none">Distance</th><th class="n" id="detTh" data-k="detourMi" style="display:none" title="Extra miles to add this site to the technician's route for the day">Detour</th><th class="n" data-k="estCount">Est. count</th><th data-k="listFlag" title="Whether the estimate is already at, or one day from, the count Neumo usually lists this site at on that weekday">Neumo list</th><th class="n thr" data-k="thrMid" title="Typical form count Neumo has called this site at on lists sent Monday to Wednesday">Calls at<br>Mon-Wed</th><th class="n thr" data-k="thrThu" title="Typical count on Thursday lists">Calls at<br>Thu</th><th class="n thr" data-k="thrFri" title="Typical count on Friday lists (restock the following Monday)">Calls at<br>Fri</th><th>On board</th>
 </tr></thead>
 <tbody id="tb"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
+<div id="lv" style="display:none"></div>
 <p class="note">Estimates are good to about a day. Friday and holiday-weekend restocks tend to leave more forms behind, so those sites may run a little higher than shown. Florida and North Carolina are left out because their counts are only percentages.</p>
 <p class="note">"Calls at" is the typical form count a site had when it was put on the dispatch list, by the day the list was sent (the number in brackets is how many lists it is based on). Treat any figure based on fewer than three lists as a rough guide. "Neumo list" compares the estimate with that weekday's figure: "likely listed" means it is already at or under it, "next day" means one more day of use gets it there. It only shows when there are at least three past lists for that weekday, and not on weekends.</p>
 </div>
@@ -76,6 +78,7 @@ function render(){
   var r=rows.filter(function(x){return (!st||x.state===st)&&(lim<0?!!x.listFlag:x.estCount<lim)});
   r.sort(function(a,b){var x=a[sortK],y=b[sortK];if(x==null)x=1e9;if(y==null)y=1e9;return (x<y?-1:x>y?1:0)*(asc?1:-1)});
   shown=r;var nl=r.filter(function(x){return x.listFlag==='likely'}).length,nn=r.filter(function(x){return x.listFlag==='next'}).length;
+  if(listMode)renderList();
   document.getElementById('stat').textContent=lim<0?(nl+' likely to be listed, '+nn+' more one day out'+(st?' in '+st:'')+'.'):'';
   document.getElementById('tb').innerHTML=r.length?r.map(function(x){
     var c=x.estCount<60?'low':x.estCount<120?'mid':'ok';
@@ -117,13 +120,41 @@ document.getElementById('tb').addEventListener('click',function(e){
   if(!Array.prototype.some.call(ns.options,function(o){return o.value===code}))ns.insertAdjacentHTML('beforeend','<option value="'+code+'">'+code+'</option>');
   ns.value=code;sortK='estCount';asc=true;load();window.scrollTo(0,0);
 });
-document.getElementById('tomorrow').onclick=function(){document.getElementById('d').value=nextBiz();document.getElementById('lim').value='-1';load()};
+document.getElementById('tomorrow').onclick=function(){document.getElementById('d').value=nextBiz();document.getElementById('lim').value='-1';load();setMode(true)};
+var listMode=false;
+function addBiz(d){var t=new Date(d+'T12:00:00');t.setDate(t.getDate()+1);while(t.getDay()==0||t.getDay()==6)t.setDate(t.getDate()+1);return iso(t)}
+function mdy(d){var p=d.split('-');return (+p[1])+'/'+(+p[2])+'/'+p[0]}
+function buildList(){
+  var d=document.getElementById('d').value,flagged=shown.filter(function(x){return x.listFlag});
+  function sect(flag,by){var r=flagged.filter(function(x){return x.listFlag===flag}).sort(function(a,b){return a.state<b.state?-1:a.state>b.state?1:(a.name<b.name?-1:a.name>b.name?1:0)});
+    return {rows:r.map(function(x){return {state:x.state,loc:(x.name||x.siteCode)+' - '+x.siteCode,lf:x.estCount,by:mdy(by)}})}}
+  return {date:d,a:sect('likely',d),b:sect('next',addBiz(d))};
+}
+var HEAD=['State','Location','LF','LR','RF','RR','Journal','Consumables Needed','Restock By:'];
+function listTable(sec){return '<table><thead><tr>'+HEAD.map(function(h){return '<th>'+h+'</th>'}).join('')+'</tr></thead><tbody>'+
+  sec.rows.map(function(r){return '<tr><td>'+esc(r.state)+'</td><td class="loc">'+esc(r.loc)+'</td><td>'+r.lf+'</td><td></td><td></td><td></td><td></td><td>Left Forms</td><td>'+r.by+'</td></tr>'}).join('')+'</tbody></table>'}
+function renderList(){
+  var L=buildList(),el=document.getElementById('lv');
+  var dn=new Date(L.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'numeric',day:'numeric'});
+  el.innerHTML='<div class="lv"><h2>Projected dispatch list for '+esc(dn)+' <span class="muted" style="font-weight:400">(estimate from usage rates, not the list from Neumo; LF is the estimated count)</span></h2>'+
+   (L.a.rows.length?listTable(L.a):'<p class="muted">No sites are projected to be at their usual call point.</p>')+
+   (L.b.rows.length?'<div><span class="hl">ONE DAY OUT: LIKELY ON THE NEXT LIST</span></div>'+listTable(L.b):'')+'</div>';
+}
+function setMode(on){listMode=on;document.getElementById('lv').style.display=on?'':'none';document.querySelector('.scroll').style.display=on?'none':'';
+  document.getElementById('view').textContent=on?'Table view':'List view';if(on)renderList()}
+document.getElementById('view').onclick=function(){setMode(!listMode)};
 document.getElementById('copy').onclick=function(){
-  var d=document.getElementById('d').value,by={};shown.forEach(function(x){(by[x.state]=by[x.state]||[]).push(x)});
-  var out='Projected restocks for '+d+' (estimate from usage rates, not Neumo\'s list)\n';
-  Object.keys(by).sort().forEach(function(k){out+='\n'+k+'\n';by[k].forEach(function(x){out+=x.siteCode+' '+x.name+' - est '+x.estCount+(x.callAt!=null?' (usually listed at about '+x.callAt+')':'')+(x.listFlag==='next'?' - one day out':'')+(x.distMiles!=null?' - '+x.distMiles.toFixed(0)+' mi':'')+(x.detourMi!=null?' - detour +'+x.detourMi.toFixed(0)+' mi':'')+'\n'})});
+  var L=buildList(),dn=new Date(L.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'numeric',day:'numeric'});
+  var title='Projected dispatch list for '+dn+' (estimate from usage rates, not the list from Neumo; LF is the estimated count)';
+  var txt=title+'\n\n'+HEAD.join('\t')+'\n'+L.a.rows.map(function(r){return [r.state,r.loc,r.lf,'','','','','Left Forms',r.by].join('\t')}).join('\n');
+  var html='<p>'+esc(title)+'</p>'+listTable(L.a).replace('<table>','<table border="1" cellpadding="4" style="border-collapse:collapse;text-align:center">');
+  if(L.b.rows.length){txt+='\n\nONE DAY OUT: LIKELY ON THE NEXT LIST\n'+HEAD.join('\t')+'\n'+L.b.rows.map(function(r){return [r.state,r.loc,r.lf,'','','','','Left Forms',r.by].join('\t')}).join('\n');
+    html+='<p style="background:#fff176;display:inline-block"><b>ONE DAY OUT: LIKELY ON THE NEXT LIST</b></p>'+listTable(L.b).replace('<table>','<table border="1" cellpadding="4" style="border-collapse:collapse;text-align:center">')}
   var b=document.getElementById('copy'),done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy list'},1500)};
-  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(out).then(done,function(){prompt('Copy this list:',out)});else prompt('Copy this list:',out);
+  function plain(){if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,function(){prompt('Copy this list:',txt)});else prompt('Copy this list:',txt)}
+  if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
+    navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([txt],{type:'text/plain'})})]).then(done,plain)}
+  else plain();
 };
 document.getElementById('go').onclick=load;
 document.getElementById('d').onchange=load;
