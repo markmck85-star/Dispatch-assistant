@@ -63,7 +63,8 @@ exports.handler = async (event) => {
     const names = {};
     const idToCode = {};
     const byCode = {};
-    siteRows.forEach((s) => { names[s.site_code] = s.name; idToCode[s.id] = s.site_code; byCode[s.site_code] = s; });
+    // some site names already end in the site code (and a number); drop that so the list shows 'Name - CODE'
+    siteRows.forEach((s) => { names[s.site_code] = String(s.name || '').replace(/\s*-\s*[A-Z]{2}\d{3,5}(\s+\d+)?\s*$/, '').trim(); idToCode[s.id] = s.site_code; byCode[s.site_code] = s; });
     // v2: sites with only 2 clean intervals are included but flagged low confidence
     const rates = await supabase.from("site_usage_rates").select("site_id, intervals");
     const intervals = {};
