@@ -42,10 +42,13 @@ td.n,th.n{text-align:right}
   <label>Show <select id="lim"><option value="150">Below 150</option><option value="250">Below 250</option><option value="9999">All sites</option><option value="-1">Near Neumo's call point</option></select></label>
   <button id="today" type="button">Today</button>
   <button id="nextbiz" type="button">Next business day</button>
+  <button id="tomorrow" type="button" title="Next business day, only sites at or near the count Neumo usually lists them at">Tomorrow's likely list</button>
+  <button id="copy" type="button">Copy list</button>
   <label>Near <select id="near"><option value="">Any stop</option></select></label>
   <label>Within <select id="rad"><option value="25">25 mi</option><option value="50" selected>50 mi</option><option value="100">100 mi</option><option value="200">200 mi</option></select></label>
   <button id="go">Refresh</button>
 </div>
+<p id="stat" class="note" style="margin:0 0 8px"></p>
 <div class="scroll"><table>
 <thead><tr>
 <th data-k="siteCode">Site</th><th data-k="state">State</th>
@@ -64,6 +67,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return
 function fmt(d){if(!d)return '';var p=d.split('-');return p[1]+'/'+p[2]}
 function listCell(x){if(!x.listFlag)return '<td></td>';var t="Neumo usually lists this site at about "+x.callAt+" on this weekday's list ("+x.callN+" lists)";return x.listFlag==='likely'?'<td title="'+t+'"><span class="pill low">likely listed</span></td>':'<td title="'+t+'"><span class="pill mid">next day</span></td>'}
 function thrCell(v,n){if(v==null)return '<td class="n thr"></td>';return '<td class="n thr'+(n<3?' few':'')+'" title="'+n+' past list'+(n==1?'':'s')+(n<3?' (too few to trust)':'')+'">'+v+' <span class="cn">('+n+')</span></td>'}
+var shown=[];
 function render(){
   document.getElementById('distTh').style.display=nearOn?'':'none';
   hasDet=nearOn&&rows.some(function(x){return x.detourMi!=null});
@@ -71,6 +75,8 @@ function render(){
   var st=document.getElementById('st').value,lim=+document.getElementById('lim').value;
   var r=rows.filter(function(x){return (!st||x.state===st)&&(lim<0?!!x.listFlag:x.estCount<lim)});
   r.sort(function(a,b){var x=a[sortK],y=b[sortK];if(x==null)x=1e9;if(y==null)y=1e9;return (x<y?-1:x>y?1:0)*(asc?1:-1)});
+  shown=r;var nl=r.filter(function(x){return x.listFlag==='likely'}).length,nn=r.filter(function(x){return x.listFlag==='next'}).length;
+  document.getElementById('stat').textContent=lim<0?(nl+' likely to be listed, '+nn+' more one day out'+(st?' in '+st:'')+'.'):'';
   document.getElementById('tb').innerHTML=r.length?r.map(function(x){
     var c=x.estCount<60?'low':x.estCount<120?'mid':'ok';
     return '<tr><td><a href="#" class="sl" data-code="'+esc(x.siteCode)+'" title="Show sites near this one"><b>'+esc(x.siteCode)+'</b> '+esc(x.name)+'</a></td><td>'+esc(x.state)+'</td><td class="n">'+x.formsPerDay.toFixed(1)+
@@ -111,6 +117,14 @@ document.getElementById('tb').addEventListener('click',function(e){
   if(!Array.prototype.some.call(ns.options,function(o){return o.value===code}))ns.insertAdjacentHTML('beforeend','<option value="'+code+'">'+code+'</option>');
   ns.value=code;sortK='estCount';asc=true;load();window.scrollTo(0,0);
 });
+document.getElementById('tomorrow').onclick=function(){document.getElementById('d').value=nextBiz();document.getElementById('lim').value='-1';load()};
+document.getElementById('copy').onclick=function(){
+  var d=document.getElementById('d').value,by={};shown.forEach(function(x){(by[x.state]=by[x.state]||[]).push(x)});
+  var out='Projected restocks for '+d+' (estimate from usage rates, not Neumo\'s list)\n';
+  Object.keys(by).sort().forEach(function(k){out+='\n'+k+'\n';by[k].forEach(function(x){out+=x.siteCode+' '+x.name+' - est '+x.estCount+(x.callAt!=null?' (usually listed at about '+x.callAt+')':'')+(x.listFlag==='next'?' - one day out':'')+(x.distMiles!=null?' - '+x.distMiles.toFixed(0)+' mi':'')+(x.detourMi!=null?' - detour +'+x.detourMi.toFixed(0)+' mi':'')+'\n'})});
+  var b=document.getElementById('copy'),done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy list'},1500)};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(out).then(done,function(){prompt('Copy this list:',out)});else prompt('Copy this list:',out);
+};
 document.getElementById('go').onclick=load;
 document.getElementById('d').onchange=load;
 document.getElementById('st').onchange=render;document.getElementById('lim').onchange=render;
