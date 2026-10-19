@@ -18,12 +18,16 @@
 // keys: LF / RF, plus F when the note gave a count but not which printer side.
 // Florida and North Carolina techs pull about 100 forms off the roll before installing it
 // (so they do not rub the back of the surfboard), which makes their count a guess; those
-// rows get source 'closing_note_approx' so anything using the counts can leave them out.
+// rows get source 'closing_note_approx'. (2026-10-19: the usage-rate calculation now uses the machine
+// type's start count, 700 for an FL/NC surfboard and 800 otherwise, so those counts are used.)
+// Techs who give a level instead of a count ("Old forms at 10%", "Replaced 8th roll of forms") are
+// converted with that start count and get source 'closing_note_level'.
 //
 // Never throws: a scheduled function that errors repeatedly only adds noise.
 
 const { createClient } = require('@supabase/supabase-js');
-const { parseLeftoverCounts } = require('./lib/leftover-from-notes.js');
+const { parseLeftoverCounts, parseLeftoverLevel } = require('./lib/leftover-from-notes.js');
+const { formsStartCount, startCountKnown } = require('./lib/forms-start.js');
 
 // Local calendar date of a visit, so an evening visit is not filed under tomorrow's UTC date.
 const STATE_TZ = {
@@ -87,11 +91,37 @@ exports.handler = async (event) => {
       if (!data || data.length < 1000) break;
     }
 
+    // Florida-style notes give a LEVEL (a percent or "8th roll"), not a count. Turn it into a count
+    // with the kiosk's start count (700 for an FL/NC surfboard, 800 otherwise), so the machine type
+    // is needed; a state that needs it and has none is skipped.
+    const levelOf = new Map(); // visit id -> { PCT }
+    const needType = new Set();
+    for (const v of visits) {
+      if (Object.keys(parseLeftoverCounts(v.closing_note)).length) continue;
+      const lv = parseLeftoverLevel(v.closing_note);
+      if (lv.PCT !== undefined) { levelOf.set(v.id, lv); needType.add(v.site_id); }
+    }
+    const machine = {};
+    const ids = [...needType];
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data, error } = await supabase.from('sites').select('id, machine_type').in('id', ids.slice(i, i + 150));
+      if (error) return json(500, { ok: false, error: error.message });
+      (data || []).forEach(r => { machine[r.id] = r.machine_type; });
+    }
+
     // One candidate per site and day; the first visit of the day wins.
     const candidates = new Map(); // "siteId|date" -> row
-    let unreadable = 0;
+    let unreadable = 0, fromLevel = 0;
     for (const v of visits) {
-      const rolls = parseLeftoverCounts(v.closing_note);
+      let rolls = parseLeftoverCounts(v.closing_note);
+      let source = APPROX_STATES.has(String(v.state || '').toUpperCase()) ? 'closing_note_approx' : 'closing_note';
+      if (!Object.keys(rolls).length && levelOf.has(v.id)) {
+        if (!startCountKnown(v.state, machine[v.site_id])) { unreadable++; continue; }
+        const cnt = Math.round(levelOf.get(v.id).PCT / 100 * formsStartCount(v.state, machine[v.site_id]));
+        rolls = { F: cnt };
+        source = 'closing_note_level';
+        fromLevel++;
+      }
       if (!Object.keys(rolls).length) { unreadable++; continue; }
       const date = localDate(v.started_at, v.state);
       const key = v.site_id + '|' + date;
@@ -102,7 +132,7 @@ exports.handler = async (event) => {
         technician_id: v.technician_id || null,
         dispatch_date: date,
         rolls,
-        source: APPROX_STATES.has(String(v.state || '').toUpperCase()) ? 'closing_note_approx' : 'closing_note',
+        source,
         _state: String(v.state || '').toUpperCase(), _note: String(v.closing_note || '').replace(/\s+/g, ' ').slice(0, 220),
       });
     }
@@ -147,7 +177,7 @@ exports.handler = async (event) => {
       ok: true, dry, days, ratesSites,
       notesWithPhrase: visits.length,
       readable: candidates.size,
-      unreadable,
+      unreadable, fromLevel,
       alreadyHad: candidates.size - fresh.length,
       added: dry ? 0 : added,
       wouldAdd: dry ? fresh.length : undefined,

@@ -103,4 +103,25 @@ function parseLeftoverCounts(note) {
   return out;
 }
 
-module.exports = { parseLeftoverCounts };
+// 2026-10-19: Florida techs who give a LEVEL instead of a count. Returns { PCT } (0-100, of a full
+// roll) or {}. Callers turn it into a count with the kiosk's start count (see forms-start.js):
+//   "Old forms at 10%."  "Old roll at 12%." (only when the note says the forms roll was replaced)
+//   "Replaced 8th roll of forms"  (an eighth of a roll = 12.5%)   "Replace 1/2 roll of forms"
+// A threshold tag after a real count ("forms at 109 <25%") is NOT a level: parseLeftoverCounts reads those.
+function parseLeftoverLevel(note) {
+  if (!note || typeof note !== 'string') return {};
+  const text = note.replace(/\s+/g, ' ');
+  let m = /\bold\s+forms?(?:\s+roll)?\s+(?:was\s+|is\s+)?at\s+(\d{1,3})(?:\.\d+)?\s*%/i.exec(text);
+  if (!m && /\breplaced\s+the\s+(?:empty\s+)?forms?\b[^.]{0,30}\bnew\s+roll/i.test(text) &&
+      !/\breplaced\s+the\s+forms?\s+and\s+(?:ribbon|journal)/i.test(text)) {
+    m = /\bold\s+roll\s+(?:was\s+|is\s+)?at\s+(\d{1,3})(?:\.\d+)?\s*%/i.exec(text);
+  }
+  if (m) { const n = parseInt(m[1], 10); if (n >= 1 && n <= 100) return { PCT: n }; }
+  m = /\breplace[d]?\s+(\d{1,2})(?:st|nd|rd|th)\s+roll\s+(?:of\s+forms?|with\s+(?:a\s+)?(?:the\s+)?2\d{3}\s+roll)/i.exec(text);
+  if (m) { const d = parseInt(m[1], 10); if (d >= 2 && d <= 20) return { PCT: Math.round(1000 / d) / 10 }; }
+  m = /\breplace[d]?\s+(\d)\s*\/\s*(\d)\s+roll\s+of\s+forms?/i.exec(text);
+  if (m) { const a = parseInt(m[1], 10), b = parseInt(m[2], 10); if (b > 0 && a > 0 && a < b) return { PCT: Math.round(1000 * a / b) / 10 }; }
+  return {};
+}
+
+module.exports = { parseLeftoverCounts, parseLeftoverLevel };
