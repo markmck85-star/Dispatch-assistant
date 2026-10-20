@@ -323,11 +323,21 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
   <div id="freshnessBanner" style="display:none;"></div>
   <div id="reviewQueueBanner" style="display:none;"></div>
 
+  <!-- 2026-10-20: Forms / Journal view toggle (shown for live-loaded regions). NC defaults to
+       Journal because NC no longer issues registration decals. -->
+  <div id="viewToggle" style="display:none; gap:8px; margin:6px 0 12px; align-items:center; flex-wrap:wrap;">
+    <span style="font-size:12px; color:var(--muted);">Show:</span>
+    <button id="viewFormsBtn" onclick="setView('forms')" class="reload-btn">Registration forms</button>
+    <button id="viewJournalBtn" onclick="setView('journal')" class="reload-btn">Journal paper</button>
+  </div>
+
+  <div id="formsChartBlock">
   <div class="section-label" id="chartLabel"></div>
   <div class="chart-wrap">
     <div class="chart-scroll" id="chartWrap">
       <canvas id="restockChart" role="img" aria-label="Horizontal bar chart of restock counts by location"></canvas>
     </div>
+  </div>
   </div>
 
   <div id="cachedBanner" style="display:none;" class="cached-banner">
@@ -380,6 +390,34 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
       Clear
     </button>
   </div>
+  <div id="journalPanel" style="display:none;">
+    <div class="section-label">journal paper — estimated inches left, lowest first</div>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:4px 0 10px; font-size:12px; color:var(--muted);">
+      <label>Full roll (in) <input id="jrCapacity" type="number" min="1000" max="20000" step="100" value="7000" onchange="reloadJournal()" style="width:80px; padding:4px 6px; border-radius:6px; border:0.5px solid var(--border-strong); background:var(--card); color:var(--text);"></label>
+      <label>Low-paper trigger (in) <input id="jrTrigger" type="number" min="100" max="10000" step="50" value="2200" onchange="reloadJournal()" style="width:80px; padding:4px 6px; border-radius:6px; border:0.5px solid var(--border-strong); background:var(--card); color:var(--text);"></label>
+    </div>
+    <p id="journalMsg" style="font-size:12px;color:var(--muted);margin:4px 0 10px;line-height:1.45;"></p>
+    <div class="table-wrap">
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:190px; text-align:left;">location</th>
+            <th style="width:82px;">status</th>
+            <th style="width:76px;" title="Estimated inches of journal paper left today">est. inches</th>
+            <th style="width:110px;" title="Most recent journal count on record and where it came from">last reading</th>
+            <th style="width:76px;" title="Typical inches used per day, from readings between restocks">in / day</th>
+            <th style="width:90px;" title="Last time journal paper was replaced">last new roll</th>
+          </tr>
+        </thead>
+        <tbody id="journalBody"></tbody>
+      </table>
+    </div>
+    </div>
+    <p class="footnote" id="journalFootnote"></p>
+  </div>
+
+  <div id="formsTableBlock">
   <div class="section-label">projected restock schedule — sorted by urgency</div>
   <p style="font-size:12px;color:var(--muted);margin:4px 0 10px;line-height:1.45;">On <b>overdue (visited)</b> or <b>due soon (visited)</b> rows, tap <b>Notes</b> under last visit. If they restocked, Confirm restocked. If they did not, Not a restock. Tap a <b>location name</b> to see every visit and its notes, in case an earlier visit was the restock.</p>
   <div class="table-wrap">
@@ -402,6 +440,7 @@ a.back-link { color: #6cb2ff; text-decoration: none; font-size: 14px; display: i
   </div>
   </div>
   <p class="footnote" id="dashFootnote"></p>
+  </div>
 
   <!-- Cluster Recommendations -->
   <div id="clusterRecSection" style="display:none; margin-top:24px;">
@@ -501,6 +540,102 @@ const CLUSTER_STATES = {
   'SC': [],
 };
 
+// ── Forms / Journal view (2026-10-20) ──────────────────────────────────────
+// NC no longer issues registration decals, so its restocks are expected to become journal-only
+// and the forms cycle stops being useful there. The Journal view asks get-journal-status for an
+// estimate of inches left per site (readings from Neumo's list plus technician Done-prompt counts).
+let trackerRegion = '';
+let currentView = 'forms';
+const JOURNAL_DEFAULT_REGIONS = new Set(['NC']);
+
+function initViewToggle(region) {
+  trackerRegion = region || '';
+  const bar = document.getElementById('viewToggle');
+  if (!bar) return;
+  bar.style.display = /^[A-Z]{2}$/.test(trackerRegion) ? 'flex' : 'none';
+  setView(JOURNAL_DEFAULT_REGIONS.has(trackerRegion) ? 'journal' : 'forms');
+}
+
+function setView(view) {
+  currentView = view === 'journal' ? 'journal' : 'forms';
+  const j = currentView === 'journal';
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('formsChartBlock', !j);
+  show('formsTableBlock', !j);
+  show('journalPanel', j);
+  const fb = document.getElementById('viewFormsBtn'), jb = document.getElementById('viewJournalBtn');
+  if (fb) fb.style.fontWeight = j ? '400' : '700';
+  if (jb) jb.style.fontWeight = j ? '700' : '400';
+  if (j) reloadJournal();
+}
+
+function reapplyActiveFilter() {
+  const sel = document.getElementById('clusterSelect');
+  const box = document.getElementById('locationSearch');
+  if (sel && sel.value) applyClusterFilter();
+  else if (box && box.value) filterTable(box.value);
+}
+
+async function reloadJournal() {
+  const body = document.getElementById('journalBody');
+  const msg = document.getElementById('journalMsg');
+  if (!body || !msg || !trackerRegion) return;
+  const capacity = parseInt(document.getElementById('jrCapacity').value, 10) || 7000;
+  const trigger = parseInt(document.getElementById('jrTrigger').value, 10) || 2200;
+  msg.textContent = 'Loading journal paper estimates…';
+  body.innerHTML = '';
+  try {
+    const qs = new URLSearchParams({ state: trackerRegion, capacity: String(capacity), trigger: String(trigger) });
+    const res = await fetch(`${DISPATCH_API_BASE}/.netlify/functions/get-journal-status?${qs.toString()}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Unknown error from get-journal-status');
+    renderJournal(data);
+  } catch (e) {
+    msg.textContent = 'Could not load journal paper estimates: ' + e.message;
+  }
+}
+
+function renderJournal(data) {
+  const body = document.getElementById('journalBody');
+  const msg = document.getElementById('journalMsg');
+  const foot = document.getElementById('journalFootnote');
+  const badge = { overdue: ['badge-overdue', 'at trigger'], soon: ['badge-soon', 'due soon'], ok: ['badge-ok', 'on track'], unknown: ['badge-info', 'no reading'] };
+  const rank = { overdue: 0, soon: 1, ok: 2, unknown: 3 };
+  const locs = (data.locations || []).slice().sort((a, b) => {
+    if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status];
+    const ea = a.estInches == null ? 1e9 : a.estInches, eb = b.estInches == null ? 1e9 : b.estInches;
+    return ea - eb;
+  });
+  const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-US'));
+  const shortDate = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+  body.innerHTML = locs.map((l) => {
+    const b = badge[l.status] || badge.unknown;
+    const conf = l.confidence === 'low' || l.confidence === 'none' ? ' <span title="Old or thin data, treat as a rough guide">*</span>' : '';
+    const reading = l.lastReading
+      ? `${fmt(l.lastReading.inches)} in<br><span style="color:var(--muted);font-size:11px;">${shortDate(l.lastReading.date)} · ${escapeHtml(l.lastReading.source)}${l.lastReading.oldRoll ? ' (old roll)' : ''}</span>`
+      : '—';
+    const burn = l.burnPerDay == null ? '—' : `${fmt(l.burnPerDay)}${l.burnSource === 'state' ? ' <span title="No pair of readings at this site yet, using the state-wide figure">~</span>' : ''}`;
+    const repl = l.lastReplaced ? `${shortDate(l.lastReplaced.date)}` : '—';
+    return `<tr>
+      <td style="text-align:left;" title="${escapeHtml(l.name)}">${escapeHtml(l.name)}<br><span style="color:var(--muted);font-size:11px;">${escapeHtml(l.site_code)}</span></td>
+      <td><span class="badge ${b[0]}">${b[1]}</span></td>
+      <td>${fmt(l.estInches)}${conf}</td>
+      <td>${reading}</td>
+      <td>${burn}</td>
+      <td>${repl}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted);">No sites found for this state.</td></tr>';
+  const withReading = locs.filter((l) => l.lastReading).length;
+  msg.textContent = `${withReading} of ${locs.length} sites have a journal reading on record. Estimates only: inches left = last reading (or a full roll after a replacement) minus typical daily use.`;
+  foot.textContent = (data.assumptions || '') + ' * = old or thin data. ~ = state-wide use rate.';
+  reapplyActiveFilter();
+}
+
 // 2026-10-20: which region to load from the page URL. Links from the dispatch
 // board, state console and Saturday on-call pass ?state=<board's state>&q=<site code>,
 // but the board's state is not always the site's state (a GA board handling a
@@ -555,7 +690,7 @@ function onSearchInput(val) {
 }
 
 function filterTableByKeywords(keywords) {
-  const rows = document.querySelectorAll('#projBody tr');
+  const rows = document.querySelectorAll('#projBody tr, #journalBody tr');
   let lastGroupHeader = null;
   let groupHasVisible = false;
   rows.forEach(row => {
@@ -575,7 +710,7 @@ function filterTableByKeywords(keywords) {
 
 function filterTable(query) {
   const q = query.toLowerCase().trim();
-  const rows = document.querySelectorAll('#projBody tr');
+  const rows = document.querySelectorAll('#projBody tr, #journalBody tr');
   let lastGroupHeader = null;
   let groupHasVisible = false;
 
@@ -632,6 +767,7 @@ function applySiteQueryFromUrl() {
       msg.style.display = 'none';
       updateClusterDropdown(region);
       renderDashboard(dashboard);
+      initViewToggle(region);
       applySiteQueryFromUrl();
       return;
     } catch (e) {
@@ -868,6 +1004,7 @@ function showStateScreen() {
       btn.textContent = isCached ? `${s.state}${countLabel} — cached` : `${s.state}${countLabel}`;
       btn.onclick = () => {
         if (isCached) {
+          initViewToggle('');
           renderDashboard(cachedDashboard);
           showCachedBanner(cachedMeta);
         } else {
@@ -910,6 +1047,7 @@ async function switchLiveRegion(region, btnEl) {
     localStorage.setItem('mcr_restock_last_region', region);
     updateClusterDropdown(region);
     renderDashboard(dashboard);
+    initViewToggle(region);
   } catch (e) {
     alert(`Could not load ${labelForRegion(region)}: ${e.message}`);
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = original; }
@@ -927,6 +1065,7 @@ function buildDashboard(state, stateCol) {
     .map(s => ({ state: s, count: rawData.filter(r => String(r[stateCol] || '').trim() === s).length }));
   saveToCache(dashboard, currentFileName, state, allStates, slimRows(rawData));
   document.getElementById('cachedBanner').style.display = 'none';
+  initViewToggle('');
   renderDashboard(dashboard);
 }
 
@@ -1140,6 +1279,7 @@ async function loadLiveDashboard() {
     if (state) localStorage.setItem('mcr_restock_last_region', state);
     msg.style.display = 'none';
     renderDashboard(dashboard);
+    initViewToggle(state);
   } catch (err) {
     msg.style.display = 'none';
     alert('Could not load live data: ' + err.message + '\n\nYou can still use the manual file upload below.');

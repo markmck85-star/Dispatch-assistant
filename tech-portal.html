@@ -1020,10 +1020,14 @@
     var out = [];
     if (stop.printers >= 2) {
       for (var n = 1; n <= stop.printers; n++) out.push({ key: 'P' + n, label: 'Printer ' + n + ' old roll' });
-      return out;
+    } else {
+      if (low.indexOf('left forms') !== -1) out.push({ key: 'LF', label: 'Left forms old roll' });
+      if (low.indexOf('right forms') !== -1) out.push({ key: 'RF', label: 'Right forms old roll' });
     }
-    if (low.indexOf('left forms') !== -1) out.push({ key: 'LF', label: 'Left forms old roll' });
-    if (low.indexOf('right forms') !== -1) out.push({ key: 'RF', label: 'Right forms old roll' });
+    // 2026-10-20: journal paper. The kiosk shows the journal count in inches. Asked whenever the
+    // restock includes journal paper (the only roll left to ask about once a state stops issuing
+    // registration forms). Key 'J' is stored in restock_leftover_counts.rolls beside the form rolls.
+    if (low.indexOf('journal') !== -1) out.push({ key: 'J', label: 'Journal paper old roll (inches)', unit: 'inches left', max: 5 });
     return out;
   }
 
@@ -1032,12 +1036,13 @@
     return new Promise(function (resolve) {
       var ov = document.createElement('div');
       ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+      var journalOnly = fields.length > 0 && fields.every(function (f) { return f.key === 'J'; });
       var rows = fields.map(function (f) {
         return '<label style="margin:10px 0 4px;">' + esc(f.label) + '</label>' +
-          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" data-k="' + f.key + '" placeholder="forms left" autocomplete="off">';
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="' + (f.max || 4) + '" data-k="' + f.key + '" placeholder="' + (f.unit || 'forms left') + '" autocomplete="off">';
       }).join('');
       ov.innerHTML = '<div class="card" style="max-width:380px;width:100%;margin:0;">' +
-        '<h2 style="margin:0 0 4px;">Forms left on the old roll</h2>' +
+        '<h2 style="margin:0 0 4px;">' + (journalOnly ? 'Journal paper left on the old roll' : 'Left on the old roll') + '</h2>' +
         '<div class="muted">' + esc(stop.siteCode || '') + ' ' + esc(stop.siteName || '') + '</div>' +
         '<p style="font-size:14px;margin:8px 0 0;">Enter the exact number the kiosk shows before you reset the count to full. Not an estimate. Leave a roll blank if you did not remove one.</p>' +
         rows +
@@ -1055,7 +1060,8 @@
         Array.prototype.forEach.call(ov.querySelectorAll('input[data-k]'), function (inp) {
           var v = inp.value.trim();
           if (!v) return;
-          if (!/^\d{1,4}$/.test(v) || parseInt(v, 10) > 2000) { bad = true; return; }
+          var isJ = inp.getAttribute('data-k') === 'J';
+          if (!(isJ ? /^\d{1,5}$/ : /^\d{1,4}$/).test(v) || parseInt(v, 10) > (isJ ? 20000 : 2000)) { bad = true; return; }
           out[inp.getAttribute('data-k')] = parseInt(v, 10);
         });
         if (bad) { ov.querySelector('#loErr').textContent = 'Numbers only, please. Use whole numbers like 235.'; return; }

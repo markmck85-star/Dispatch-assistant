@@ -792,15 +792,20 @@ async function doCompleteStop(supabase, ctx, body) {
   return json(200, { ok: true, leftoversSaved });
 }
 
-// Roll names the Done prompt can send: LF / RF (left and right forms) and P1-P4 (multi-printer sites).
+// Roll names the Done prompt can send: LF / RF (left and right forms), P1-P4 (multi-printer sites),
+// and J (journal paper, counted in inches; added 2026-10-20, allowed up to 20000 since a journal
+// roll runs far longer than a forms roll).
 function cleanLeftovers(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const out = {};
-  ['LF', 'RF', 'P1', 'P2', 'P3', 'P4'].forEach((k) => {
+  ['LF', 'RF', 'P1', 'P2', 'P3', 'P4', 'J'].forEach((k) => {
     const v = raw[k];
     if (v === undefined || v === null || v === '') return;
-    const n = typeof v === 'number' ? v : (/^\d{1,4}$/.test(String(v).trim()) ? parseInt(String(v).trim(), 10) : NaN);
-    if (Number.isInteger(n) && n >= 0 && n <= 2000) out[k] = n;
+    const isJ = k === 'J';
+    const max = isJ ? 20000 : 2000;
+    const re = isJ ? /^\d{1,5}$/ : /^\d{1,4}$/;
+    const n = typeof v === 'number' ? v : (re.test(String(v).trim()) ? parseInt(String(v).trim(), 10) : NaN);
+    if (Number.isInteger(n) && n >= 0 && n <= max) out[k] = n;
   });
   return Object.keys(out).length ? out : null;
 }
