@@ -501,14 +501,34 @@ const CLUSTER_STATES = {
   'SC': [],
 };
 
+// 2026-10-20: which region to load from the page URL. Links from the dispatch
+// board, state console and Saturday on-call pass ?state=<board's state>&q=<site code>,
+// but the board's state is not always the site's state (a GA board handling a
+// Charlotte NC call linked NC1015 with state=GA, so the GA report loaded and
+// the NC site was never found). When q starts with a two-letter state prefix
+// plus digits (NC1015, GA1022), that prefix wins over ?state=. Codes without a
+// state prefix (T-codes, C-codes, OHC codes) fall back to ?state=.
+function regionFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const q = (params.get('q') || '').trim().toUpperCase();
+  const m = q.match(/^([A-Z]{2})\d{3,}/);
+  if (m) return m[1];
+  return (params.get('state') || '').trim().toUpperCase();
+}
+
 function updateClusterDropdown(state) {
   const sel = document.getElementById('clusterSelect');
   if (!sel) return;
   const allowed = new Set(CLUSTER_STATES[state] || Object.keys(CLUSTERS));
-  // Show/hide optgroups and options
+  // Show/hide optgroups and options. Mobile browsers ignore style.display on
+  // <option>, so also set hidden/disabled so a cluster from another state
+  // can't be picked (picking one filtered the wrong state's rows to nothing).
   sel.querySelectorAll('option:not([value=""])').forEach(opt => {
     const key = opt.value;
-    opt.style.display = (!key || allowed.has(key)) ? '' : 'none';
+    const ok = (!key || allowed.has(key));
+    opt.style.display = ok ? '' : 'none';
+    opt.hidden = !ok;
+    opt.disabled = !ok;
   });
   sel.querySelectorAll('optgroup').forEach(grp => {
     const visible = [...grp.querySelectorAll('option')].some(o => o.style.display !== 'none');
@@ -599,7 +619,7 @@ function applySiteQueryFromUrl() {
   if (typeof filterTable === 'function') filterTable(q);
 }
 
-  const requestedRegion = new URLSearchParams(window.location.search).get('state');
+  const requestedRegion = regionFromUrl();
   const region = (requestedRegion || localStorage.getItem('mcr_restock_last_region') || '').trim().toUpperCase();
   if (/^[A-Z]{2}$/.test(region)) {
     const msg = document.getElementById('liveLoadingMsg');
@@ -610,6 +630,7 @@ function applySiteQueryFromUrl() {
       const dashboard = await fetchLiveRegion(region, since, until);
       localStorage.setItem('mcr_restock_last_region', region);
       msg.style.display = 'none';
+      updateClusterDropdown(region);
       renderDashboard(dashboard);
       applySiteQueryFromUrl();
       return;
@@ -635,7 +656,7 @@ function applySiteQueryFromUrl() {
       // report is already cached locally (can't fetch a new report on its
       // own). Falls through to the normal picker if the param's missing or
       // the requested state isn't in the cached data.
-      const requestedState = new URLSearchParams(window.location.search).get('state');
+      const requestedState = regionFromUrl();
       if (requestedState && rawData && rawData.length) {
         const stateCol = rawData[0].hasOwnProperty('Jurisdiction') ? 'Jurisdiction' : 'State__c';
         const wanted = requestedState.trim().toUpperCase();
@@ -887,6 +908,7 @@ async function switchLiveRegion(region, btnEl) {
     const { since, until } = resolveLiveRange('nov1');
     const dashboard = await fetchLiveRegion(region, since, until);
     localStorage.setItem('mcr_restock_last_region', region);
+    updateClusterDropdown(region);
     renderDashboard(dashboard);
   } catch (e) {
     alert(`Could not load ${labelForRegion(region)}: ${e.message}`);
