@@ -1129,6 +1129,56 @@
         // back to whatever date is passed in when absent/unparsable. Used to
         // avoid checking a Monday-pushed stop's tech availability against a
         // Saturday's on-call-only roster (see getUnavailableTechsForDate).
+        // 2026-10-21: "DCO due" marker. Sites that still need a decal change-out in a state with a running
+        // campaign (set on /dco-tracker) get a badge on their board stops, the compact and printed views and a
+        // line in the tech message. The stop that IS the change-out ticket is not marked (it already says so).
+        window.dcoDue = window.dcoDue || {};
+        function dcoDueFor(item) {
+            if (!item || !item.code) return null;
+            const due = (window.dcoDue || {})[item.code];
+            if (!due) return null;
+            try {
+                if (/decal[\s-]*change|\bdco\b/i.test(String(item.ticketIssue || ''))) return null;
+                if ((item.ticketLineItems || []).some(li => /decal[\s-]*change|\bdco\b/i.test(JSON.stringify(li)))) return null;
+            } catch (e) {}
+            return due;
+        }
+        function dcoDueLabel(due) {
+            const p = String(due).split('-');
+            return p.length === 3 ? ' by ' + parseInt(p[1], 10) + '/' + parseInt(p[2], 10) : '';
+        }
+        function dcoDueBadgeHtml(item, kind) {
+            const due = dcoDueFor(item);
+            if (!due) return '';
+            const t = 'DCO due' + dcoDueLabel(due);
+            const tip = 'This site still needs its decal change-out. Do it on this visit if the forms are on hand.';
+            if (kind === 'tag') return `<span class="tag amber" title="${tip}">\uD83D\uDD04 ${t}</span>`;
+            if (kind === 'text') return ` <span style="color:#8b5a00;font-weight:bold;">(${t})</span>`;
+            if (kind === 'light') return `<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;margin-left:4px;vertical-align:middle;background:#fff3cd;color:#8b5a00;" title="${tip}">\uD83D\uDD04 ${t}</span>`;
+            return `<span style="background:#8b5a00;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;" title="${tip}">\uD83D\uDD04 ${t}</span>`;
+        }
+        (function loadDcoDue() {
+            const KEY = 'mcr_dco_due_v1';
+            function apply(map, rerender) {
+                window.dcoDue = map || {};
+                if (rerender && window.currentAssignments && Object.keys(window.dcoDue).length && typeof renderReviewBoard === 'function') {
+                    try { renderReviewBoard(true); } catch (e) {}
+                }
+            }
+            try {
+                const c = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+                if (c && Date.now() - c.t < 5 * 60 * 1000) { apply(c.map, false); return; }
+            } catch (e) {}
+            fetch('/.netlify/functions/dco-status?due=1', { credentials: 'same-origin' })
+                .then(r => r.ok ? r.json() : null)
+                .then(j => {
+                    if (!j || !j.ok) return;
+                    try { sessionStorage.setItem(KEY, JSON.stringify({ t: Date.now(), map: j.due })); } catch (e) {}
+                    apply(j.due, true);
+                })
+                .catch(() => {});
+        })();
+
         function getItemEffectiveDateStr(item, fallbackDateStr) {
             if (item && item.restockBy) {
                 const parts = item.restockBy.split('/');
@@ -5437,7 +5487,7 @@ function distanceMatrixStatus(state) {
                                     <button class="move-btn" onclick="moveStop('${tech}', ${index}, 1)">▼</button>
                                 </div>
                                 <div class="os-stop-main">
-                                    <div><span class="os-stop-name" onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${needsReviewBadge}${restockByStr}</div>
+                                    <div><span class="os-stop-name" onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${dcoDueBadgeHtml(item, 'board')}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${needsReviewBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
                                     <div style="font-size:11px;color:#888;margin-top:1px;">${isFuturePushed ? legLabel : '📏 ' + legLabel + (index === 0 ? ' from home' : ' from prev. stop')}</div>
                                     ${ticketInfoStr}
@@ -7661,6 +7711,7 @@ function distanceMatrixStatus(state) {
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                     msg = `⚡ URGENT - Hey ${info.firstName}, a trouble ticket for ${loc.name} just came in:\n\n`;
                     msg += `1. ${woStr}${issueStr}${reassignNote}\n`;
+                    if (dcoDueFor(item)) msg += `   \uD83D\uDD04 Also needs a DCO (decal change-out) at this site${dcoDueLabel(dcoDueFor(item))}\n`;
                     { const a = siteAccessText(item, pickerIso); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours: ${a.today}\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
                     const warnings = checkConsumables(item.code);
                     if (warnings.length > 0) warnings.forEach(w => { msg += `   ${w}\n`; });
@@ -7686,6 +7737,7 @@ function distanceMatrixStatus(state) {
                             ? (item.restockOverdue ? ` - Consumable Restock 🔴 OVERDUE (was due ${item.restockBy})` : ' - Consumable Restock ⚡ SAME DAY')
                             : ' - Consumable Restock');
                         msg += `${i + 1}. ${prefix}${loc.name}${stopType}${reassignNote}\n`;
+                        if (dcoDueFor(item)) msg += `   \uD83D\uDD04 Also needs a DCO (decal change-out) at this site${dcoDueLabel(dcoDueFor(item))}\n`;
                         if (item.urgent) { const a = siteAccessText(item, getItemEffectiveDateStr(item, pickerIso)); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours: ${a.today}\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
 
                         // Append consumables detail for restock stops
@@ -8156,7 +8208,7 @@ function distanceMatrixStatus(state) {
                     const badgeStyle = "display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;margin-left:4px;vertical-align:middle;";
                     const todayBadge = "";
                     const urgentBadge = stopKindBadgeHtml(stop, true);
-                    const rfBadge = stop.hasRightForms ? `<span style="${badgeStyle}background:#2e7d32;color:#fff;">Right Forms</span>` : "";
+                    const rfBadge = (stop.hasRightForms ? `<span style="${badgeStyle}background:#2e7d32;color:#fff;">Right Forms</span>` : "") + dcoDueBadgeHtml(stop, 'light');
                     const dateStr = stop.restockBy ? ` <span style="font-size:12px;color:#555;">by ${stop.restockBy}</span>` : "";
 
                     // Consumables detail
@@ -8530,7 +8582,7 @@ ${content}
                     const info = compactStopInfo(code);
                     let badge = '';
                     try { badge = stopKindBadgeHtml(stop, true) || ''; } catch (e) { badge = ''; }
-                    const rf = stop.hasRightForms ? '<span class="tag green">Right Forms</span>' : '';
+                    const rf = (stop.hasRightForms ? '<span class="tag green">Right Forms</span>' : '') + dcoDueBadgeHtml(stop, 'tag');
                     const cover = stop.reassignedFrom ? `<span class="tag amber">covering ${esc(String(stop.reassignedFrom).split(' ')[0])}</span>` : '';
                     const wo = stop.fromTicket && stop.ticketWo ? esc(stop.ticketWo) : '';
                     let issue = '';
@@ -8660,7 +8712,7 @@ ${content}
                             ? ' <span style="color:red;">(SAME DAY)</span>'
                             : ` <span style="color:#8b5a00;">(DUE ${dueDayLabel(item.ticketSlaEnd)})</span>`)
                         : '';
-                    const rfBadge = item.hasRightForms ? ' <span style="color:#2d6a2d;font-weight:bold;">(Right Forms)</span>' : '';
+                    const rfBadge = (item.hasRightForms ? ' <span style="color:#2d6a2d;font-weight:bold;">(Right Forms)</span>' : '') + dcoDueBadgeHtml(item, 'text');
                     const dateStr = item.restockBy ? ` <span style="color:#888;font-size:11px;">by ${item.restockBy}</span>` : '';
 
                     let consumDetail = '';

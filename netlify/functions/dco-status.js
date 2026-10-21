@@ -22,6 +22,7 @@
 // done date.
 //
 // GET  ?state=OH                      -> campaign, counts, pace, sites
+// GET  ?due=1                         -> sites still needing a change-out in every running campaign
 // POST { action:'save_campaign', state, start_date, due_date }
 // POST { action:'mark', state, site_code, status:'done'|'exempt'|'clear', done_date?, note? }
 
@@ -72,7 +73,7 @@ async function loadCampaign(supabase, state) {
   return (data && data[0]) || null;
 }
 
-exports.handler = async (event) => {
+exports.handler = async function handler(event) {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return json(500, { ok: false, error: 'Not configured.' });
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -123,6 +124,24 @@ exports.handler = async (event) => {
 
     if (event.httpMethod !== 'GET') return json(405, { ok: false, error: 'Method Not Allowed' });
     const params = event.queryStringParameters || {};
+
+    // ?due=1 : every site that still needs a change-out, across all states with a running campaign, for the
+    // dispatch board's "DCO due" badge. { ok, due: { SITECODE: 'YYYY-MM-DD' (campaign due date) } }
+    if (params.due === '1') {
+      const today0 = todayEt();
+      const { data: camps, error: cErr } = await supabase.from('dco_campaigns').select('state, start_date, due_date')
+        .lte('start_date', today0).gte('due_date', addDays(today0, -30)).order('start_date', { ascending: false });
+      if (cErr) return json(500, { ok: false, error: 'campaigns fetch failed' });
+      const seen = {}, due = {};
+      for (const c of camps || []) {
+        if (seen[c.state]) continue; seen[c.state] = true;
+        const r = await handler({ httpMethod: 'GET', queryStringParameters: { state: c.state } });
+        let j = null; try { j = JSON.parse(r.body); } catch (e) { j = null; }
+        if (!j || !j.ok) continue;
+        (j.sites || []).forEach((x) => { if (x.status === 'remaining' || x.status === 'review') due[x.site_code] = c.due_date; });
+      }
+      return json(200, { ok: true, due });
+    }
     const state = String(params.state || '').trim().toUpperCase();
     if (!/^[A-Z]{2}$/.test(state)) return json(400, { ok: false, error: 'Pick a state.' });
 
