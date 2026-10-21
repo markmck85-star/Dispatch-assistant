@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decal Change-Out Tracker</title>
+<style>
+:root{--bg:#f5f3ef;--card:#fff;--text:#2c2c2a;--muted:#73726c;--border:rgba(0,0,0,.12);--accent:#BA7517;
+--low-bg:#fdeaea;--low-tc:#A32D2D;--mid-bg:#fef3db;--mid-tc:#854F0B;--ok-bg:#eaf3de;--ok-tc:#3B6D11;--bar:#d9d6ce;}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1a18;--card:#2c2c28;--text:#e4e2dc;--muted:#a8a8a2;--border:rgba(255,255,255,.14);--accent:#FAC775;
+--low-bg:#2d0f0f;--low-tc:#F7C1C1;--mid-bg:#2e1a04;--mid-tc:#FAC775;--ok-bg:#173404;--ok-tc:#C0DD97;--bar:#47463f;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,sans-serif;padding:16px}
+.wrap{max-width:960px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--muted);font-size:12px;margin:0 0 14px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+input,select,button{font:inherit;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text)}
+button{cursor:pointer}
+button.sm{padding:3px 8px;font-size:12px}
+a.back{color:var(--accent);text-decoration:none;font-size:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px}
+.prog{height:14px;background:var(--bar);border-radius:7px;overflow:hidden;margin:8px 0}
+.prog>div{height:100%;background:var(--ok-tc)}
+.kpis{display:flex;flex-wrap:wrap;gap:18px}
+.kpi b{display:block;font-size:20px}
+.kpi span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.scroll{overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:8px}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-weight:600;font-size:12px}
+.remaining{background:var(--low-bg);color:var(--low-tc)}.review{background:var(--mid-bg);color:var(--mid-tc)}.done{background:var(--ok-bg);color:var(--ok-tc)}.exempt{background:var(--bar);color:var(--muted)}
+.ev{font-size:11px;color:var(--muted);max-width:340px;white-space:normal}
+.note{color:var(--muted);font-size:12px;margin-top:12px}
+.warn{color:var(--low-tc);font-weight:600}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p><a class="back" href="/">&larr; Dispatch board</a></p>
+<h1>Decal Change-Out Tracker</h1>
+<p class="sub">Which kiosks have had their forms changed over, and whether the state is on pace for its completion date.</p>
+
+<div class="bar">
+  <label>State <select id="st"></select></label>
+  <label>Start <input type="date" id="sd"></label>
+  <label>Complete by <input type="date" id="dd"></label>
+  <button id="save" type="button">Save dates</button>
+  <span id="msg" class="note" style="margin:0"></span>
+</div>
+
+<div id="setup" class="card hide">No change-out is set up for this state yet. Pick the start and completion dates above and press Save dates. States that never change forms out can simply be left without dates.</div>
+
+<div id="main" class="hide">
+  <div class="card">
+    <div class="kpis" id="kpis"></div>
+    <div class="prog"><div id="pbar" style="width:0"></div></div>
+    <div id="pace" class="note" style="margin:0"></div>
+  </div>
+  <div class="bar">
+    <label>Show <select id="flt">
+      <option value="open">Not done yet</option>
+      <option value="review">Needs a look</option>
+      <option value="done">Done</option>
+      <option value="exempt">Not applicable</option>
+      <option value="all">All sites</option>
+    </select></label>
+    <input type="search" id="q" placeholder="Search site, name, tech">
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>Site</th><th>Primary tech</th><th>Status</th><th>Done</th><th>From</th><th></th></tr></thead>
+    <tbody id="tb"></tbody>
+  </table></div>
+  <p class="note">A site counts as done when a closing note on or after the start date says the change-out was performed, or when someone marks it here. A note that mentions a change-out but reads as not done is listed under "Needs a look". Each site is tracked once; individual printers are not tracked separately.</p>
+</div>
+</div>
+<script>
+var data=null;
+function $(i){return document.getElementById(i)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function md(d){if(!d)return '';var p=d.split('-');return (+p[1])+'/'+(+p[2])}
+var LABEL={remaining:'Not done',review:'Needs a look',done:'Done',exempt:'Not applicable'};
+function api(path,opts){
+  return fetch('/.netlify/functions/dco-status'+(path||''),Object.assign({credentials:'same-origin'},opts||{})).then(function(r){
+    if(r.status===401){location.href='/';throw 0}return r.json()});
+}
+function post(body){return api('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
+function load(){
+  var st=$('st').value;
+  try{localStorage.setItem('dco_state',st)}catch(e){}
+  api('?state='+encodeURIComponent(st)).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Could not load');
+    data=j;
+    if(!j.campaign){$('setup').classList.remove('hide');$('main').classList.add('hide');$('sd').value='';$('dd').value='';return}
+    $('setup').classList.add('hide');$('main').classList.remove('hide');
+    $('sd').value=j.campaign.start_date;$('dd').value=j.campaign.due_date;
+    render();
+  }).catch(function(e){if(e)$('msg').textContent='Could not load: '+e.message});
+}
+function render(){
+  var c=data.counts,p=data.pace,scope=data.inScope||0;
+  var pct=scope?Math.round(c.done/scope*100):0;
+  $('pbar').style.width=pct+'%';
+  $('kpis').innerHTML=[['Done',c.done],['Not done',c.remaining],['Needs a look',c.review],['Not applicable',c.exempt],['Complete',pct+'%']].map(function(k){return '<div class="kpi"><b>'+k[1]+'</b><span>'+k[0]+'</span></div>'}).join('');
+  var left=c.remaining+c.review,t=[];
+  t.push('Complete by '+md(data.campaign.due_date)+' ('+p.workdaysLeft+' working day'+(p.workdaysLeft==1?'':'s')+' left).');
+  if(left>0&&p.needPerWorkday!=null)t.push('To finish on time: about '+p.needPerWorkday+' sites per working day across the state.');
+  if(p.donePerWorkday!=null)t.push('So far: about '+p.donePerWorkday+' per working day; '+p.doneLast7+' in the last 7 days.');
+  if(p.projectedFinish)t.push('At the last week\'s pace the last site is done around '+md(p.projectedFinish)+(p.projectedFinish>data.campaign.due_date?' <span class="warn">(after the completion date)</span>':'')+'.');
+  if(p.pastDue)t.push('<span class="warn">Past the completion date with '+left+' left.</span>');
+  if(left===0)t.push('Every site is accounted for.');
+  $('pace').innerHTML=t.join(' ');
+  draw();
+}
+function draw(){
+  var f=$('flt').value,q=$('q').value.trim().toLowerCase();
+  var r=data.sites.filter(function(s){
+    if(f==='open'&&s.status!=='remaining'&&s.status!=='review')return false;
+    if(f!=='open'&&f!=='all'&&s.status!==f)return false;
+    if(q&&(s.site_code+' '+(s.name||'')+' '+(s.primaryTech||'')+' '+(s.doneBy||'')).toLowerCase().indexOf(q)<0)return false;
+    return true;
+  });
+  $('tb').innerHTML=r.length?r.map(function(s){
+    var act='';
+    if(s.status==='done'&&s.source==='manual')act='<button class="sm" data-a="clear" data-c="'+esc(s.site_code)+'">Undo</button>';
+    else if(s.status==='exempt')act='<button class="sm" data-a="clear" data-c="'+esc(s.site_code)+'">Undo</button>';
+    else if(s.status==='done')act='';
+    else act='<button class="sm" data-a="done" data-c="'+esc(s.site_code)+'">Mark done</button> <button class="sm" data-a="exempt" data-c="'+esc(s.site_code)+'" title="This kiosk has only one form type or is otherwise not part of the change-out">Not applicable</button>';
+    var ev=s.evidence?'<div class="ev">'+esc(s.evidence)+'</div>':'';
+    return '<tr><td><b>'+esc(s.site_code)+'</b> '+esc(s.name||'')+ev+'</td><td>'+esc(s.primaryTech||'')+'</td><td><span class="pill '+s.status+'">'+LABEL[s.status]+'</span></td><td>'+md(s.doneDate)+(s.doneBy?' <span class="ev">'+esc(s.doneBy)+'</span>':'')+'</td><td class="ev">'+esc(s.source||'')+'</td><td>'+act+'</td></tr>';
+  }).join(''):'<tr><td colspan="6">Nothing here.</td></tr>';
+}
+$('tb').addEventListener('click',function(e){
+  var b=e.target.closest&&e.target.closest('button[data-a]');if(!b)return;
+  var code=b.getAttribute('data-c'),a=b.getAttribute('data-a');
+  b.disabled=true;
+  post({action:'mark',state:$('st').value,site_code:code,status:a==='clear'?'clear':a}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Could not save');load();
+  }).catch(function(err){b.disabled=false;if(err)$('msg').textContent=err.message});
+});
+$('save').onclick=function(){
+  $('msg').textContent='';
+  post({action:'save_campaign',state:$('st').value,start_date:$('sd').value,due_date:$('dd').value}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Could not save');$('msg').textContent='Saved.';load();
+  }).catch(function(err){if(err)$('msg').textContent=err.message});
+};
+$('flt').onchange=draw;$('q').oninput=draw;$('st').onchange=function(){$('msg').textContent='';load()};
+// State list: every state that has active sites; remembers the last one used.
+(function(){
+  var states='CA CO FL GA ID IL IN MI MN MS NC NV OH OR SC WV'.split(' ');
+  var cur='GA';try{cur=localStorage.getItem('dco_state')||'GA'}catch(e){}
+  var q=new URLSearchParams(location.search).get('state');if(q&&/^[A-Za-z]{2}$/.test(q))cur=q.toUpperCase();
+  $('st').innerHTML=states.map(function(s){return '<option'+(s===cur?' selected':'')+'>'+s+'</option>'}).join('');
+  load();
+})();
+</script>
+</body>
+</html>
