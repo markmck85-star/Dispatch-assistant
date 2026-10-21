@@ -7,7 +7,11 @@
 // date. This function answers "which sites are done, which are left, and are we on pace".
 //
 // Evidence a site is done, strongest first:
-//   1. a manual mark on the tracker page (done / exempt), stored in dco_marks
+//   0. counter and testing sites (machine type OTHER, or a site code that is not the usual two letters and
+//      four digits) are treated as not applicable automatically: their forms are changed by the state's own
+//      staff, not by MCR technicians (Ohio, Sept 2026: 0 of 43 such sites had a change-out note, against
+//      41 of 68 regular kiosks). A manual 'include' mark puts one back in scope.
+//   1. a manual mark on the tracker page (done / exempt / include), stored in dco_marks
 //   2. a closing note on a visit on/after the campaign start that says the change-out was performed
 //      ("completed DCO", "performed decal change over", "performed the dco on printer two" ...)
 // A note that mentions a DCO but reads as not done or still to do ("no dco", "needs dco", "will do dco") is
@@ -100,7 +104,7 @@ exports.handler = async (event) => {
           if (error) return json(500, { ok: false, error: 'Could not clear the mark.' });
           return json(200, { ok: true });
         }
-        if (status !== 'done' && status !== 'exempt') return json(400, { ok: false, error: 'Unknown status.' });
+        if (status !== 'done' && status !== 'exempt' && status !== 'include') return json(400, { ok: false, error: 'Unknown status.' });
         const doneDate = status === 'done' && /^\d{4}-\d{2}-\d{2}$/.test(String(body.done_date || '')) ? body.done_date : (status === 'done' ? todayEt() : null);
         const row = {
           campaign_id: camp.id, site_id: site[0].id, status,
@@ -165,14 +169,16 @@ exports.handler = async (event) => {
       const m = marks[s.id];
       const h = noteHits[s.id] || {};
       let status = 'remaining', doneDate = null, source = null, evidence = null, tech = null;
+      const counterSite = s.machine_type === 'OTHER' || !/^[A-Z]{2}\d{4}$/.test(s.site_code);
       if (m && m.status === 'exempt') { status = 'exempt'; source = 'manual'; evidence = m.note || null; }
       else if (m && m.status === 'done') { status = 'done'; doneDate = m.done_date; source = 'manual'; evidence = m.note || null; }
       else if (h.done) { status = 'done'; doneDate = h.done.date; source = 'closing note'; evidence = h.done.note; tech = h.done.tech; }
+      else if (counterSite && !(m && m.status === 'include')) { status = 'exempt'; source = 'automatic'; evidence = 'Counter or testing site'; }
       else if (h.review) { status = 'review'; doneDate = h.review.date; source = 'closing note'; evidence = h.review.note; tech = h.review.tech; }
       return {
         site_code: s.site_code, name: s.name, county: s.county || null, machine_type: s.machine_type || null,
         primaryTech: techName[s.primary_tech_id] || null,
-        status, doneDate, source, evidence, doneBy: tech,
+        status, doneDate, source, evidence, doneBy: tech, counterSite,
         lastVisit: lastVisit[s.id] || null,
       };
     });
