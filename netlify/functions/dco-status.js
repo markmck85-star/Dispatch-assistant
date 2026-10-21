@@ -193,6 +193,16 @@ exports.handler = async (event) => {
       }
     }
 
+    // A closed ticket only counts as a completed change-out if a visit was recorded against that work order;
+    // a ticket closed with no visit was canceled or covered by an earlier visit (the closing note decides).
+    const woList = Object.values(ticketHits).filter((t) => t.closed).map((t) => t.wo).filter(Boolean);
+    const woVisit = {}; // wo_number -> ET date of the visit
+    for (const c of chunk(woList, IN_CHUNK)) {
+      const { data: vs, error: vErr } = await supabase.from('site_visits').select('wo_number, started_at').in('wo_number', c);
+      if (vErr) return json(500, { ok: false, error: 'ticket visits fetch failed' });
+      (vs || []).forEach((v) => { const d = etDate(v.started_at); if (!woVisit[v.wo_number] || d > woVisit[v.wo_number]) woVisit[v.wo_number] = d; });
+    }
+
     const rows = (sites || []).map((s) => {
       const m = marks[s.id];
       const tk = ticketHits[s.id];
@@ -202,7 +212,8 @@ exports.handler = async (event) => {
       if (m && m.status === 'exempt') { status = 'exempt'; source = 'manual'; evidence = m.note || null; }
       else if (m && m.status === 'done') { status = 'done'; doneDate = m.done_date; source = 'manual'; evidence = m.note || null; }
       else if (h.done) { status = 'done'; doneDate = h.done.date; source = 'closing note'; evidence = h.done.note; tech = h.done.tech; }
-      else if (tk && tk.closed) { status = 'done'; doneDate = lastVisit[s.id] && lastVisit[s.id] >= etDate(tk.received) ? lastVisit[s.id] : etDate(tk.received); source = 'ticket closed'; evidence = 'Change-out ticket ' + tk.wo + ' closed'; }
+      else if (tk && tk.closed && woVisit[tk.wo]) { status = 'done'; doneDate = woVisit[tk.wo]; source = 'ticket closed'; evidence = 'Change-out ticket ' + tk.wo + ' completed'; }
+      else if (tk && tk.closed) { status = 'review'; source = 'ticket closed'; evidence = 'Change-out ticket ' + tk.wo + ' was closed with no visit recorded (canceled, or done on an earlier visit)'; }
       else if (tk) { status = 'remaining'; source = 'ticket open'; evidence = 'Change-out ticket ' + tk.wo + ' open'; }
       else if (counterSite && !(m && m.status === 'include')) { status = 'exempt'; source = 'automatic'; evidence = 'Counter or testing site'; }
       else if (h.review) { status = 'review'; doneDate = h.review.date; source = 'closing note'; evidence = h.review.note; tech = h.review.tech; }
