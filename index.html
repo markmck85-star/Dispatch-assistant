@@ -687,10 +687,6 @@
                      distance matrix builder uses), auto-firing on every board
                      regeneration. Removed rather than gated, per Mark's call. -->
                 <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-                    <button id="dcoToggleBtn" onclick="toggleDCO()"
-                        style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
-                        🔔 DCO: OFF
-                    </button>
                     <button id="troubleOnlyToggleBtn" onclick="toggleTroubleOnly()"
                         title="Show only trouble tickets + anything else due today -- hides restock/maintenance stops due a later day. Defaults on when the Dispatch Date is a Saturday."
                         style="flex:1;min-width:130px;padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a3e;color:#888;font-size:13px;font-weight:bold;cursor:pointer;">
@@ -5809,16 +5805,8 @@ function distanceMatrixStatus(state) {
         }
 
         // ── DCO TOGGLE ───────────────────────────────────────────────────────
-        function toggleDCO() {
-            window.dcoEnabled = !window.dcoEnabled;
-            const btn = document.getElementById('dcoToggleBtn');
-            if (btn) {
-                btn.style.background = window.dcoEnabled ? '#3a2000' : '#2a2a3e';
-                btn.style.color = window.dcoEnabled ? '#ffa500' : '#888';
-                btn.style.borderColor = window.dcoEnabled ? '#ffa500' : '#555';
-                btn.textContent = window.dcoEnabled ? '🔔 DCO: ON' : '🔔 DCO: OFF';
-            }
-        }
+        // 2026-10-21: the "DCO: ON/OFF" board button moved into the messages screen (checkbox below the
+        // Back / Publish buttons in generateFinalMessages); window.dcoEnabled still drives the extra message line.
 
         // ── TROUBLE ONLY TOGGLE ─────────────────────────────────────────────
         // 2026-08-29: session toggle (same pattern as Drive Time/DCO above) to
@@ -7647,7 +7635,11 @@ function distanceMatrixStatus(state) {
             let html = `<div style="margin-bottom:20px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="big-btn" onclick="renderReviewBoard()" style="background:#6c757d;flex:1;">⬅ Back</button>
                 <button class="big-btn" id="publishFromMessagesBtn" onclick="publishFromMessages()" style="background:#1e7e34;flex:1;">Publish to techs</button>
-            </div>`;
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;margin:-8px 0 16px;font-size:14px;cursor:pointer;">
+                <input type="checkbox" id="dcoMsgChk" ${window.dcoEnabled ? 'checked' : ''} onchange="window.dcoEnabled = this.checked; generateFinalMessages();">
+                Add a "DCO required" line to each message
+            </label>`;
             
             Object.keys(window.currentAssignments).sort().filter(t => window.currentAssignments[t].length > 0).forEach(tech => {
                 const items = window.currentAssignments[tech];
@@ -7778,7 +7770,7 @@ function distanceMatrixStatus(state) {
                     if (loadoutTally.JP > 0) tally.push(`JP×${loadoutTally.JP}`);
                     if (tally.length > 0) msg += `\n📦 Min loadout: ${tally.join('  ')}`;
                 }
-                if (window.dcoEnabled) msg += `\n🔔 DCO required — please confirm dispatch acknowledged per Gina.`;
+                if (window.dcoEnabled) msg += `\n🔔 DCO required. Please confirm dispatch acknowledged per Gina.`;
                 msg += `\nPlease acknowledge receipt.`;
                 
                 messagesByTech[tech] = msg;
@@ -10412,7 +10404,6 @@ ${content}
         { id: 'saturday',  sel: 'a[href="/saturday-oncall"]',                         group: 'plan',  simple: true },
         { id: 'analyze',   virtual: true, label: '\uD83E\uDDED Analyze Routes', reveal: 'analyze', group: 'today', simple: true },
         { id: 'help',      sel: 'a.help-link',                                        group: 'look',  simple: true },
-        { id: 'dco',       sel: '#dcoToggleBtn',                                      group: 'today' },
         { id: 'trouble',   sel: '#troubleOnlyToggleBtn',                              group: 'today' },
         { id: 'outstrip',  virtual: true, label: '\uD83D\uDC65 Technician out bar (main screen)', reveal: 'strip', group: 'today' },
         { id: 'assistant', virtual: true, label: '\uD83E\uDD16 Assistant bar', reveal: 'chat',    group: 'today' },
