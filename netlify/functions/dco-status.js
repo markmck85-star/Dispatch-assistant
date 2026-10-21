@@ -11,8 +11,11 @@
 //      four digits) are treated as not applicable automatically: their forms are changed by the state's own
 //      staff, not by MCR technicians (Ohio, Sept 2026: 0 of 43 such sites had a change-out note, against
 //      41 of 68 regular kiosks). A manual 'include' mark puts one back in scope.
-//   1. a manual mark on the tracker page (done / exempt / include), stored in dco_marks
-//   2. a closing note on a visit on/after the campaign start that says the change-out was performed
+//   1. Neumo's own "Decal Change" maintenance tickets: a site with one is in scope even if it looks like a
+//      counter site, and the ticket being closed counts as done (Ohio, Sept 2026: 47 of 66 regular kiosks
+//      got a ticket, all closed; the rest were done on other visits and say so in the closing note).
+//   2. a manual mark on the tracker page (done / exempt / include), stored in dco_marks
+//   3. a closing note on a visit on/after the campaign start that says the change-out was performed
 //      ("completed DCO", "performed decal change over", "performed the dco on printer two" ...)
 // A note that mentions a DCO but reads as not done or still to do ("no dco", "needs dco", "will do dco") is
 // returned as status 'review' so a person decides. Per-printer tracking is not modelled yet: one site, one
@@ -165,20 +168,48 @@ exports.handler = async (event) => {
       }
     }
 
+    // Neumo "Decal Change" maintenance tickets received on/after the campaign start.
+    const ticketHits = {}; // site_id -> { wo, closed, received }
+    for (const c of chunk(ids, IN_CHUNK)) {
+      const { data: tks, error: tErr } = await supabase.from('tickets')
+        .select('site_id, wo_number, status, manually_resolved_at, received_at, inbound_email_id')
+        .in('site_id', c).gte('received_at', camp.start_date + 'T00:00:00-05:00').not('inbound_email_id', 'is', null);
+      if (tErr) return json(500, { ok: false, error: 'tickets fetch failed' });
+      const emailIds = [...new Set((tks || []).map((t) => t.inbound_email_id))];
+      const dcoEmail = new Set();
+      for (const ec of chunk(emailIds, IN_CHUNK)) {
+        const { data: ems, error: eErr } = await supabase.from('inbound_emails').select('id').in('id', ec).ilike('body_text', '%decal%change%');
+        if (eErr) return json(500, { ok: false, error: 'emails fetch failed' });
+        (ems || []).forEach((e) => dcoEmail.add(e.id));
+      }
+      for (const t of tks || []) {
+        if (!dcoEmail.has(t.inbound_email_id)) continue;
+        const closed = t.status === 'closed' || !!t.manually_resolved_at;
+        const prev = ticketHits[t.site_id];
+        // Keep one entry per site: any open ticket keeps the site open; otherwise the latest closed one.
+        if (!prev || (!closed && prev.closed) || (closed === prev.closed && t.received_at > prev.received)) {
+          ticketHits[t.site_id] = { wo: t.wo_number, closed, received: t.received_at };
+        }
+      }
+    }
+
     const rows = (sites || []).map((s) => {
       const m = marks[s.id];
+      const tk = ticketHits[s.id];
       const h = noteHits[s.id] || {};
       let status = 'remaining', doneDate = null, source = null, evidence = null, tech = null;
       const counterSite = s.machine_type === 'OTHER' || !/^[A-Z]{2}\d{4}$/.test(s.site_code);
       if (m && m.status === 'exempt') { status = 'exempt'; source = 'manual'; evidence = m.note || null; }
       else if (m && m.status === 'done') { status = 'done'; doneDate = m.done_date; source = 'manual'; evidence = m.note || null; }
       else if (h.done) { status = 'done'; doneDate = h.done.date; source = 'closing note'; evidence = h.done.note; tech = h.done.tech; }
+      else if (tk && tk.closed) { status = 'done'; doneDate = lastVisit[s.id] && lastVisit[s.id] >= etDate(tk.received) ? lastVisit[s.id] : etDate(tk.received); source = 'ticket closed'; evidence = 'Change-out ticket ' + tk.wo + ' closed'; }
+      else if (tk) { status = 'remaining'; source = 'ticket open'; evidence = 'Change-out ticket ' + tk.wo + ' open'; }
       else if (counterSite && !(m && m.status === 'include')) { status = 'exempt'; source = 'automatic'; evidence = 'Counter or testing site'; }
       else if (h.review) { status = 'review'; doneDate = h.review.date; source = 'closing note'; evidence = h.review.note; tech = h.review.tech; }
       return {
         site_code: s.site_code, name: s.name, county: s.county || null, machine_type: s.machine_type || null,
         primaryTech: techName[s.primary_tech_id] || null,
-        status, doneDate, source, evidence, doneBy: tech, counterSite,
+        status, doneDate, source, evidence, doneBy: tech, counterSite, ticketed: !!tk,
         lastVisit: lastVisit[s.id] || null,
       };
     });
