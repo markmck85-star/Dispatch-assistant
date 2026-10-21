@@ -73,7 +73,8 @@ function stripSignatureAndDisclaimer(text) {
   return t.trim();
 }
 
-function cleanBody(bodyText, bodyHtmlFallback) {
+function cleanBody(bodyText, bodyHtmlFallback, maxChars) {
+  const cap = maxChars || MAX_SNIPPET_CHARS;
   let t = (bodyText || "").trim();
   if (!t && bodyHtmlFallback) {
     t = bodyHtmlFallback.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -82,8 +83,8 @@ function cleanBody(bodyText, bodyHtmlFallback) {
   t = stripQuotedChain(t);
   t = stripSignatureAndDisclaimer(t);
   t = t.trim();
-  const truncated = t.length > MAX_SNIPPET_CHARS;
-  return { snippet: truncated ? t.slice(0, MAX_SNIPPET_CHARS) + "…" : t, truncated };
+  const truncated = t.length > cap;
+  return { snippet: truncated ? t.slice(0, cap) + "…" : t, truncated };
 }
 
 function inferState(row) {
@@ -126,6 +127,13 @@ exports.handler = async (event) => {
   let limit = parseInt(params.limit, 10);
   if (!Number.isFinite(limit) || limit <= 0) limit = DEFAULT_LIMIT;
   limit = Math.min(limit, MAX_LIMIT);
+
+  // 2026-10-21: optional longer snippet (default unchanged at 900). The add-site prompt reads
+  // street addresses out of ticket text, and install tickets put the real address in the line
+  // item description, past the 900-character cut.
+  let maxChars = parseInt(params.maxChars, 10);
+  if (!Number.isFinite(maxChars) || maxChars < MAX_SNIPPET_CHARS) maxChars = MAX_SNIPPET_CHARS;
+  maxChars = Math.min(maxChars, 4000);
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -189,7 +197,7 @@ exports.handler = async (event) => {
   if (error) return json(500, { ok: false, error: "inbound_emails query failed: " + error.message });
 
   let emails = (data || []).map((row) => {
-    const { snippet, truncated } = cleanBody(row.body_text, row.body_html);
+    const { snippet, truncated } = cleanBody(row.body_text, row.body_html, maxChars);
     const inferredState = inferState(row);
     return {
       id: row.id,

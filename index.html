@@ -6857,6 +6857,45 @@ function distanceMatrixStatus(state) {
             const address = addr ? addr[1].replace(/\s+/g, ' ').replace(/United States/gi, '').trim().replace(/[\s,]+$/, '') : '';
             return { name, address };
         }
+        // 2026-10-21: the pasted dispatch list already names every row ("Michigan City SSO 1 -
+        // IN1146"), but the add-site prompt only ever looked for the CODE in emails. A brand-new
+        // site (Michigan City SSO, IN1146-1148, installed 9/22) shows up on the list before any
+        // email carries its code: Neumo's install tickets name it "IN - Michigan City BMV" with
+        // the BMV's mailing address, so the prompt came up completely blank. Read the name from
+        // the pasted list text, and use it to find the street address inside ticket text.
+        function listNameForCode(code) {
+            try {
+                const box = document.getElementById('locationCodes');
+                const text = box ? String(box.value || '') : '';
+                const esc = String(code || '').replace(/[^A-Za-z0-9]/g, '');
+                if (!text || !esc) return '';
+                const m = text.match(new RegExp('([^\\n\\r\\t]*?)\\s*[-–]\\s*' + esc + '\\b', 'i'));
+                if (!m) return '';
+                let name = m[1].replace(/^\s*[A-Z]{2}\s*[-–]\s*/, '').replace(/\s+/g, ' ').trim();
+                if (name.length < 3 || name.length > 80 || /^[\d\s]+$/.test(name)) return '';
+                return name;
+            } catch (e) { return ''; }
+        }
+        // "Michigan City SSO 1" -> street address that follows "Michigan City SSO" in ticket text,
+        // e.g. "...onsite at Michigan City SSO 1551 Woodland Avenue, Michigan City, IN 46360".
+        async function findAddressNearListName(listName, state) {
+            const base = String(listName || '').replace(/\s*#?\d+\s*$/, '').trim();
+            if (base.length < 4) return null;
+            const pat = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+            const re = new RegExp(pat + '(?:\\s+(?:located\\s+)?(?:at|@))?\\s*[:,\\-]?\\s+(\\d{1,6}\\s[^\\n\\r,]{3,60},\\s*[^\\n\\r,]{2,40},\\s*[A-Z]{2}\\s+\\d{5}(?:-\\d{4})?)', 'i');
+            const words = base.split(/\s+/).slice(0, 4).join(' ');
+            for (const box of ['trouble', 'restock', 'maintenance']) {
+                const qs = new URLSearchParams({ mailbox: box, query: words, limit: '10', maxChars: '3000' });
+                if (state) qs.set('state', state);
+                const res = await fetch('/.netlify/functions/list-inbound-emails?' + qs.toString());
+                const data = await res.json();
+                for (const em of ((data && data.emails) || [])) {
+                    const hit = ((em.subject || '') + '\n' + (em.bodySnippet || '')).match(re);
+                    if (hit) return hit[1].replace(/\s+/g, ' ').trim();
+                }
+            }
+            return null;
+        }
         async function prefillAddLocationFromEmail(code) {
             const nameEl = document.getElementById('alp-name');
             const addrEl = document.getElementById('alp-address');
@@ -6866,10 +6905,23 @@ function distanceMatrixStatus(state) {
             const known = ['CA','CO','FL','GA','ID','IL','IN','MI','MN','MS','NC','NV','OH','OR','SC','WV'];
             const state = (known.includes(stateFromCode) ? stateFromCode : (typeof CURRENT_STATE === 'string' ? CURRENT_STATE : '')).toUpperCase();
             if (status) status.textContent = 'Looking for a restock/ticket email…';
+            // First choice: the address written next to this location's own list name.
+            try {
+                const ln = listNameForCode(code);
+                if (ln) {
+                    const found = await findAddressNearListName(ln, known.includes(state) ? state : '');
+                    if (found) {
+                        if (!addrEl.value) addrEl.value = found;
+                        if (!nameEl.value) nameEl.value = ln;
+                        if (status) status.textContent = 'Address pre-filled from a ticket email that names this location. Verify before saving.';
+                        return;
+                    }
+                }
+            } catch (e) { /* fall through to the code search below */ }
             const boxes = ['restock', 'maintenance', 'trouble'];
             try {
                 for (const box of boxes) {
-                    const qs = new URLSearchParams({ mailbox: box, query: code, limit: '8' });
+                    const qs = new URLSearchParams({ mailbox: box, query: code, limit: '8', maxChars: '3000' });
                     if (state && known.includes(state)) qs.set('state', state);
                     const res = await fetch('/.netlify/functions/list-inbound-emails?' + qs.toString());
                     const data = await res.json();
@@ -6920,6 +6972,7 @@ function distanceMatrixStatus(state) {
                     <option value="SK">SK — Small Kahuna (default)</option>
                     <option value="SB">SB — Surfboard</option>
                     <option value="BK">BK — Big Kahuna (cash)</option>
+                    <option value="BH">BH — Big Hoku (3-4 printers)</option>
                     <option value="OTHER">Other — testing/OTC, no restock cycle</option>
                 </select>
                 <div style="display:flex;gap:10px;">
@@ -6928,6 +6981,15 @@ function distanceMatrixStatus(state) {
                 </div>
                 <div id="alp-status" style="margin-top:8px;font-size:12px;color:#ffa500;min-height:16px;"></div>`;
             document.body.appendChild(div);
+            // 2026-10-21: start from what the pasted list already says. Name comes from the list
+            // row; a row with three or more printers (P3 forms present) is a Big Hoku, not the
+            // Small Kahuna default.
+            try {
+                var listName = listNameForCode(code);
+                if (listName) document.getElementById('alp-name').value = listName;
+                var pf = (window.parsedFormCounts || {})[code];
+                if (pf && pf.P3F !== null && pf.P3F !== undefined) document.getElementById('alp-machinetype').value = 'BH';
+            } catch (e) { /* prompt still works blank */ }
             var techStatus = document.createElement('div');
             techStatus.id = 'alp-tech-status';
             techStatus.style.cssText = 'margin:-4px 0 8px;font-size:11px;color:#aaa;min-height:14px;';
