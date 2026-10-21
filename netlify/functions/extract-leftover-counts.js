@@ -171,6 +171,9 @@ exports.handler = async (event) => {
       } catch (e) { /* leave null */ }
       // Same for the per-site "Neumo calls it at" counts built from the dispatch lists.
       try { await supabase.rpc('refresh_site_restock_thresholds'); } catch (e) { /* ignore */ }
+      // 2026-10-21: score any new dispatch list against the forecast (forecast_scorecard), so its
+      // accuracy can be tracked as lists come in. Runs hourly with this job; never blocks the run.
+      try { await supabase.rpc('score_new_dispatch_lists', { lookback_days: 3 }); } catch (e) { /* ignore */ }
     }
 
     return json(200, {
