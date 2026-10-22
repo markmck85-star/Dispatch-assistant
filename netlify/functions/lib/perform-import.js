@@ -601,7 +601,9 @@ async function performImport(supabase, rows) {
       .from('assignments')
       .update({ status: 'completed' })
       .in('ticket_id', ticketIdList)
-      .eq('status', 'planned')
+      // 2026-10-22: 'notified' (technician already texted) is still an active
+      // stop; leaving it out stranded GA1083 and GA1085 as open forever.
+      .in('status', ['planned', 'notified'])
       .select('id');
     if (assignmentErr) {
       console.error('[perform-import] auto-complete assignments failed:', assignmentErr.message);
@@ -614,7 +616,7 @@ async function performImport(supabase, rows) {
       .from('assignments')
       .select('id')
       .in('ticket_id', ticketIdList)
-      .in('status', ['planned', 'completed']);
+      .in('status', ['planned', 'notified', 'completed']);
     await stampCloserOnAssignments(supabase, (ticketAssigns || []).map((r) => r.id));
   }
 
@@ -658,7 +660,7 @@ async function performImport(supabase, rows) {
       .from('assignments')
       .select('id, site_id, dispatch_date')
       .in('site_id', chunk)
-      .eq('status', 'planned')
+      .in('status', ['planned', 'notified'])
       // 2026-09-17 fix: this site+date fallback was built for ticketless
       // bulk-restock stops (see the 2026-08-23 comment on
       // siteDateCompletions above) -- but with no guard here, it was just
@@ -712,7 +714,7 @@ async function performImport(supabase, rows) {
         .from('assignments')
         .update({ status: 'completed' })
         .in('id', idsToComplete)
-        .eq('status', 'planned')
+        .in('status', ['planned', 'notified'])
         .select('id');
       if (siteDateErr) {
         console.error('[perform-import] site/date auto-complete update failed:', siteDateErr.message);

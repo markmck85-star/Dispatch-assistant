@@ -29,6 +29,7 @@
  */
 
 const { createClient } = require("@supabase/supabase-js");
+const ticketState = require("./lib/ticket-state.js");
 
 const MAILBOX = { MI: "imap-mi", OH: "imap-oh", NV: "imap-nv", CO: "imap-co", OR: "imap-or" };
 
@@ -273,6 +274,8 @@ exports.handler = async (event) => {
         summary.errors.push(uErr.message);
         continue;
       }
+      // 2026-10-22: the ticket's board stop closes with it.
+      await ticketState.closeStopsForTickets(supabase, [match.id], "completed");
       await supabase.from("inbound_emails").update(
         email._fwd
           ? { parse_error: JSON.stringify({ applied: true, ticketId: match.id, wo: match.wo_number, at: new Date().toISOString() }) }

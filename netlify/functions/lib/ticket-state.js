@@ -54,4 +54,29 @@ function reopenClearFields() {
   };
 }
 
-module.exports = { isClosedAnyWay, reopenedAtOf, visitPredatesReopen, reopenClearFields };
+// When a ticket is closed by some path other than the board's own Done/Cancel
+// (a service-response or mailbox closing email), its active board stops must
+// close with it, or they sit 'planned'/'notified' forever. Found 2026-10-22:
+// eight such stops. Returns how many stops were closed; never throws.
+async function closeStopsForTickets(supabase, ticketIds, finalStatus) {
+  try {
+    const ids = (ticketIds || []).filter(Boolean);
+    if (!ids.length) return 0;
+    const { data, error } = await supabase
+      .from('assignments')
+      .update({ status: finalStatus || 'completed', updated_at: new Date().toISOString() })
+      .in('ticket_id', ids)
+      .in('status', ['planned', 'notified'])
+      .select('id');
+    if (error) {
+      console.error('[ticket-state] closing stops for tickets failed:', error.message);
+      return 0;
+    }
+    return (data || []).length;
+  } catch (e) {
+    console.error('[ticket-state] closing stops for tickets threw:', e.message);
+    return 0;
+  }
+}
+
+module.exports = { isClosedAnyWay, reopenedAtOf, visitPredatesReopen, reopenClearFields, closeStopsForTickets };

@@ -7,6 +7,7 @@
  * GET /.netlify/functions/match-mailbox-closings?state=MI
  */
 const { createClient } = require("@supabase/supabase-js");
+const ticketState = require("./lib/ticket-state.js");
 
 const MAILBOX = { OH: "imap-oh", MI: "imap-mi", CO: "imap-co", NV: "imap-nv" };
 const WINDOW_MS = 60 * 86400000;
@@ -93,6 +94,8 @@ async function matchClosings(state) {
       inbound_email_id: email.id,
     }).eq("id", ticket.id).is("manually_resolved_at", null);
     if (error) { skipped += 1; continue; }
+    // 2026-10-22: the ticket's board stop closes with it.
+    await ticketState.closeStopsForTickets(supabase, [ticket.id], "completed");
     await supabase.from("inbound_emails").update({ parse_status: "matched" }).eq("id", email.id);
     open.splice(open.findIndex((t) => t.id === ticket.id), 1);
     closed += 1;
