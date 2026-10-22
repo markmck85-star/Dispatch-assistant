@@ -112,11 +112,17 @@ async function sweepDoneStopTickets(supabase, opts) {
       const chunk = ticketIds.slice(i, i + 150);
       const { data: tickets } = await supabase
         .from('tickets')
-        .select('id, status, manually_resolved_at, attributes')
+        .select('id, status, manually_resolved_at, attributes, ticket_kind, issue_category, loomis_meet_status')
         .in('id', chunk)
         .eq('status', 'open')
         .is('manually_resolved_at', null);
       if (!tickets || !tickets.length) continue;
+      // Not on a clock a dispatcher can judge from the stop alone: armored
+      // truck meets (days of back-and-forth to agree a date) and installs /
+      // site surveys (the email often comes weeks before the real date).
+      // These close only through their own signals.
+      const isSlowTrack = (t) => t.ticket_kind === 'install' || t.ticket_kind === 'site_survey'
+        || !!t.loomis_meet_status || /armored/i.test(t.issue_category || '');
       const { data: active } = await supabase
         .from('assignments')
         .select('ticket_id')
@@ -125,6 +131,7 @@ async function sweepDoneStopTickets(supabase, opts) {
       const hasActive = new Set((active || []).map((a) => a.ticket_id));
       for (const t of tickets) {
         if (hasActive.has(t.id)) continue;
+        if (isSlowTrack(t)) continue;
         const reopened = reopenedAtOf(t);
         if (reopened !== null && lastDoneByTicket[t.id] <= reopened) continue;
         toResolve.push(t.id);
