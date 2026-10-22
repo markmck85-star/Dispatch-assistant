@@ -89,19 +89,46 @@
   const AVG_MPH = 50;
   const ON_SITE_MIN = 25;             // typical on-site time per kiosk (median ~28 min, trimmed average ~26, Jul-Oct 2026)
   const MAX_THURSDAY_DAY_HOURS = 8;   // drive plus on-site; balancing never pulls a stop forward past this
-  function estDriveHours(tech, pts) {
+  // Uses the real driving-time matrix (_dmCache.IN, loaded from get-distance-matrix) for tech-to-site
+  // and site-to-site legs; a leg missing from the matrix falls back to the straight-line estimate.
+  // Points are site codes.
+  function matrixOf() {
+    return (typeof _dmCache !== 'undefined' && _dmCache.IN && _dmCache.IN.matrix) || null;
+  }
+  function legMin(mx, techSlug, a, b) {
+    // a is 'HOME' (the tech) or a site code; b is a site code or 'HOME'
+    const home = a === 'HOME' ? b : (b === 'HOME' ? a : null);
+    if (home !== null) {
+      const e = mx && mx[techSlug + '|' + home];
+      if (e && e.durationMin != null) return e.durationMin;
+    } else {
+      const e = mx && (mx[a + '|' + b] || mx[b + '|' + a]);
+      if (e && e.durationMin != null) return e.durationMin;
+    }
+    return null;
+  }
+  function estDriveHours(tech, codes) {
     const t = (typeof TECHS !== 'undefined' && TECHS[tech]) || null;
-    if (!t || !isFinite(Number(t.lat)) || !isFinite(Number(t.lng)) || t.lat == null || t.lng == null) return 0;
-    const home = { lat: t.lat, lng: t.lng };
-    const left = pts.filter(p => p && miles(home, p) !== null);
-    let cur = home, total = 0;
+    const mx = matrixOf();
+    const slug = String(tech || '').toLowerCase().replace(/\s+/g, '-');
+    const homePt = (t && t.lat != null && t.lng != null && isFinite(Number(t.lat)) && isFinite(Number(t.lng))) ? { lat: t.lat, lng: t.lng } : null;
+    const pt = (c) => (c === 'HOME' ? homePt : LOCATIONS[c]);
+    const leg = (a, b) => {
+      const m = legMin(mx, slug, a, b);
+      if (m !== null) return m;
+      const d = miles(pt(a), pt(b));
+      return d === null ? null : d * ROAD_FACTOR / AVG_MPH * 60;
+    };
+    const left = codes.filter(c => c && leg('HOME', c) !== null);
+    if (!left.length) return 0;
+    let cur = 'HOME', total = 0;
     while (left.length) {
       let bi = 0, bd = Infinity;
-      left.forEach((p, i) => { const d = miles(cur, p); if (d < bd) { bd = d; bi = i; } });
-      total += bd; cur = left.splice(bi, 1)[0];
+      left.forEach((c, i) => { const d = leg(cur, c); if (d !== null && d < bd) { bd = d; bi = i; } });
+      total += isFinite(bd) ? bd : 0; cur = left.splice(bi, 1)[0];
     }
-    total += miles(cur, home) || 0;
-    return total * ROAD_FACTOR / AVG_MPH;
+    total += leg(cur, 'HOME') || 0;
+    return total / 60;
   }
 
   // A row belongs to this planner only if it is an Indiana site. The paste holds
@@ -326,18 +353,18 @@
       if (thuIso) {
         const thuBy = {};
         thuStops.forEach(t => { thuBy[t.tech] = (thuBy[t.tech] || 0) + 1; });
-        const anchorsBy = {};
-        thuStops.forEach(t => { (anchorsBy[t.tech] = anchorsBy[t.tech] || []).push(LOCATIONS[t.code]); });
+        const anchorsBy = {}; // tech -> site codes already on that tech's Thursday
+        thuStops.forEach(t => { (anchorsBy[t.tech] = anchorsBy[t.tech] || []).push(t.code); });
         plans.filter(pl => pl.near).forEach(pl => {
           thuBy[pl.near.tech] = (thuBy[pl.near.tech] || 0) + pl.members.length;
-          (anchorsBy[pl.near.tech] = anchorsBy[pl.near.tech] || []).push(LOCATIONS[pl.members[0].code]);
+          (anchorsBy[pl.near.tech] = anchorsBy[pl.near.tech] || []).push(pl.members[0].code);
         });
         const poolBy = {};
         plans.filter(pl => !pl.near && pl.friTech && thuAvail.indexOf(pl.friTech) !== -1)
           .forEach(pl => { (poolBy[pl.friTech] = poolBy[pl.friTech] || []).push(pl); });
-        const dist = (pl, pts) => {
+        const dist = (pl, codes) => {
           let best = Infinity;
-          pts.forEach(p => { const m = miles(LOCATIONS[pl.members[0].code], p); if (m !== null && m < best) best = m; });
+          codes.forEach(c => { const m = miles(LOCATIONS[pl.members[0].code], LOCATIONS[c]); if (m !== null && m < best) best = m; });
           return best;
         };
         Object.keys(poolBy).forEach(tech => {
@@ -353,7 +380,7 @@
             } else {
               // no Thursday stop yet: start from the site closest to the rest of this tech's Friday sites
               pool.forEach(pl => {
-                const d = dist(pl, pool.filter(o => o !== pl).map(o => LOCATIONS[o.members[0].code]));
+                const d = dist(pl, pool.filter(o => o !== pl).map(o => o.members[0].code));
                 const dd = isFinite(d) ? d : 1e9;
                 if (pick === null || dd < pickD) { pick = pl; pickD = dd; }
               });
@@ -362,12 +389,12 @@
             if (have + pick.members.length > want + 1) continue; // would overshoot; try a smaller site
             // avoid overtime: drive (home loop, return included) plus on-site time stays within the
             // day limit, otherwise the site stays on Friday
-            if (estDriveHours(tech, anchors.concat([LOCATIONS[pick.members[0].code]])) +
+            if (estDriveHours(tech, anchors.concat([pick.members[0].code])) +
                 (have + pick.members.length) * ON_SITE_MIN / 60 > MAX_THURSDAY_DAY_HOURS) continue;
             pick.near = { tech, code: '', miles: isFinite(pickD) && pickD < 1e8 ? pickD : null, balance: true,
                           thu: have + pick.members.length, fri: friN };
             have += pick.members.length;
-            anchors.push(LOCATIONS[pick.members[0].code]);
+            anchors.push(pick.members[0].code);
           }
         });
       }
@@ -522,6 +549,8 @@
       alert('No Indiana Thursday or Friday restocks found. Paste the dispatch list on the Indiana board first.');
       return;
     }
+    // Real driving times for the day-length cap (falls back to straight-line estimates if unavailable).
+    try { if (typeof loadDistanceMatrix === 'function') await loadDistanceMatrix('IN'); } catch (e) { /* estimate instead */ }
     const plan = await buildPlan(counts);
     if (plan.length) renderPlanner(plan);
     else alert('No Indiana Thursday or Friday restocks found in this list.');
