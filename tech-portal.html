@@ -91,6 +91,15 @@
   .wd .site { margin:4px 0; }
   .summban { background:var(--card); border:1px solid var(--warn); border-left:5px solid var(--warn); border-radius:10px; padding:10px 12px; margin-bottom:10px; font-size:14px; }
   .wdbar input[type=date] { flex:1; min-width:0; padding:10px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); }
+  /* Summary: one compact line, state | date | Today/Tomorrow (2026-10-22) */
+  .sumbar { gap:6px; align-items:stretch; }
+  .sumbar select { flex:0 0 auto; width:64px; padding:9px 4px; font-size:15px; }
+  .sumbar input[type=date] { flex:1 1 0; min-width:0; padding:9px 6px; font-size:15px; }
+  .sumbar .seg { flex:none; display:flex; }
+  .sumbar .seg button { padding:9px 10px; font-size:14px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:0; }
+  .sumbar .seg button:first-child { border-radius:8px 0 0 8px; }
+  .sumbar .seg button:last-child { border-radius:0 8px 8px 0; border-left:0; }
+  .sumbar .seg button.on { background:var(--brand); color:#fff; border-color:var(--brand); }
   .applink { display:block; width:100%; box-sizing:border-box; text-align:center; padding:13px 14px; font-size:16px; font-weight:600; border:0; color:#fff; background:var(--brand); border-radius:10px; text-decoration:none; box-shadow:0 2px 4px rgba(0,0,0,.25); }
   .applink:active { filter:brightness(.9); box-shadow:none; }
   .stop { border-top:1px solid var(--line); padding:8px 0; font-size:15px; }
@@ -196,12 +205,11 @@
 
     <section id="summPane" class="hidden">
       <div class="summban"><b>App plan only. Not confirmed in Salesforce.</b><br>This is the plan in the dispatch app, either the default or as edited by a dispatcher. It may differ from what is assigned in Salesforce. Check Salesforce before relying on it.</div>
-      <div class="wdbar">
+      <div class="wdbar sumbar">
         <select id="summState" aria-label="State"></select>
         <input type="date" id="summDate" aria-label="Date">
-        <button id="summRefresh">Refresh</button>
+        <div class="seg"><button id="summToday">Today</button><button id="summTomorrow">Tomorrow</button></div>
       </div>
-      <div class="shiprow"><div class="seg"><button id="summToday">Today</button><button id="summTomorrow">Tomorrow</button></div></div>
       <div class="shiprow"><a id="summOpenApp" class="applink" href="/" target="_blank" rel="noopener">Open the dispatch app to change assignments &rarr;</a></div>
       <div class="muted" id="summStatus"></div>
       <div id="summList"></div>
@@ -383,7 +391,7 @@
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabWatch').onclick = function () { tab('Watch'); };
   $('tabSumm').onclick = function () { tab('Summ'); };
-  $('summRefresh').onclick = function () { loadSumm(); };
+  // (no Refresh button: tapping the highlighted Today/Tomorrow button reloads that day)
   $('summState').onchange = function () { loadSumm(); };
   $('summDate').onchange = function () { loadSumm(); };
   function summDay(offset) {
