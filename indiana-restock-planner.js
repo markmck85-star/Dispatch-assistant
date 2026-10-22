@@ -263,9 +263,28 @@
       const h = historicalPrefs[m.code];
       if (h) votes[h] = (votes[h] || 0) + 0.5;
     });
+    // 2026-10-22: the site's fallback tech counts too (it is who covers when the primary is out),
+    // and a tech who is far from the site or based outside Indiana is penalized, so a light load
+    // alone no longer sends a site to someone hours away.
+    const fbVotes = {};
+    members.forEach(m => {
+      const fb = (LOCATIONS[m.code] || {}).fallbackTech;
+      if (fb) fbVotes[fb] = (fbVotes[fb] || 0) + 1;
+    });
+    const mx = matrixOf();
+    const travelPenalty = (tech) => {
+      const code = members[0].code;
+      const e = mx && mx[String(tech).toLowerCase().replace(/\s+/g, '-') + '|' + code];
+      if (e && e.durationMin != null) return Number(e.durationMin) / 30; // 60 min away = 2 points
+      const t = (typeof TECHS !== 'undefined' && TECHS[tech]) || {};
+      if (t.state && String(t.state).toUpperCase() !== 'IN') return 8;   // not an Indiana tech, no matrix data
+      const d = miles(t, LOCATIONS[code]);
+      return d === null ? 0 : d / 25;                                     // 50 mi away = 2 points
+    };
     let best = null, bestScore = -Infinity;
     availableTechs.forEach(tech => {
-      const score = (votes[tech] || 0) * 10 / members.length - (loadByTech[tech] || 0) * 1.5;
+      const score = (votes[tech] || 0) * 10 / members.length + (fbVotes[tech] || 0) * 6 / members.length
+        - (loadByTech[tech] || 0) * 1.5 - travelPenalty(tech);
       if (score > bestScore) { bestScore = score; best = tech; }
     });
     return best || (availableTechs[0] || null);
