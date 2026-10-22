@@ -1108,6 +1108,19 @@ function parseEmailBody(text, receivedAt, subject) {
     return false;
   }
 
+  // 2026-10-22: a work order number is only ever digits (8 in practice). Some emails wrap the value in
+  // markup or quote characters ("*00153024\r\n>\r\n> *", "</strong> 00155552<br />") or put the wrong
+  // field next to the label ("Low"), and the raw text then became the ticket's WO number, which made a
+  // second, phantom ticket instead of matching the real one. Take the digits; if there are none, use the
+  // number in the subject line; only if neither exists keep whatever was there.
+  function cleanWoNumber(raw) {
+    const s = String(raw == null ? '' : raw);
+    const m = s.match(/(?<!\d)(\d{6,9})(?!\d)/);
+    if (m) return m[1];
+    const sm = String(subject || '').match(/(?<!\d)(\d{8})(?!\d)/);
+    return sm ? sm[1] : s;
+  }
+
   const getField = (label) => {
     // Stop at next Neumo field label (word(s) followed by colon at start of a segment).
     // Capture group is zero-or-more (not one-or-more) so a genuinely blank field
@@ -1282,7 +1295,7 @@ function parseEmailBody(text, receivedAt, subject) {
   const isAddLineItemFollowUp = /Add\s+Line\s+Item\s+to\s+Work\s+Order/i.test(subject || '')
     || /add\s+the\s+following\s+line\s+item\s+to\s+the\s+existing\s+Work\s+Order/i.test(text);
   if (!isAddLineItemFollowUp && (/Maintenance/i.test(text) || /Consumable Restock/i.test(text))) {
-    const woNum = getField('Work Order Number');
+    const woNum = cleanWoNumber(getField('Work Order Number'));
     const account = getField('Account Name');
     const sstName = getField('SST Name');
     const pcName = getField('PC Name');
@@ -1416,7 +1429,7 @@ function parseEmailBody(text, receivedAt, subject) {
 
   // 3. Trouble ticket
   if (/Work Order Number:/i.test(text) || /Work Order #/i.test(text)) {
-    const woNum = stripMarkdownWrap(getField('Work Order Number') || getField('Work Order #'));
+    const woNum = cleanWoNumber(stripMarkdownWrap(getField('Work Order Number') || getField('Work Order #')));
     const pcName = stripMarkdownWrap(getField('PC Name'));
     const account = stripMarkdownWrap(getField('Account Name'));
     const issueCategory = stripMarkdownWrap(getField('Line Item Issue Category'));
@@ -1833,7 +1846,11 @@ exports.handler = async (event) => {
     // below), unlike replies. The actual isReplyOnly decision is finalized
     // further below, once effectiveBody exists -- see the note there for
     // why a raw Re: subject alone isn't a safe-enough signal on its own.
-    const rawSubjectIsReply = /^\s*re\s*:/i.test(subject);
+    // 2026-10-22: Neumo's helpdesk notices ("Ticket#7542/MCRTechnicalService/FW: Tech Dispatch ... -- has been
+    // updated") are conversation about an existing work order, never a new dispatch. One arrived with the whole
+    // forwarded email as raw HTML and made a phantom open ticket (WO "</strong> 00155552<br />") that sat on the
+    // watchdog for two days next to the real, closed one. Treated like a reply: stored, but no ticket, no reopen.
+    const rawSubjectIsReply = /^\s*re\s*:/i.test(subject) || /^\s*Ticket#\d+\//i.test(subject);
     // 2026-09-17: normalized subject (Re:/Fwd: stripped, lowercased) --
     // used below to recognize a same-thread reply-all on an already-
     // alerted dispatch list (e.g. Neumo's routine "these haven't hit
@@ -1849,7 +1866,12 @@ exports.handler = async (event) => {
     console.log(`[mailgun-inbound] Body sizes: ${bodySizes}`);
 
     // Use HTML as fallback if plain text is too short
-    let effectiveBody = textBody.length > 50 ? textBody : stripHtml(htmlBody);
+    // 2026-10-22: some senders put the HTML source in the plain-text part. Use it as text only after the markup
+    // is removed (twice, since forwarded mail can carry entity-escaped tags that only show up after the first pass).
+    const textBodyIsHtml = /^\s*<(?:!doctype|html|body|table|div)\b/i.test(textBody)
+      || (textBody.match(/<\/?(?:td|tr|table|br|strong|span|div|p)\b/gi) || []).length > 8;
+    const textBodyClean = textBodyIsHtml ? stripHtml(stripHtml(textBody)) : textBody;
+    let effectiveBody = textBodyClean.length > 50 ? textBodyClean : stripHtml(htmlBody);
 
     // If still too short, try to extract quoted/forwarded content
     // Manual forwards often bury the original in "---------- Forwarded message ----------" blocks
