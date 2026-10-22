@@ -78,7 +78,8 @@
 
   // Tunables for pulling a Friday stop forward to Thursday.
   const PULL_FORWARD_MILES = 25;   // straight-line miles from one of that tech's Thursday stops
-  const MAX_PULL_PER_TECH = 3;     // extra Friday stops one tech takes on Thursday
+  const MAX_PULL_PER_TECH = 3;     // extra Friday stops one tech takes on Thursday (near-a-Thursday-stop pulls)
+  const THURSDAY_SHARE = 0.4;      // target share of a tech's Thu+Fri stops done Thursday (matches Sep/Oct history)
 
   // A row belongs to this planner only if it is an Indiana site. The paste holds
   // every state's rows, and the board can also hold sites from other states.
@@ -293,6 +294,57 @@
         load[tech] = (load[tech] || 0) + pl.members.length;
         pl.friTech = tech;
       });
+
+      // Balance the two days (2026-10-22). Any Friday stop may be done Thursday; Thursday-due
+      // stops never move to Friday. History (Sep/Oct) shows Thursday carrying about 40% of a
+      // tech's Thu+Fri restocks. For each tech whose Thursday is light, pull whole Friday sites
+      // forward, nearest to that tech's Thursday stops first (or a compact group when the tech
+      // has none), until Thursday reaches THURSDAY_SHARE of the tech's two-day total.
+      if (thuIso) {
+        const thuBy = {};
+        thuStops.forEach(t => { thuBy[t.tech] = (thuBy[t.tech] || 0) + 1; });
+        const anchorsBy = {};
+        thuStops.forEach(t => { (anchorsBy[t.tech] = anchorsBy[t.tech] || []).push(LOCATIONS[t.code]); });
+        plans.filter(pl => pl.near).forEach(pl => {
+          thuBy[pl.near.tech] = (thuBy[pl.near.tech] || 0) + pl.members.length;
+          (anchorsBy[pl.near.tech] = anchorsBy[pl.near.tech] || []).push(LOCATIONS[pl.members[0].code]);
+        });
+        const poolBy = {};
+        plans.filter(pl => !pl.near && pl.friTech && thuAvail.indexOf(pl.friTech) !== -1)
+          .forEach(pl => { (poolBy[pl.friTech] = poolBy[pl.friTech] || []).push(pl); });
+        const dist = (pl, pts) => {
+          let best = Infinity;
+          pts.forEach(p => { const m = miles(LOCATIONS[pl.members[0].code], p); if (m !== null && m < best) best = m; });
+          return best;
+        };
+        Object.keys(poolBy).forEach(tech => {
+          const pool = poolBy[tech].slice();
+          const friN = pool.reduce((n, pl) => n + pl.members.length, 0);
+          let have = thuBy[tech] || 0;
+          const want = Math.round((have + friN) * THURSDAY_SHARE);
+          const anchors = (anchorsBy[tech] || []).slice();
+          while (have < want && pool.length) {
+            let pick = null, pickD = Infinity;
+            if (anchors.length) {
+              pool.forEach(pl => { const d = dist(pl, anchors); if (pick === null || d < pickD) { pick = pl; pickD = d; } });
+            } else {
+              // no Thursday stop yet: start from the site closest to the rest of this tech's Friday sites
+              pool.forEach(pl => {
+                const d = dist(pl, pool.filter(o => o !== pl).map(o => LOCATIONS[o.members[0].code]));
+                const dd = isFinite(d) ? d : 1e9;
+                if (pick === null || dd < pickD) { pick = pl; pickD = dd; }
+              });
+            }
+            pool.splice(pool.indexOf(pick), 1);
+            if (have + pick.members.length > want + 1) continue; // would overshoot; try a smaller site
+            pick.near = { tech, code: '', miles: isFinite(pickD) && pickD < 1e8 ? pickD : null, balance: true,
+                          thu: have + pick.members.length, fri: friN };
+            have += pick.members.length;
+            anchors.push(LOCATIONS[pick.members[0].code]);
+          }
+        });
+      }
+
       plans.forEach(pl => {
         const friTech = pl.friTech || suggestTechForSite(pl.members, avail, load, historicalPrefs);
         pl.members.forEach(item => {
@@ -302,9 +354,11 @@
             tech = pl.near.tech;
             extra.pullTech = pl.near.tech;
             extra.pull = true;
-            extra.pullNote = pl.near.same
-              ? 'same site as ' + pl.near.code + ' (' + pl.near.tech + ' Thu)'
-              : Math.round(pl.near.miles) + ' mi from ' + pl.near.code + ' (' + pl.near.tech + ' Thu)';
+            extra.pullNote = pl.near.balance
+              ? 'evens out ' + pl.near.tech + '’s week' + (pl.near.miles != null ? ' (' + Math.round(pl.near.miles) + ' mi from another Thu stop)' : '')
+              : pl.near.same
+                ? 'same site as ' + pl.near.code + ' (' + pl.near.tech + ' Thu)'
+                : Math.round(pl.near.miles) + ' mi from ' + pl.near.code + ' (' + pl.near.tech + ' Thu)';
           }
           d.assignments.push(mkAssign(item, tech, extra));
         });
@@ -336,7 +390,7 @@
     container.style.cssText = 'margin:12px 0; padding:14px; background:#1a1a2e; border:1px solid #444; border-radius:8px; color:#eee;';
 
     let html = '<div style="font-weight:bold; font-size:16px; margin-bottom:8px; color:#ffa500;">Indiana Restock Planner (Wed list \u2192 Thu / Fri)</div>';
-    html += '<div style="font-size:13px; color:#aaa; margin-bottom:12px;">Only Indiana sites are shown. Sites with several kiosks at one address stay together with one technician. Thursday stops are due Thursday. A Friday stop close to a Thursday stop can be caught Thursday: leave "Do Thursday" checked to move it, or uncheck it to keep it on Friday. Change a technician with the dropdown. Nothing is written until you click Apply.</div>';
+    html += '<div style="font-size:13px; color:#aaa; margin-bottom:12px;">Only Indiana sites are shown. Sites with several kiosks at one address stay together with one technician. Thursday stops are due Thursday. Any Friday stop can be done Thursday, and the plan moves some to even out each technician’s two days, starting with sites near that technician’s Thursday stops: leave "Do Thursday" checked to move it, or uncheck it to keep it on Friday. Change a technician with the dropdown. Nothing is written until you click Apply.</div>';
 
     plan.forEach(day => {
       html += '<div style="margin-bottom:14px;">';
