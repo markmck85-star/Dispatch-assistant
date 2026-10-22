@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.10 (publish in Messages)</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-220</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-221</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -906,6 +906,22 @@
             const fc = window.parsedFormCounts && window.parsedFormCounts[code];
             if (fc && fc.isBigHoku) return true;
             return false;
+        }
+        // 2026-10-22: Indiana restock rows name forms by printer position ("P1 Forms",
+        // "P3 Forms & Ribbon") and have no formsCount/ribbonCount, so the minimum-loadout
+        // tallies missed every Indiana ribbon on Big Hoku sites and all P-forms. This
+        // reads the listed consumables text instead (one ribbon / one forms set per stop).
+        function inListedLoad(code, fc) {
+            const out = { rib: 0, pf: {} };
+            if (!/^IN\d/i.test(code || '') || !fc) return out;
+            const t = String(fc.consumables || '').toLowerCase();
+            if (t.includes('ribbon')) out.rib = 1;
+            const re = /\bp(\d)\s*forms/g; let m;
+            while ((m = re.exec(t))) out.pf['P' + m[1]] = 1;
+            return out;
+        }
+        function inPfLabels(pf) {
+            return Object.keys(pf).sort().filter(k => pf[k] > 0).map(k => `${k}F×${pf[k]}`);
         }
         // Right-forms and color/decal rules apply only to GA SK/BK (dual-printer, form-year distinction)
         function isGARightFormsEligible(code) {
@@ -7794,13 +7810,16 @@ function distanceMatrixStatus(state) {
                     });
                 }
                 // ── Minimum consumables loadout tally ──
-                const loadoutTally = { LF: 0, RF: 0, RIB: 0, JP: 0, BHFORMS: 0, BHRIB: 0 };
+                const loadoutTally = { LF: 0, RF: 0, RIB: 0, JP: 0, BHFORMS: 0, BHRIB: 0, PF: {} };
                 let hasAnyRestock = false;
                 (items || []).forEach(item => {
                     if (item.urgent) return;
                     const fc = (window.parsedFormCounts || {})[item.code];
                     if (!fc) return;
                     const listed = (fc.consumables || '').toLowerCase();
+                    const _inL = inListedLoad(item.code, fc);
+                    if (_inL.rib && isBigHoku(item.code)) { loadoutTally.BHRIB += 1; hasAnyRestock = true; }
+                    Object.keys(_inL.pf).forEach(k => { loadoutTally.PF[k] = (loadoutTally.PF[k] || 0) + 1; hasAnyRestock = true; });
                     if (isBigHoku(item.code)) {
                         if (fc.formsCount > 0) { loadoutTally.BHFORMS += fc.formsCount; hasAnyRestock = true; }
                         if (fc.ribbonCount > 0) { loadoutTally.BHRIB += fc.ribbonCount; hasAnyRestock = true; }
@@ -7820,6 +7839,7 @@ function distanceMatrixStatus(state) {
                     const totalRIB = loadoutTally.RIB + loadoutTally.BHRIB;
                     if (totalRF  > 0) tally.push(`RF×${totalRF}`);
                     if (totalRIB > 0) tally.push(`RIB×${totalRIB}`);
+                    inPfLabels(loadoutTally.PF).forEach(x => tally.push(x));
                     if (loadoutTally.JP > 0) tally.push(`JP×${loadoutTally.JP}`);
                     if (tally.length > 0) msg += `\n📦 Min loadout: ${tally.join('  ')}`;
                 }
@@ -8297,13 +8317,16 @@ function distanceMatrixStatus(state) {
                 }
 
                 // ── Minimum loadout tally for print report ──
-                const pTally = { LF: 0, RF: 0, RIB: 0, JP: 0, BHFORMS: 0, BHRIB: 0 };
+                const pTally = { LF: 0, RF: 0, RIB: 0, JP: 0, BHFORMS: 0, BHRIB: 0, PF: {} };
                 let pHasRestock = false;
                 stops.forEach(item => {
                     if (item.urgent) return;
                     const fc2 = (window.parsedFormCounts || {})[item.code];
                     if (!fc2) return;
                     const listed2 = (fc2.consumables || '').toLowerCase();
+                    const _inL2 = inListedLoad(item.code, fc2);
+                    if (_inL2.rib && isBigHoku(item.code)) { pTally.BHRIB += 1; pHasRestock = true; }
+                    Object.keys(_inL2.pf).forEach(k => { pTally.PF[k] = (pTally.PF[k] || 0) + 1; pHasRestock = true; });
                     if (isBigHoku(item.code)) {
                         if (fc2.formsCount > 0) { pTally.BHFORMS += fc2.formsCount; pHasRestock = true; }
                         if (fc2.ribbonCount > 0) { pTally.BHRIB += fc2.ribbonCount; pHasRestock = true; }
@@ -8322,6 +8345,7 @@ function distanceMatrixStatus(state) {
                     const pTotalRIB = pTally.RIB + pTally.BHRIB;
                     if (pTotalRF  > 0) pLine.push(`RF×${pTotalRF}`);
                     if (pTotalRIB > 0) pLine.push(`RIB×${pTotalRIB}`);
+                    inPfLabels(pTally.PF).forEach(x => pLine.push(x));
                     if (pTally.JP > 0) pLine.push(`JP×${pTally.JP}`);
                     if (pLine.length > 0) {
                         block += `<div style="margin-top:8px;padding:5px 8px;background:#f0f4ff;border-radius:4px;font-size:12px;font-weight:600;color:#1a3a6b;">📦 Min loadout: ${pLine.join('  ')}</div>`;
@@ -8549,13 +8573,16 @@ ${content}
                 }
                 let h = `<div class="tech"><div class="th"><span class="tn">${esc(techName)}</span><span class="sub">${stops.length} stop${stops.length !== 1 ? 's' : ''}${esc(formatPrintTechDrive(techName))}</span>`;
                 // Minimum loadout (same tally as the printed summary)
-                const t = { LF: 0, RF: 0, RIB: 0, JP: 0, BHF: 0, BHR: 0 };
+                const t = { LF: 0, RF: 0, RIB: 0, JP: 0, BHF: 0, BHR: 0, PF: {} };
                 let any = false;
                 stops.forEach(item => {
                     if (item.urgent) return;
                     const fc2 = (window.parsedFormCounts || {})[item.code];
                     if (!fc2) return;
                     const l2 = (fc2.consumables || '').toLowerCase();
+                    const _inL3 = inListedLoad(item.code, fc2);
+                    if (_inL3.rib && isBigHoku(item.code)) { t.BHR += 1; any = true; }
+                    Object.keys(_inL3.pf).forEach(k => { t.PF[k] = (t.PF[k] || 0) + 1; any = true; });
                     if (isBigHoku(item.code)) {
                         if (fc2.formsCount > 0) { t.BHF += fc2.formsCount; any = true; }
                         if (fc2.ribbonCount > 0) { t.BHR += fc2.ribbonCount; any = true; }
@@ -8572,6 +8599,7 @@ ${content}
                     if (t.LF) L.push(`LF×${t.LF}`);
                     if (t.RF + t.BHF) L.push(`RF×${t.RF + t.BHF}`);
                     if (t.RIB + t.BHR) L.push(`RIB×${t.RIB + t.BHR}`);
+                    inPfLabels(t.PF).forEach(x => L.push(x));
                     if (t.JP) L.push(`JP×${t.JP}`);
                     if (L.length) h += `<span class="load">Load: ${L.join(' ')}</span>`;
                 }
