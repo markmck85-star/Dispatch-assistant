@@ -15,6 +15,7 @@
 // popup can show (and let the user change) how that visit is counted.
 
 const { createClient } = require('@supabase/supabase-js');
+const { isClosedAnyWay } = require('./lib/ticket-state.js');
 
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
@@ -51,7 +52,10 @@ function ticketAsVisit(t) {
     closing_note: null,
     inbound_email_id: t.inbound_email_id || null,
     source: 'email_ticket',
-    ticket_status: t.status || null,
+    // 2026-10-22: a ticket resolved by hand (Mark resolved, board Cancel, done-stop sweep) is closed here too,
+    // using the same rule as everywhere else. Before, this read tickets.status only and showed "open" for
+    // tickets that had long been resolved in the app.
+    ticket_status: isClosedAnyWay(t) ? 'closed' : (t.status || null),
     ticket_kind: t.ticket_kind || null,
   };
 }
@@ -168,7 +172,7 @@ exports.handler = async (event) => {
   if (offset === 0) {
     const { data: ticketRows, error: allTickErr } = await supabase
       .from('tickets')
-      .select('id, wo_number, ticket_kind, status, issue_category, issue_detail, description, received_at, inbound_email_id, needs_review')
+      .select('id, wo_number, ticket_kind, status, manually_resolved_at, issue_category, issue_detail, description, received_at, inbound_email_id, needs_review')
       .eq('site_id', site.id)
       .order('received_at', { ascending: false, nullsFirst: false })
       .limit(200);
