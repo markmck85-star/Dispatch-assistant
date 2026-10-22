@@ -42,7 +42,7 @@ exports.handler = async (event) => {
       const state = ((event.queryStringParameters || {}).state || "").trim().toUpperCase();
       const { data, error } = await supabase
         .from("tickets")
-        .select("id, wo_number, site_id, site_text, issue_category, cancel_request_at, cancel_request_confidence, cancel_request_excerpt, cancel_request_sender, sites(site_code, name, state)")
+        .select("id, wo_number, site_id, site_text, issue_category, cancel_request_at, cancel_request_confidence, cancel_request_excerpt, cancel_request_sender, cancel_request_email_id, sites(site_code, name, state)")
         .eq("status", "open")
         .is("manually_resolved_at", null)
         .not("cancel_request_at", "is", null)
@@ -50,6 +50,12 @@ exports.handler = async (event) => {
         .order("cancel_request_at", { ascending: false })
         .limit(200);
       if (error) return json(500, { ok: false, error: error.message });
+      const ids = (data || []).map((t) => t.cancel_request_email_id).filter(Boolean);
+      const bodies = {};
+      if (ids.length) {
+        const { data: em } = await supabase.from("inbound_emails").select("id, body_text, subject, received_at").in("id", ids);
+        (em || []).forEach((e) => { bodies[e.id] = e; });
+      }
       const items = (data || [])
         .filter((t) => !state || (t.sites && t.sites.state === state))
         .map((t) => ({
@@ -62,6 +68,8 @@ exports.handler = async (event) => {
           confidence: t.cancel_request_confidence,
           excerpt: t.cancel_request_excerpt,
           sender: t.cancel_request_sender,
+          emailSubject: bodies[t.cancel_request_email_id] ? bodies[t.cancel_request_email_id].subject : null,
+          emailBody: bodies[t.cancel_request_email_id] ? (bodies[t.cancel_request_email_id].body_text || "").slice(0, 8000) : null,
         }));
       return json(200, { ok: true, items });
     }

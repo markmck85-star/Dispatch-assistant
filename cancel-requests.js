@@ -24,11 +24,13 @@
             '<div style="color:#fecaca;font-size:13px;">' + tag + ' <b>' + esc(it.siteCode || '') + '</b> ' + esc(it.siteName || '') + ' · WO ' + esc(it.woNumber) + (it.state ? ' · ' + esc(it.state) : '') + '</div>' +
             '<div style="color:#d1a5a5;font-size:12px;margin:3px 0 6px;">“' + esc(it.excerpt) + '” — ' + esc(it.sender) + '</div>' +
             '<button data-i="' + i + '" data-a="confirm" style="padding:6px 12px;background:#ef4444;color:#fff;border:none;border-radius:4px;font-weight:bold;font-size:12px;cursor:pointer;margin-right:6px;">Confirm cancel</button>' +
+            '<button data-i="' + i + '" data-a="view" style="padding:6px 12px;background:#1e3a5f;color:#bfdbfe;border:none;border-radius:4px;font-size:12px;cursor:pointer;margin-right:6px;">View email</button>' +
             '<button data-i="' + i + '" data-a="keep" style="padding:6px 12px;background:#333;color:#ccc;border:none;border-radius:4px;font-size:12px;cursor:pointer;">Keep ticket</button>' +
+            '<pre id="crEmail' + i + '" style="display:none;white-space:pre-wrap;background:#111;color:#ddd;border-radius:4px;padding:8px;margin:8px 0 0;font-size:12px;max-height:260px;overflow:auto;">' + esc((it.emailSubject ? it.emailSubject + '\n\n' : '') + (it.emailBody || it.excerpt)) + '</pre>' +
             '</div>';
         }).join('') + '</div>';
       mount.querySelectorAll('button[data-a]').forEach(function (b) {
-        b.onclick = function () { act(items[+b.dataset.i], b.dataset.a, b); };
+        b.onclick = function () { if (b.dataset.a === 'view') { var p = document.getElementById('crEmail' + b.dataset.i); p.style.display = p.style.display === 'none' ? '' : 'none'; return; } act(items[+b.dataset.i], b.dataset.a, b); };
       });
     }
 
