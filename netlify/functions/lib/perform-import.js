@@ -206,7 +206,7 @@ async function stampCloserOnAssignments(supabase, assignmentIds) {
   if (!assignmentIds || !assignmentIds.length) return 0;
   const { data: assigns, error } = await supabase
     .from('assignments')
-    .select('id, site_id, ticket_id, dispatch_date, technician_id')
+    .select('id, site_id, ticket_id, dispatch_date, technician_id, status')
     .in('id', assignmentIds);
   if (error || !assigns || !assigns.length) return 0;
 
@@ -245,11 +245,24 @@ async function stampCloserOnAssignments(supabase, assignmentIds) {
         return vd && vd >= earliest && vd <= a.dispatch_date;
       }) || null;
     }
-    if (!visit || !visit.technician_id || visit.technician_id === a.technician_id) continue;
-    const { error: uErr } = await supabase
-      .from('assignments')
-      .update({ technician_id: visit.technician_id, updated_at: new Date().toISOString() })
-      .eq('id', a.id);
+    if (!visit || !visit.technician_id) continue;
+    const upd = {};
+    if (visit.technician_id !== a.technician_id) upd.technician_id = visit.technician_id;
+    // 2026-10-22: a stop done EARLY (visit before its dispatch_date) kept its later date, so the
+    // next day's board and route still drew a stop that was already finished (GA1026 Tara, done
+    // Wed, dated Thu). Move the completed row to the day the visit happened, unless that site
+    // already has a row on that day.
+    if (a.status === 'completed' && visit.started_at) {
+      const visitDay = easternDateOnly(visit.started_at);
+      if (visitDay && visitDay < a.dispatch_date) {
+        const { data: clash } = await supabase
+          .from('assignments').select('id').eq('site_id', a.site_id).eq('dispatch_date', visitDay).limit(1);
+        if (!clash || !clash.length) upd.dispatch_date = visitDay;
+      }
+    }
+    if (!Object.keys(upd).length) continue;
+    upd.updated_at = new Date().toISOString();
+    const { error: uErr } = await supabase.from('assignments').update(upd).eq('id', a.id);
     if (!uErr) stamped += 1;
   }
   return stamped;
