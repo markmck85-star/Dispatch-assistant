@@ -87,7 +87,8 @@
   // tech has no home coordinates, so the cap simply does not apply.
   const ROAD_FACTOR = 1.3;
   const AVG_MPH = 50;
-  const MAX_THURSDAY_DRIVE_HOURS = 5; // balancing never pulls a stop forward past this
+  const ON_SITE_MIN = 25;             // typical on-site time per kiosk (median ~28 min, trimmed average ~26, Jul-Oct 2026)
+  const MAX_THURSDAY_DAY_HOURS = 8;   // drive plus on-site; balancing never pulls a stop forward past this
   function estDriveHours(tech, pts) {
     const t = (typeof TECHS !== 'undefined' && TECHS[tech]) || null;
     if (!t || !isFinite(Number(t.lat)) || !isFinite(Number(t.lng)) || t.lat == null || t.lng == null) return 0;
@@ -359,8 +360,10 @@
             }
             pool.splice(pool.indexOf(pick), 1);
             if (have + pick.members.length > want + 1) continue; // would overshoot; try a smaller site
-            // keep the tech's Thursday drive reasonable: leave a far-off site on Friday
-            if (estDriveHours(tech, anchors.concat([LOCATIONS[pick.members[0].code]])) > MAX_THURSDAY_DRIVE_HOURS) continue;
+            // avoid overtime: drive (home loop, return included) plus on-site time stays within the
+            // day limit, otherwise the site stays on Friday
+            if (estDriveHours(tech, anchors.concat([LOCATIONS[pick.members[0].code]])) +
+                (have + pick.members.length) * ON_SITE_MIN / 60 > MAX_THURSDAY_DAY_HOURS) continue;
             pick.near = { tech, code: '', miles: isFinite(pickD) && pickD < 1e8 ? pickD : null, balance: true,
                           thu: have + pick.members.length, fri: friN };
             have += pick.members.length;
