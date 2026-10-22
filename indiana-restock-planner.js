@@ -335,11 +335,28 @@
       const thuAvail = thuIso ? availableFor(thuIso) : [];
       const thuStops = thuIso ? days[thuIso].assignments : [];
       const pulled = {};
+      // A tech already going to a site on Thursday for another ticket (a trouble ticket, say)
+      // catches that site's Friday restock on the same visit (2026-10-22).
+      let thuExisting = {};
+      if (thuIso && typeof fetchExistingAssignments === 'function') {
+        try { thuExisting = (await fetchExistingAssignments(thuIso)) || {}; } catch (e) { thuExisting = {}; }
+      }
+      const existingThuTech = (members) => {
+        for (const m of members) {
+          const ex = thuExisting[m.code];
+          if (ex && (ex.status === 'planned' || ex.status === 'notified') && ex.techName &&
+              thuAvail.indexOf(ex.techName) !== -1) return { tech: ex.techName, code: m.code };
+        }
+        return null;
+      };
       const sites = byCluster(groups[friIso]);
       const plans = sites.map(members => {
         const key = cid[members[0].code];
         let near = null;
-        if (thuIso && thuTechOfCluster[key] && thuAvail.indexOf(thuTechOfCluster[key]) !== -1) {
+        const already = thuIso ? existingThuTech(members) : null;
+        if (already) {
+          near = { tech: already.tech, code: already.code, miles: 0, same: true, existing: true };
+        } else if (thuIso && thuTechOfCluster[key] && thuAvail.indexOf(thuTechOfCluster[key]) !== -1) {
           // Same site already has kiosks due Thursday: they go together, no distance test.
           const t = thuStops.find(x => cid[x.code] === key);
           near = { tech: thuTechOfCluster[key], code: t ? t.code : '', miles: 0, same: true };
@@ -466,8 +483,10 @@
             tech = pl.near.tech;
             extra.pullTech = pl.near.tech;
             extra.pull = true;
-            extra.pullNote = pl.near.rehomed
-              ? pl.near.tech + ' has room Thursday (keeps ' + pl.near.from + ' under the day limit)'
+            extra.pullNote = pl.near.existing
+              ? 'already on Thursday for another ticket (' + pl.near.tech + ')'
+              : pl.near.rehomed
+              ?pl.near.tech + ' has room Thursday (keeps ' + pl.near.from + ' under the day limit)'
               : pl.near.balance
               ? 'evens out ' + pl.near.tech + '’s week' + (pl.near.miles != null ? ' (' + Math.round(pl.near.miles) + ' mi from another Thu stop)' : '')
               : pl.near.same
