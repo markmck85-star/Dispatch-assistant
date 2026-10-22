@@ -157,7 +157,11 @@
     }
     function outCount(d) {
       var av = (d && d.availability) || {};
-      return (av.outToday || []).length + (av.outNext || []).length;
+      // 2026-10-22: count people, not lines. Someone out today AND next workday (Kevin, PTO two days) is one
+      // technician out, but was counted twice (header said 2, badge said "2 out").
+      var seen = {};
+      (av.outToday || []).concat(av.outNext || []).forEach(function (t) { seen[(t && (t.id || t.name)) || ''] = 1; });
+      return Object.keys(seen).length;
     }
     function badgeText(d) {
       if (!d) return '';
@@ -288,7 +292,7 @@
           : '';
         avHtml += item('info', esc(p[0]), names(p[1]) + note);
       });
-      var avCount = (av.outToday || []).length + (av.outNext || []).length;
+      var avCount = outCount(d);
       h += sec('Technicians out', avCount, avHtml || empty('Everyone is in today and the next workday.'), avCount > 0);
 
       // Trouble tickets
