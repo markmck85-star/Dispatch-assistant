@@ -24,6 +24,10 @@
  * number if there is one, otherwise the shipped units. Anything doing stock
  * math should use receivedUnits, never units.
  *
+ * v6 (2026-10-22): DCO (decal change-out) requests and replies in every subject shape
+ *   Neumo uses are read (see parseDcoEmail). Each shipment carries kind "dco" or
+ *   "restock"; the inventory projection ignores "dco" shipments.
+ *
  * v5 (2026-10-13): technician match tolerates a small surname typo in the subject
  *   (see matchTech); everything else unchanged from v4.
  *
@@ -105,8 +109,8 @@ const SUBJECT_RE = new RegExp(
 // "10 BOX 30 ROLLS – 10101030 FORM GA SST RED"
 //  boxes      units unit         sku       description
 const ITEM_RE = new RegExp(
-  "(\\d+)\\s*BOX(?:ES)?\\s+(\\d+)\\s+([A-Za-z]+)\\s*" + DASH + "\\s*(\\d{6,9})\\s*(?:" + DASH + "\\s*)?" +
-  "([^\\r\\n]*?)(?=\\s+\\d+\\s*BOX\\b|\\s*THANK\\s+YOU|[\\r\\n]|$)",
+  "(\\d+)\\s*B[O0]X(?:ES)?\\s+(\\d+)\\s+([A-Za-z]+)\\s*" + DASH + "\\s*(\\d{6,9})\\s*(?:" + DASH + "\\s*)?" +
+  "([^\\r\\n]*?)(?=\\s+\\d+\\s*B[O0]X\\b|\\s*THANK\\s+YOU|[\\r\\n]|$)",
   "gi"
 );
 
@@ -114,6 +118,16 @@ const ITEM_RE = new RegExp(
 const DCO_SUBJECT_RE = new RegExp(
   "^\\s*(?:(?:re|fwd?|fw)\\s*:\\s*)*(\\d{1,2})\\/(\\d{1,2})\\s*" + DASH +
   "\\s*DCO\\s+MCR\\s+TECHS\\s+([A-Z]{2})\\s+SST",
+  "i"
+);
+// Single-tech DCO (decal change-out) request or reply. Neumo has used many subject
+// shapes: "10/19 - DCO MCR BRAD SCHILLER - MN SST", "10/21 - DCO - MCR GINA OWNBEY - GA SST",
+// "10/21 - DCO - SC SST - MCR MICAEIL NEWBOULT", "10/21 - DCO - MCR ROBERT MEDLEY" (no state),
+// "10/26 - DCO/RESTOCK - MCR LITTLETON". So the subject only needs the date and the word DCO;
+// the technician and state come from the "MCR NAME - XX SST" line in the body (with the
+// subject as a fallback), which is also what the warehouse's reply quotes.
+const DCO_ANY_SUBJECT_RE = new RegExp(
+  "^\\s*(?:(?:re|fwd?|fw)\\s*:\\s*)*(\\d{1,2})\\/(\\d{1,2})\\s*" + DASH + "\\s*DCO\\b(?!\\s+MCR\\s+TECHS)",
   "i"
 );
 // "MCR RYAN BARNES - IL SST" (a tech's block header inside a multi-tech request)
@@ -241,6 +255,7 @@ function parseMultiTechEmail(email) {
     if (!t.items.length && !t.tracking.length) continue;
     out.push({
       emailId: email.id,
+      kind: "dco",
       requestDate,
       techNameRaw: t.name,
       state: t.state,
@@ -261,7 +276,10 @@ function parseMultiTechEmail(email) {
 function parseShipEmails(email) {
   const single = parseShipEmail(email);
   if (single) return [single];
-  return parseMultiTechEmail(email);
+  const multi = parseMultiTechEmail(email);
+  if (multi.length) return multi;
+  const dco = parseDcoEmail(email);
+  return dco ? [dco] : [];
 }
 
 /**
@@ -277,7 +295,11 @@ function parseShipEmail(email) {
   const requestDate = requestDateFrom(Number(sm[1]), Number(sm[2]), email.received_at);
   const techNameRaw = sm[3].replace(/\s+/g, " ").trim();
   const state = sm[4].toUpperCase();
+  return finishParse(email, subject, body, requestDate, techNameRaw, state, "restock");
+}
 
+/** Shared tail: body + who/when -> a partial shipment (items, tracking, ship details). */
+function finishParse(email, subject, body, requestDate, techNameRaw, state, kind) {
   const items = extractItems(body);
 
   const tracking = [...new Set((body.match(TRACKING_RE) || []).map((t) => t.toUpperCase()))];
@@ -288,6 +310,7 @@ function parseShipEmail(email) {
 
   return {
     emailId: email.id,
+    kind,
     requestDate,
     techNameRaw,
     state,
@@ -302,6 +325,32 @@ function parseShipEmail(email) {
     sawRequestText: items.length > 0,
     sawReplyText: isReply && tracking.length > 0,
   };
+}
+
+/** Single-tech DCO email (any of the subject shapes above) -> a partial shipment, or null. */
+function parseDcoEmail(email) {
+  const subject = String(email.subject || "");
+  const sm = subject.match(DCO_ANY_SUBJECT_RE);
+  if (!sm) return null;
+  const body = cleanBody(email.body_text);
+  const requestDate = requestDateFrom(Number(sm[1]), Number(sm[2]), email.received_at);
+
+  let name = null, state = null;
+  TECH_BLOCK_RE.lastIndex = 0;
+  const bm = TECH_BLOCK_RE.exec(body);
+  if (bm) { name = bm[1]; state = bm[2]; }
+  if (!name) {
+    const a = subject.match(new RegExp("MCR\\s+(.+?)\\s*" + DASH + "\\s*([A-Z]{2})\\s+SST", "i"));
+    const b = subject.match(new RegExp("\\b([A-Z]{2})\\s+SST\\s*" + DASH + "\\s*MCR\\s+(.+?)\\s*$", "i"));
+    const c = subject.match(/MCR\s+(.+?)\s*$/i);
+    if (a) { name = a[1]; state = a[2]; }
+    else if (b) { name = b[2]; state = b[1]; }
+    else if (c) { name = c[1]; }
+  }
+  if (!name) return null;
+  name = name.replace(/\s+/g, " ").trim();
+  const kind = /RESTOCK/i.test(subject) ? "restock" : "dco";
+  return finishParse(email, subject, body, requestDate, name, state ? state.toUpperCase() : null, kind);
 }
 
 function words(s) {
@@ -358,11 +407,12 @@ function buildShipments(parsed, roster) {
     if (!groups.has(key)) {
       groups.set(key, {
         techNameRaw: p.techNameRaw, state: p.state, requestDate: p.requestDate,
-        items: [], tracking: [], boxesShipped: null, shipMethod: null, shippedAt: null, emailIds: [],
+        kind: p.kind || "restock", items: [], tracking: [], boxesShipped: null, shipMethod: null, shippedAt: null, emailIds: [],
       });
     }
     const g = groups.get(key);
     g.emailIds.push(p.emailId);
+    if (p.kind === "dco") g.kind = "dco";
     const have = new Set(g.items.map((i) => i.sku + "|" + i.boxes + "|" + i.units));
     for (const it of p.items) {
       const k = it.sku + "|" + it.boxes + "|" + it.units;
@@ -390,6 +440,7 @@ function buildShipments(parsed, roster) {
       technician: tech ? { id: tech.id, name: tech.name, state: tech.home_state } : null,
       techNameRaw: g.techNameRaw,
       state: g.state,
+      kind: g.kind,
       requestDate: g.requestDate,
       shippedAt: g.shippedAt,
       status: g.tracking.length ? "shipped" : "requested",
@@ -453,6 +504,7 @@ async function syncShipments(db, shipments) {
     const parsedCols = {
       technician_id: s.technician ? s.technician.id : null,
       state: s.state || null,
+      kind: s.kind || "restock",
       shipped_at: s.shippedAt || null,
       ship_method: s.shipMethod || null,
       boxes_requested: s.boxesRequested || null,
@@ -513,6 +565,7 @@ function shape(row, techById, today) {
     technician: tech ? { id: tech.id, name: tech.name, state: tech.home_state } : null,
     techNameRaw: row.tech_name_raw,
     state: row.state,
+    kind: row.kind || "restock",
     requestDate: row.request_date,
     shippedAt: row.shipped_at,
     shipMethod: row.ship_method,
@@ -560,7 +613,7 @@ exports.handler = async (event) => {
     .from("inbound_emails")
     .select("id, received_at, sender, subject, to_address, body_text")
     .gte("received_at", since + "T00:00:00-04:00")
-    .or("subject.ilike.%RESTOCK MCR%,subject.ilike.%DCO MCR%")
+    .or("subject.ilike.%RESTOCK MCR%,subject.ilike.%DCO%")
     .order("received_at", { ascending: true })
     .limit(500);
   if (mErr) return json(500, { error: mErr.message });

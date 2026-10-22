@@ -417,7 +417,7 @@ function renderConsumable() {
             const what = (s.items || []).map(itemLine).filter(Boolean).join('<br>');
             const tracking = (s.tracking || []).map(t => `<a href="${t.url}" target="_blank" rel="noopener">${t.number}</a>`).join('<br>');
             const warn = (s.warnings || []).length ? `<div style="color:#9b3b3b;font-size:12px;margin-top:4px;">${s.warnings.join(' ')}</div>` : '';
-            return `<tr><td>${consumableName(s)}</td><td>${s.state || ''}</td><td>${s.requestDate || ''}</td><td>${s.shippedAt || '—'}</td><td>${what || '—'}${warn}</td><td>${tracking || '—'}</td><td>${phaseLabel(s)}</td></tr>`;
+            return `<tr><td>${consumableName(s)}</td><td>${s.state || ''}</td><td>${s.requestDate || ''}</td><td>${s.shippedAt || '—'}</td><td>${s.kind === 'dco' ? '<strong>DCO</strong> ' : ''}${what || '—'}${warn}</td><td>${tracking || '—'}</td><td>${phaseLabel(s)}</td></tr>`;
         }).join('') +
         '</tbody></table></div>';
 }

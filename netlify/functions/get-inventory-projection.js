@@ -169,13 +169,14 @@ exports.handler = async (event) => {
 
     // Two plain queries (by id, by name) instead of .or(), so names with
     // spaces or punctuation cannot break the filter string.
-    const shipCols = "shipped_at, request_date, status, delivered_at, items, tech_name_raw, technician_id";
+    const shipCols = "shipped_at, request_date, status, delivered_at, items, tech_name_raw, technician_id, kind";
     const [byId, byName] = await Promise.all([
       supabase.from("consumable_shipments").select(shipCols).eq("technician_id", tech.id),
       supabase.from("consumable_shipments").select(shipCols).ilike("tech_name_raw", tech.name),
     ]);
     const seenShip = new Set();
     const ships = [...(byId.data || []), ...(byName.data || [])].filter((x) => {
+      if (x.kind === "dco") return false; // decal change-out forms are not steady consumption
       const k = x.shipped_at + "|" + x.tech_name_raw + "|" + JSON.stringify(x.items);
       if (seenShip.has(k)) return false; seenShip.add(k); return true;
     });
