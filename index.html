@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.10 (publish in Messages)</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-221</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-222</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -8408,7 +8408,7 @@ function distanceMatrixStatus(state) {
   @media print { .print-btn { display: none; } body { padding: 0; } }
 </style>
 </head><body>
-<button class="print-btn" onclick="(function(){try{window.close();}catch(e){}setTimeout(function(){location.href='${location.origin}/';},250);})()" style="right:auto;left:16px;background:#555;">← Back to app</button>
+<button class="print-btn" onclick="(function(){try{if(window.parent&&window.parent!==window&&window.parent.closeSummaryOverlay){window.parent.closeSummaryOverlay();return;}window.close();}catch(e){}setTimeout(function(){location.href='${location.origin}/';},250);})()" style="right:auto;left:16px;background:#555;">← Back to app</button>
 <button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print</button>
 
 ${content}
@@ -8435,21 +8435,9 @@ ${content}
 <\/script>
 <\/body><\/html>`;
 
-            const blob = new Blob([html], { type: 'text/html' });
-            const blobUrl = URL.createObjectURL(blob);
-            const printWin = window.open(blobUrl, '_blank');
-            if (!printWin) {
-                // Popup blocked — fall back to replacing page content temporarily
-                URL.revokeObjectURL(blobUrl);
-                const original = document.body.innerHTML;
-                document.body.innerHTML = `<div style="font-family:sans-serif;padding:16px;">${content}</div>`;
-                window.print();
-                document.body.innerHTML = original;
-                location.reload();
-                return;
-            }
-            // Clean up blob URL after a short delay
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+            // 2026-10-22: shown in an in-app overlay instead of a new tab (a new tab left a
+            // blank page behind on the installed app and the browser back arrow did nothing).
+            openSummaryOverlay(html);
         }
 
         // 2026-10-09: Compact on-screen dispatch summary. Opens in its own tab,
@@ -8499,6 +8487,34 @@ ${content}
             return out;
         }
 
+        // In-app full-screen overlay for the printable / compact dispatch summaries.
+        // Back arrow (history) and the page's own "Back to app" button both close it.
+        function closeSummaryOverlay(fromPop) {
+            const el = document.getElementById('summaryOverlay');
+            if (el) el.remove();
+            if (!fromPop && window._summaryOverlayPushed) { window._summaryOverlayPushed = false; try { history.back(); } catch (e) {} }
+            window._summaryOverlayPushed = false;
+        }
+        window.closeSummaryOverlay = closeSummaryOverlay;
+        function openSummaryOverlay(html) {
+            let el = document.getElementById('summaryOverlay');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'summaryOverlay';
+                el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#fff;';
+                el.innerHTML = '<iframe id="summaryFrame" style="border:0;width:100%;height:100%;background:#fff;"></iframe>';
+                document.body.appendChild(el);
+                try { history.pushState({ summaryOverlay: 1 }, ''); window._summaryOverlayPushed = true; } catch (e) {}
+                if (!window._summaryPopBound) {
+                    window._summaryPopBound = true;
+                    window.addEventListener('popstate', function () {
+                        if (document.getElementById('summaryOverlay')) closeSummaryOverlay(true);
+                    });
+                }
+            }
+            document.getElementById('summaryFrame').srcdoc = html;
+        }
+
         async function openCompactSummary() {
             // Stops dated for another day show on this board only as dashed "pushed to a
             // later date" placeholders. They are not part of this day's route, so leave
@@ -8515,9 +8531,7 @@ ${content}
             }
             // Open the tab right away (inside the click) so the popup blocker
             // allows it; the roster fetch below can take a moment.
-            const w = window.open('', '_blank');
-            if (!w) { alert('Pop-up blocked. Allow pop-ups for this site and try again.'); return; }
-            w.document.write('<p style="font-family:sans-serif;padding:16px;">Building compact summary…</p>');
+            openSummaryOverlay('<p style="font-family:sans-serif;padding:16px;">Building compact summary…</p>');
 
             const dateStr = window._lastDateStr || '';
             const regionLabel = window._lastRegionLabel || '';
@@ -8695,12 +8709,10 @@ ${content}
   }
   @media print { .bar button { display: none; } body { padding: 0; } }
 </style></head><body>
-<div class="bar"><button onclick="(function(){try{window.close();}catch(e){}setTimeout(function(){location.href='${location.origin}/';},250);})()">← Back to app</button><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('two')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
+<div class="bar"><button onclick="(function(){try{if(window.parent&&window.parent!==window&&window.parent.closeSummaryOverlay){window.parent.closeSummaryOverlay();return;}window.close();}catch(e){}setTimeout(function(){location.href='${location.origin}/';},250);})()">← Back to app</button><h1>Dispatch Summary${regionLabel ? ' – ' + esc(regionLabel) : ''}</h1><span class="d">${esc(dateStr)}</span><button onclick="document.body.classList.toggle('two')">1 / 2 columns</button><button onclick="window.print()">Print</button></div>
 <div class="cols">${body}</div>
 <\/body><\/html>`;
-            w.document.open();
-            w.document.write(html);
-            w.document.close();
+            openSummaryOverlay(html);
         }
 
         function generateMobileReport() {
