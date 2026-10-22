@@ -60,10 +60,12 @@
   </select>
   <button id="refreshBtn">Refresh</button>
 </div>
+<div id="cancelReqBanner" style="display:none;"></div>
 <div id="status"></div>
 <div id="list"></div>
 <a href="/" class="back-btn">← Back to Dispatch Tool</a>
 
+<script src="/cancel-requests.js"></script>
 <script>
 const stateSelect = document.getElementById('stateSelect');
 const refreshBtn = document.getElementById('refreshBtn');
@@ -95,6 +97,13 @@ function fmtDate(iso) {
     stateSelect.value = urlState;
   }
 })();
+
+try {
+  window.initCancelRequests({
+    mount: document.getElementById('cancelReqBanner'),
+    state: REAL_STATES.includes(stateSelect.value) ? stateSelect.value : ''
+  });
+} catch (e) {}
 
 async function fetchStateEntries(state) {
   const resp = await fetch(`/.netlify/functions/get-watchdog-log?state=${state}`);

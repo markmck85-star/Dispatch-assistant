@@ -2028,6 +2028,50 @@ exports.handler = async (event) => {
         console.error('[mailgun-inbound] Loomis meet tracking error (non-fatal):', meetEx.message);
       }
 
+      // 2026-10-22: cancellation-request detection. Neumo/ITI sometimes asks
+      // for a dispatch to be cancelled by replying on the ticket thread
+      // ("Please cancel this dispatch...", "FYI: This dispatch has been
+      // canceled."). Those replies are skipped by dispatch parsing, so the
+      // ticket just sat open. This only FLAGS the matching open ticket
+      // (tickets.cancel_request_*) -- a dispatcher confirms or keeps it via
+      // cancel-requests.js. Never cancels anything on its own. Sender must be
+      // Neumo/ITI: MCR's own mailbox replies quote the customer's words and
+      // would otherwise re-flag.
+      try {
+        const woC = subject.match(/\b(\d{8,})\b/);
+        const fromNeumo = /@(neumo\.com|iti4dmv\.com)\b/i.test(sender || '');
+        if (woC && fromNeumo && rawSubjectIsReply) {
+          const topC = extractTopOfReply(effectiveBody).replace(/\s+/g, ' ').trim();
+          const clearRe = /\b(please\s+)?cancel(l)?(ed)?\s+(this|the)\s+(dispatch|ticket|work\s*order|wo|sa|request)\b|\b(dispatch|ticket|work\s*order)\s+(has\s+been|is|was)\s+cancel(l)?ed\b|\bthis\s+dispatch\s+(has\s+been\s+)?cancel(l)?ed\b|\bplease\s+cancel\b|\bcancel(l)?ed\b.*\bdispatch\b/i;
+          const possibleRe = /\bcancel|\bno\s+longer\s+(need|require)|\bnot\s+(needed|necessary|required)\b|\bdisregard\b|\bignore\s+this\s+(dispatch|ticket)\b|\bresolved\s+(remotely|itself)\b|\bissue\s+(has\s+)?(resolved|cleared)\b|\bclose\s+(this|it)\s+out\b/i;
+          let conf = null;
+          if (topC && clearRe.test(topC)) conf = 'clear';
+          else if (topC && possibleRe.test(topC)) conf = 'possible';
+          if (conf) {
+            const { data: cTicket } = await supabase
+              .from('tickets')
+              .select('id, cancel_request_email_id, cancel_request_resolved_at')
+              .eq('wo_number', woC[1]).eq('status', 'open').is('manually_resolved_at', null)
+              .maybeSingle();
+            if (cTicket && cTicket.cancel_request_email_id !== inboundEmailId) {
+              const { error: cErr } = await supabase.from('tickets').update({
+                cancel_request_at: receivedAt.toISOString(),
+                cancel_request_confidence: conf,
+                cancel_request_excerpt: topC.slice(0, 300),
+                cancel_request_sender: sender,
+                cancel_request_email_id: inboundEmailId,
+                cancel_request_resolved_at: null,
+                cancel_request_resolution: null,
+              }).eq('id', cTicket.id);
+              if (cErr) console.error('[mailgun-inbound] cancel-request flag failed:', cErr.message);
+              else console.log(`[mailgun-inbound] Cancel request (${conf}) flagged on WO ${woC[1]} from ${sender}`);
+            }
+          }
+        }
+      } catch (cancelEx) {
+        console.error('[mailgun-inbound] cancel-request detection error (non-fatal):', cancelEx.message);
+      }
+
       // 2026-09-20: technician mileage sanity-check -- Mike forwards each
       // tech's biweekly expense/mileage .xlsx as it comes in
       // (FieldPilot-standardized filename, e.g.
