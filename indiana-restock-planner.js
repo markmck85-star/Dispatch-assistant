@@ -355,6 +355,45 @@
         if (near) pulled[near.tech] = (pulled[near.tech] || 0) + members.length;
         return { members, near };
       });
+      // Day-length cap for the near-a-Thursday-stop pulls too (2026-10-22). If a tech's Thursday
+      // (drive loop plus on-site time) runs past the limit, hand the farthest pulled site to another
+      // available tech who can fit it, or leave it on Friday. A site that shares an address with a
+      // Thursday-due site always goes with it.
+      if (thuIso) {
+        const dayCodes = {}, dayKiosks = {};
+        const addTo = (tech, code, n) => {
+          (dayCodes[tech] = dayCodes[tech] || []).push(code);
+          dayKiosks[tech] = (dayKiosks[tech] || 0) + n;
+        };
+        thuStops.forEach(t => addTo(t.tech, t.code, 1));
+        plans.forEach(pl => { if (pl.near) addTo(pl.near.tech, pl.members[0].code, pl.members.length); });
+        const hrs = (tech, codes, k) => estDriveHours(tech, codes) + k * ON_SITE_MIN / 60;
+        plans.filter(pl => pl.near && !pl.near.same)
+          .sort((a, b) => (b.near.miles || 0) - (a.near.miles || 0))
+          .forEach(pl => {
+            const tech = pl.near.tech, code = pl.members[0].code, n = pl.members.length;
+            if (hrs(tech, dayCodes[tech], dayKiosks[tech]) <= MAX_THURSDAY_DAY_HOURS) return;
+            dayCodes[tech].splice(dayCodes[tech].indexOf(code), 1);
+            dayKiosks[tech] -= n;
+            let alt = null, altCost = Infinity;
+            thuAvail.forEach(c => {
+              if (c === tech) return;
+              const ti = (typeof TECHS !== 'undefined' && TECHS[c]) || {};
+              if (ti.state && String(ti.state).toUpperCase() !== 'IN') return; // out-of-state techs are not used for this
+              const have = dayCodes[c] || [];
+              if (hrs(c, have.concat([code]), (dayKiosks[c] || 0) + n) > MAX_THURSDAY_DAY_HOURS) return;
+              const cost = estDriveHours(c, have.concat([code])) - estDriveHours(c, have);
+              if (cost < altCost) { altCost = cost; alt = c; }
+            });
+            if (alt) {
+              pl.near = { tech: alt, code: '', miles: null, balance: true, rehomed: true, from: tech };
+              addTo(alt, code, n);
+            } else {
+              pl.near = null; // stays on Friday
+            }
+          });
+      }
+
       const avail = availableFor(friIso);
       const load = {};
       plans.filter(pl => !pl.near).forEach(pl => {
@@ -427,7 +466,9 @@
             tech = pl.near.tech;
             extra.pullTech = pl.near.tech;
             extra.pull = true;
-            extra.pullNote = pl.near.balance
+            extra.pullNote = pl.near.rehomed
+              ? pl.near.tech + ' has room Thursday (keeps ' + pl.near.from + ' under the day limit)'
+              : pl.near.balance
               ? 'evens out ' + pl.near.tech + '’s week' + (pl.near.miles != null ? ' (' + Math.round(pl.near.miles) + ' mi from another Thu stop)' : '')
               : pl.near.same
                 ? 'same site as ' + pl.near.code + ' (' + pl.near.tech + ' Thu)'
