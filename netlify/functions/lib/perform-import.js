@@ -726,7 +726,13 @@ async function performImport(supabase, rows) {
   }
   assignmentsCompleted += assignmentsCompletedBySiteDate;
 
+  // 2026-10-22: tickets whose stops were all marked Done more than a day ago
+  // and that no visit ever matched are treated as resolved -- see
+  // sweepDoneStopTickets in ticket-state.js.
+  const ticketsResolvedBySweep = await ticketState.sweepDoneStopTickets(supabase);
+
   return {
+    ticketsResolvedBySweep,
     inserted,
     skippedExisting: rows.length - toInsert.length,
     siteMatched: siteMatchedCount,

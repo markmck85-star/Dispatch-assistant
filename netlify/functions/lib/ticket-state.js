@@ -79,4 +79,79 @@ async function closeStopsForTickets(supabase, ticketIds, finalStatus) {
   }
 }
 
-module.exports = { isClosedAnyWay, reopenedAtOf, visitPredatesReopen, reopenClearFields, closeStopsForTickets };
+// A ticket whose board stop was marked Done (board or tech portal) stays open
+// until Salesforce's closed report confirms a visit -- and when no visit ever
+// matches, it stays open for weeks (24 such tickets found 2026-10-22). Rule:
+// once every stop on a ticket is finished and the last one was finished more
+// than a day ago, the ticket is treated as resolved locally. Neumo reopening
+// the WO (see reopenClosedTicket in mailgun-inbound.js) overrides it, and a
+// stop finished BEFORE the latest reopen never counts. Runs on every import;
+// non-fatal; returns the number of tickets resolved.
+async function sweepDoneStopTickets(supabase, opts) {
+  try {
+    const graceMs = (opts && opts.graceMs) || 24 * 3600 * 1000;
+    const cutoff = new Date(Date.now() - graceMs).toISOString();
+    const floor = new Date(Date.now() - 120 * 24 * 3600 * 1000).toISOString();
+    const { data: done, error } = await supabase
+      .from('assignments')
+      .select('ticket_id, updated_at')
+      .eq('status', 'completed')
+      .not('ticket_id', 'is', null)
+      .lt('updated_at', cutoff)
+      .gt('updated_at', floor)
+      .limit(2000);
+    if (error || !done || !done.length) return 0;
+    const lastDoneByTicket = {};
+    for (const r of done) {
+      const ms = Date.parse(r.updated_at);
+      if (!(r.ticket_id in lastDoneByTicket) || ms > lastDoneByTicket[r.ticket_id]) lastDoneByTicket[r.ticket_id] = ms;
+    }
+    const ticketIds = Object.keys(lastDoneByTicket);
+    const toResolve = [];
+    for (let i = 0; i < ticketIds.length; i += 150) {
+      const chunk = ticketIds.slice(i, i + 150);
+      const { data: tickets } = await supabase
+        .from('tickets')
+        .select('id, status, manually_resolved_at, attributes')
+        .in('id', chunk)
+        .eq('status', 'open')
+        .is('manually_resolved_at', null);
+      if (!tickets || !tickets.length) continue;
+      const { data: active } = await supabase
+        .from('assignments')
+        .select('ticket_id')
+        .in('ticket_id', tickets.map((t) => t.id))
+        .in('status', ['planned', 'notified']);
+      const hasActive = new Set((active || []).map((a) => a.ticket_id));
+      for (const t of tickets) {
+        if (hasActive.has(t.id)) continue;
+        const reopened = reopenedAtOf(t);
+        if (reopened !== null && lastDoneByTicket[t.id] <= reopened) continue;
+        toResolve.push(t.id);
+      }
+    }
+    if (!toResolve.length) return 0;
+    let resolved = 0;
+    for (let i = 0; i < toResolve.length; i += 150) {
+      const chunk = toResolve.slice(i, i + 150);
+      const { data, error: uErr } = await supabase
+        .from('tickets')
+        .update({
+          manually_resolved_at: new Date().toISOString(),
+          manually_resolved_note: 'Stop marked done; no matching visit after a day (reopens if Neumo sends a new dispatch)',
+        })
+        .in('id', chunk)
+        .eq('status', 'open')
+        .is('manually_resolved_at', null)
+        .select('id');
+      if (uErr) console.error('[ticket-state] done-stop sweep update failed:', uErr.message);
+      else resolved += (data || []).length;
+    }
+    return resolved;
+  } catch (e) {
+    console.error('[ticket-state] done-stop sweep threw:', e.message);
+    return 0;
+  }
+}
+
+module.exports = { isClosedAnyWay, reopenedAtOf, visitPredatesReopen, reopenClearFields, closeStopsForTickets, sweepDoneStopTickets };
