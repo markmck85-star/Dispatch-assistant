@@ -583,6 +583,37 @@ async function autoAddTicketToBoard({
                 else if (staleRows && staleRows.length) staleOpenAssignment = staleRows[0];
               }
 
+              // 2026-10-22: the same duplicate shape one day either side.
+              // The bulk Location-Codes paste files a ticketless row on the
+              // day it is loaded; the restock's own ticket then arrives
+              // dated the due day (usually the next day), finds nothing on
+              // that exact date, and inserts a second, ticket-linked row.
+              // 174 such pairs since 9/1 (106 GA); one real visit then
+              // completes both. Before inserting, look for an open
+              // ticketless row at this site the day before or after and
+              // link the ticket to it instead. Maintenance (restock) only,
+              // ticketless planned/notified rows only, and the row keeps
+              // its date, tech and status (a dispatcher decision).
+              let adjacentOpenAssignment = null;
+              if (!existingAssignment && !staleOpenAssignment && (ticketKind || 'trouble') === 'maintenance') {
+                const dayShift = (str, n) => {
+                  const d = new Date(str + 'T12:00:00Z');
+                  d.setUTCDate(d.getUTCDate() + n);
+                  return d.toISOString().slice(0, 10);
+                };
+                const { data: adjRows, error: adjErr } = await supabase
+                  .from('assignments')
+                  .select('id, dispatch_date, status')
+                  .eq('site_id', siteId)
+                  .in('status', ['planned', 'notified'])
+                  .is('ticket_id', null)
+                  .in('dispatch_date', [dayShift(dispatchDateStr, -1), dayShift(dispatchDateStr, 1)])
+                  .order('dispatch_date', { ascending: true })
+                  .limit(1);
+                if (adjErr) console.error('[mailgun-inbound] adjacent-day ticketless lookup failed:', adjErr.message);
+                else if (adjRows && adjRows.length) adjacentOpenAssignment = adjRows[0];
+              }
+
               if (existingAssignErr) {
                 console.error('[mailgun-inbound] existing-assignment lookup for auto-add failed:', existingAssignErr.message);
               } else if (!existingAssignment && staleOpenAssignment) {
@@ -597,6 +628,14 @@ async function autoAddTicketToBoard({
                   .eq('id', staleOpenAssignment.id);
                 if (absorbErr) console.error('[mailgun-inbound] absorb-stale-assignment failed:', absorbErr.message);
                 else console.log(`[mailgun-inbound] Moved stale planned entry from ${staleOpenAssignment.dispatch_date} to ${dispatchDateStr} for new ticket ${woNum} instead of creating a duplicate`);
+              } else if (!existingAssignment && adjacentOpenAssignment) {
+                const { error: adjLinkErr } = await supabase
+                  .from('assignments')
+                  .update({ ticket_id: newTicketId, updated_at: new Date().toISOString() })
+                  .eq('id', adjacentOpenAssignment.id)
+                  .is('ticket_id', null);
+                if (adjLinkErr) console.error('[mailgun-inbound] link-ticket-to-adjacent-day-row failed:', adjLinkErr.message);
+                else console.log(`[mailgun-inbound] Linked ticket ${woNum} to the ticketless ${adjacentOpenAssignment.status} entry on ${adjacentOpenAssignment.dispatch_date} instead of adding a second ${dispatchDateStr} row`);
               } else if (!existingAssignment) {
                 // 2026-10-17: on a date with an on-call schedule, the
                 // closest on-call tech beats the site's own default.
