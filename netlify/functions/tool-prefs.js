@@ -40,12 +40,21 @@ function cleanIds(list) {
 
 function cleanPrefs(p) {
   const src = p && typeof p === 'object' ? p : {};
-  return {
+  const out = {
     v: 1,
     preset: PRESETS.has(src.preset) ? src.preset : null,
     pinned: cleanIds(src.pinned),
     unpinned: cleanIds(src.unpinned),
   };
+  // Per-view layouts (simple / everything): stars plus the order set with the Edit arrows.
+  if (src.layouts && typeof src.layouts === 'object') {
+    out.layouts = {};
+    for (const k of ['simple', 'everything']) {
+      const l = src.layouts[k] && typeof src.layouts[k] === 'object' ? src.layouts[k] : {};
+      out.layouts[k] = { pinned: cleanIds(l.pinned), unpinned: cleanIds(l.unpinned), order: cleanIds(l.order) };
+    }
+  }
+  return out;
 }
 
 function escapeLike(value) {

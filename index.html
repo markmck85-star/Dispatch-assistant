@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub v10.10 (publish in Messages)</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-222</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-223</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -10448,6 +10448,10 @@ ${content}
     }
     .tool-star { display: none; align-items: center; justify-content: center; width: 44px; min-height: 44px; border-radius: 8px; border: 1px solid #333; background: #141414; color: #f0a500; font-size: 20px; cursor: pointer; padding: 0; }
     #boardToolBar.editing #toolMain .tool-star { display: flex; }
+    .tool-move { display: none; flex-direction: column; gap: 2px; width: 40px; }
+    #boardToolBar.editing #toolMain .tool-move { display: flex; }
+    .tool-move button { flex: 1 1 0; min-height: 21px; border-radius: 6px; border: 1px solid #333; background: #141414; color: #f0a500; font-size: 13px; line-height: 1; cursor: pointer; padding: 0; }
+    .tool-move button:disabled { opacity: 0.25; cursor: default; }
     #toolMore .tool-star { display: flex; color: #888; }
     #toolMore { margin: 8px 0 0; border: 1px solid #333; border-radius: 8px; background: #141414; }
     #toolMore > summary { list-style: none; cursor: pointer; min-height: 44px; padding: 12px; font-weight: 700; font-size: 13px; color: #ccc; }
@@ -10525,7 +10529,7 @@ ${content}
     function region() { var s = document.getElementById('stateSelector'); return s ? s.value : ''; }
     function cacheKey(u) { return 'mcr_tool_prefs_v1:' + String(u.username || '').toLowerCase(); }
 
-    function emptyLayout() { return { pinned: [], unpinned: [] }; }
+    function emptyLayout() { return { pinned: [], unpinned: [], order: [] }; }
     function cleanList(list, known) {
         var out = [];
         if (!Array.isArray(list)) return out;
@@ -10543,16 +10547,16 @@ ${content}
         if (p.layouts && typeof p.layouts === 'object') {
             ['simple', 'everything'].forEach(function (k) {
                 var l = p.layouts[k] || {};
-                out.layouts[k] = { pinned: cleanList(l.pinned, known), unpinned: cleanList(l.unpinned, known) };
+                out.layouts[k] = { pinned: cleanList(l.pinned, known), unpinned: cleanList(l.unpinned, known), order: cleanList(l.order, known) };
             });
         } else if (Array.isArray(p.pinned) || Array.isArray(p.unpinned)) {
             var target = p.preset || (u && isAdmin(u) ? 'everything' : 'simple');
-            out.layouts[target] = { pinned: cleanList(p.pinned, known), unpinned: cleanList(p.unpinned, known) };
+            out.layouts[target] = { pinned: cleanList(p.pinned, known), unpinned: cleanList(p.unpinned, known), order: [] };
         }
         return out;
     }
     function hasPicks(p) {
-        return !!(p && (p.preset || ['simple', 'everything'].some(function (k) { return p.layouts[k].pinned.length || p.layouts[k].unpinned.length; })));
+        return !!(p && (p.preset || ['simple', 'everything'].some(function (k) { return p.layouts[k].pinned.length || p.layouts[k].unpinned.length || (p.layouts[k].order || []).length; })));
     }
     function lay() { return prefs.layouts[presetFor(user())]; }
     function loadLocal(u) {
@@ -10589,7 +10593,7 @@ ${content}
             if (res.prefs) {
                 var fromServer = clean(res.prefs, u);
                 // A server copy without per-view layouts is an older save; keep this browser's picks and send them up.
-                if (!(res.prefs.layouts) && hasPicks(prefs) && prefs.layouts && (prefs.layouts.simple.pinned.length + prefs.layouts.simple.unpinned.length + prefs.layouts.everything.pinned.length + prefs.layouts.everything.unpinned.length)) {
+                if (!(res.prefs.layouts) && hasPicks(prefs) && prefs.layouts && (prefs.layouts.simple.pinned.length + prefs.layouts.simple.unpinned.length + prefs.layouts.simple.order.length + prefs.layouts.everything.pinned.length + prefs.layouts.everything.unpinned.length + prefs.layouts.everything.order.length)) {
                     callServer(u, 'save', prefs);
                     return;
                 }
@@ -10625,6 +10629,14 @@ ${content}
             var t = allowed.filter(function (x) { return x.id === id; })[0];
             if (t && main.indexOf(t) < 0) main.push(t);
         });
+        // Reordered with the arrows in Edit mode: tools in the saved order go first, in that order;
+        // anything not in it (newly starred) stays after them.
+        if (L.order && L.order.length) {
+            var rank = function (t) { var i = L.order.indexOf(t.id); return i < 0 ? 1e6 : i; };
+            main = main.map(function (t, i) { return { t: t, i: i }; })
+                .sort(function (a, b) { return (rank(a.t) - rank(b.t)) || (a.i - b.i); })
+                .map(function (x) { return x.t; });
+        }
         var more = allowed.filter(function (t) { return main.indexOf(t) < 0; });
         return { main: main, more: more, allowed: allowed };
     }
@@ -10662,6 +10674,11 @@ ${content}
         w.setAttribute('data-tool', t.id);
         if (el.parentNode) el.parentNode.insertBefore(w, el);
         w.appendChild(el);
+        var mv = document.createElement('div');
+        mv.className = 'tool-move';
+        mv.innerHTML = '<button type="button" data-move="up" data-tool-id="' + t.id + '" aria-label="Move up" title="Move up">\u25B2</button>' +
+                       '<button type="button" data-move="down" data-tool-id="' + t.id + '" aria-label="Move down" title="Move down">\u25BC</button>';
+        w.appendChild(mv);
         var star = document.createElement('button');
         star.type = 'button';
         star.className = 'tool-star';
@@ -10689,11 +10706,23 @@ ${content}
         var L = prefs.layouts[preset];
         L.pinned = L.pinned.filter(function (x) { return x !== id; });
         L.unpinned = L.unpinned.filter(function (x) { return x !== id; });
+        L.order = (L.order || []).filter(function (x) { return x !== id; });
         if (inMain) {
             if (isDefault) L.unpinned.push(id);
         } else {
             L.pinned.push(id);
         }
+        persist(u);
+        refresh();
+    }
+
+    function moveTool(id, dir) {
+        var u = user(); if (!u) return;
+        var ids = resolve(u).main.map(function (t) { return t.id; });
+        var i = ids.indexOf(id), j = i + (dir === 'up' ? -1 : 1);
+        if (i < 0 || j < 0 || j >= ids.length) return;
+        var tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp;
+        prefs.layouts[presetFor(u)].order = ids;
         persist(u);
         refresh();
     }
@@ -10707,7 +10736,7 @@ ${content}
         bar.innerHTML =
             '<div id="toolMain"></div>' +
             '<details id="toolMore"><summary id="toolMoreSummary">More tools</summary><div id="toolMoreList"></div></details>' +
-            '<div class="tool-hint">Tap a star to move a tool between the main row and More tools. New stars land at the bottom of the main row, so star them in the order you want them.' +
+            '<div class="tool-hint">Tap Edit, then use the arrows to reorder the main row, or a star to move a tool between the main row and More tools. New stars land at the bottom of the main row.' +
               '<button type="button" data-reset>Reset this view to default</button></div>' +
             '<div class="tool-head">' +
               '<div class="tool-seg" role="group" aria-label="Tool view">' +
@@ -10754,6 +10783,8 @@ ${content}
         bar.addEventListener('click', function (e) {
             var t = e.target;
             var u = user(); if (!u) return;
+            var mvBtn = t.closest ? t.closest('[data-move]') : null;
+            if (mvBtn) { e.preventDefault(); e.stopPropagation(); if (!mvBtn.disabled) moveTool(mvBtn.getAttribute('data-tool-id'), mvBtn.getAttribute('data-move')); return; }
             var starBtn = t.closest ? t.closest('.tool-star') : null;
             if (starBtn) { e.preventDefault(); e.stopPropagation(); togglePin(starBtn.getAttribute('data-star')); return; }
             var presetBtn = t.closest ? t.closest('[data-preset]') : null;
@@ -10816,11 +10847,14 @@ ${content}
         var mainBox = document.getElementById('toolMain');
         var moreList = document.getElementById('toolMoreList');
         var seen = {};
-        r.main.forEach(function (t) {
+        r.main.forEach(function (t, idx) {
             var w = ensureWrapper(t); if (!w) return;
             setStar(w, true);
             mainBox.appendChild(w);
             seen[t.id] = true;
+            var up = w.querySelector('[data-move="up"]'), dn = w.querySelector('[data-move="down"]');
+            if (up) up.disabled = idx === 0;
+            if (dn) dn.disabled = idx === r.main.length - 1;
         });
 
         moreList.innerHTML = '';
