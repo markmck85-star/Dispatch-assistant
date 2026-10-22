@@ -68,6 +68,14 @@ function parseLeftoverCounts(note) {
       [new RegExp(NUM + '\\s+forms?\\s+remaining\\s+on\\s+(?:the\\s+)?recovered', 'i'), 0, 1],
       // "Restocked left forms full roll, 295 remain"
       [new RegExp('\\b(left|right)\\s+forms?\\s+full\\s+roll,?\\s*' + NUM + '\\s+remain', 'i'), 1, 2],
+      // 2026-10-22, Georgia: "Left registrations at 178 upon arrival." (one tech's standard wording; 119 GA
+      // visits since August were unread without it)
+      [new RegExp('\\b(left|right)\\s+registrations?\\s+(?:at\\s+)?' + NUM, 'i'), 0, 2],
+      // "Restocked form paper which had a count of 148", "left form printer paper which had a count of 113",
+      // "Forms had a count of 180"
+      [new RegExp('\\bforms?(?:\\s+printer)?(?:\\s+paper)?\\s+(?:which\\s+)?had\\s+a\\s+count\\s+of\\s+' + NUM, 'i'), 0, 1],
+      // "Restocked 2027 left forms at count 2."
+      [new RegExp('\\bforms?\\s+at\\s+count\\s+' + NUM, 'i'), 0, 1],
       // "Form count was 227", "Forms count was 295" (also covered by B for the short forms)
       [new RegExp('\\bforms?\\s+count\\s+(?:was|is)\\s+' + NUM, 'i'), 0, 1],
     ];
