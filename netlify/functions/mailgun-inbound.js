@@ -1689,6 +1689,48 @@ async function queuePendingDigest(store, hoursExcluded, entry) {
 
 // ── Main handler ──────────────────────────────────────────────────────────────
 
+// 2026-10-22: Neumo sometimes sends a NEW dispatch email (or an "Add Line
+// Item") on a work order whose ticket is already closed -- a second visit on
+// the same WO instead of a fresh WO. Real case: WO 00155464 (GA1126),
+// closed 10/19, then a second line item / new appointment on 10/22. The
+// ticket upsert ignores duplicates, so the row stayed 'closed' with the old
+// deadline, and the closed-ticket import (which re-closes any WO still in
+// the Salesforce closed report) would have completed the new stop from the
+// old visit. This reopens the ticket, refreshes its timing, notes it, and
+// records attributes.reopenedAt so perform-import ignores visits that
+// happened before the reopen.
+//
+// Guards: only a ticket currently 'closed'; only an email received AFTER
+// the ticket's last update (a re-forward or retry of an old email never
+// reopens anything); and never the same inbound email that created it.
+async function reopenClosedTicket(supabase, existing, receivedAt, inboundEmailId, noteText, fields) {
+  try {
+    if (!existing || existing.status !== 'closed') return false;
+    if (existing.inbound_email_id && existing.inbound_email_id === inboundEmailId) return false;
+    const lastTouched = existing.updated_at ? new Date(existing.updated_at) : null;
+    if (lastTouched && !(receivedAt > lastTouched)) return false;
+    const stamp = receivedAt.toISOString().slice(0, 10);
+    const note = `[Reopened ${stamp}] ${noteText || 'New dispatch received on a closed work order'}`;
+    const attrs = { ...(existing.attributes || {}), reopenedAt: receivedAt.toISOString(), reopenedEmailId: inboundEmailId || null };
+    const upd = {
+      ...(fields || {}),
+      status: 'open',
+      description: (existing.description ? existing.description + '\n\n' : '') + note,
+      attributes: attrs,
+    };
+    const { error } = await supabase.from('tickets').update(upd).eq('id', existing.id).eq('status', 'closed');
+    if (error) {
+      console.error('[mailgun-inbound] reopen closed ticket failed:', error.message);
+      return false;
+    }
+    console.log(`[mailgun-inbound] Reopened closed ticket ${existing.wo_number || existing.id} (new email after closure)`);
+    return true;
+  } catch (e) {
+    console.error('[mailgun-inbound] reopen closed ticket threw (non-fatal):', e.message);
+    return false;
+  }
+}
+
 exports.handler = async (event) => {
   connectLambda(event);
   if (event.httpMethod !== "POST") return json(405, { error: "Method Not Allowed" });
@@ -2446,7 +2488,7 @@ exports.handler = async (event) => {
         // block -- see the 2026-08-29 comment there.)
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
-            .from('tickets').select('id, description, ticket_kind, site_id, site_text, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
+            .from('tickets').select('id, wo_number, status, updated_at, attributes, inbound_email_id, description, ticket_kind, site_id, site_text, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
           if (existingErr) {
             console.error('[mailgun-inbound] existing-ticket lookup for line item addition failed:', existingErr.message);
           } else if (existingTicket) {
@@ -2472,6 +2514,14 @@ exports.handler = async (event) => {
             const { error: updateErr } = await supabase
               .from('tickets').update(updateFields).eq('id', existingTicket.id);
             if (updateErr) console.error('[mailgun-inbound] append line item failed:', updateErr.message);
+            else if (existingTicket.status === 'closed') {
+              // 2026-10-22: a line item added to an already-closed WO is new
+              // work -- reopen it (flagged for review so a dispatcher looks).
+              await reopenClosedTicket(
+                supabase, { ...existingTicket, description: newDescription }, receivedAt, inboundEmailId,
+                addedText, { needs_review: true }
+              );
+            }
             else {
               console.log(`[mailgun-inbound] Line item appended to existing ticket ${parsed.woNum} (site state: ${appendedTicketState || 'still unknown -- original ticket has no site match either'})`);
               appendedToExisting = true;
@@ -2588,7 +2638,7 @@ exports.handler = async (event) => {
         // fields just below and the SMS dedup further down at the alert
         // block.
         const { data: preExistingTicket } = await supabase
-          .from('tickets').select('id').eq('wo_number', parsed.woNum).maybeSingle();
+          .from('tickets').select('id, wo_number, status, updated_at, description, attributes, inbound_email_id').eq('wo_number', parsed.woNum).maybeSingle();
         ticketAlreadyExisted = !!preExistingTicket;
 
         const isInstallOrSurvey = ['install', 'site_survey'].includes(parsed.ticketKind);
@@ -2654,6 +2704,25 @@ exports.handler = async (event) => {
           .upsert(ticketRow, { onConflict: 'wo_number', ignoreDuplicates: true });
         if (ticketErr) console.error('[mailgun-inbound] tickets upsert failed:', ticketErr.message);
         else console.log(`[mailgun-inbound] Supabase: ticket ${parsed.woNum} written (site_id: ${siteId || 'unmatched, needs_review'})`);
+
+        // 2026-10-22: a new dispatch email on an already-closed WO means a
+        // second visit -- reopen the ticket with this email's timing.
+        if (preExistingTicket && preExistingTicket.status === 'closed') {
+          await reopenClosedTicket(
+            supabase, preExistingTicket, receivedAt, inboundEmailId,
+            parsed.description || parsed.issue || null,
+            {
+              received_at: ticketRow.received_at,
+              earliest_start_at: ticketRow.earliest_start_at,
+              due_at: ticketRow.due_at,
+              sla_ends_at: ticketRow.sla_ends_at,
+              deadline_source: ticketRow.deadline_source,
+              issue_category: ticketRow.issue_category,
+              issue_detail: ticketRow.issue_detail,
+              inbound_email_id: ticketRow.inbound_email_id,
+            }
+          );
+        }
 
         // 2026-09-10: the upsert above uses ignoreDuplicates on wo_number,
         // so a RE-processed WO (Mark manually re-forwarding a stuck email,

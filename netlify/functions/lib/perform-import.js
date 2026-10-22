@@ -323,7 +323,7 @@ async function performImport(supabase, rows) {
     if (!chunk.length) continue;
     const { data: matchedTickets } = await supabase
       .from('tickets')
-      .select('id, wo_number, site_id')
+      .select('id, wo_number, site_id, attributes')
       .in('wo_number', chunk);
     for (const t of matchedTickets || []) ticketByWo[t.wo_number] = t;
   }
@@ -385,7 +385,23 @@ async function performImport(supabase, rows) {
     // to their own creation, however long ago that completion was first
     // imported.
     const linkedTicket = r.woNumber ? ticketByWo[r.woNumber] : null;
-    if (linkedTicket) ticketIdsToClose.add(linkedTicket.id);
+    // 2026-10-22: Neumo can reopen a closed WO with a second visit (see
+    // reopenClosedTicket in mailgun-inbound.js, which stamps
+    // attributes.reopenedAt). The EARLIER visit stays in the closed report,
+    // so without this check every sync would re-close the reopened ticket
+    // and complete its new board stop. A visit that started before the
+    // reopen never closes it; only a later one does. Tickets that were never
+    // reopened behave exactly as before.
+    let visitPredatesReopen = false;
+    if (linkedTicket && linkedTicket.attributes && linkedTicket.attributes.reopenedAt) {
+      const rowStartIso = existingSet.has(r.appointmentNumber)
+        ? (existingRowInfo.get(r.appointmentNumber) || {}).started_at
+        : parseSalesforceDate(r.actualStart);
+      if (rowStartIso && new Date(rowStartIso) < new Date(linkedTicket.attributes.reopenedAt)) {
+        visitPredatesReopen = true;
+      }
+    }
+    if (linkedTicket && !visitPredatesReopen) ticketIdsToClose.add(linkedTicket.id);
 
     // 2026-08-12, same session as the fix above: get-state-console.js's
     // Open/Closed label does NOT read tickets.status at all -- it
