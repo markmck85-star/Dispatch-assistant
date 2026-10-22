@@ -210,6 +210,7 @@
         <input type="date" id="summDate" aria-label="Date">
         <div class="seg"><button id="summToday">Today</button><button id="summTomorrow">Tomorrow</button></div>
       </div>
+      <div class="shiprow"><button type="button" id="summPubBtn" class="primary" style="margin:0;">Publish to techs</button><span id="summPubStatus" class="muted"></span></div>
       <div class="shiprow"><a id="summOpenApp" class="applink" href="/" target="_blank" rel="noopener">Open the dispatch app to change assignments &rarr;</a></div>
       <div class="muted" id="summStatus"></div>
       <div id="summList"></div>
@@ -414,9 +415,32 @@
   }
   $('summToday').onclick = function () { $('summDate').value = summDay(0); loadSumm(); };
   $('summTomorrow').onclick = function () { $('summDate').value = summDay(1); loadSumm(); };
+  // Publish from the Summary tab (2026-10-22): this is where the whole state's plan is on screen, so the
+  // dispatcher sees what every tech will get. The Today tab only shows the logged-in person's own stops.
+  function summRegion() { var s = $('summState').value; return (s === 'GA' || s === 'NC' || s === 'SC') ? 'GA/NC/SC' : s; }
+  async function summPubRefresh() {
+    var date = $('summDate').value, st = $('summState').value;
+    var ps = await call('publish_status', { date: date, state: st });
+    if (date !== $('summDate').value || st !== $('summState').value) return;
+    var isPub = !!(ps && ps.published);
+    $('summPubBtn').textContent = isPub ? 'Unpublish' : 'Publish to techs';
+    $('summPubStatus').textContent = isPub ? 'Published: every tech in ' + summRegion() + ' sees their stops for this date' : 'Not published yet';
+  }
+  $('summPubBtn').onclick = async function () {
+    var date = $('summDate').value, st = $('summState').value;
+    var on = $('summPubBtn').textContent.indexOf('Unpublish') === -1;
+    if (on && !confirm('Publish the plan shown below to every tech in ' + summRegion() + ' for ' + date + '?')) return;
+    $('summPubBtn').disabled = true;
+    try {
+      var r = await call('publish_stops', { date: date, state: st, on: on });
+      if (r.ok) summPubRefresh(); else alert(r.error || 'Could not update');
+    } catch (e) { alert('Could not update'); }
+    finally { $('summPubBtn').disabled = false; }
+  };
   async function loadSumm() {
     summMarks();
     if (KIND !== 's') return;
+    summPubRefresh();
     var seq = ++SUMM_SEQ;
     $('summStatus').textContent = 'Loading...';
     $('summList').innerHTML = '';
@@ -1156,8 +1180,9 @@
 
   // Publish toggle for staff
   function updatePublishBtn() {
-    if (KIND !== 's') { $('publishBar').classList.add('hidden'); return; }
-    $('publishBar').classList.remove('hidden');
+    // 2026-10-22: publishing moved to the Summary tab (it shows the whole plan); keep this bar hidden.
+    $('publishBar').classList.add('hidden');
+    if (KIND !== 's') return;
     $('publishBtn').onclick = async function () {
       var date = $('todayDate').value || todayIso(0);
       var st = STATE || $('stateSel').value;
