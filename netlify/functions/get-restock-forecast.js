@@ -115,7 +115,25 @@ exports.handler = async (event) => {
     // whatever the gap), so a site whose last forms listing had no ribbon is likely to get it next.
     const ribbonHint = (t) => (t && t.last_ribbon != null ? { ribbonLikely: t.last_ribbon === false, lastRibbonBy: t.last_forms_by } : {});
 
-    const rows = (est.data || []).map((r) => ({
+    // v8 (2026-10-22): a site already on the board for an EARLIER day (today or later, before this date) has a
+    // restock coming, even if the tech has not done it yet, so it is left out of this day's forecast. Without
+    // this a site on today's list shows as nearly empty tomorrow (Rockbridge, GA1044). Only maintenance
+    // (restock) stops count, and only active or done ones, not removed/cancelled.
+    const todayEt = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const earlier = {};
+    if (date > todayEt) {
+      const ea = await supabase
+        .from("assignments")
+        .select("dispatch_date, status, site_id, tickets(ticket_kind)")
+        .gte("dispatch_date", todayEt).lt("dispatch_date", date)
+        .in("status", ["planned", "notified", "completed"]);
+      (ea.data || []).forEach((a) => {
+        const code = idToCode[a.site_id];
+        if (code && a.tickets && a.tickets.ticket_kind === "maintenance") earlier[code] = a.dispatch_date;
+      });
+    }
+
+    const rows = (est.data || []).filter((r) => !earlier[r.site_code]).map((r) => ({
       ...listFlag(r, thr[r.site_code]),
       ...ribbonHint(thr[r.site_code]),
       thrMid: rnd((thr[r.site_code] || {}).mid_median), thrMidN: (thr[r.site_code] || {}).mid_n || 0,
@@ -221,7 +239,7 @@ exports.handler = async (event) => {
       rows.sort((a, b) => a.estCount - b.estCount);
     }
     const techList = Object.keys(techs).map((id) => ({ id, name: techs[id] }));
-    return json(200, { date, near: (techNear || origin) ? near : null, stops, techs: techList, rows: out });
+    return json(200, { date, near: (techNear || origin) ? near : null, stops, techs: techList, rows: out, plannedEarlier: earlier });
   } catch (e) {
     return json(500, { error: String(e.message || e) });
   }
