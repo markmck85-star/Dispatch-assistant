@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-238</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-239</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -7750,7 +7750,14 @@ function distanceMatrixStatus(state) {
                             const slaStr = (item.fromTicket && item.ticketSlaEnd) ? formatServerSlaTime(item.ticketSlaEnd, item.code) : (meta.slaEnd || (meta.dueDate ? formatDueDate(meta.dueDate) : ''));
                     if (slaStr) issueStr += ` (SLA ends ${slaStr})`;
                         }
-                        const stopType = item.urgent ? issueStr : (item.restockUrgent
+                        // 2026-10-22: a stop that is Neumo's "Decal Change" ticket is a DCO visit, not a restock.
+                        const isDcoTicketStop = !item.urgent && (() => {
+                            try {
+                                return /decal[\s-]*change|\bdco\b/i.test(String(item.ticketIssue || '')) ||
+                                    (item.ticketLineItems || []).some(li => /decal[\s-]*change|\bdco\b/i.test(JSON.stringify(li)));
+                            } catch (e) { return false; }
+                        })();
+                        const stopType = item.urgent ? issueStr : (isDcoTicketStop ? ' - DCO (decal change-out)' : item.restockUrgent
                             ? (item.restockOverdue ? ` - Consumable Restock 🔴 OVERDUE (was due ${item.restockBy})` : ' - Consumable Restock ⚡ SAME DAY')
                             : ' - Consumable Restock');
                         msg += `${i + 1}. ${prefix}${loc.name}${stopType}${reassignNote}\n`;
