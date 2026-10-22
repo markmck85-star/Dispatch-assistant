@@ -87,7 +87,8 @@
   // tech has no home coordinates, so the cap simply does not apply.
   const ROAD_FACTOR = 1.3;
   const AVG_MPH = 50;
-  const ON_SITE_MIN = 25;             // typical on-site time per kiosk (median ~28 min, trimmed average ~26, Jul-Oct 2026)
+  const ON_SITE_FIRST_MIN = 25;       // on-site time for the first kiosk at an address (median ~28 min, trimmed average ~26, Jul-Oct 2026)
+  const ON_SITE_EXTRA_KIOSK_MIN = 15; // each further kiosk at the same address (Indy West visits average ~17 min)
   const MAX_THURSDAY_DAY_HOURS = 8;   // drive plus on-site; balancing never pulls a stop forward past this
   // Uses the real driving-time matrix (_dmCache.IN, loaded from get-distance-matrix) for tech-to-site
   // and site-to-site legs; a leg missing from the matrix falls back to the straight-line estimate.
@@ -372,39 +373,41 @@
         if (near) pulled[near.tech] = (pulled[near.tech] || 0) + members.length;
         return { members, near };
       });
+      // On-site time: a full visit for the first kiosk at an address, a shorter one for each further
+      // kiosk there (Indy West 1-4 takes about an hour for all four, roughly 15 minutes each after the first).
+      const onSiteHours = (codes) => {
+        const sitesN = new Set(codes.map(c => cid[c] || c)).size;
+        return (sitesN * ON_SITE_FIRST_MIN + Math.max(0, codes.length - sitesN) * ON_SITE_EXTRA_KIOSK_MIN) / 60;
+      };
       // Day-length cap for the near-a-Thursday-stop pulls too (2026-10-22). If a tech's Thursday
       // (drive loop plus on-site time) runs past the limit, hand the farthest pulled site to another
       // available tech who can fit it, or leave it on Friday. A site that shares an address with a
       // Thursday-due site always goes with it.
       if (thuIso) {
-        const dayCodes = {}, dayKiosks = {};
-        const addTo = (tech, code, n) => {
-          (dayCodes[tech] = dayCodes[tech] || []).push(code);
-          dayKiosks[tech] = (dayKiosks[tech] || 0) + n;
-        };
-        thuStops.forEach(t => addTo(t.tech, t.code, 1));
-        plans.forEach(pl => { if (pl.near) addTo(pl.near.tech, pl.members[0].code, pl.members.length); });
-        const hrs = (tech, codes, k) => estDriveHours(tech, codes) + k * ON_SITE_MIN / 60;
+        const dayCodes = {}; // tech -> every kiosk code on that tech's Thursday
+        const addTo = (tech, codes) => { (dayCodes[tech] = dayCodes[tech] || []).push(...codes); };
+        thuStops.forEach(t => addTo(t.tech, [t.code]));
+        plans.forEach(pl => { if (pl.near) addTo(pl.near.tech, pl.members.map(m => m.code)); });
+        const hrs = (tech, codes) => estDriveHours(tech, codes) + onSiteHours(codes);
         plans.filter(pl => pl.near && !pl.near.same)
           .sort((a, b) => (b.near.miles || 0) - (a.near.miles || 0))
           .forEach(pl => {
-            const tech = pl.near.tech, code = pl.members[0].code, n = pl.members.length;
-            if (hrs(tech, dayCodes[tech], dayKiosks[tech]) <= MAX_THURSDAY_DAY_HOURS) return;
-            dayCodes[tech].splice(dayCodes[tech].indexOf(code), 1);
-            dayKiosks[tech] -= n;
+            const tech = pl.near.tech, mem = pl.members.map(m => m.code);
+            if (hrs(tech, dayCodes[tech]) <= MAX_THURSDAY_DAY_HOURS) return;
+            dayCodes[tech] = dayCodes[tech].filter(c => mem.indexOf(c) === -1);
             let alt = null, altCost = Infinity;
             thuAvail.forEach(c => {
               if (c === tech) return;
               const ti = (typeof TECHS !== 'undefined' && TECHS[c]) || {};
               if (ti.state && String(ti.state).toUpperCase() !== 'IN') return; // out-of-state techs are not used for this
               const have = dayCodes[c] || [];
-              if (hrs(c, have.concat([code]), (dayKiosks[c] || 0) + n) > MAX_THURSDAY_DAY_HOURS) return;
-              const cost = estDriveHours(c, have.concat([code])) - estDriveHours(c, have);
+              if (hrs(c, have.concat(mem)) > MAX_THURSDAY_DAY_HOURS) return;
+              const cost = estDriveHours(c, have.concat(mem)) - estDriveHours(c, have);
               if (cost < altCost) { altCost = cost; alt = c; }
             });
             if (alt) {
               pl.near = { tech: alt, code: '', miles: null, balance: true, rehomed: true, from: tech };
-              addTo(alt, code, n);
+              addTo(alt, mem);
             } else {
               pl.near = null; // stays on Friday
             }
@@ -432,7 +435,7 @@
         thuStops.forEach(t => { (anchorsBy[t.tech] = anchorsBy[t.tech] || []).push(t.code); });
         plans.filter(pl => pl.near).forEach(pl => {
           thuBy[pl.near.tech] = (thuBy[pl.near.tech] || 0) + pl.members.length;
-          (anchorsBy[pl.near.tech] = anchorsBy[pl.near.tech] || []).push(pl.members[0].code);
+          (anchorsBy[pl.near.tech] = anchorsBy[pl.near.tech] || []).push(...pl.members.map(m => m.code));
         });
         const poolBy = {};
         plans.filter(pl => !pl.near && pl.friTech && thuAvail.indexOf(pl.friTech) !== -1)
@@ -464,12 +467,12 @@
             if (have + pick.members.length > want + 1) continue; // would overshoot; try a smaller site
             // avoid overtime: drive (home loop, return included) plus on-site time stays within the
             // day limit, otherwise the site stays on Friday
-            if (estDriveHours(tech, anchors.concat([pick.members[0].code])) +
-                (have + pick.members.length) * ON_SITE_MIN / 60 > MAX_THURSDAY_DAY_HOURS) continue;
+            const withPick = anchors.concat(pick.members.map(m => m.code));
+            if (estDriveHours(tech, withPick) + onSiteHours(withPick) > MAX_THURSDAY_DAY_HOURS) continue;
             pick.near = { tech, code: '', miles: isFinite(pickD) && pickD < 1e8 ? pickD : null, balance: true,
                           thu: have + pick.members.length, fri: friN };
             have += pick.members.length;
-            anchors.push(pick.members[0].code);
+            anchors.push(...pick.members.map(m => m.code));
           }
         });
       }
