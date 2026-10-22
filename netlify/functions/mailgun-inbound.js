@@ -17,6 +17,7 @@ const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
 const { addressesLooselyMatch, findSiteByAddress } = require("./lib/address-match");
 const { parseSiteAccess } = require("./lib/site-access-info.js");
+const ticketState = require("./lib/ticket-state.js");
 const {
   createPlaceholderSite,
   findPlaceholderByAddress,
@@ -1700,25 +1701,32 @@ async function queuePendingDigest(store, hoursExcluded, entry) {
 // records attributes.reopenedAt so perform-import ignores visits that
 // happened before the reopen.
 //
-// Guards: only a ticket currently 'closed'; only an email received AFTER
-// the ticket's last update (a re-forward or retry of an old email never
-// reopens anything); and never the same inbound email that created it.
+// "Closed" means status 'closed' OR resolved by hand (board Cancel, Mark
+// resolved, cancel-request confirm, mailbox closing) -- see lib/ticket-state.js.
+// Neumo reopening a WO overrides anything done in the app before.
+//
+// Guards: only a ticket that is closed either way; only an email received
+// AFTER the ticket was last touched (a re-forward or retry of an old email
+// never reopens anything); and never the same inbound email that created it.
 async function reopenClosedTicket(supabase, existing, receivedAt, inboundEmailId, noteText, fields) {
   try {
-    if (!existing || existing.status !== 'closed') return false;
+    if (!ticketState.isClosedAnyWay(existing)) return false;
     if (existing.inbound_email_id && existing.inbound_email_id === inboundEmailId) return false;
-    const lastTouched = existing.updated_at ? new Date(existing.updated_at) : null;
-    if (lastTouched && !(receivedAt > lastTouched)) return false;
+    const touchedMs = Math.max(
+      existing.updated_at ? Date.parse(existing.updated_at) || 0 : 0,
+      existing.manually_resolved_at ? Date.parse(existing.manually_resolved_at) || 0 : 0
+    );
+    if (touchedMs && !(receivedAt.getTime() > touchedMs)) return false;
     const stamp = receivedAt.toISOString().slice(0, 10);
     const note = `[Reopened ${stamp}] ${noteText || 'New dispatch received on a closed work order'}`;
     const attrs = { ...(existing.attributes || {}), reopenedAt: receivedAt.toISOString(), reopenedEmailId: inboundEmailId || null };
     const upd = {
       ...(fields || {}),
-      status: 'open',
+      ...ticketState.reopenClearFields(),
       description: (existing.description ? existing.description + '\n\n' : '') + note,
       attributes: attrs,
     };
-    const { error } = await supabase.from('tickets').update(upd).eq('id', existing.id).eq('status', 'closed');
+    const { error } = await supabase.from('tickets').update(upd).eq('id', existing.id);
     if (error) {
       console.error('[mailgun-inbound] reopen closed ticket failed:', error.message);
       return false;
@@ -2488,7 +2496,7 @@ exports.handler = async (event) => {
         // block -- see the 2026-08-29 comment there.)
         if (parsed.isLineItemAddition) {
           const { data: existingTicket, error: existingErr } = await supabase
-            .from('tickets').select('id, wo_number, status, updated_at, attributes, inbound_email_id, description, ticket_kind, site_id, site_text, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
+            .from('tickets').select('id, wo_number, status, updated_at, manually_resolved_at, attributes, inbound_email_id, description, ticket_kind, site_id, site_text, sites(state)').eq('wo_number', parsed.woNum).maybeSingle();
           if (existingErr) {
             console.error('[mailgun-inbound] existing-ticket lookup for line item addition failed:', existingErr.message);
           } else if (existingTicket) {
@@ -2514,7 +2522,7 @@ exports.handler = async (event) => {
             const { error: updateErr } = await supabase
               .from('tickets').update(updateFields).eq('id', existingTicket.id);
             if (updateErr) console.error('[mailgun-inbound] append line item failed:', updateErr.message);
-            else if (existingTicket.status === 'closed') {
+            else if (ticketState.isClosedAnyWay(existingTicket)) {
               // 2026-10-22: a line item added to an already-closed WO is new
               // work -- reopen it (flagged for review so a dispatcher looks).
               await reopenClosedTicket(
@@ -2638,7 +2646,7 @@ exports.handler = async (event) => {
         // fields just below and the SMS dedup further down at the alert
         // block.
         const { data: preExistingTicket } = await supabase
-          .from('tickets').select('id, wo_number, status, updated_at, description, attributes, inbound_email_id').eq('wo_number', parsed.woNum).maybeSingle();
+          .from('tickets').select('id, wo_number, status, updated_at, manually_resolved_at, description, attributes, inbound_email_id').eq('wo_number', parsed.woNum).maybeSingle();
         ticketAlreadyExisted = !!preExistingTicket;
 
         const isInstallOrSurvey = ['install', 'site_survey'].includes(parsed.ticketKind);
@@ -2707,7 +2715,7 @@ exports.handler = async (event) => {
 
         // 2026-10-22: a new dispatch email on an already-closed WO means a
         // second visit -- reopen the ticket with this email's timing.
-        if (preExistingTicket && preExistingTicket.status === 'closed') {
+        if (preExistingTicket && ticketState.isClosedAnyWay(preExistingTicket)) {
           await reopenClosedTicket(
             supabase, preExistingTicket, receivedAt, inboundEmailId,
             parsed.description || parsed.issue || null,

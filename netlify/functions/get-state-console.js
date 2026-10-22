@@ -30,6 +30,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { computeSlaDeadline } = require('./slaCalculator.js');
+const ticketState = require('./lib/ticket-state');
 
 // 2026-09-12: ONCALL_SCHEDULE_GA (the old hardcoded object that used to
 // live here) was found stale -- it still listed "Nyzier Moore" for every
@@ -297,7 +298,7 @@ exports.handler = async (event) => {
     // rather than a permanent, undismissable flag in this list.
     const { data: tickets, error: ticketsErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at, attributes')
       .in('site_id', siteIds)
       .in('ticket_kind', ['trouble', 'maintenance'])
       .gte('received_at', sinceDate)
@@ -311,7 +312,7 @@ exports.handler = async (event) => {
     const haveIds = new Set((tickets || []).map(row => row.id));
     const { data: meetExtra, error: meetErr } = await supabase
       .from('tickets')
-      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at')
+      .select('id, site_id, issue_category, issue_detail, ticket_kind, wo_number, received_at, due_at, sla_ends_at, deadline_source, manually_resolved_at, manually_resolved_note, inbound_email_id, address, needs_review, loomis_meet_status, loomis_meet_confirmed_at, loomis_meet_last_contact_at, attributes')
       .in('site_id', siteIds)
       .ilike('issue_category', 'Armored Truck Meet')
       .is('manually_resolved_at', null)
@@ -351,7 +352,13 @@ exports.handler = async (event) => {
         .in('ticket_id', ticketIds)
         .order('started_at', { ascending: true });
       if (closingErr) return json(500, { ok: false, error: 'closing-visit fetch failed: ' + closingErr.message });
+      // 2026-10-22: a visit that started before the ticket's latest reopen
+      // belongs to the earlier trip and must not show the reopened ticket as
+      // closed (see lib/ticket-state.js).
+      const ticketRowById = {};
+      (tickets || []).forEach(t => { ticketRowById[t.id] = t; });
       for (const v of (closingVisits || [])) {
+        if (ticketState.visitPredatesReopen(ticketRowById[v.ticket_id], v.started_at)) continue;
         if (!(v.ticket_id in closedByTicketId)) closedByTicketId[v.ticket_id] = v.ended_at || v.started_at;
       }
     }

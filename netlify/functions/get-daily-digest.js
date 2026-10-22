@@ -75,6 +75,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { computeAreaWeight } = require('./lib/area-workload');
+const ticketState = require('./lib/ticket-state');
 const { computeSlaDeadline, resolveTimezone, HOLIDAYS_2026 } = require('./slaCalculator.js');
 
 // ---------------------------------------------------------------- config
@@ -412,11 +413,19 @@ exports.handler = async (event) => {
 
     // A closing site_visit linked to the ticket means it is confirmed closed,
     // whatever tickets.status says (same signal the state console uses).
+    // 2026-10-22: a visit from before the ticket's latest reopen does not
+    // count (lib/ticket-state.js).
     const closedTicketIds = new Set();
+    const candidateById = {};
+    candidates.forEach((t) => { candidateById[t.id] = t; });
     for (const ids of chunk(candidates.map((t) => t.id), 100)) {
-      const { data: visits, error: vErr } = await supabase.from('site_visits').select('ticket_id').in('ticket_id', ids);
+      const { data: visits, error: vErr } = await supabase.from('site_visits').select('ticket_id, started_at').in('ticket_id', ids);
       if (vErr) return json(500, { error: 'closing-visit fetch failed: ' + vErr.message });
-      (visits || []).forEach((v) => { if (v.ticket_id) closedTicketIds.add(v.ticket_id); });
+      (visits || []).forEach((v) => {
+        if (!v.ticket_id) return;
+        if (ticketState.visitPredatesReopen(candidateById[v.ticket_id], v.started_at)) return;
+        closedTicketIds.add(v.ticket_id);
+      });
     }
     const liveTickets = candidates.filter((t) => !t.manually_resolved_at && !closedTicketIds.has(t.id));
 

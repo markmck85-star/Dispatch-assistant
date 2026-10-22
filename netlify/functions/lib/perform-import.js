@@ -9,6 +9,8 @@
 // reasoning comments on the matching strategy -- kept there since that's
 // still the primary human-facing entry point.
 
+const ticketState = require('./ticket-state');
+
 const TOKEN_ALIASES = {
   'co': 'county',
   'cnty': 'county',
@@ -397,9 +399,7 @@ async function performImport(supabase, rows) {
       const rowStartIso = existingSet.has(r.appointmentNumber)
         ? (existingRowInfo.get(r.appointmentNumber) || {}).started_at
         : parseSalesforceDate(r.actualStart);
-      if (rowStartIso && new Date(rowStartIso) < new Date(linkedTicket.attributes.reopenedAt)) {
-        visitPredatesReopen = true;
-      }
+      visitPredatesReopen = ticketState.visitPredatesReopen(linkedTicket, rowStartIso);
     }
     if (linkedTicket && !visitPredatesReopen) ticketIdsToClose.add(linkedTicket.id);
 
