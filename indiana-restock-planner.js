@@ -81,6 +81,28 @@
   const MAX_PULL_PER_TECH = 3;     // extra Friday stops one tech takes on Thursday (near-a-Thursday-stop pulls)
   const THURSDAY_SHARE = 0.4;      // target share of a tech's Thu+Fri stops done Thursday (matches Sep/Oct history)
 
+  // Rough drive time for one tech's day: nearest-neighbour loop from the tech's home through the
+  // given points and back, straight-line miles x road factor at an average speed. Matches the
+  // board's own estimates closely enough (e.g. 396 mi round trip ~ 8 hr). Returns 0 when the
+  // tech has no home coordinates, so the cap simply does not apply.
+  const ROAD_FACTOR = 1.3;
+  const AVG_MPH = 50;
+  const MAX_THURSDAY_DRIVE_HOURS = 5; // balancing never pulls a stop forward past this
+  function estDriveHours(tech, pts) {
+    const t = (typeof TECHS !== 'undefined' && TECHS[tech]) || null;
+    if (!t || !isFinite(Number(t.lat)) || !isFinite(Number(t.lng)) || t.lat == null || t.lng == null) return 0;
+    const home = { lat: t.lat, lng: t.lng };
+    const left = pts.filter(p => p && miles(home, p) !== null);
+    let cur = home, total = 0;
+    while (left.length) {
+      let bi = 0, bd = Infinity;
+      left.forEach((p, i) => { const d = miles(cur, p); if (d < bd) { bd = d; bi = i; } });
+      total += bd; cur = left.splice(bi, 1)[0];
+    }
+    total += miles(cur, home) || 0;
+    return total * ROAD_FACTOR / AVG_MPH;
+  }
+
   // A row belongs to this planner only if it is an Indiana site. The paste holds
   // every state's rows, and the board can also hold sites from other states.
   function inBoard(code) {
@@ -337,6 +359,8 @@
             }
             pool.splice(pool.indexOf(pick), 1);
             if (have + pick.members.length > want + 1) continue; // would overshoot; try a smaller site
+            // keep the tech's Thursday drive reasonable: leave a far-off site on Friday
+            if (estDriveHours(tech, anchors.concat([LOCATIONS[pick.members[0].code]])) > MAX_THURSDAY_DRIVE_HOURS) continue;
             pick.near = { tech, code: '', miles: isFinite(pickD) && pickD < 1e8 ? pickD : null, balance: true,
                           thu: have + pick.members.length, fri: friN };
             have += pick.members.length;
