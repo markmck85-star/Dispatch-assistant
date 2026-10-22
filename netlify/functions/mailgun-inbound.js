@@ -649,6 +649,7 @@ async function autoAddTicketToBoard({
                     assigned_by: 'auto',
                     status: 'planned',
                     ticket_id: newTicketId,
+                    created_via: 'email-ticket',
                   });
                 if (insertErr) console.error('[mailgun-inbound] auto-add to board failed:', insertErr.message);
                 else console.log(`[mailgun-inbound] Auto-add to ${dispatchDateStr} board: added`);

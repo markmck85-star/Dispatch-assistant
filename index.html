@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-235</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-236</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -4790,7 +4790,7 @@ function distanceMatrixStatus(state) {
                     });
                     const today = existingByCode[item.code];
                     if (today && (today.status === 'planned' || today.status === 'notified') && dateStr >= _realTodayIso) {
-                        syncAssignmentToSupabase(today.techName, item, 'completed', today.assignedBy || 'auto', { dispatchDateOverride: dateStr });
+                        syncAssignmentToSupabase(today.techName, item, 'completed', today.assignedBy || 'auto', { dispatchDateOverride: dateStr, via: 'list-already-done' });
                     }
                     return false;
                 });
@@ -5088,7 +5088,7 @@ function distanceMatrixStatus(state) {
                     );
                 }
                 if (goSave) {
-                    pendingNewSaves.forEach(x => syncAssignmentToSupabase(x.tech, x.item, 'planned', x.assignedBy, x.opts));
+                    pendingNewSaves.forEach(x => syncAssignmentToSupabase(x.tech, x.item, 'planned', x.assignedBy, Object.assign({ via: 'generate' }, x.opts || {})));
                 } else {
                     console.log('[dispatch] Generate Dispatches: user declined to add ' + pendingNewSaves.length + ' new stop(s); nothing saved.');
                 }
@@ -5998,6 +5998,7 @@ function distanceMatrixStatus(state) {
             }
             if (!dispatchDate || !item || !item.code || !tech) return;
             const payload = {
+                via: opts.via || '',
                 dispatchDate: dispatchDate,
                 siteCode: item.code,
                 techName: tech,
@@ -6108,7 +6109,7 @@ function distanceMatrixStatus(state) {
                 inQueue: false
             });
             assignments[tech].splice(index, 1);
-            syncAssignmentToSupabase(tech, item, reason === 'completed' ? 'completed' : 'removed', 'manual');
+            syncAssignmentToSupabase(tech, item, reason === 'completed' ? 'completed' : 'removed', 'manual', { via: 'remove-stop' });
             // 2026-10-16: Cancel on a real ticket-backed stop also flags the
             // ticket itself as manually resolved. Before this, Cancel only
             // changed the assignment row, so the ticket stayed open and kept
@@ -6304,8 +6305,8 @@ function distanceMatrixStatus(state) {
             assignments[tech].splice(index, 1);
 
             if (todayStr) {
-                syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr });
-                syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: targetDateStr });
+                syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr, via: 'push-to-date' });
+                syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: targetDateStr, via: 'push-to-date' });
             }
             closePushToDatePicker();
             renderReviewBoard(true);
@@ -6350,8 +6351,8 @@ function distanceMatrixStatus(state) {
                 const dayOffset = window._isSaturday ? 2 : (window._isFriday ? 3 : 1);
                 nextDate.setDate(nextDate.getDate() + dayOffset);
                 const nextDateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,'0')}-${String(nextDate.getDate()).padStart(2,'0')}`;
-                syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr });
-                syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: nextDateStr });
+                syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr, via: 'push-tomorrow' });
+                syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: nextDateStr, via: 'push-tomorrow' });
                 // 2026-08-27: attach the target date to the entry just
                 // pushed above, so undoStop() can also clean up this
                 // target-date row (not just restore the original day's) --
@@ -6396,6 +6397,7 @@ function distanceMatrixStatus(state) {
             // now follows that date forward, which would fight the
             // targetDateStr cleanup below.
             syncAssignmentToSupabase(entry.tech, entry.snapshot, 'planned', 'manual', {
+                via: 'undo',
                 dispatchDateOverride: (document.getElementById('dispatchDate') || {}).value || ''
             });
             // 2026-10-16: undoing a Cancel also un-resolves the ticket (see
@@ -6410,7 +6412,7 @@ function distanceMatrixStatus(state) {
             // cleanup done earlier tonight, just freshly created instead of
             // historical. Clean it up here too when a target date was recorded.
             if (entry.targetDateStr) {
-                syncAssignmentToSupabase(entry.tech, entry.snapshot, 'removed', 'manual', { dispatchDateOverride: entry.targetDateStr });
+                syncAssignmentToSupabase(entry.tech, entry.snapshot, 'removed', 'manual', { dispatchDateOverride: entry.targetDateStr, via: 'undo' });
             }
             window.removedStops.splice(removedIndex, 1);
             renderReviewBoard(true);
@@ -6462,7 +6464,7 @@ function distanceMatrixStatus(state) {
             window.currentAssignments[oldTech].splice(index, 1);
             if (!window.currentAssignments[newTech]) window.currentAssignments[newTech] = [];
             window.currentAssignments[newTech].push(item);
-            syncAssignmentToSupabase(newTech, item, 'planned', 'manual');
+            syncAssignmentToSupabase(newTech, item, 'planned', 'manual', { via: 'reassign' });
             // Auto-sort the receiving tech's card so the reassigned stop slots
             // into route order instead of just sitting at the top of the list.
             sortStopsByDistance(newTech);
@@ -6743,7 +6745,7 @@ function distanceMatrixStatus(state) {
                     // reprocess/reload -- without this, neither modal button survives
                     // logout+login when primary+fallback are both unavailable, since
                     // the reprocess logic only skips re-deriving when assignedBy==='manual'.
-                    syncAssignmentToSupabase(newTech, movedStop, 'planned', 'manual');
+                    syncAssignmentToSupabase(newTech, movedStop, 'planned', 'manual', { via: 'reassign-modal' });
                     // Auto-sort the receiving tech's card so the newly added stop
                     // slots into route order instead of just sitting at the top.
                     sortStopsByDistance(newTech);
@@ -7787,7 +7789,7 @@ function distanceMatrixStatus(state) {
                                 if (fc.LF !== undefined && fc.LF !== null) parts.push(`LF: ${fc.LF}`);
                                 if (showLR) parts.push(`LR: ${fc.LR} ⚠️`);
                                 if (fc.RF !== undefined && fc.RF !== null && fc.RF > 0) {
-                                    const rfNote = isGARightFormsEligible(item.code) && fc.RF <= 200 ? ` ⚠️ Swap RF forms with larger partial` : '';
+                                    const rfNote = ''; // 2026-10-22: the "swap RF forms with larger partial" suggestion is off while DCOs are close
                                     parts.push(`RF: ${fc.RF}${rfNote}`);
                                 }
                                 if (fc.Journal !== null && fc.Journal !== undefined) {
@@ -8267,7 +8269,7 @@ function distanceMatrixStatus(state) {
                                 if (fc.LF !== undefined && fc.LF !== null) parts.push(`LF: ${fc.LF}`);
                                 if (showLR) parts.push(`LR: ${fc.LR} ⚠️`);
                                 if (fc.RF !== undefined && fc.RF !== null && fc.RF > 0) {
-                                    const rfNotePrint = isGARightFormsEligible(code) && fc.RF <= 200 ? ' ⚠️ Swap RF forms with larger partial' : '';
+                                    const rfNotePrint = ''; // 2026-10-22: the "swap RF forms with larger partial" suggestion is off while DCOs are close
                                     parts.push(`RF: ${fc.RF}${rfNotePrint}`);
                                 }
                                 if (isSurfboard(code)) {
@@ -8471,7 +8473,7 @@ ${content}
                 if (fc.LF !== undefined && fc.LF !== null) parts.push(`LF: ${fc.LF}`);
                 if (showLR) parts.push(`LR: ${fc.LR} ⚠️`);
                 if (fc.RF !== undefined && fc.RF !== null && fc.RF > 0) {
-                    const rfNote = isGARightFormsEligible(code) && fc.RF <= 200 ? ' ⚠️ swap RF w/ larger partial' : '';
+                    const rfNote = ''; // 2026-10-22: the "swap RF forms with larger partial" suggestion is off while DCOs are close
                     parts.push(`RF: ${fc.RF}${rfNote}`);
                 }
                 if (isSurfboard(code)) {
@@ -8783,7 +8785,7 @@ ${content}
                             if (fc.LF !== undefined && fc.LF !== null) parts.push(`LF: ${fc.LF}`);
                             if (showLR) parts.push(`LR: ${fc.LR} ⚠️`);
                             if (fc.RF !== undefined && fc.RF !== null && fc.RF > 0) {
-                                const rfNoteMobile = isGARightFormsEligible(item.code) && fc.RF <= 200 ? ' ⚠️ Swap RF forms with larger partial' : '';
+                                const rfNoteMobile = ''; // 2026-10-22: the "swap RF forms with larger partial" suggestion is off while DCOs are close
                                 parts.push(`RF: ${fc.RF}${rfNoteMobile}`);
                             }
                             if (isSurfboard(item.code)) {

@@ -142,6 +142,16 @@ exports.handler = async (event) => {
       row.restock_form_counts = payload.formCounts;
     }
 
+    // 2026-10-22: remember what first created a row (generate, reassign, push-to-date, ...),
+    // so ticketless duplicate stops can be traced. Set only when the row is new; later saves
+    // never overwrite it.
+    const via = String(payload.via || "").replace(/[^a-z0-9-]/gi, "").slice(0, 30);
+    if (via) {
+      const { data: prior } = await supabase.from("assignments").select("id")
+        .eq("dispatch_date", dispatchDate).eq("site_id", siteRow.id).maybeSingle();
+      if (!prior) row.created_via = via;
+    }
+
     const { data, error } = await supabase
       .from("assignments")
       .upsert(row, { onConflict: "dispatch_date,site_id" })

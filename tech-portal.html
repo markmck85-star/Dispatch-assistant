@@ -1081,7 +1081,7 @@
       var ps = await call('publish_status', { date: date, state: STATE });
       var isPub = !!(ps && ps.published);
       $('publishBtn').textContent = isPub ? 'Unpublish' : 'Publish to techs';
-      $('publishStatus').textContent = isPub ? 'Published to techs' : 'Not published to techs yet';
+      $('publishStatus').textContent = isPub ? 'Published: every tech in ' + (STATE === 'NC' || STATE === 'SC' ? 'GA/NC/SC' : STATE) + ' sees their stops for this date' : 'Not published yet. Publishing sends every tech in ' + (STATE === 'NC' || STATE === 'SC' ? 'GA/NC/SC' : STATE) + ' their stops for this date.';
     }
     var j = await call('my_stops', { date: date });
     if (!j.ok) {
