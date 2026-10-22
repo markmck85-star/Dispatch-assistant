@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-237</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-238</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -7704,11 +7704,9 @@ function distanceMatrixStatus(state) {
             let html = `<div style="margin-bottom:20px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="big-btn" onclick="renderReviewBoard()" style="background:#6c757d;flex:1;">⬅ Back</button>
                 <button class="big-btn" id="publishFromMessagesBtn" onclick="publishFromMessages()" style="background:#1e7e34;flex:1;">Publish to techs</button>
-            </div>
-            <label style="display:flex;align-items:center;gap:8px;margin:-8px 0 16px;font-size:14px;cursor:pointer;">
-                <input type="checkbox" id="dcoMsgChk" ${window.dcoEnabled ? 'checked' : ''} onchange="window.dcoEnabled = this.checked; generateFinalMessages();">
-                Add a "DCO required" line to each message
-            </label>`;
+            </div>`;
+            // 2026-10-22: the blanket "DCO required" checkbox was removed. Messages now carry a per-stop
+            // "Also needs a DCO" line (dcoDueFor) only for sites that still owe one, so mixed lists stay accurate.
             
             Object.keys(window.currentAssignments).sort().filter(t => window.currentAssignments[t].length > 0).forEach(tech => {
                 const items = window.currentAssignments[tech];
@@ -7845,7 +7843,6 @@ function distanceMatrixStatus(state) {
                     if (loadoutTally.JP > 0) tally.push(`JP×${loadoutTally.JP}`);
                     if (tally.length > 0) msg += `\n📦 Min loadout: ${tally.join('  ')}`;
                 }
-                if (window.dcoEnabled) msg += `\n🔔 DCO required. Please confirm dispatch acknowledged per Gina.`;
                 msg += `\nPlease acknowledge receipt.`;
                 
                 messagesByTech[tech] = msg;
