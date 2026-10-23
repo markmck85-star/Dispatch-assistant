@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-247</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-248</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -1196,7 +1196,17 @@
                 .catch(() => {});
         })();
 
+        // 2026-10-23: a stop the dispatcher has pulled onto the viewed day (the
+        // "← Today" button, or an early catch such as the Indiana Thu/Fri planner)
+        // carries workDate = that day. Everything that asks "which day is this
+        // stop for" (saves, messages, availability checks, site hours) then
+        // follows the day it is actually being worked, not its later Restock By.
         function getItemEffectiveDateStr(item, fallbackDateStr) {
+            if (item && item.workDate) return item.workDate;
+            return getItemRestockDateStr(item, fallbackDateStr);
+        }
+        // The day the stop's own Restock By points at, ignoring any pull-forward.
+        function getItemRestockDateStr(item, fallbackDateStr) {
             if (item && item.restockBy) {
                 const parts = item.restockBy.split('/');
                 if (parts.length === 3) {
@@ -4685,7 +4695,12 @@ function distanceMatrixStatus(state) {
                         // (pushed forward from a past day onto this one).
                         if (!item.isSameDay && d.getTime() !== today.getTime()) {
                             const _ex = existingByCode[item.code];
-                            if (_ex && (_ex.status === 'planned' || _ex.status === 'notified')) item.isSameDay = true;
+                            if (_ex && (_ex.status === 'planned' || _ex.status === 'notified')) {
+                                item.isSameDay = true;
+                                // 2026-10-23: remember it is being worked on this board's day, so
+                                // reassigns/saves/messages use today instead of its later Restock By.
+                                item.workDate = dateStr;
+                            }
                         }
                         item.restockUrgent = d.getTime() <= realToday.getTime();
                         item.restockOverdue = d.getTime() < realToday.getTime();
@@ -5518,7 +5533,20 @@ function distanceMatrixStatus(state) {
                                         ${buildTechOptions(Object.keys(TECHS).filter(t => (TECHS[t] || {}).active !== false && !currentUnavailableTechs.has(t)), item.code, CURRENT_STATE, '', new Set([tech]))}
                                     </select>
                                     <div style="display:flex;gap:3px;">
-                                        <button class="control-btn" onclick="pushToTomorrow('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">${window._isFriday ? '→ Mon' : window._isSaturday ? '→ Mon' : '→ Tomorrow'}</button>
+                                        ${(() => {
+                                            // 2026-10-23: pull a later-day stop onto the viewed day (and send it back).
+                                            const _vd = (document.getElementById('dispatchDate') || {}).value || '';
+                                            const _own = _vd ? getItemRestockDateStr(item, _vd) : '';
+                                            const _later = !!(_own && _own > _vd);
+                                            if (item.workDate && _later) {
+                                                const _dayLbl = new Date(_own + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+                                                return `<button class="control-btn" onclick="sendBackToOwnDate('${tech}', ${index})" title="Move this stop back to its own day (${_own})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">↩ ${_dayLbl}</button>`;
+                                            }
+                                            const _pullBtn = (isFuturePushed && _later)
+                                                ? `<button class="control-btn" onclick="pullToToday('${tech}', ${index})" title="Work this stop on the day shown above instead of its later date" style="font-size:10px;padding:2px 6px;background:#1a6b8a;color:#fff;border:none;border-radius:3px;cursor:pointer;">← Today</button>`
+                                                : '';
+                                            return _pullBtn + `<button class="control-btn" onclick="pushToTomorrow('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">${window._isFriday ? '→ Mon' : window._isSaturday ? '→ Mon' : '→ Tomorrow'}</button>`;
+                                        })()}
                                         <button class="control-btn" onclick="openPushToDatePicker('${tech}', ${index})" title="Push to a specific date (e.g. an on-call Saturday)" style="font-size:10px;padding:2px 6px;background:#444;color:#fff;border:none;border-radius:3px;cursor:pointer;">📅</button>
                                     </div>
                                     ${item.noSavedDefault ? `<button class="control-btn" onclick="setAsDefaultTech('${tech}', ${index})" style="font-size:10px;padding:2px 6px;background:#5a2d82;color:#fff;border:none;border-radius:3px;cursor:pointer;">✓ Set Default</button>` : ''}
@@ -6311,6 +6339,50 @@ function distanceMatrixStatus(state) {
             closePushToDatePicker();
             renderReviewBoard(true);
         }
+
+        // 2026-10-23: the reverse of pushToTomorrow. A stop that belongs to a later
+        // day (next-day restocks from the dispatch list, or anything pushed out)
+        // can be pulled onto the day being viewed, so it counts as today's work:
+        // it moves into the Today section and today's route, and the tech
+        // message and the tech portal carry it under today's date. Saved as a
+        // manual 'planned' row on the viewed day, with the later day's row
+        // marked 'removed' (same remove-and-recreate pattern as pushToDate and
+        // the Indiana Thu/Fri planner). Reloading keeps it: a planned row on
+        // the viewed day wins over the later day's row (see _processDispatchCore).
+        function pullToToday(tech, index) {
+            const item = (window.currentAssignments[tech] || [])[index];
+            if (!item) return;
+            const dateInput = document.getElementById('dispatchDate');
+            const todayStr = dateInput && dateInput.value ? dateInput.value : '';
+            if (!todayStr) { alert('Pick a dispatch date first.'); return; }
+            const ownDate = getItemRestockDateStr(item, todayStr);
+            if (!ownDate || ownDate <= todayStr) return;
+            item.isSameDay = true;
+            item.workDate = todayStr;
+            syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: todayStr, via: 'pull-today' });
+            syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: ownDate, via: 'pull-today' });
+            renderReviewBoard(true);
+            if (typeof showToast === 'function') showToast('Moved to today', 2500);
+        }
+
+        // Undo for pullToToday (also works for early catches the Indiana planner
+        // placed): back to the stop's own later day.
+        function sendBackToOwnDate(tech, index) {
+            const item = (window.currentAssignments[tech] || [])[index];
+            if (!item) return;
+            const dateInput = document.getElementById('dispatchDate');
+            const todayStr = dateInput && dateInput.value ? dateInput.value : '';
+            if (!todayStr) return;
+            const ownDate = getItemRestockDateStr(item, todayStr);
+            if (!ownDate || ownDate <= todayStr) return;
+            item.isSameDay = false;
+            delete item.workDate;
+            syncAssignmentToSupabase(tech, item, 'planned', 'manual', { dispatchDateOverride: ownDate, via: 'pull-today-undo' });
+            syncAssignmentToSupabase(tech, item, 'removed', 'manual', { dispatchDateOverride: todayStr, via: 'pull-today-undo' });
+            renderReviewBoard(true);
+        }
+        window.pullToToday = pullToToday;
+        window.sendBackToOwnDate = sendBackToOwnDate;
 
         function pushToTomorrow(tech, index) {
             // Saturday or Friday → push to Monday
