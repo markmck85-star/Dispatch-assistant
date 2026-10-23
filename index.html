@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-248</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-249</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -7740,6 +7740,18 @@ function distanceMatrixStatus(state) {
             }
         }
 
+        // 2026-10-23: a stop can be a service ticket (UPS swap, printer fault, ...) AND
+        // still carry a restock from the dispatch list at the same site. The summaries and
+        // messages used to treat any ticket-flagged stop as service-only, so its restock
+        // items, counts and loadout were dropped (real case: GA1030, left forms on the
+        // list plus a UPS work order -> the loadout showed one roll of forms, not two).
+        // True when the stop is flagged urgent but the restock list also asks for consumables here.
+        function itemAlsoRestocks(item) {
+            if (!item) return false;
+            const fc = (window.parsedFormCounts || {})[item.code];
+            return !!(fc && String(fc.consumables || '').trim());
+        }
+
         function generateFinalMessages(opts) {
             const returnOnly = !!(opts && opts.returnOnly);
             const messagesByTech = {};
@@ -7802,6 +7814,7 @@ function distanceMatrixStatus(state) {
                     msg += `1. ${woStr}${issueStr}${reassignNote}\n`;
                     if (dcoDueFor(item)) msg += `   \uD83D\uDD04 Also needs a DCO (decal change-out) at this site${dcoDueLabel(dcoDueFor(item))}\n`;
                     { const a = siteAccessText(item, pickerIso); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours: ${a.today}\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
+                    if (itemAlsoRestocks(item)) msg += `   Also restock: ${window.parsedFormCounts[item.code].consumables}\n`;
                     const warnings = checkConsumables(item.code);
                     if (warnings.length > 0) warnings.forEach(w => { msg += `   ${w}\n`; });
                 } else {
@@ -7839,7 +7852,7 @@ function distanceMatrixStatus(state) {
                         if (item.urgent) { const a = siteAccessText(item, getItemEffectiveDateStr(item, pickerIso)); if (a) { if (a.hours) msg += a.today && a.today !== 'Closed' ? `   Site hours: ${a.today}\n` : (a.today === 'Closed' ? `   Site hours: closed today per listed hours\n` : `   Site hours: ${a.hours}\n`); if (a.phone) msg += `   Site phone: ${a.phone}\n`; } }
 
                         // Append consumables detail for restock stops
-                        if (!item.urgent) {
+                        if (!item.urgent || itemAlsoRestocks(item)) {
                             const fc = (window.parsedFormCounts || {})[item.code];
                             if (fc) {
                                 // Consumables requested
@@ -7894,7 +7907,7 @@ function distanceMatrixStatus(state) {
                 const loadoutTally = { LF: 0, RF: 0, RIB: 0, JP: 0, BHFORMS: 0, BHRIB: 0, PF: {} };
                 let hasAnyRestock = false;
                 (items || []).forEach(item => {
-                    if (item.urgent) return;
+                    if (item.urgent && !itemAlsoRestocks(item)) return;
                     const fc = (window.parsedFormCounts || {})[item.code];
                     if (!fc) return;
                     const listed = (fc.consumables || '').toLowerCase();
@@ -8400,7 +8413,7 @@ function distanceMatrixStatus(state) {
                 const pTally = { LF: 0, RF: 0, RIB: 0, JP: 0, BHFORMS: 0, BHRIB: 0, PF: {} };
                 let pHasRestock = false;
                 stops.forEach(item => {
-                    if (item.urgent) return;
+                    if (item.urgent && !itemAlsoRestocks(item)) return;
                     const fc2 = (window.parsedFormCounts || {})[item.code];
                     if (!fc2) return;
                     const listed2 = (fc2.consumables || '').toLowerCase();
@@ -8670,7 +8683,7 @@ ${content}
                 const t = { LF: 0, RF: 0, RIB: 0, JP: 0, BHF: 0, BHR: 0, PF: {} };
                 let any = false;
                 stops.forEach(item => {
-                    if (item.urgent) return;
+                    if (item.urgent && !itemAlsoRestocks(item)) return;
                     const fc2 = (window.parsedFormCounts || {})[item.code];
                     if (!fc2) return;
                     const l2 = (fc2.consumables || '').toLowerCase();
@@ -8837,7 +8850,7 @@ ${content}
                     const dateStr = item.restockBy ? ` <span style="color:#888;font-size:11px;">by ${item.restockBy}</span>` : '';
 
                     let consumDetail = '';
-                    if (!item.urgent) {
+                    if (!item.urgent || itemAlsoRestocks(item)) {
                         const fc = (window.parsedFormCounts || {})[item.code];
                         if (fc) {
                             if (fc.consumables) {
