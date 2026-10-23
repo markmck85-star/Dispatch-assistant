@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-250</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-251</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -848,6 +848,7 @@
                 </div>
 
                 <div id="availabilityStrip" style="display:none;margin:8px 0;padding:8px 10px;background:#1e1e1e;border:1px solid #444;border-radius:8px;color:#ddd;font-size:13px;"></div>
+                <div id="openDcoPanel"></div>
                 <div id="results" class="results hidden"></div>
             </div>
         </div>
@@ -4588,6 +4589,10 @@ function distanceMatrixStatus(state) {
                 })
                 .catch(e => console.warn('[dispatch] get-pending-promotions check failed (non-fatal):', e.message));
 
+            // 2026-10-23: open decal change-out tickets for this state, listed above the
+            // board (also when there is no restock list for the day). Fire-and-forget.
+            try { loadOpenDcoPanel(CURRENT_STATE, dateStr); } catch (e) {}
+
             // 2026-10-11: inactive-site activation check -- a ticket arrived
             // for a site marked inactive; offer to mark it active. Same
             // fire-and-forget pattern as the promotion check above.
@@ -6339,6 +6344,87 @@ function distanceMatrixStatus(state) {
             closePushToDatePicker();
             renderReviewBoard(true);
         }
+
+        // 2026-10-23: open decal change-out (DCO) tickets. Neumo stamps a DCO ticket with a
+        // due day (the day it was issued) and the board only shows stops saved on the exact
+        // day being viewed, so an open DCO ticket vanished from every board once that day
+        // passed (Illinois, Oct 2026). This lists them for the state above the board, and
+        // "Add to today" saves one as a stop for the viewed day (the site's default tech,
+        // reassignable like any stop). Reference only: nothing is added unless clicked.
+        async function loadOpenDcoPanel(state, dateStr) {
+            const host = document.getElementById('openDcoPanel');
+            if (!host) return;
+            try {
+                const res = await fetch('/.netlify/functions/get-open-dco-tickets?state=' + encodeURIComponent(state) +
+                    (dateStr ? '&date=' + encodeURIComponent(dateStr) : ''), { cache: 'no-store' });
+                if (!res.ok) { host.innerHTML = ''; return; }
+                const data = await res.json();
+                // A state switch or date change while the request was out: ignore the stale answer.
+                if (state !== CURRENT_STATE) return;
+                window._openDco = { state, dateStr, tickets: (data.tickets || []).filter(t => !t.onBoard) };
+                renderOpenDcoPanel();
+            } catch (e) {
+                host.innerHTML = '';
+            }
+        }
+
+        function renderOpenDcoPanel() {
+            const host = document.getElementById('openDcoPanel');
+            if (!host) return;
+            const st = window._openDco;
+            if (!st || !st.tickets || !st.tickets.length) { host.innerHTML = ''; return; }
+            const esc2 = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            const realToday = new Date(); realToday.setHours(0, 0, 0, 0);
+            const todayIso = realToday.getFullYear() + '-' + String(realToday.getMonth() + 1).padStart(2, '0') + '-' + String(realToday.getDate()).padStart(2, '0');
+            let addLabel = 'Add to today';
+            if (st.dateStr && st.dateStr !== todayIso) {
+                const d = new Date(st.dateStr + 'T12:00:00');
+                addLabel = 'Add to ' + d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+            }
+            const rows = st.tickets.map((t, i) => {
+                const days = t.receivedAt ? Math.max(0, Math.floor((Date.now() - new Date(t.receivedAt).getTime()) / 86400000)) : null;
+                const age = days == null ? '' : (days === 0 ? 'issued today' : 'open ' + days + ' day' + (days === 1 ? '' : 's'));
+                const btn = t.techName
+                    ? `<button type="button" onclick="addDcoToBoard(${i}, this)" style="flex-shrink:0;font-size:11px;padding:3px 10px;background:#1a6b8a;color:#fff;border:none;border-radius:4px;cursor:pointer;">${esc2(addLabel)}</button>`
+                    : `<span style="font-size:11px;color:#c98a1e;">No default tech set</span>`;
+                return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;${i ? 'border-top:1px solid #333;' : ''}">
+                    <div style="font-size:12px;color:#ddd;min-width:0;"><strong>${esc2(t.siteCode)}</strong> ${esc2(t.siteName || '')}<div style="font-size:11px;color:#999;">${esc2(t.techName || '')}${t.techName ? ' · ' : ''}WO ${esc2(t.woNumber)}${age ? ' · ' + age : ''}</div></div>
+                    ${btn}</div>`;
+            }).join('');
+            host.innerHTML = `<details style="margin:8px 0;background:#1e1e1e;border:1px solid #444;border-radius:8px;padding:8px 10px;color:#ddd;">
+                <summary style="cursor:pointer;font-size:13px;font-weight:bold;">Open decal change-outs (${st.tickets.length})</summary>
+                <div style="margin-top:6px;">${rows}</div></details>`;
+        }
+
+        async function addDcoToBoard(i, btn) {
+            const st = window._openDco;
+            const t = st && st.tickets && st.tickets[i];
+            if (!t || !t.techName) return;
+            const dateInput = document.getElementById('dispatchDate');
+            const dateStr = dateInput && dateInput.value ? dateInput.value : '';
+            if (!dateStr) { alert('Pick a dispatch date first.'); return; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+            try {
+                const r = await fetch('/.netlify/functions/save-assignment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dispatchDate: dateStr, siteCode: t.siteCode, techName: t.techName,
+                        status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber, via: 'dco-add'
+                    })
+                });
+                const j = await r.json();
+                if (!j.ok) throw new Error(j.error || 'not saved');
+                t.onBoard = true;
+                st.tickets = st.tickets.filter(x => !x.onBoard);
+                renderOpenDcoPanel();
+                await processDispatch(true);
+            } catch (e) {
+                alert('Could not add that stop: ' + (e && e.message ? e.message : e));
+                if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
+            }
+        }
+        window.addDcoToBoard = addDcoToBoard;
 
         // 2026-10-23: the reverse of pushToTomorrow. A stop that belongs to a later
         // day (next-day restocks from the dispatch list, or anything pushed out)
