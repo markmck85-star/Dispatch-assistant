@@ -834,7 +834,11 @@ async function journalLowThreshold(region) {
 // sites use their own variations on the board and are shown here with the standard rules.
 function describeStop(fc, ticket, jLow) {
   const kind = ticket.ticket_kind || '';
-  const isRestock = kind === 'maintenance' || kind === 'restock';
+  // 2026-10-23: a maintenance-kind ticket is not always a restock (a UPS replacement
+  // work order is kind 'maintenance' with category Hardware). Only label it a consumable
+  // restock when its category is Maintenance (or has none); otherwise show its real issue.
+  const cat = String(ticket.issue_category || '').trim();
+  const isRestock = (kind === 'maintenance' || kind === 'restock') && (!cat || /^maintenance$/i.test(cat));
   let issue = '';
   if (isRestock) issue = 'Maintenance – Consumable Restock';
   else if (ticket.issue_category) issue = ticket.issue_category + (ticket.issue_detail ? ' – ' + ticket.issue_detail : '');
