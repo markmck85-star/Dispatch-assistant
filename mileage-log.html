@@ -647,6 +647,28 @@ function useMatrixEnd() {
   persistLocal();
 }
 
+// One tap: take the matrix distance as the ending reading and add the stop. The stop is saved
+// as an estimate, and the note under the form offers Undo.
+async function matrixAddStop() {
+  const before = legs.length;
+  useMatrixEnd();
+  if (!document.getElementById('odoEnd').value) return;
+  await addLeg();
+  if (legs.length <= before) return;
+  const idx = legs.length - 1, leg = legs[idx];
+  const el = document.getElementById('dayNote');
+  if (!el) return;
+  const prevText = el.style.display !== 'none' ? el.textContent : '';
+  el.textContent = 'Added ' + (leg.to_print || leg.to_picker || 'stop') + ' at ' + leg.odo_end + ' (matrix estimate). ';
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'secondary'; b.style.padding = '4px 10px'; b.style.fontSize = '13px';
+  b.textContent = 'Undo';
+  b.onclick = () => { setDayNote('', false); if (legs[idx] === leg) removeLeg(idx); };
+  el.appendChild(b);
+  if (prevText) { const d = document.createElement('div'); d.style.marginTop = '4px'; d.textContent = prevText; el.appendChild(d); }
+  el.style.display = 'block';
+}
+
 function digitsOnly(v) { return String(v == null ? '' : v).replace(/[^0-9]/g, ''); }
 
 // Ask the server for the matrix distance between two stops (null if unknown).
@@ -790,7 +812,7 @@ function maybePrefill(focusAfter) {
   if (prefix < 1) { autoPrefix = ''; return; }
   autoPrefix = String(prefix);
   endEl.value = autoPrefix;
-  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.', { label: 'Use ' + expectedMi + ' mi (' + (start + expectedMi) + ')', fn: useMatrixEnd });
+  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.', { label: 'Add stop (' + (start + expectedMi) + ')', fn: matrixAddStop });
   if (focusAfter) {
     setTimeout(() => {
       endEl.focus();
