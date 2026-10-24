@@ -600,7 +600,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-251</div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-252</div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -7052,6 +7052,23 @@ function distanceMatrixStatus(state) {
             } catch (e) {
                 console.warn('[add-location] recheck failed, prompting as before:', e && e.message);
                 pending = codes.filter(c => !LOCATIONS[c]);
+            }
+            // 2026-10-24: if this browser could not refresh a state's location list (it is running on
+            // an old saved copy, e.g. a tablet that has not been used for a while), a code that
+            // looks missing is far more likely a stale list than a genuinely new site. Do not ask
+            // anyone to add it (GA1004, a site already in the database, got offered for adding
+            // that way); say the list is out of date instead and let a reload fix it.
+            const staleSet = window.__staleLocationStates;
+            if (staleSet && staleSet.size > 0 && pending.length > 0) {
+                const skipped = pending.filter(c => staleSet.has(String(c).slice(0, 2).toUpperCase()));
+                if (skipped.length > 0) {
+                    pending = pending.filter(c => !skipped.includes(c));
+                    const nowT = Date.now();
+                    if (nowT - (window.__staleLocToastAt || 0) > 60000) {
+                        window.__staleLocToastAt = nowT;
+                        try { showToast('Location list is out of date on this device, so ' + skipped.join(', ') + ' was not offered for adding. Reload the page to refresh it.', 9000); } catch (e) { /* toast unavailable */ }
+                    }
+                }
             }
             if (pending.length === 0) return;
             const [first, ...rest] = pending;
