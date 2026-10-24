@@ -581,7 +581,9 @@ function siteAccessInfo(t) {
   const hours = t && t.operatingHours ? t.operatingHours : null;
   const dayIdx = new Date(TARGET_DAY + 'T12:00:00').getDay();
   const today = hours ? hoursForDay(hours, dayIdx) : null; // null = could not read, show full text
-  return { hours, today, phone: t && t.sitePhone ? t.sitePhone : null, tz: (t && t.siteTimeZone) || null };
+  let afterHours = false;
+  try { const l = resolveSiteLoc(t); afterHours = !!(l && l.afterHoursAccess); } catch (e) {}
+  return { hours, today, afterHours, phone: t && t.sitePhone ? t.sitePhone : null, tz: (t && t.siteTimeZone) || null };
 }
 
 function fmtSlaForSite(t) {
@@ -1622,8 +1624,9 @@ function renderStopCard(t) {
   const acc = siteAccessInfo(t);
   let accessHtml = '';
   if (acc.hours) {
-    const todayTxt = acc.today === 'Closed' ? 'Location closed today' : (acc.today ? 'Open today ' + acc.today : 'Hours: ' + acc.hours);
-    const warn = acc.today === 'Closed' ? ' style="color:#f0a500;"' : '';
+    const keyCard = acc.today === 'Closed' && acc.afterHours;
+    const todayTxt = keyCard ? 'Location closed today · key card access to the kiosk' : (acc.today === 'Closed' ? 'Location closed today' : (acc.today ? 'Open today ' + acc.today : 'Hours: ' + acc.hours));
+    const warn = acc.today === 'Closed' && !keyCard ? ' style="color:#f0a500;"' : '';
     accessHtml = `<div class="meta"${warn}><b>${escapeHtml(todayTxt)}</b>${acc.phone ? ' · ' + escapeHtml(acc.phone) : ''}</div>`;
   } else if (acc.phone) {
     accessHtml = `<div class="meta">${escapeHtml(acc.phone)}</div>`;
@@ -2106,7 +2109,7 @@ function buildMessageText() {
   const acc = siteAccessInfo(t);
   if (acc.hours) {
     if (acc.today && acc.today !== 'Closed') msg += `   Site hours: ${acc.today}\n`;
-    else if (acc.today === 'Closed') msg += `   Site hours: closed today per listed hours\n`;
+    else if (acc.today === 'Closed') msg += acc.afterHours ? `   Site hours: location closed today, key card access to the kiosk\n` : `   Site hours: closed today per listed hours\n`;
     else msg += `   Site hours: ${acc.hours}\n`; // unreadable format: show what the email said
   }
   if (acc.phone) msg += `   Site phone: ${acc.phone}\n`;
