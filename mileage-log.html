@@ -329,6 +329,10 @@ async function shiftLegDate(n) {
   if (!cur) return;
   // 2026-10-24: a finished entry that was typed but never added (reading typed, then Next day)
   // is added first, so it is not lost or carried onto the next day.
+  // (only when a full odometer is typed does a typed-but-unpicked place matter here)
+  if (n > 0 && digitsOnly(document.getElementById('odoEnd').value) !== '' && digitsOnly(document.getElementById('odoEnd').value) !== autoPrefix) {
+    if (!acceptTypedPlaces()) return;
+  }
   if (n > 0 && pendingComplete()) await addLeg();
   // 2026-10-24: Next day on a day whose last stop is still a store (no drive home logged):
   // first tap fills Home as the ending and waits for the odometer; a second tap skips it
@@ -497,7 +501,7 @@ function searchStops(side) {
   if (rawTyped.length >= 3 && !hits.some(h => h.kind !== 'home' && String(h.print || h.picker).toLowerCase() === q)) {
     hits.push({ kind: 'other', custom: true, id: null, picker: rawTyped, print: rawTyped, search: q });
   }
-  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + (s.custom ? 'Use “' + s.print + '” (not in list)' : (q ? labelForQuery(s, q) : s.picker) + (s.recent ? ' <span class="muted">(used before)</span>' : '')) + '</div>').join('') || '<div>No match</div>';
+  box.innerHTML = hits.map((s,i) => '<div onclick="chooseStop(\'' + side + '\',' + i + ')">' + (s.custom ? 'Use “' + s.print + '” (not in list) <div class="muted">Tip: include the town, like UPS Store Roswell</div>' : (q ? labelForQuery(s, q) : s.picker) + (s.recent ? ' <span class="muted">(used before)</span>' : '')) + '</div>').join('') || '<div>No match</div>';
   box._hits = hits;
   box.style.display = 'block';
 }
@@ -876,7 +880,36 @@ function flagMiles(miles) {
   return null;
 }
 
+// A place typed into From/To but never picked from the list (a friend's house, a hotel,
+// anything not a service location) is used as typed.
+// It only goes through on purpose: if the text resembles a known stop the tech is sent back to
+// pick it (so mileage logs keep real site names); if it matches nothing they must confirm it.
+// Returns false when the stop should not be added yet.
+function acceptTypedPlaces() {
+  for (const side of ['from', 'to']) {
+    if (picked[side]) continue;
+    const t = document.getElementById(side + 'Q').value.trim();
+    if (t.length < 2) continue;
+    const q = t.toLowerCase();
+    const known = allStops().filter(s => s.kind !== 'home' && s.id !== 'other' && !s.custom && (s.search || '').indexOf(q) !== -1);
+    if (known.length) {
+      searchStops(side);
+      document.getElementById(side + 'Q').focus();
+      showOdoNote('Tap the matching place in the list so the log uses the real site name.');
+      return false;
+    }
+    if (!confirm('"' + t + '" is not a service location or a place you used earlier this pay period. Add it as typed? Tip: include the town, like UPS Store Roswell. (Cancel to pick from the list.)')) {
+      searchStops(side);
+      return false;
+    }
+    picked[side] = { kind: 'other', id: null, picker: t, print: t };
+    document.getElementById(side + 'Picked').textContent = 'Using: ' + t + ' (not in list)';
+  }
+  return true;
+}
+
 async function addLeg() {
+  if (!acceptTypedPlaces()) return;
   if (!picked.from || !picked.to) { alert('Pick From and To.'); return; }
   if (picked.from.kind === 'home' && picked.to.kind === 'home') {
     alert('That is home to home, so there is nothing to add. Your next trip starts from home with the odometer reading you type as its start. If you drove the car for anything else since you got home, just change the starting reading.');
