@@ -293,11 +293,17 @@ function updateDow() {
 }
 
 function initPeriod() {
-  const s = sundayOf(new Date());
-  document.getElementById('periodStart').value = s;
-  document.getElementById('periodEnd').value = addDays(s, 13);
+  // 2026-10-24: pay periods are fixed two-week blocks (Sunday to Saturday). The real
+  // submitted sheets run 9/13-9/26, 9/27-10/10, 10/11-10/24, so anchor on 9/13/2026 and
+  // step by 14 days. (Using "this week's Sunday" landed on the wrong week half the time.)
   const today = new Date();
   const todayIso = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  const anchor = Date.UTC(2026, 8, 13);
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const daysSince = Math.round((todayUtc - anchor) / 86400000);
+  const s = addDays('2026-09-13', daysSince - (((daysSince % 14) + 14) % 14));
+  document.getElementById('periodStart').value = s;
+  document.getElementById('periodEnd').value = addDays(s, 13);
   const end = addDays(s, 13);
   document.getElementById('legDate').value = (todayIso >= s && todayIso <= end) ? todayIso : s;
   updateDow();
