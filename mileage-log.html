@@ -789,7 +789,7 @@ function maybePrefill(focusAfter) {
   if (prefix < 1) { autoPrefix = ''; return; }
   autoPrefix = String(prefix);
   endEl.value = autoPrefix;
-  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.', { label: 'Use ' + expectedMi + ' mi', fn: useMatrixEnd });
+  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.', { label: 'Use ' + expectedMi + ' mi (' + (start + expectedMi) + ')', fn: useMatrixEnd });
   if (focusAfter) {
     setTimeout(() => {
       endEl.focus();
