@@ -2218,6 +2218,40 @@ exports.handler = async (event) => {
         }
       }
 
+      // 2026-10-24: keep the original timesheet workbook too. Until now only the parsed mileage
+      // was stored, so a technician's last timesheet could not be opened again (needed to start
+      // the next period from it). Saved to the private 'timesheet-files' bucket and indexed in
+      // timesheet_files; read only through get-timesheet-file.js, which requires an admin sign-in.
+      // Non-fatal: a storage problem never affects normal mail handling or the mileage check above.
+      try {
+        if (timesheetAttachments.length && inboundEmailId) {
+          for (const att of timesheetAttachments) {
+            if (!att.content || !att.content.length || att.content.length > 15 * 1024 * 1024) continue;
+            let techRaw = null;
+            try { techRaw = parseMileageWorkbookBuffer(att.content).technicianNameRaw || null; } catch (e) { /* name is optional */ }
+            const safeName = String(att.filename).replace(/[^A-Za-z0-9._-]+/g, '_');
+            const storagePath = `${inboundEmailId}/${safeName}`;
+            const { error: upErr } = await supabase.storage
+              .from('timesheet-files')
+              .upload(storagePath, att.content, { contentType: att.contentType || 'application/octet-stream', upsert: true });
+            if (upErr) { console.error(`[mailgun-inbound] timesheet upload failed (${att.filename}):`, upErr.message); continue; }
+            const { error: rowErr } = await supabase.from('timesheet_files').upsert({
+              inbound_email_id: inboundEmailId,
+              filename: att.filename,
+              content_type: att.contentType || null,
+              size_bytes: att.content.length,
+              storage_path: storagePath,
+              technician_name_raw: techRaw,
+              received_at: receivedAt.toISOString(),
+            }, { onConflict: 'inbound_email_id,filename' });
+            if (rowErr) console.error(`[mailgun-inbound] timesheet_files insert failed (${att.filename}):`, rowErr.message);
+            else console.log(`[mailgun-inbound] Timesheet saved: ${att.filename} (${att.content.length} bytes)`);
+          }
+        }
+      } catch (tsSaveEx) {
+        console.error('[mailgun-inbound] Timesheet capture failed (non-fatal):', tsSaveEx.message);
+      }
+
       // 2026-10-05: keep the technician's weekly inventory count sheet.
       // Until now only the email text was stored, so the counts inside the
       // attached spreadsheet were unreachable (needed for the projected-stock
