@@ -1002,10 +1002,28 @@ async function endDay() {
   persistLocal();
 }
 
+// After the log changes underneath the entry form (a stop removed or a reading edited), the
+// From/To boxes could still show the old picture. Point them at where the day now ends.
+function resyncForm(dateStr) {
+  const dEl = document.getElementById('legDate');
+  if (!ctx || !dEl || dEl.value !== dateStr) return;
+  picked.to = null;
+  document.getElementById('toQ').value = '';
+  document.getElementById('toPicked').textContent = '';
+  document.getElementById('odoEnd').value = '';
+  autoPrefix = '';
+  matrixEndUsed = null;
+  expectedMi = null;
+  showOdoNote('');
+  applyStartFor(dateStr, true);
+}
+
 function removeLeg(i) {
+  const day = legs[i] && legs[i].date;
   legs.splice(i, 1);
   persistLocal();
   renderLegs();
+  if (day) resyncForm(day);
   saveLog('draft');
 }
 
@@ -1096,12 +1114,14 @@ function editOdo(i, field, raw) {
   }
   persistLocal();
   renderLegs();
+  resyncForm(L.date);
   saveLog('draft');
 }
 
 function toggleEditDay(d) {
   editingDay = (editingDay === d) ? null : d;
   renderLegs();
+  if (editingDay === null) resyncForm(d);
 }
 
 function editBtnHtml(d) {
