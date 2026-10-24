@@ -183,6 +183,7 @@ let distReq = 0;
 let dirty = false;       // server copy is behind what is on screen
 let saveTimer = null;
 let lastSavedAt = null;
+let editingDay = null;     // date whose stops are open for editing
 let homePromptDate = null; // day where Next day already offered the drive-home step
 
 function currentUser() {
@@ -1036,11 +1037,103 @@ function legName(l, side) {
   return escHtml(l[side + '_print'] || l[side + '_picker'] || '?');
 }
 
+// ---- Edit day: fix odometer readings in place -------------------------------------------
+// Typed readings are real and stay as typed. A reading that was only estimated from the matrix
+// keeps its estimated distance and moves with the reading before it.
+function clearEst(l) { delete l.estimated; delete l.est_field; delete l.matrix_accepted; }
+
+function settleLeg(i) {
+  const L = legs[i];
+  const oldEnd = L.odo_end;
+  if (L.estimated && L.est_field === 'end' && typeof L.miles === 'number' && L.odo_start != null) {
+    L.odo_end = L.odo_start + L.miles;
+  } else if (L.odo_start != null && L.odo_end != null) {
+    L.miles = L.odo_end - L.odo_start;
+  }
+  L.flag = flagMiles(L.miles);
+  if (L.odo_end !== oldEnd) cascadeFrom(i, oldEnd, L.odo_end);
+}
+
+function cascadeFrom(i, oldEnd, newEnd) {
+  for (let j = i + 1; j < legs.length; j++) {
+    if (legs[j].date !== legs[i].date) continue;
+    if (oldEnd != null && legs[j].odo_start === oldEnd) {
+      legs[j].odo_start = newEnd;
+      settleLeg(j);
+    }
+    return;
+  }
+}
+
+function editOdo(i, field, raw) {
+  const L = legs[i];
+  const v = digitsOnly(raw);
+  if (!L || v === '') { renderLegs(); return; }
+  const n = Number(v);
+  if (field === 'start') {
+    const oldStart = L.odo_start;
+    if (n === oldStart) { renderLegs(); return; }
+    let p = null;
+    for (let k = i - 1; k >= 0; k--) { if (legs[k].date === L.date) { p = legs[k]; break; } }
+    if (p && !(oldStart != null && p.odo_end === oldStart)) p = null;
+    L.odo_start = n;
+    if (L.estimated && L.est_field === 'start') clearEst(L);
+    if (p) {
+      p.odo_end = n;
+      if (p.estimated && p.est_field === 'end') clearEst(p);
+      if (p.odo_start != null) p.miles = p.odo_end - p.odo_start;
+      p.flag = flagMiles(p.miles);
+    }
+    settleLeg(i);
+  } else {
+    const oldEnd = L.odo_end;
+    if (n === oldEnd) { renderLegs(); return; }
+    L.odo_end = n;
+    if (L.estimated && L.est_field === 'end') clearEst(L);
+    if (L.odo_start != null) L.miles = n - L.odo_start;
+    L.flag = flagMiles(L.miles);
+    cascadeFrom(i, oldEnd, n);
+  }
+  persistLocal();
+  renderLegs();
+  saveLog('draft');
+}
+
+function toggleEditDay(d) {
+  editingDay = (editingDay === d) ? null : d;
+  renderLegs();
+}
+
+function editBtnHtml(d) {
+  return ' <button type="button" class="secondary" style="padding:3px 10px;font-size:13px;float:right;" onclick="toggleEditDay(\'' + d + '\')">' + (editingDay === d ? 'Done editing' : 'Edit day') + '</button>';
+}
+
+function odoInput(i, field, val) {
+  return '<input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="' + (val != null ? val : '') + '" onchange="editOdo(' + i + ',\'' + field + '\',this.value)">';
+}
+
+function editRowsHtml(items) {
+  let h = '<div class="muted" style="margin:6px 0;">Change a reading and tap away. Readings you typed stay as typed; estimated ones move with the reading before them.</div>';
+  items.forEach(({ l, i }, idx) => {
+    const prev = idx ? items[idx - 1].l : null;
+    const chained = prev && prev.odo_end === l.odo_start;
+    if (!chained) {
+      h += '<div class="stop-row" style="margin-top:6px;"><div class="grow muted">' + legName(l, 'from') + '</div><div class="odo">' + odoInput(i, 'start', l.odo_start) + (l.estimated && l.est_field === 'start' ? '<span class="muted">est.</span>' : '') + '</div></div>';
+    }
+    h += '<div class="stop-row" style="margin-top:6px;"><div class="grow"><strong>' + legName(l, 'to') + '</strong></div><div class="odo">' + odoInput(i, 'end', l.odo_end) + (l.estimated && l.est_field === 'end' ? '<span class="muted">est.</span>' : '') + '</div></div>' +
+      '<div class="muted" style="margin-bottom:6px;">+' + (l.miles == null ? '?' : l.miles) + ' mi' +
+      ' <button type="button" class="warn" onclick="removeLeg(' + i + ')">remove</button></div>' +
+      legNotesHtml(l);
+  });
+  return h;
+}
+
 // the day being entered, laid out like a page in a notebook: place, then the reading
 function padCard(dateStr, items) {
-  let html = '<div class="card" style="border-left:5px solid #1d4e89;"><div class="muted">Log for</div><span class="dayhead">' + weekdayLabel(dateStr) + '</span>';
+  let html = '<div class="card" style="border-left:5px solid #1d4e89;"><div class="muted">Log for</div><span class="dayhead">' + weekdayLabel(dateStr) + '</span>' + editBtnHtml(dateStr);
   let sub = 0, prev = null;
-  items.forEach(({ l, i }) => {
+  if (editingDay === dateStr) { items.forEach(({ l }) => { if (typeof l.miles === 'number') sub += l.miles; }); html += editRowsHtml(items); }
+  else items.forEach(({ l, i }) => {
     if (typeof l.miles === 'number') sub += l.miles;
     // start line for the first stop, or wherever the chain of readings breaks
     if (!prev || prev.to_kind !== l.from_kind || (prev.to_print || prev.to_picker) !== (l.from_print || l.from_picker) || prev.odo_end !== l.odo_start) {
@@ -1082,8 +1175,9 @@ function renderLegs() {
   let html = days.length ? '<div class="muted" style="margin:10px 0 0;">Other days this pay period</div>' : '';
   days.forEach(d => {
     let sub = 0;
-    html += '<div class="card"><span class="dayhead">' + weekdayLabel(d) + '</span>';
-    byDay[d].forEach(({ l, i }) => {
+    html += '<div class="card"><span class="dayhead">' + weekdayLabel(d) + '</span>' + editBtnHtml(d);
+    if (editingDay === d) { byDay[d].forEach(({ l }) => { if (typeof l.miles === 'number') sub += l.miles; }); html += editRowsHtml(byDay[d]); }
+    else byDay[d].forEach(({ l, i }) => {
       if (typeof l.miles === 'number') sub += l.miles;
       html += '<div style="padding:8px 0;border-bottom:1px solid #d5dde3;">' +
         '<div class="stop-row"><div class="grow">' + legName(l, 'from') + '</div><div class="odo">' + (l.odo_start != null ? l.odo_start : '?') + (l.estimated && l.est_field === 'start' ? ' <span class="muted">est.</span>' : '') + '</div></div>' +
