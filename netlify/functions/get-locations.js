@@ -80,7 +80,7 @@ exports.handler = async (event) => {
 
       const { data: sites, error: sitesErr } = await supabase
         .from("sites")
-        .select("id, site_code, state, name, address, county, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id, skip_armored_meet_prompt")
+        .select("id, site_code, state, name, address, county, machine_type, contractor_override, contractor_name, remote, lat, lng, primary_tech_id, fallback_tech_id, skip_armored_meet_prompt, after_hours_access")
         .eq("state", state);
 
       if (sitesErr) throw sitesErr;
@@ -124,6 +124,9 @@ exports.handler = async (event) => {
           // not per-state -- see save-location.js and the prompt's own
           // "don't ask again" option in index.html.
           skipArmoredMeetPrompt: !!s.skip_armored_meet_prompt,
+          // 2026-10-24: technicians can get to the kiosk even when the location is closed
+          // (key card to the room behind it). Set per site; the Saturday on-call page reads it.
+          afterHoursAccess: !!s.after_hours_access,
           ...(s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : {}),
         };
         result[s.site_code] = record;
