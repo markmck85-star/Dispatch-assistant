@@ -61,6 +61,12 @@ exports.handler = async (event) => {
     record.remote = Boolean(payload.remote);
   }
 
+  // 2026-10-24: technicians can reach the kiosk when the location is closed (key card).
+  // Only written when the caller sends it, so unrelated saves never flip it off.
+  if (payload.afterHoursAccess !== undefined) {
+    record.afterHoursAccess = Boolean(payload.afterHoursAccess);
+  }
+
   if (payload.skipArmoredMeetPrompt !== undefined) {
     record.skipArmoredMeetPrompt = Boolean(payload.skipArmoredMeetPrompt);
   }
@@ -150,6 +156,9 @@ exports.handler = async (event) => {
               primary_tech_id: primaryTechId,
               fallback_tech_id: fallbackTechId,
             };
+            // Only touch the column when this save actually carried the field; an upsert
+            // that omits it leaves the stored value alone.
+            if (payload.afterHoursAccess !== undefined) siteRow.after_hours_access = !!payload.afterHoursAccess;
             if (addressChanged) {
               // Match Blobs behavior: an address change invalidates any
               // existing coordinates until the site is re-geocoded.
