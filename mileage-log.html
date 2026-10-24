@@ -183,6 +183,7 @@ let distReq = 0;
 let dirty = false;       // server copy is behind what is on screen
 let saveTimer = null;
 let lastSavedAt = null;
+let homePromptDate = null; // day where Next day already offered the drive-home step
 
 function currentUser() {
   try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
@@ -305,6 +306,24 @@ function initPeriod() {
 function shiftLegDate(n) {
   const cur = document.getElementById('legDate').value;
   if (!cur) return;
+  // 2026-10-24: Next day on a day whose last stop is still a store (no drive home logged):
+  // first tap fills Home as the ending and waits for the odometer; a second tap skips it
+  // (the drive home is then estimated from the matrix when the next day starts).
+  if (n > 0 && homePromptDate !== cur && !picked.to) {
+    const dayLegs = legs.filter(l => l.date === cur);
+    const last = dayLegs[dayLegs.length - 1];
+    const fromOdo = Number(document.getElementById('odoStart').value);
+    if (last && last.to_kind === 'site' && last.odo_end != null && picked.from && picked.from.kind !== 'home' &&
+        document.getElementById('odoEnd').value === '' && fromOdo === last.odo_end) {
+      homePromptDate = cur;
+      picked.to = homeStop();
+      document.getElementById('toQ').value = picked.to.picker;
+      document.getElementById('toPicked').textContent = 'Using: ' + picked.to.picker;
+      refreshExpected(true);
+      setDayNote('Type your odometer when you got home, then Add stop. Or tap Next day again to skip it (the drive home will be estimated).', false);
+      return;
+    }
+  }
   let next = addDays(cur, n);
   const start = document.getElementById('periodStart').value;
   const end = document.getElementById('periodEnd').value;
