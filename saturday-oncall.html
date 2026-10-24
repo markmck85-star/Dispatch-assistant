@@ -1577,7 +1577,7 @@ function renderStopCard(t) {
   const acc = siteAccessInfo(t);
   let accessHtml = '';
   if (acc.hours) {
-    const todayTxt = acc.today === 'Closed' ? 'Closed today' : (acc.today ? 'Open today ' + acc.today : 'Hours: ' + acc.hours);
+    const todayTxt = acc.today === 'Closed' ? 'Location closed today' : (acc.today ? 'Open today ' + acc.today : 'Hours: ' + acc.hours);
     const warn = acc.today === 'Closed' ? ' style="color:#f0a500;"' : '';
     accessHtml = `<div class="meta"${warn}><b>${escapeHtml(todayTxt)}</b>${acc.phone ? ' · ' + escapeHtml(acc.phone) : ''}</div>`;
   } else if (acc.phone) {
