@@ -309,9 +309,27 @@ function initPeriod() {
   updateDow();
 }
 
-function shiftLegDate(n) {
+// A stop that is fully filled in (From, To, a complete ending odometer) but not yet added.
+function pendingComplete() {
+  const startEl = document.getElementById('odoStart');
+  const typed = digitsOnly(document.getElementById('odoEnd').value);
+  if (!picked.from || !picked.to || typed === '' || typed === autoPrefix) return false;
+  if (pendingJunk()) return false;
+  if (autoPrefix && typed.length < autoPrefix.length + 3) return false;
+  const s = Number(startEl.value), e = Number(typed);
+  return startEl.value !== '' && Number.isFinite(s) && Number.isFinite(e) && e >= s;
+}
+// Home to home can never be added, so a leftover one is just clutter.
+function pendingJunk() {
+  return !!(picked.from && picked.to && picked.from.kind === 'home' && picked.to.kind === 'home');
+}
+
+async function shiftLegDate(n) {
   const cur = document.getElementById('legDate').value;
   if (!cur) return;
+  // 2026-10-24: a finished entry that was typed but never added (reading typed, then Next day)
+  // is added first, so it is not lost or carried onto the next day.
+  if (n > 0 && pendingComplete()) await addLeg();
   // 2026-10-24: Next day on a day whose last stop is still a store (no drive home logged):
   // first tap fills Home as the ending and waits for the odometer; a second tap skips it
   // (the drive home is then estimated from the matrix when the next day starts).
@@ -350,7 +368,7 @@ function shiftLegDate(n) {
   // should start at home). Drop an ending that is only that auto-fill; a real typed ending
   // is still left alone.
   const endDigits = digitsOnly(document.getElementById('odoEnd').value);
-  const typedEnding = endDigits !== '' && endDigits !== autoPrefix;
+  const typedEnding = endDigits !== '' && endDigits !== autoPrefix && !pendingJunk();
   if (!typedEnding) {
     picked.to = null;
     document.getElementById('toQ').value = '';
@@ -566,7 +584,8 @@ async function loadContext() {
     autoPrefix = '';
     expectedMi = null;
     showOdoNote('');
-    if (local && local.pickedTo && Array.isArray(local.legs) && local.legs.length === legs.length) {
+    if (local && local.pickedTo && Array.isArray(local.legs) && local.legs.length === legs.length &&
+        !(picked.from && picked.from.kind === 'home' && local.pickedTo.kind === 'home')) {
       picked.to = local.pickedTo;
       document.getElementById('toQ').value = picked.to.print || picked.to.picker || '';
       document.getElementById('toPicked').textContent = 'Using: ' + (picked.to.picker || '');
@@ -918,7 +937,30 @@ async function addLeg() {
   saveLog('draft');
 }
 
-function endDay() {
+async function endDay() {
+  // already home: there is nothing to end (a home to home row cannot be added)
+  if (picked.from && picked.from.kind === 'home') {
+    showOdoNote('You are already home. Add your stops first, or tap Next day.');
+    return;
+  }
+  const startVal = Number(document.getElementById('odoStart').value);
+  const typed = digitsOnly(document.getElementById('odoEnd').value);
+  const hasReading = typed !== '' && typed !== autoPrefix && document.getElementById('odoStart').value !== '' &&
+    Number.isFinite(startVal) && Number(typed) >= startVal &&
+    !(autoPrefix && typed.length < autoPrefix.length + 3);
+  if (hasReading && picked.to && picked.to.kind !== 'home') {
+    // the typed reading belongs to the stop already picked: add it, then go home from there
+    await addLeg();
+  } else if (hasReading) {
+    // reading typed first (To empty, or already Home): it is the reading at home, so add the drive home now
+    if (!picked.to) {
+      picked.to = homeStop();
+      document.getElementById('toQ').value = picked.to.picker;
+      document.getElementById('toPicked').textContent = 'Using: ' + picked.to.picker;
+    }
+    await addLeg();
+    return;
+  }
   picked.to = homeStop();
   document.getElementById('toQ').value = picked.to.picker;
   document.getElementById('toPicked').textContent = 'Using: ' + picked.to.picker;
@@ -1202,7 +1244,7 @@ function onLegDateChange() {
   const d = document.getElementById('legDate').value;
   // drop an ending that is only auto-fill or a leftover pick (a typed odometer is kept)
   const endDigits = digitsOnly(document.getElementById('odoEnd').value);
-  const typedEnding = endDigits !== '' && endDigits !== autoPrefix;
+  const typedEnding = endDigits !== '' && endDigits !== autoPrefix && !pendingJunk();
   if (!typedEnding) {
     picked.to = null;
     document.getElementById('toQ').value = '';
