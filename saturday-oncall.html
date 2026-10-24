@@ -158,6 +158,10 @@
     </div>
 
     <div class="section-title">Trouble Tickets</div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;margin:0 0 8px;cursor:pointer;">
+      <input type="checkbox" id="hideDoneToggle" onchange="onHideDoneChange()">
+      Hide closed stops (marked Done, or site closed today)
+    </label>
     <div id="ticketList"><div class="empty">Loading&hellip;</div></div>
 
     <div class="section-title" id="restockTitle" style="display:none;">Restocks Moved to Today</div>
@@ -1464,6 +1468,32 @@ function renderRestockSection() {
   listEl.innerHTML = html;
 }
 
+// A site that is closed today per its listed hours (or flagged closed on Saturdays), or a stop
+// already marked Done, has nothing left to dispatch. Those sort to the bottom of each list and
+// can be hidden with the checkbox above.
+function isClosedStop(t) {
+  const a = t._assignment;
+  if (a && a.status === 'completed') return true;
+  try { if (siteAccessInfo(t).today === 'Closed') return true; } catch (e) { /* no hours on file */ }
+  return !!closedSaturdayFlag(t.address);
+}
+function closedLast(list) {
+  return list.map((t, i) => ({ t, i })).sort((x, y) => (isClosedStop(x.t) - isClosedStop(y.t)) || (x.i - y.i)).map(o => o.t);
+}
+
+function hideDoneChecked() {
+  const el = document.getElementById('hideDoneToggle');
+  return !!(el && el.checked);
+}
+function onHideDoneChange() {
+  const el = document.getElementById('hideDoneToggle');
+  try { localStorage.setItem('mcr_sat_hideDone', el && el.checked ? '1' : '0'); } catch (e) { /* silent */ }
+  renderTicketList();
+}
+document.addEventListener('DOMContentLoaded', () => {
+  try { const el = document.getElementById('hideDoneToggle'); if (el) el.checked = localStorage.getItem('mcr_sat_hideDone') === '1'; } catch (e) { /* silent */ }
+});
+
 function renderTicketList() {
   try { renderRestockSection(); } catch (err) { console.error('saturday restocks', err); }
   const el = document.getElementById('ticketList');
@@ -1486,6 +1516,10 @@ function renderTicketList() {
   // since there's no assignment row possible for them yet.
   const groups = {}; // key: "STATE::Tech Name" -> rows[]
   const unassignedRows = [];
+  // 2026-10-24: "Hide done stops" -- a stop marked Done stays on the list (its ticket is still open
+  // until the Salesforce close-out syncs), so this keeps the page focused on what is left to do.
+  const hideDone = hideDoneChecked();
+  let hiddenDone = 0;
   rows.forEach((t, i) => {
     const loc = resolveSiteLoc(t);
     const key = ticketKey(t, loc ? loc.code : null);
@@ -1494,6 +1528,7 @@ function renderTicketList() {
     t._idx = i;
     t._loc = loc;
     t._assignment = live;
+    if (hideDone && isClosedStop(t)) { hiddenDone++; return; }
     if (live) {
       const gk = `${t.state}::${live.techName}`;
       (groups[gk] = groups[gk] || []).push(t);
@@ -1505,15 +1540,16 @@ function renderTicketList() {
   window._satTicketRows = rows;
 
   let html = '';
+  if (hiddenDone) html += `<div class="empty" style="padding:6px 0;font-size:12px;">${hiddenDone} closed stop${hiddenDone === 1 ? '' : 's'} hidden.</div>`;
   for (const [gk, groupRows] of Object.entries(groups)) {
     const [state, techName] = gk.split('::');
     html += `<div class="placard"><div class="placard-head">${escapeHtml(techName)} <span class="count">(${groupRows.length}) — ${state}</span></div>`;
-    html += groupRows.map(t => renderStopCard(t)).join('');
+    html += closedLast(groupRows).map(t => renderStopCard(t)).join('');
     html += `</div>`;
   }
   if (unassignedRows.length) {
     html += `<div class="placard" style="border-left-color:#888;"><div class="placard-head">Unassigned / unmatched <span class="count">(${unassignedRows.length})</span></div>`;
-    html += unassignedRows.map(t => renderStopCard(t)).join('');
+    html += closedLast(unassignedRows).map(t => renderStopCard(t)).join('');
     html += `</div>`;
   }
   el.innerHTML = html;
@@ -1533,6 +1569,9 @@ function renderStopCard(t) {
     ? ` <span class="closed-badge" style="background:#1a3d2a;color:#8fd4a8;border:1px solid #2e6b48;">✓ Received ${new Date(a.receivedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>`
     : '';
   const notifiedStr = (!a || a.receivedAt) ? '' : (a.status === 'notified' ? ' — notified' : '');
+  const doneStr = (a && a.status === 'completed')
+    ? ' <span class="closed-badge" style="background:#1a6b1a;color:#d6f5d6;">✓ Done</span>'
+    : '';
   const reviewBadge = t.needsReview
     ? `<span onclick="showSiteHistory('${loc ? loc.code : ''}')" style="cursor:pointer;display:inline-block;background:#c98a1e;color:#1a1a1a;font-weight:700;font-size:11px;border-radius:4px;padding:2px 6px;margin-top:5px;" title="Possible second ticket today for this site -- tap to view history">⚠ REVIEW — view history</span>`
     : '';
@@ -1549,7 +1588,7 @@ function renderStopCard(t) {
 
   return `<div class="stop-card" data-idx="${t._idx}">
     <span class="site" data-code="${loc ? loc.code : ''}">[${t.state}] ${escapeHtml(siteLabel)}</span>
-    <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}${notifiedStr}${receivedStr}</div>
+    <div class="meta">${escapeHtml(t.issueCategory || 'Trouble')}${t.woNumber ? ' — WO ' + escapeHtml(t.woNumber) : ''}${notifiedStr}${receivedStr}${doneStr}</div>
     ${slaLabel ? `<div class="sla">${slaLabel}</div>` : ''}
     ${accessHtml}
     ${reviewBadge}
