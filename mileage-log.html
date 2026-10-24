@@ -320,7 +320,22 @@ function shiftLegDate(n) {
   }
   document.getElementById('legDate').value = next;
   updateDow();
-  applyStartFor(next);
+  // 2026-10-24: "End day at home" fills the To box and an odometer prefix, which made the form
+  // look half-typed, so changing the day kept the old From/To (Steve Reynolds on a day that
+  // should start at home). Drop an ending that is only that auto-fill; a real typed ending
+  // is still left alone.
+  const endDigits = digitsOnly(document.getElementById('odoEnd').value);
+  const typedEnding = endDigits !== '' && endDigits !== autoPrefix;
+  if (!typedEnding) {
+    picked.to = null;
+    document.getElementById('toQ').value = '';
+    document.getElementById('toPicked').textContent = '';
+    document.getElementById('odoEnd').value = '';
+    expectedMi = null; autoPrefix = ''; showOdoNote('');
+    applyStartFor(next, true);
+  } else {
+    applyStartFor(next);
+  }
 }
 
 function skipEmptyDay() {
