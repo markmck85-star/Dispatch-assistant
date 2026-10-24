@@ -592,11 +592,35 @@ function arrivalFor(dateStr) {
   return dateStr === todayLocal() ? { arrived_at: new Date().toISOString() } : {};
 }
 
-function showOdoNote(t) {
+function showOdoNote(t, btn) {
   const el = document.getElementById('odoNote');
   if (!el) return;
   el.textContent = t || '';
+  if (t && btn) {
+    el.appendChild(document.createTextNode(' '));
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'secondary'; b.style.padding = '4px 10px'; b.style.fontSize = '13px';
+    b.textContent = btn.label;
+    b.onclick = btn.fn;
+    el.appendChild(b);
+  }
   el.style.display = t ? 'block' : 'none';
+}
+
+// 2026-10-24: accept the matrix distance as the ending odometer (start + expected miles).
+// The stop is marked as estimated so it shows "est." and can be corrected later.
+let matrixEndUsed = null;
+function useMatrixEnd() {
+  const startEl = document.getElementById('odoStart');
+  const start = Number(startEl.value);
+  if (expectedMi == null || startEl.value === '' || !Number.isFinite(start)) return;
+  const v = String(start + expectedMi);
+  document.getElementById('odoEnd').value = v;
+  matrixEndUsed = v;
+  autoPrefix = '';
+  showOdoNote('Using the matrix distance (' + expectedMi + ' mi) as an estimate. Type over it if you have the real reading.');
+  previewFlag();
+  persistLocal();
 }
 
 function digitsOnly(v) { return String(v == null ? '' : v).replace(/[^0-9]/g, ''); }
@@ -622,6 +646,7 @@ async function getMatrixMiles(f, t) {
 
 async function refreshExpected(focusAfter) {
   expectedMi = null;
+  matrixEndUsed = null;
   showOdoNote('');
   if (!ctx || !picked.from || !picked.to) return;
   if (picked.from.kind === 'site' && picked.to.kind === 'site' && picked.from.id && picked.from.id === picked.to.id) {
@@ -741,7 +766,7 @@ function maybePrefill(focusAfter) {
   if (prefix < 1) { autoPrefix = ''; return; }
   autoPrefix = String(prefix);
   endEl.value = autoPrefix;
-  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.');
+  showOdoNote('Matrix says about ' + expectedMi + ' mi. Type the last 3 digits from the odometer.', { label: 'Use ' + expectedMi + ' mi', fn: useMatrixEnd });
   if (focusAfter) {
     setTimeout(() => {
       endEl.focus();
@@ -773,6 +798,7 @@ function onOdoEndInput() {
   const endEl = document.getElementById('odoEnd');
   const clean = digitsOnly(endEl.value);
   if (clean !== endEl.value) endEl.value = clean;
+  matrixEndUsed = null; // typed over the matrix number
   resolveRollover();
   previewFlag();
   persistLocal();
@@ -869,6 +895,8 @@ async function addLeg() {
       Object.assign(last, arrivalFor(date));
     }
     pendingClosing = null;
+    if (matrixEndUsed && String(odoEnd) === matrixEndUsed) { last.estimated = true; last.est_field = 'end'; last.matrix_accepted = true; }
+    matrixEndUsed = null;
   }
   picked.from = picked.to;
   document.getElementById('fromQ').value = picked.from.picker;
@@ -915,7 +943,7 @@ function legNotesHtml(l) {
   if (l.flag === 'negative') out += '<div class="flag neg">Odometer went down — check the reading.</div>';
   else if (l.flag === 'over') out += '<div class="flag neg">That stop is ' + l.miles + ' miles. Check the odometer (extra digit?).' + (l.expected_mi != null ? ' Matrix says about ' + l.expected_mi + ' mi.' : '') + '</div>';
   else if (l.flag === 'check') out += '<div class="flag">About ' + (l.expected_mi != null ? l.expected_mi + ' mi expected' : 'a shorter hop') + '; you entered ' + l.miles + '. Detour is fine — worth a glance.</div>';
-  if (l.estimated) out += '<div class="flag">' + (l.auto_home ? 'Drive home estimated from the matrix.' : 'Middle reading estimated from the matrix.') + ' Remove it and re-add if you have the real number.</div>';
+  if (l.estimated) out += '<div class="flag">' + (l.auto_home ? 'Drive home estimated from the matrix.' : (l.matrix_accepted ? 'Ending reading taken from the matrix distance.' : 'Middle reading estimated from the matrix.')) + ' Remove it and re-add if you have the real number.</div>';
   if (l.via_trip_meter) out += '<div class="muted">Middle reading from trip meter.</div>';
   return out;
 }
@@ -1335,9 +1363,18 @@ function addFromClosing(id) {
     picked.to = st.kind === 'site' ? Object.assign({}, st) : st;
     document.getElementById('toQ').value = st.print || st.picker;
     document.getElementById('toPicked').textContent = 'Using: ' + st.picker;
-    refreshExpected(false);
-    showOdoNote('Closing was at ' + new Date(v.ended_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '. Type the odometer you had at this stop.');
+    setDayNote('Closing was at ' + new Date(v.ended_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '. Type the odometer you had at this stop.', false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    // put the cursor in the ending odometer, after the digits the app filled in
+    refreshExpected(true).then(() => {
+      setTimeout(() => {
+        const startEl = document.getElementById('odoStart');
+        const el = document.getElementById('odoEnd');
+        const target = (startEl.value === '') ? startEl : el;
+        target.focus();
+        try { target.setSelectionRange(target.value.length, target.value.length); } catch (e) {}
+      }, 120);
+    });
   }
 }
 
@@ -1363,6 +1400,7 @@ function openInsert(idx, visit) {
   msg.textContent = visit ? 'Closing at ' + new Date(visit.ended_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '. Pick the trip it fell inside if the suggestion is wrong.' : '';
   box.style.display = 'block';
   box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (visit) setTimeout(() => { try { document.getElementById('insertOdo').focus(); } catch (e) {} }, 350);
 }
 
 function closeInsert() {
