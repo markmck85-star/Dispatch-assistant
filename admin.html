@@ -243,6 +243,10 @@
                     <input type="checkbox" id="locRemote">
                     <label for="locRemote" style="margin:0;font-weight:400;">Remote location <span style="color:#888;font-size:12px;">(triggers Restock Tracker suggestion when dispatched)</span></label>
                 </div>
+                <div class="checkbox-row" style="margin-top:4px;">
+                    <input type="checkbox" id="locAfterHours">
+                    <label for="locAfterHours" style="margin:0;font-weight:400;">After-hours access <span style="color:#888;font-size:12px;">(technicians can reach the kiosk when the location is closed, e.g. key card; the Saturday on-call page shows this instead of a closed warning)</span></label>
+                </div>
                 <label for="locContractorName">Contractor Name</label>
                 <input type="text" id="locContractorName" placeholder="Contractor name (if override)">
                 <button class="big-btn save-btn" onclick="saveLocation()">Save Location</button>
@@ -3383,6 +3387,7 @@
             document.getElementById('locFallbackTech').value = '';
             document.getElementById('locContractorOverride').checked = false;
             document.getElementById('locRemote').checked = false;
+            document.getElementById('locAfterHours').checked = false;
             document.getElementById('locContractorName').value = '';
             document.getElementById('locFormTitle').textContent = 'Add Location';
         }
@@ -3414,6 +3419,7 @@
             document.getElementById('locContractorOverride').checked = !!loc.contractorOverride;
             document.getElementById('locMachineType').value = loc.machineType || 'SK';
             document.getElementById('locRemote').checked = !!loc.remote;
+            document.getElementById('locAfterHours').checked = !!loc.afterHoursAccess;
             document.getElementById('locContractorName').value = loc.contractorName || '';
             document.getElementById('locFormTitle').textContent = 'Edit Location — ' + code;
 
@@ -3460,6 +3466,7 @@
                 contractorOverride: document.getElementById('locContractorOverride').checked,
                 machineType: document.getElementById('locMachineType').value,
                 remote: document.getElementById('locRemote').checked,
+                afterHoursAccess: document.getElementById('locAfterHours').checked,
                 surfboard: document.getElementById('locMachineType').value === 'SB',
                 cashSide: document.getElementById('locMachineType').value === 'BK',
                 contractorName: document.getElementById('locContractorName').value.trim()
