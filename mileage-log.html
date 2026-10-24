@@ -945,6 +945,22 @@ async function addLeg() {
   const odoEnd = document.getElementById('odoEnd').value;
   const miles = (odoEnd !== '' && odoStart !== '') ? Number(odoEnd) - Number(odoStart) : null;
   const flag = flagMiles(miles);
+  // A drive home from this same point may already be in the log (the estimated one added when the
+  // day was left without ending it). A typed reading replaces that estimate; it never adds a second
+  // leg. A second typed one is refused rather than doubling the miles.
+  if (picked.to.kind === 'home') {
+    const fromName = picked.from.print || picked.from.picker;
+    const dupIdx = legs.findIndex(l => l.date === date && l.to_kind === 'home' && l.odo_start != null &&
+      String(l.odo_start) === String(odoStart) && (l.from_print || l.from_picker) === fromName);
+    if (dupIdx >= 0) {
+      if (legs[dupIdx].estimated && legs[dupIdx].auto_home) {
+        legs.splice(dupIdx, 1);
+      } else {
+        showOdoNote('The drive home from ' + fromName + ' is already in this day. Remove it first if it is wrong.');
+        return;
+      }
+    }
+  }
   legs.push({
     date,
     from_kind: picked.from.kind,
@@ -1765,7 +1781,9 @@ function exportExcel() {
   const endParts = (end || start).split('-');
   const fileEnd = endParts.length === 3 ? (Number(endParts[1]) + '_' + Number(endParts[2]) + '_' + endParts[0]) : (end || start);
   const lastName = (ctx.technician.name || 'tech').trim().split(/\s+/).slice(-1)[0];
-  const base = lastName + '_Mileage_' + fileEnd;
+  // Named like the full expense file (Name_Expense_M_D_YYYY) so the mileage check picks it up
+  // when it is forwarded; the workbook holds only the Mileage sheet.
+  const base = lastName + '_Expense_' + fileEnd;
   if (!window.XLSX) {
     document.getElementById('status').textContent = 'Excel library did not load — try Print / PDF.';
     return;
