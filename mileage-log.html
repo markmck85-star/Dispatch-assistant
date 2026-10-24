@@ -1137,7 +1137,11 @@ function applyStartFor(dateStr, force) {
       // same day as that stop: carry on from where it ended
       picked.from = stopFromLegEnd(L);
       odo.value = L.odo_end != null ? L.odo_end : '';
-      if (L.to_kind === 'home') note = backHomeText(L.odo_end);
+      if (L.to_kind === 'home') {
+        note = (dateStr && dateStr < todayLocal())
+          ? 'This day is finished: you were back home at ' + (L.odo_end != null ? L.odo_end : '?') + '. Tap Next day to continue. Only change the odometer if you drove the car again that evening.'
+          : backHomeText(L.odo_end);
+      }
     } else if (L.to_kind === 'home') {
       picked.from = homeStop();
       odo.value = L.odo_end != null ? L.odo_end : '';
@@ -1167,7 +1171,20 @@ function flushHomeNote() {
 
 function onLegDateChange() {
   updateDow();
-  applyStartFor(document.getElementById('legDate').value);
+  const d = document.getElementById('legDate').value;
+  // drop an ending that is only auto-fill or a leftover pick (a typed odometer is kept)
+  const endDigits = digitsOnly(document.getElementById('odoEnd').value);
+  const typedEnding = endDigits !== '' && endDigits !== autoPrefix;
+  if (!typedEnding) {
+    picked.to = null;
+    document.getElementById('toQ').value = '';
+    document.getElementById('toPicked').textContent = '';
+    document.getElementById('odoEnd').value = '';
+    expectedMi = null; autoPrefix = ''; showOdoNote(''); previewFlag();
+    applyStartFor(d, true);
+  } else {
+    applyStartFor(d);
+  }
 }
 
 async function addDriveHome(dateStr) {
