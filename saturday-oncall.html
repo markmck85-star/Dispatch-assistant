@@ -302,7 +302,7 @@ function satAiState() {
   if (activeStateFilter) return activeStateFilter;
   const states = new Set();
   (SAT_STATES || []).forEach(s => {
-    (ticketsByState[s.code] || []).forEach(t => {
+    visibleTickets(s.code).forEach(t => {
       const loc = resolveSiteLoc(t);
       const key = ticketKey(t, loc && loc.code);
       const asg = key && assignmentsByKey[key];
@@ -317,7 +317,7 @@ function satAiRoutesSnapshot() {
   const st = satAiState();
   if (!st) return [];
   const byTech = {};
-  (ticketsByState[st] || []).forEach(ticket => {
+  visibleTickets(st).forEach(ticket => {
     const loc = resolveSiteLoc(ticket);
     if (!loc || !loc.code) return;
     const key = ticketKey(ticket, loc.code);
@@ -657,6 +657,49 @@ function isDueTodayOrEarlier(t) {
 // ever actually gets Saturday-dispatched.
 function isTestingStation(t) {
   return (t.issueCategory || '').trim().toLowerCase() === 'testing station';
+}
+
+// 2026-10-24: a ticket a dispatcher already moved to a later date (Monday or any picked date) still
+// shows as open in the ticket feed, so it kept appearing on Saturday's list and map even though
+// nobody needs to act on it today. Treated as pushed only when it has a live assignment on one of the
+// next 7 days and none on today. Hidden from the list and map, with a count under the list.
+let pushedLaterByKey = {};
+async function loadPushedLater() {
+  if (PREVIEW || !TARGET_DAY) return;
+  const covered = new Set(SAT_STATES.map(s => s.code));
+  const days = [];
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(TARGET_DAY + 'T12:00:00');
+    d.setDate(d.getDate() + i);
+    days.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+  }
+  const found = {};
+  let anyOk = false;
+  await Promise.all(days.map(async (day) => {
+    try {
+      const res = await fetch(`/.netlify/functions/get-assignments?dispatchDate=${day}`);
+      const data = await res.json();
+      anyOk = true;
+      (data.assignments || []).forEach(a => {
+        if (!covered.has(a.state)) return;
+        if (a.status !== 'planned' && a.status !== 'notified') return;
+        if (!a.ticket || a.ticket.ticketKind !== 'trouble') return;
+        const key = a.ticket.woNumber || a.siteCode;
+        if (key && (!found[key] || day < found[key])) found[key] = day;
+      });
+    } catch (e) { /* a failed day just means that day's pushes are not hidden this round */ }
+  }));
+  if (anyOk) pushedLaterByKey = found;
+}
+function isPushedLater(t) {
+  const loc = resolveSiteLoc(t);
+  const key = ticketKey(t, loc ? loc.code : null);
+  if (!key || !pushedLaterByKey[key]) return false;
+  const today = assignmentsByKey[key];
+  return !(today && today.status !== 'removed');
+}
+function visibleTickets(code) {
+  return (ticketsByState[code] || []).filter(t => !isPushedLater(t));
 }
 
 async function loadTickets() {
@@ -1161,7 +1204,7 @@ function nearestSatBoardStopLine(code) {
   const states = activeStateFilter ? [activeStateFilter] : (SAT_STATES || []).map(s => s.code);
   states.forEach(function(st) {
     const locs = LOCATIONS_BY_STATE[st] || {};
-    (ticketsByState[st] || []).forEach(function(ticket) {
+    visibleTickets(st).forEach(function(ticket) {
       const loc = resolveSiteLoc(ticket);
       if (!loc || !loc.code || loc.code === code) return;
       const key = typeof ticketKey === 'function' ? ticketKey(ticket, loc.code) : null;
@@ -1252,7 +1295,7 @@ function renderMap() {
     });
 
     const locs = LOCATIONS_BY_STATE[code] || {};
-    (ticketsByState[code] || []).forEach(ticket => {
+    visibleTickets(code).forEach(ticket => {
       const loc = resolveSiteLoc(ticket);
       if (loc && loc.lat != null && loc.lng != null) {
         const closed = closedSaturdayFlag(ticket.address);
@@ -1301,7 +1344,7 @@ function renderMap() {
 
     if (window._satShowAllSites) {
       const ticketCodes = new Set();
-      (ticketsByState[code] || []).forEach(ticket => {
+      visibleTickets(code).forEach(ticket => {
         const loc = resolveSiteLoc(ticket);
         if (loc && loc.code) ticketCodes.add(loc.code);
       });
@@ -1499,7 +1542,7 @@ function renderTicketList() {
   const states = activeStateFilter ? [activeStateFilter] : SAT_STATES.map(s => s.code);
   const rows = [];
   for (const code of states) {
-    (ticketsByState[code] || []).forEach(t => rows.push({ ...t, state: code }));
+    visibleTickets(code).forEach(t => rows.push({ ...t, state: code }));
   }
   rows.sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt));
 
@@ -1538,7 +1581,9 @@ function renderTicketList() {
 
   window._satTicketRows = rows;
 
+  const pushedCount = states.reduce((n, code) => n + (ticketsByState[code] || []).filter(isPushedLater).length, 0);
   let html = '';
+  if (pushedCount) html += `<div class="empty" style="padding:6px 0;font-size:12px;">${pushedCount} ticket${pushedCount === 1 ? '' : 's'} moved to a later date ${pushedCount === 1 ? 'is' : 'are'} hidden.</div>`;
   if (hiddenDone) html += `<div class="empty" style="padding:6px 0;font-size:12px;">${hiddenDone} done stop${hiddenDone === 1 ? '' : 's'} hidden.</div>`;
   for (const [gk, groupRows] of Object.entries(groups)) {
     const [state, techName] = gk.split('::');
@@ -1780,6 +1825,7 @@ async function handleStopAction(t, action) {
       await saveAssignmentRow({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: action === 'done' ? 'completed' : 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
     }
     await loadAssignments();
+    await loadPushedLater();
     renderTicketList();
     renderMap();
   } catch (e) {
@@ -1819,6 +1865,7 @@ document.getElementById('dateModalConfirm').onclick = async () => {
     await saveAssignmentRow({ dispatchDate: TARGET_DAY, siteCode: t._loc.code, techName, status: 'removed', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
     await saveAssignmentRow({ dispatchDate: targetIso, siteCode: t._loc.code, techName, status: 'planned', assignedBy: 'manual', ticketWoNumber: t.woNumber || undefined });
     await loadAssignments();
+    await loadPushedLater();
     renderTicketList();
     document.getElementById('dateModal').classList.remove('active');
     alert(`Pushed to ${targetIso} for ${techName}.`);
@@ -1865,7 +1912,7 @@ async function removeOnCallTech(state, techName) {
   const tech = (TECHS_BY_STATE[state] || {})[slug];
   if (!tech) { alert('Could not find that technician.'); return; }
 
-  const assignedCount = (ticketsByState[state] || []).filter(t => {
+  const assignedCount = visibleTickets(state).filter(t => {
     const loc = resolveSiteLoc(t);
     const key = ticketKey(t, loc ? loc.code : null);
     const a = key && assignmentsByKey[key];
@@ -2192,6 +2239,7 @@ function escapeHtml(s) {
   await loadSaturdayStates();
   renderStateChips();
   await Promise.all([loadDispatchers(), loadDispatcherOnCall(), loadOnCallTechs(), loadTickets(), loadLocationsAndTechs(), loadAssignments()]);
+  await loadPushedLater();
   if (PREVIEW) {
     document.getElementById('previewBanner').style.display = 'block';
     applyPreviewFixtures();
@@ -2219,6 +2267,7 @@ function escapeHtml(s) {
       let ticketsChanged = false;
       if (pollTick % 3 === 0) {
         await loadTickets();
+        await loadPushedLater();
         ticketsChanged = JSON.stringify(Object.values(ticketsByState).map(l => l.map(t => t.ticketId))) !== ticketsBefore;
       }
       if (ticketsChanged || JSON.stringify(assignmentsByKey) !== before) {
