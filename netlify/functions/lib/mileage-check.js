@@ -364,7 +364,32 @@ function parseMileageWorkbookBuffer(buffer) {
   const sheetName = wb.SheetNames.find((n) => /mileage/i.test(n)) || wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-  return extractMileageLegs(grid);
+  const out = extractMileageLegs(grid);
+  if (!out.technicianNameRaw) {
+    // NAME: left blank on the mileage tab -- try the Time tab's "FOR:" and the Expense tab's NAME box
+    try {
+      for (const n of wb.SheetNames) {
+        const g = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
+        for (const row of g) {
+          for (let i = 0; i < row.length - 1; i++) {
+            const c = typeof row[i] === 'string' ? row[i].trim().toUpperCase().replace(/\s+/g, ' ') : '';
+            if ((/^time/i.test(n) && /^FOR:?$/.test(c)) || (/^expense/i.test(n) && c === 'NAME')) {
+              for (let j = i + 1; j < row.length; j++) {
+                if (row[j] == null || (typeof row[j] === 'string' && !row[j].trim())) continue;
+                // the first filled cell after the label is the name -- unless it is the next label (box left blank)
+                if (typeof row[j] === 'string' && /[A-Za-z]{2,}/.test(row[j]) && !/^(POSITION|DIVISION|PAY PERIOD|HOME|DATE)/i.test(row[j].trim())) out.technicianNameRaw = row[j].trim();
+                break;
+              }
+            }
+            if (out.technicianNameRaw) break;
+          }
+          if (out.technicianNameRaw) break;
+        }
+        if (out.technicianNameRaw) break;
+      }
+    } catch (e) { /* name stays blank; the caller falls back to the sender */ }
+  }
+  return out;
 }
 
 /**

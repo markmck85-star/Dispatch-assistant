@@ -1853,7 +1853,7 @@ exports.handler = async (event) => {
           if (/\.(xlsx|xlsm|xls)$/i.test(a.filename)) {
             try {
               const pm = parseMileageWorkbookBuffer(a.content);
-              looksLikeMileage = !!(pm && pm.technicianNameRaw && pm.legs && pm.legs.length);
+              looksLikeMileage = !!(pm && pm.legs && pm.legs.length);
             } catch (e) { /* not a readable workbook */ }
           }
           if (looksLikeMileage) timesheetAttachments.push(a);
@@ -2239,7 +2239,11 @@ exports.handler = async (event) => {
               .select('id').eq('source_email_id', inboundEmailId).eq('source_filename', att.filename).limit(1);
             if (already && already.length) { console.log(`[mailgun-inbound] Mileage timesheet ${att.filename}: already processed for this email -- skipping`); continue; }
           }
-          const { technicianNameRaw, legs } = parseMileageWorkbookBuffer(att.content);
+          const parsedM = parseMileageWorkbookBuffer(att.content);
+          const legs = parsedM.legs;
+          let technicianNameRaw = parsedM.technicianNameRaw;
+          // name cells left blank on the sheet: use who it was emailed from
+          if (!technicianNameRaw && legs.length) technicianNameRaw = await require('./lib/timesheet-owner.js').resolveTechnicianNameFromSender(supabase, sender);
           if (!technicianNameRaw || !legs.length) {
             console.log(`[mailgun-inbound] Mileage timesheet ${att.filename}: no NAME/legs found -- skipping (possibly not the expected template)`);
             continue;
