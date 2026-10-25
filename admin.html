@@ -128,6 +128,7 @@
           <a href="/inbound-mail.html" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;">✉ Inbound Mail</a>
           <a href="/service-responses.html" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">⏱ Service responses</a>
           <a href="/inventory-board" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">📦 Inventory</a>
+          <a id="adminMileageBtn" href="/mileage.html" style="display:none;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">🚗 Mileage check</a>
           <a href="/mileage-log.html" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">🛣️ Mileage log</a>
         </p>
 
@@ -151,7 +152,7 @@
             <button id="tabIssuetrends" onclick="switchTab('issuetrends')">📈 Issue Trends</button>
             <button id="tabUnmatchedsites" onclick="switchTab('unmatchedsites')">🔍 Unmatched Sites</button>
             <button id="tabRestockschedule" onclick="switchTab('restockschedule')">🔄 Restock Schedule</button>
-            <button id="tabMileagecheck" onclick="switchTab('mileagecheck')">🚗 Mileage Check</button>
+            <button id="tabMileagecheck" style="display:none" onclick="switchTab('mileagecheck')">🚗 Mileage Check</button>
             <button id="tabUsers" onclick="switchTab('users')" style="display:none;">👤 Users</button>
             <button id="tabStates" onclick="switchTab('states')" style="display:none;">🗺 States</button>
         </div>
@@ -1887,6 +1888,10 @@
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('userInfo').textContent = currentUser.username + ' (' + currentUser.role + ')';
+
+            // Mileage check page: admin-role logins only (the old Mileage Check tab is hidden now that this page replaces it)
+            var mcBtn = document.getElementById('adminMileageBtn');
+            if (mcBtn) mcBtn.style.display = (currentUser.role === 'admin') ? 'inline-block' : 'none';
 
             var invUser = String(currentUser.username || '').toLowerCase();
             var invLink = document.getElementById('inventoryTrackerLink');
