@@ -183,6 +183,14 @@ function isHomeLabel(rawLabel, homeAddress) {
   return false;
 }
 
+// A bare label that is just the technician's home CITY ("cary" for someone living in Cary). Says
+// "home" only at the start/end of a day: a technician can also have a real stop in his own town.
+function isHomeCityOnlyLabel(rawLabel, homeAddress) {
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
+  const city = homeCityFromAddress(homeAddress);
+  return !!(label && city && (label === city || label === city.replace(/\s+/g, '')));
+}
+
 function isErrandLabel(rawLabel) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
@@ -542,7 +550,8 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   }
 
   function resolveEnd(rawLabel, isBookendSlot, date) {
-    if (techRow && isHomeLabel(rawLabel, techRow.home_address)) return { type: 'home' };
+    if (techRow && isHomeLabel(rawLabel, techRow.home_address)
+        && (isBookendSlot || !isHomeCityOnlyLabel(rawLabel, techRow.home_address))) return { type: 'home' };
     if (isBookendSlot && dayHomeLabel[date] && normalizePlaceLabel(rawLabel).toLowerCase() === dayHomeLabel[date]) {
       return { type: 'home' };
     }
@@ -570,6 +579,71 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       return h != null ? { miles: h, type: 'haversine-fallback' } : null;
     }
     return null;
+  }
+
+  const normKey = (l) => normalizePlaceLabel(l).toLowerCase();
+  function refineByMiles(date, dayLegs, stops, visitSites, knownByLabel, baseline) {
+    const none = { map: baseline, changed: new Set() };
+    const unresolved = unresolvedLabelsByDate[date];
+    if (!unresolved) return none;
+    const rawByKey = {};
+    for (const l of stops) if (unresolved.has(l) && !knownByLabel[normKey(l)] && !rawByKey[normKey(l)]) rawByKey[normKey(l)] = l;
+    const keys = Object.keys(rawByKey);
+    const knownIds = new Set(Object.values(knownByLabel).map((x) => x.id));
+    const sites = [];
+    for (const v of visitSites) if (!knownIds.has(v.id) && !sites.some((x) => x.id === v.id)) sites.push(v);
+    if (!keys.length || keys.length > 6 || sites.length > 6 || !sites.length) return none;
+
+    const scoreOf = (mapK) => {
+      let total = 0;
+      dayLegs.forEach((leg, i) => {
+        const place = (raw, bookend) => {
+          const r = resolveEnd(raw, bookend, date);
+          if (r) return r;
+          const k = normKey(raw);
+          if (mapK[k]) return { type: 'site', site: mapK[k] };
+          if (knownByLabel[k]) return { type: 'site', site: knownByLabel[k] };
+          return null;
+        };
+        const a = place(leg.fromRaw, i === 0), b = place(leg.toRaw, i === dayLegs.length - 1);
+        if ((a && a.type === 'errand') || (b && b.type === 'errand')) return;
+        if (!a || !b) { total += 1; return; }
+        const e = expectedMilesFor(a, b);
+        if (!e) { total += 1; return; }
+        if (!(leg.claimedMiles > 0)) { total += e.miles > 0.5 ? 2 : 0; return; }
+        total += Math.min(2, Math.abs(Math.log(leg.claimedMiles / Math.max(e.miles, 0.5))));
+      });
+      return total;
+    };
+
+    const baseK = {};
+    for (const [label, site] of Object.entries(baseline)) if (site && rawByKey[normKey(label)]) baseK[normKey(label)] = site;
+    const results = [{ map: baseK, score: scoreOf(baseK) - 0.06 }];
+    let evals = 0;
+    const walk = (i, cur, used) => {
+      if (evals > 20000) return;
+      if (i === keys.length) { evals++; results.push({ map: { ...cur }, score: scoreOf(cur) }); return; }
+      walk(i + 1, cur, used);
+      for (const site of sites) {
+        if (used.has(site.id)) continue;
+        cur[keys[i]] = site; used.add(site.id);
+        walk(i + 1, cur, used);
+        delete cur[keys[i]]; used.delete(site.id);
+      }
+    };
+    walk(0, {}, new Set());
+    const best = Math.min(...results.map((r) => r.score));
+    const close = results.filter((r) => r.score <= best + 0.05);
+    const out = {}; const changed = new Set();
+    for (const k of keys) {
+      const picks = close.map((r) => (r.map[k] ? r.map[k].id : null));
+      if (!picks.every((x) => x === picks[0]) || picks[0] == null) continue;
+      const site = close[0].map[k];
+      out[rawByKey[k]] = site;
+      if (!(baseK[k] && baseK[k].id === site.id)) changed.add(rawByKey[k]);
+    }
+    // labels the baseline resolved that the search dropped as ambiguous stay dropped
+    return { map: out, changed };
   }
 
   // ── Pass 1: home + exact alias only (unambiguous, no guessing) ─────────
@@ -635,11 +709,11 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     for (const date of datesNeedingLookup) {
       const dayLegs = legs.filter((l) => l.date === date);
       const homeLabel = dayHomeLabel[date];
-      const stops = dayLegs.map((l) => l.toRaw).filter((label) =>
-        !(techRow && isHomeLabel(label, techRow.home_address))
+      const stops = dayLegs.map((l, li) => ({ label: l.toRaw, last: li === dayLegs.length - 1 })).filter(({ label, last }) =>
+        !(techRow && isHomeLabel(label, techRow.home_address) && (last || !isHomeCityOnlyLabel(label, techRow.home_address)))
         && !isErrandLabel(label)
         && !(homeLabel && normalizePlaceLabel(label).toLowerCase() === homeLabel && label === dayLegs[dayLegs.length - 1].toRaw)
-      );
+      ).map((x) => x.label);
       const visitSites = (visitsByDate[date] || []).map((v) => v.sites).filter(Boolean);
       if (!stops.length || !visitSites.length) continue;
 
@@ -675,7 +749,6 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
           const vi = visitSites.findIndex((s) => s.id === known.id);
           if (vi >= 0) anchors.push({ si, vi });
         });
-        if (!anchors.length) continue;
         stops.forEach((label, si) => {
           const votes = {};
           for (const a of anchors) {
@@ -690,13 +763,22 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
         });
       }
 
+      // The ticket order is only as good as the start times behind it (a ticket tapped In Progress late
+      // lands in the wrong slot). Re-check the day against the claimed miles: if another assignment of
+      // stops to tickets explains the miles clearly better, use that one; if two fit equally, leave the
+      // stop unidentified rather than pick one.
+      const refined = refineByMiles(date, dayLegs, stops, visitSites, knownByLabel, proposed);
+      for (const k of Object.keys(proposed)) delete proposed[k];
+      Object.assign(proposed, refined.map);
+      const reorderedLabels = refined.changed;
+
       Object.entries(proposed).forEach(([label, site]) => {
         if (!site) return;
         if (!unresolvedLabelsByDate[date] || !unresolvedLabelsByDate[date].has(label)) return;
         const key = `${date}|${label}`;
         if (labelToResolvedSite[key]) return;
         labelToResolvedSite[key] = site;
-        resolvedViaClosedTickets.push({ date, rawLabel: label, resolvedSiteCode: site.site_code, resolvedSiteName: site.name });
+        resolvedViaClosedTickets.push({ date, rawLabel: label, resolvedSiteCode: site.site_code, resolvedSiteName: site.name, ...(reorderedLabels.has(label) ? { reorderedByMiles: true } : {}) });
       });
     }
 
