@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-262 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-263 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -9830,6 +9830,13 @@ ${content}
             // reliably known (they're pulled from the separate completed/
             // removed list, not the sequenced active board), so a line through
             // them would imply a path that may not be real.
+            // A board dated after today cannot have anything finished ON it yet: a completed stop
+            // sitting there was caught on an earlier day. It stays on the map as a muted completed pin,
+            // but no route line runs through it (it is not part of that day's drive).
+            const _mapBoardIso = ((document.getElementById('dispatchDate') || {}).value) || '';
+            const _mapNow = new Date();
+            const _mapTodayIso = _mapNow.getFullYear() + '-' + String(_mapNow.getMonth() + 1).padStart(2, '0') + '-' + String(_mapNow.getDate()).padStart(2, '0');
+            const completedBeforeBoardDay = !!(_mapBoardIso && _mapBoardIso > _mapTodayIso);
             const completedByTech = {};
             (window.removedStops || []).forEach(r => {
                 if (r.reason !== 'completed' || !r.tech || !r.code) return;
@@ -9926,6 +9933,7 @@ ${content}
                     pts: pts,
                     futurePts: futurePts,
                     completedPts: completedPts,
+                    completedBeforeBoardDay: completedBeforeBoardDay,
                     home: home
                 });
                 stopCount += pts.length;
@@ -10013,7 +10021,7 @@ ${content}
                     if (latlngs.length) {
                         const donePath = [];
                         donePath.push([route.home.lat, route.home.lng]);
-                        (route.completedPts || []).forEach(function(p) { donePath.push([p.lat, p.lng]); });
+                        if (!route.completedBeforeBoardDay) (route.completedPts || []).forEach(function(p) { donePath.push([p.lat, p.lng]); });
                         const dottedSegs = [];
                         for (var di = 0; di < donePath.length - 1; di++) {
                             dottedSegs.push([donePath[di], donePath[di + 1]]);
@@ -10067,7 +10075,7 @@ ${content}
                         ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
                             + (p.leg.durationMin != null ? ' · ' + formatDriveTime(p.leg.durationMin) : '')
                             + (p.leg.isReal ? '' : ' (est.)')
-                            + (i === 0 ? ((route.completedPts && route.completedPts.length) ? ' from last completed' : ' from home') : ' from prev. stop')
+                            + (i === 0 ? ((route.completedPts && route.completedPts.length && !route.completedBeforeBoardDay) ? ' from last completed' : ' from home') : ' from prev. stop')
                         : '';
                     L.marker([p.lat, p.lng], {
                         icon: L.divIcon({
