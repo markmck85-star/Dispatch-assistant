@@ -1,6 +1,13 @@
 /**
- * get-timesheet-receipts.js  (v1.1, 2026-10-12)
+ * get-timesheet-receipts.js  (v1.2, 2026-10-25)
  * SAVE AS: netlify/functions/get-timesheet-receipts.js
+ *
+ * v1.2 (2026-10-25): optional &mileage=1 adds, for the Mileage Check page, each
+ * received person's saved sheet(s) (timesheet_files) and newest mileage report for the
+ * period, plus a status: flagged / fine / no_mileage (a sheet was kept but no mileage
+ * could be read from it) / no_file (the email arrived with no spreadsheet kept).
+ * Reports with no matching person on the roster come back as otherReports.
+ * Without &mileage=1 the answer is the same as v1.1, so the Timesheet board is untouched.
  *
  * v1.1 (2026-10-12): Tom Ellison added to NOT_EXPECTED (TJ: he does not work for
  * MCR). Lance Wise and Brit Kees stay expected: TJ confirmed they file time sheets.
@@ -73,6 +80,53 @@ function periodEndFor(todayEt) {
   return fromDayNumber(anchor + n * 14);
 }
 function isPeriodEnd(ymd) { return (dayNumber(ymd) - dayNumber(ANCHOR_END)) % 14 === 0; }
+
+// ---- mileage view (v1.2) ----
+const REPORT_COLS = "id, technician_id, technician_name_raw, pay_period_end, source, source_email_id, source_filename, total_legs, matched_legs, total_claimed_miles, total_expected_miles, flagged_legs, unmatched_legs, day_summaries, history_comparison, needs_review, processed_at";
+
+/**
+ * Pure: attach files + newest report to each received person. A person with no email counted
+ * but a report in the period (sheet uploaded by hand, or mail that came through another
+ * address) moves from missing to received, so the board does not chase someone whose sheet
+ * is already on file. Mutates received / missing.
+ */
+function attachMileage(received, missing, unmatched, files, reports) {
+  const filesByEmail = new Map();
+  for (const f of files) { const a = filesByEmail.get(f.inbound_email_id) || []; a.push(f); filesByEmail.set(f.inbound_email_id, a); }
+  const newestFirst = (a, b) => String(b.processed_at).localeCompare(String(a.processed_at));
+  const reportsByTech = new Map();
+  for (const r of reports.slice().sort(newestFirst)) { if (!r.technician_id) continue; const a = reportsByTech.get(r.technician_id) || []; a.push(r); reportsByTech.set(r.technician_id, a); }
+  const used = new Set();
+  const rosterIds = new Map();
+  for (const p of received) rosterIds.set(p.id, p);
+  for (let i = missing.length - 1; i >= 0; i--) {
+    const m = missing[i];
+    const mine = reportsByTech.get(m.id);
+    if (!mine || !mine.length) continue;
+    const rep = mine[0];
+    missing.splice(i, 1);
+    const p = { id: m.id, name: m.name, state: m.state, subject: rep.source_filename || "(sheet uploaded)", receivedAt: rep.processed_at, matchedBy: "upload", emails: 0, emailIds: [] };
+    received.push(p);
+    rosterIds.set(p.id, p);
+  }
+  const fileInfo = (f) => ({ id: f.id, filename: f.filename, sizeBytes: f.size_bytes, receivedAt: f.received_at });
+  for (const p of received) {
+    const myFiles = [];
+    for (const id of p.emailIds || []) for (const f of filesByEmail.get(id) || []) myFiles.push(fileInfo(f));
+    const mine = reportsByTech.get(p.id) || [];
+    const rep = mine[0] || null;
+    if (rep) used.add(rep.id);
+    p.files = myFiles;
+    p.report = rep;
+    p.reportCount = mine.length;
+    p.status = rep ? (rep.needs_review ? "flagged" : "fine") : (myFiles.length ? "no_mileage" : "no_file");
+  }
+  for (const u of unmatched) {
+    u.files = (filesByEmail.get(u.id) || []).map(fileInfo);
+  }
+  const otherReports = reports.filter((r) => !(r.technician_id && rosterIds.has(r.technician_id)));
+  return { otherReports: otherReports.sort(newestFirst) };
+}
 
 // ---- mail filter ----
 const TIME_SUBJECT = /(time\s*sheet|timesheet|time\s*card|timecard|expense|\bt\s*&\s*e\b|\bt\s*and\s*e\b|mileage|\bppe\b|\bexp\b)/i;
@@ -152,15 +206,15 @@ function matchTimesheets(roster, mail) {
     const r = resolveEmail(e, roster);
     if (!r.tech) { unmatched.push({ id: e.id, subject: e.subject, sender: e.sender, receivedAt: e.received_at, reason: r.reason }); continue; }
     const cur = byTech.get(r.tech.id);
-    if (cur) { cur.count += 1; continue; }
-    byTech.set(r.tech.id, { e, matchedBy: r.matchedBy, count: 1 });
+    if (cur) { cur.count += 1; cur.ids.push(e.id); continue; }
+    byTech.set(r.tech.id, { e, matchedBy: r.matchedBy, count: 1, ids: [e.id] });
   }
   const received = [];
   const missing = [];
   for (const t of roster) {
     const hit = byTech.get(t.id);
-    if (hit) received.push({ name: t.name, state: t.home_state, subject: hit.e.subject, receivedAt: hit.e.received_at, matchedBy: hit.matchedBy, emails: hit.count });
-    else missing.push({ name: t.name, state: t.home_state, email: t.email || null, phone: t.phone || null });
+    if (hit) received.push({ id: t.id, name: t.name, state: t.home_state, subject: hit.e.subject, receivedAt: hit.e.received_at, matchedBy: hit.matchedBy, emails: hit.count, emailIds: hit.ids });
+    else missing.push({ id: t.id, name: t.name, state: t.home_state, email: t.email || null, phone: t.phone || null });
   }
   return { received, missing, unmatched };
 }
@@ -202,10 +256,48 @@ exports.handler = async (event) => {
   if (mErr) return json(500, { error: mErr.message });
 
   const { received, missing, unmatched } = matchTimesheets(roster, (mails || []).filter(isTimesheetMail));
-  return json(200, { ok: true, periodEnd: end, periodStart: start, countedUntil: until, techCount: roster.length, includeContractors, received, missing, unmatched });
+  const out = { ok: true, periodEnd: end, periodStart: start, countedUntil: until, techCount: roster.length, includeContractors, received, missing, unmatched };
+
+  if (params.mileage === "1") {
+    const emailIds = Array.from(new Set(received.flatMap((p) => p.emailIds || []).concat(unmatched.map((u) => u.id)).filter(Boolean)));
+    let files = [];
+    let reports = [];
+    if (emailIds.length) {
+      const { data: fRows, error: fErr } = await supabase.from("timesheet_files")
+        .select("id, inbound_email_id, filename, size_bytes, received_at").in("inbound_email_id", emailIds);
+      if (fErr) return json(500, { error: fErr.message });
+      files = fRows || [];
+    }
+    // Reports belong to the period their last mileage date falls in, or to any email counted above.
+    const q1 = await supabase.from("technician_mileage_reports").select(REPORT_COLS).gte("pay_period_end", start).lte("pay_period_end", end).limit(300);
+    if (q1.error) return json(500, { error: q1.error.message });
+    reports = q1.data || [];
+    if (emailIds.length) {
+      const q2 = await supabase.from("technician_mileage_reports").select(REPORT_COLS).in("source_email_id", emailIds).limit(300);
+      if (q2.error) return json(500, { error: q2.error.message });
+      const have = new Set(reports.map((r) => r.id));
+      for (const r of q2.data || []) if (!have.has(r.id)) reports.push(r);
+    }
+    const extra = attachMileage(received, missing, unmatched, files, reports);
+    // names for reports that are not on the roster
+    const unknownIds = Array.from(new Set(extra.otherReports.map((r) => r.technician_id).filter(Boolean)));
+    const nameById = new Map();
+    if (unknownIds.length) {
+      const { data: tn } = await supabase.from("technicians").select("id, name, home_state").in("id", unknownIds);
+      for (const t of tn || []) nameById.set(t.id, t);
+    }
+    out.otherReports = extra.otherReports.map((r) => ({ ...r, technicianName: (nameById.get(r.technician_id) || {}).name || r.technician_name_raw, state: (nameById.get(r.technician_id) || {}).home_state || null }));
+    out.mileage = {
+      read: received.filter((p) => p.report).length,
+      flagged: received.filter((p) => p.status === "flagged").length,
+      noMileage: received.filter((p) => p.status === "no_mileage" || p.status === "no_file").length,
+    };
+  }
+  return json(200, out);
 };
 
 // Exposed for tests only.
 exports._matchTimesheets = matchTimesheets;
 exports._isTimesheetMail = isTimesheetMail;
 exports._periodEndFor = periodEndFor;
+exports._attachMileage = attachMileage;

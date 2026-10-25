@@ -1829,6 +1829,39 @@ exports.handler = async (event) => {
       } catch (invParseEx) { /* not an inventory sheet */ }
     }
 
+    // 2026-10-25: timesheets sent to the expense mailbox under any file name. Until now only
+    // files named like "McKelvey_Expense_10_24_2026.xlsx" were read or kept, so most of the
+    // sheets technicians copied to the expense mailbox (about 25 mails in one pay period) were
+    // dropped without a trace. Any spreadsheet (PDF/Word/CSV files are kept too, unread) on mail addressed to the expense mailbox (or a
+    // company sender with a time/expense subject) is now kept, and read by its contents: if it
+    // holds a mileage log it is checked like the named ones. A spreadsheet that is really an
+    // inventory count sheet (found above) is left to the inventory path.
+    const unreadableTimesheetAtts = [];
+    {
+      const subjEarly = fields["subject"] || "";
+      const addrHay = ((fields["To"] || fields["to"] || "") + " " + (fields["Cc"] || fields["cc"] || "") + " " +
+        (fields["recipient"] || fields["Recipient"] || "")).toLowerCase();
+      const senderEarly = String(fields["sender"] || fields["from"] || "").toLowerCase();
+      const toExpense = /expense@mcrtechservice\.com/.test(addrHay);
+      const timeSubject = /(time\s*sheet|timecard|time\s*card|expense|\bt\s*&\s*e\b|\bt\s*and\s*e\b|mileage)/i.test(subjEarly) && senderEarly.includes("mcrtechservice.com");
+      if (toExpense || timeSubject) {
+        const invSet = new Set(inventorySheetAtts.map((x) => x.att));
+        for (const a of attachments) {
+          if (timesheetAttachments.includes(a) || invSet.has(a)) continue;
+          if (!/\.(xlsx|xlsm|xls|csv|pdf|docx?)$/i.test(a.filename || "") || !a.content || !a.content.length) continue;
+          let looksLikeMileage = false;
+          if (/\.(xlsx|xlsm|xls)$/i.test(a.filename)) {
+            try {
+              const pm = parseMileageWorkbookBuffer(a.content);
+              looksLikeMileage = !!(pm && pm.technicianNameRaw && pm.legs && pm.legs.length);
+            } catch (e) { /* not a readable workbook */ }
+          }
+          if (looksLikeMileage) timesheetAttachments.push(a);
+          else if (toExpense) unreadableTimesheetAtts.push(a);
+        }
+      }
+    }
+
     const sender    = fields["sender"] || fields["from"] || "unknown";
     const subject   = fields["subject"] || "";
     // Prioritize full body fields over stripped — stripped versions lose forwarded content
@@ -2200,6 +2233,12 @@ exports.handler = async (event) => {
       // path calls, so both are scored identically.
       for (const att of timesheetAttachments) {
         try {
+          // a mail retry must not produce a second report for the same file
+          if (inboundEmailId) {
+            const { data: already } = await supabase.from('technician_mileage_reports')
+              .select('id').eq('source_email_id', inboundEmailId).eq('source_filename', att.filename).limit(1);
+            if (already && already.length) { console.log(`[mailgun-inbound] Mileage timesheet ${att.filename}: already processed for this email -- skipping`); continue; }
+          }
           const { technicianNameRaw, legs } = parseMileageWorkbookBuffer(att.content);
           if (!technicianNameRaw || !legs.length) {
             console.log(`[mailgun-inbound] Mileage timesheet ${att.filename}: no NAME/legs found -- skipping (possibly not the expected template)`);
@@ -2224,8 +2263,8 @@ exports.handler = async (event) => {
       // timesheet_files; read only through get-timesheet-file.js, which requires an admin sign-in.
       // Non-fatal: a storage problem never affects normal mail handling or the mileage check above.
       try {
-        if (timesheetAttachments.length && inboundEmailId) {
-          for (const att of timesheetAttachments) {
+        if ((timesheetAttachments.length || unreadableTimesheetAtts.length) && inboundEmailId) {
+          for (const att of timesheetAttachments.concat(unreadableTimesheetAtts)) {
             if (!att.content || !att.content.length || att.content.length > 15 * 1024 * 1024) continue;
             let techRaw = null;
             try { techRaw = parseMileageWorkbookBuffer(att.content).technicianNameRaw || null; } catch (e) { /* name is optional */ }

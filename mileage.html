@@ -1,183 +1,408 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
 <title>Mileage Check — MCR Dispatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
-  :root {
-    --navy: #12203f;
-    --navy-2: #1c3466;
-    --bg: #0e1116;
-    --card: #171b22;
-    --border: #2a3140;
-    --text: #e8eaed;
-    --muted: #8b93a2;
-    --green: #4caf50;
-    --red: #e05555;
-    --amber: #ffa500;
-    --accent: #4a7fd6;
-  }
+  :root { --ink:#1c1916; --muted:#6b6258; --line:#e4dcd0; --paper:#f6f1e8; --card:#fffdf8; --bad:#9f1239; --ok:#3f6b4a; --warn:#b45309; }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-  }
-  header {
-    background: var(--navy);
-    padding: 22px 20px 18px;
-    border-bottom: 1px solid #2a3d6a;
-  }
-  header .inner { max-width: 880px; margin: 0 auto; }
-  header .tag {
-    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-    color: #9fb3dc; margin-bottom: 4px;
-  }
-  header h1 { margin: 0; font-size: 24px; }
-  header p { margin: 8px 0 0; color: #c5d0e8; font-size: 14px; max-width: 640px; }
-  main { max-width: 880px; margin: 0 auto; padding: 24px 20px 64px; }
-  section {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px 22px;
-    margin-bottom: 16px;
-  }
-  h2 { margin: 0 0 10px; font-size: 16px; color: #fff; }
-  p { margin: 0 0 10px; }
-  .muted { color: var(--muted); font-size: 13px; }
-  ul { margin: 0 0 8px; padding-left: 20px; }
-  li { margin-bottom: 6px; }
-  code {
-    background: #11151c; border: 1px solid var(--border);
-    border-radius: 4px; padding: 1px 6px; font-size: 13px;
-  }
-  input[type=file] {
-    width: 100%; padding: 10px; margin: 8px 0 12px;
-    background: #11151c; color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px;
-  }
-  button {
-    background: var(--navy-2); color: #fff; border: 1px solid #2a4a88;
-    border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer;
-  }
-  button:hover { background: #24407a; }
-  button.del {
-    background: transparent; color: #c98a8a; border-color: #5a3030;
-    padding: 4px 10px; font-size: 12px;
-  }
-  button.del:hover { background: #2a1010; color: #e05555; }
-  button.secondary {
-    background: transparent; border-color: var(--border); color: var(--text);
-  }
-  button.secondary:hover { background: #1c2230; }
-  #status {
-    color: #ccc; font-size: 13px; min-height: 22px;
-    padding: 8px 10px; background: #11151c; border-radius: 4px;
-    white-space: pre-wrap; word-break: break-word; margin-bottom: 4px;
-  }
-  .card {
-    background: #11151c; border: 1px solid var(--border);
-    border-radius: 8px; padding: 12px 14px; margin-bottom: 10px;
-  }
-  .card-top { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-  .flag {
-    padding: 6px 10px; background: #2a1010; border-left: 3px solid var(--red);
-    border-radius: 0 4px 4px 0; margin-top: 6px; font-size: 13px;
-  }
-  .unmatched {
-    padding: 6px 10px; background: #2a2000; border-left: 3px solid var(--amber);
-    border-radius: 0 4px 4px 0; margin-top: 6px; font-size: 13px; color: #ddd;
-  }
-  .ok { color: var(--green); font-weight: 600; }
-  .bad { color: var(--red); font-weight: 600; }
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px; }
-  a { color: var(--accent); }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans", system-ui, sans-serif; line-height:1.45; }
+  header { padding:24px 20px 16px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fff 0%, var(--paper) 100%); }
+  .kicker { font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  h1 { margin:6px 0 6px; font-size:26px; letter-spacing:-.03em; }
+  .sub { color:var(--muted); max-width:72ch; font-size:14px; margin:0; }
+  .wrap { width:min(1100px, 100%); margin:0 auto; padding:16px 16px 64px; display:grid; gap:16px; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .bar select, .bar button, button.btn { font:inherit; font-size:14px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  .bar button, button.btn { cursor:pointer; font-weight:600; }
+  .bar button.dark, button.btn.dark { background:var(--ink); color:#fff; border-color:var(--ink); }
+  button.mini { font:inherit; font-size:12px; padding:4px 10px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); cursor:pointer; font-weight:600; }
+  button.mini:hover { background:#f3ede2; }
+  button.mini.del { color:var(--bad); }
+  button:disabled { opacity:.55; cursor:default; }
+  .bar label { font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .period { font-weight:600; }
+  .updated { font-size:12px; color:var(--muted); margin-left:auto; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .stat b { display:block; font-size:28px; letter-spacing:-.04em; }
+  .stat span { color:var(--muted); font-size:13px; }
+  .stat.miss b, .stat.look b { color:var(--bad); }
+  .stat.ok b { color:var(--ok); }
+  .stat.warn b { color:var(--warn); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .panel > h2, .panel > summary { margin:0; padding:12px 16px; font-size:15px; font-weight:600; border-bottom:1px solid var(--line); background:#fbf8f2; display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; cursor:default; }
+  .panel > summary { cursor:pointer; list-style:none; }
+  .panel > summary::-webkit-details-marker { display:none; }
+  .panel:not([open]) > summary { border-bottom:0; }
+  .panel > h2 small, .panel > summary small { font-weight:400; color:var(--muted); font-size:12px; }
+  .st { padding:8px 16px 2px; font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:.1em; color:var(--muted); background:#faf6ee; border-top:1px solid var(--line); }
+  .st:first-child { border-top:0; }
+  .row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 12px; padding:10px 16px; border-bottom:1px solid var(--line); align-items:center; }
+  .row:last-child { border-bottom:0; }
+  .row .who { font-weight:600; }
+  .row .meta { color:var(--muted); font-size:12px; word-break:break-word; }
+  .tag { font-family:"IBM Plex Mono", monospace; font-size:11px; padding:2px 8px; border-radius:999px; background:#eee7db; white-space:nowrap; }
+  .tag.in { background:#e4f0e6; color:var(--ok); }
+  .tag.out { background:#fde8ee; color:var(--bad); }
+  .tag.warn { background:#fdf0dc; color:var(--warn); }
+  .note { padding:12px 16px; color:var(--muted); font-size:13px; }
+  .err { color:var(--bad); padding:12px 16px; }
+  textarea { width:100%; min-height:96px; font:inherit; font-size:14px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  .msgbox { padding:12px 16px; display:grid; gap:8px; }
+  details.person { border-bottom:1px solid var(--line); }
+  details.person:last-child { border-bottom:0; }
+  details.person > summary { list-style:none; cursor:pointer; padding:10px 16px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 12px; align-items:center; }
+  details.person > summary::-webkit-details-marker { display:none; }
+  details.person[open] > summary { background:#fbf8f2; }
+  .detail { padding:6px 16px 14px; display:grid; gap:8px; }
+  .line { font-size:13px; }
+  .flag { padding:6px 10px; background:#fde8ee; border-left:3px solid var(--bad); border-radius:0 6px 6px 0; font-size:13px; }
+  .unm { padding:6px 10px; background:#fdf0dc; border-left:3px solid var(--warn); border-radius:0 6px 6px 0; font-size:13px; }
+  .plain { padding:6px 10px; background:#f3ede2; border-left:3px solid var(--line); border-radius:0 6px 6px 0; font-size:13px; color:#4d463d; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .hint { color:var(--muted); font-size:12px; }
+  input[type=file] { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; font-size:14px; }
+  #status { color:var(--muted); font-size:13px; min-height:22px; padding:8px 10px; background:#f3ede2; border-radius:6px; white-space:pre-wrap; word-break:break-word; }
+  .howto { padding:12px 16px; font-size:13px; color:#4d463d; display:grid; gap:6px; }
+  footer { width:min(1100px, 100%); margin:0 auto; padding:0 16px 40px; color:var(--muted); font-size:13px; }
+  footer a { color:#2b5aa8; }
+  @media (max-width:640px) { .stats { grid-template-columns:1fr 1fr; } .stat b { font-size:22px; } .updated { margin-left:0; width:100%; } }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header>
-  <div class="inner">
-    <div class="tag">MCR Technical Service · Mileage Sanity Check</div>
-    <h1>Mileage Check</h1>
-    <p>A quick look at each technician’s biweekly mileage log — not an audit. It flags numbers that cannot be a real drive (a dropped digit, a backward odometer, 200 miles between two stores next door).</p>
-  </div>
+  <div class="kicker">Bi-weekly time and expense</div>
+  <h1>Mileage check</h1>
+  <p class="sub">Every sheet that reaches the expense mailbox is saved and its mileage log read automatically, one pay period at a time. It flags numbers that cannot be a real drive (a dropped digit, a backward odometer, 200 miles between two stores next door). A quick look, not an audit.</p>
 </header>
-<main>
-  <section>
-    <h2>What you are looking at</h2>
-    <p class="muted">
-      Each hop on the Mileage sheet is compared to the known driving distance between those two stops.
-      Lunch detours and a mid-day bounce home stay quiet. A −2 mile leg or a 3× claim lights up.
-      Techs only write the city for home (e.g. Johns Creek), not the street.
-    </p>
-    <ul class="muted">
-      <li><span class="ok">looks fine</span> — the miles they wrote line up with the usual drive between those two stops. No need to dig in.</li>
-      <li><span class="bad">flagged</span> — one hop cannot be a real drive. Read that line.</li>
-      <li>Yellow — a stop name we have not learned yet. Not an overcharge; we add an alias and it sticks.</li>
-    </ul>
-  </section>
+<main class="wrap">
+  <div class="bar">
+    <button id="prev" type="button" aria-label="Earlier pay period">&larr;</button>
+    <span class="period" id="period">Loading...</span>
+    <button id="next" type="button" aria-label="Later pay period">&rarr;</button>
+    <select id="state" aria-label="State"><option value="">All states</option></select>
+    <label><input type="checkbox" id="contractors" /> Include contractors</label>
+    <button id="refresh" type="button" class="dark">Refresh</button>
+    <span class="updated" id="updated"></span>
+  </div>
 
-  <section>
-    <h2>How to send timesheets for a test</h2>
-    <p>
-      Forward the usual <code>*_Expense_*.xlsx</code> file to
-      <a href="mailto:dispatch@mcrdispatch.net">dispatch@mcrdispatch.net</a>
-      (or upload below). Best tests right now — these states already have real
-      drive-to-drive distances on file:
-    </p>
-    <ul class="muted">
-      <li><strong>Georgia</strong> — Keontae Johnson, Omari Williams, Randy Thomas, Robert Medley, or Sean Reich (Gina and Mark are already on this page).</li>
-      <li><strong>Michigan</strong> — Caleb Caroen, Jordan Basaran, Marshall Cook, Sean Todd, Terril King, or Ward Nordbeck.</li>
-      <li><strong>Indiana</strong> — Aaron Schrop first; otherwise Dave Steingass, Justin Haines, Kevin Demlow, Ross Crabtree, or Sid Bowman.</li>
-      <li><strong>Colorado</strong> — Alejandro Abreu, Daren Dozier, Dr. Joel, Joseph Osborn, or Luis Duran.</li>
-    </ul>
-    <p class="muted">Same mailbox the dispatch app already watches. Different nicknames for the same store are useful, not a problem.</p>
-  </section>
+  <div id="out"><div class="note">Loading...</div></div>
 
-  <section>
-    <h2>Upload one file</h2>
-    <input type="file" id="mcFileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-    <div id="status">Ready.</div>
-  </section>
-
-  <section>
-    <h2>Recent reports</h2>
-    <div class="toolbar">
-      <button type="button" id="refreshBtn">Refresh</button>
-      <button type="button" id="exportCsvBtn" class="secondary">⬇ Export CSV</button>
+  <details class="panel" id="upload">
+    <summary>Add a sheet by hand <small>only if a sheet did not arrive by email</small></summary>
+    <div class="msgbox">
+      <input type="file" id="mcFileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <div id="status">Ready.</div>
     </div>
-    <div id="list" style="margin-top:12px;">Loading…</div>
-  </section>
+  </details>
+
+  <details class="panel" id="howto">
+    <summary>How to read this <small>tap to open</small></summary>
+    <div class="howto">
+      <div>Each hop on the Mileage sheet is compared with the known driving distance between those two stops. Lunch detours and a mid-day trip home stay quiet. A negative leg or a claim three times the usual drive lights up.</div>
+      <div><span class="tag in">Looks fine</span> the miles written line up with the usual drive between those stops.</div>
+      <div><span class="tag out">flagged</span> one hop, or a day's total, cannot be a real drive. Open the row and read that line.</div>
+      <div><span class="tag warn">No mileage read</span> the sheet arrived and is saved, but no mileage log could be read from it (different layout, or a picture or PDF). Open the original to look.</div>
+      <div><span class="tag out">Email only</span> the email arrived but no spreadsheet came with it.</div>
+      <div class="hint">A stop name the system has not learned yet is shown as unidentified. That is not an overcharge, only a name to learn. This page does not call Google Maps; it only reads distances already stored.</div>
+    </div>
+  </details>
 </main>
 <footer>
-  <a href="/admin.html">Admin panel</a> · <a href="/">Dispatch board</a><br>
-  This page does not call Google Maps. It only reads distances already stored.
+  <a href="/admin.html">Admin panel</a> &middot; <a href="/timesheet-board.html">Timesheet board</a> &middot; <a href="/">Dispatch board</a>
 </footer>
 <script>
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function when(iso) { try { return new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return iso; } }
+function pretty(ymd) { const p = ymd.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2])).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }); }
+function shift(ymd, days) { const p = ymd.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2] + days)).toISOString().slice(0, 10); }
+function fmtDay(iso) { if (!iso) return "—"; return new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
+
+let periodEnd = "";
+let lastStates = [];
+let current = null;            // last answer from the server
+let loading = false;
+const openIds = new Set();     // rows the viewer has expanded, kept across refreshes
+
+/* ---------- one report's detail (flagged hops, day totals, history, unidentified stops) ---------- */
+function reportDetailHtml(r) {
+  if (!r) return "";
+  let h = "";
+  const flagged = r.flagged_legs || [];
+  const unmatched = r.unmatched_legs || [];
+  h += '<div class="line">' + esc(r.matched_legs) + "/" + esc(r.total_legs) + " hops matched &middot; claimed " + esc(r.total_claimed_miles) + " mi vs expected ~" + esc(r.total_expected_miles) + " mi" +
+    (unmatched.length ? " &middot; " + unmatched.length + " unidentified" : "") + "</div>";
+  const hc = r.history_comparison;
+  if (hc) {
+    h += '<div class="' + (hc.flagged ? "flag" : "plain") + '">This period: ' + esc(hc.currentClaimedMiles) + " mi vs their own last " + esc(hc.periodsCompared) + "-period average of ~" + esc(hc.averagePastClaimedMiles) + " mi" +
+      (hc.ratio != null ? " (" + esc(hc.ratio) + "x usual)" : "") + (hc.flagged ? " — worth a look" : "") + "</div>";
+  }
+  const days = r.day_summaries || [];
+  const flaggedDays = days.filter((d) => d.flagged);
+  const dayLine = (d) => fmtDay(d.date) + ": " + d.stopCount + " stop" + (d.stopCount === 1 ? "" : "s") + ", " + d.claimedMiles + " mi" +
+    (d.expectedMiles != null ? " (expected ~" + d.expectedMiles + " mi" + (d.ratio != null ? ", " + d.ratio + "x" : "") + ")" : " (not enough matched stops to judge)");
+  flaggedDays.forEach((d) => { h += '<div class="flag">' + esc(dayLine(d)) + "</div>"; });
+  flagged.forEach((f) => {
+    const cluster = f.cluster ? " — part of a run of flags this day; the order of stops may be off, not just this number" : "";
+    const why = f.reason === "negative_or_zero" ? " — negative or zero mileage" : (f.ratio != null ? " — " + f.ratio + "x expected" : " — flagged");
+    h += '<div class="flag">' + esc(fmtDay(f.date)) + ": <strong>" + esc(f.fromRaw) + "</strong> &rarr; <strong>" + esc(f.toRaw) + "</strong> — claimed " + esc(f.claimedMiles) +
+      " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc(f.expectedSource) + ")" + esc(why) + esc(cluster) + "</div>";
+  });
+  if (!flagged.length && !flaggedDays.length && !(hc && hc.flagged)) h += '<div class="plain">Nothing in this sheet looks out of line.</div>';
+  if (days.length) {
+    h += '<details><summary class="hint" style="cursor:pointer;">All ' + days.length + " days</summary>" +
+      days.map((d) => '<div class="' + (d.flagged ? "flag" : "plain") + '" style="margin-top:4px;">' + esc(dayLine(d)) + "</div>").join("") + "</details>";
+  }
+  if (unmatched.length) {
+    h += '<details><summary class="hint" style="cursor:pointer;">' + unmatched.length + " stop" + (unmatched.length === 1 ? "" : "s") + " unidentified</summary>" +
+      unmatched.map((u) => '<div class="unm" style="margin-top:4px;">' + esc(fmtDay(u.date)) + ': "' + esc(u.fromRaw) + '" &rarr; "' + esc(u.toRaw) + '" — claimed ' + esc(u.claimedMiles) + " mi (" +
+        (u.reason === "no_distance_data" ? "site matched, no distance on file" : "could not identify this stop") + ")</div>").join("") + "</details>";
+  }
+  return h;
+}
+
+function filesHtml(files) {
+  if (!files || !files.length) return "";
+  return files.map((f) => '<button class="mini" type="button" data-open-file="' + esc(f.id) + '">Open ' + esc(f.filename) + "</button>").join(" ");
+}
+
+function statusTag(p) {
+  if (p.status === "flagged") { const n = ((p.report && p.report.flagged_legs) || []).length; return '<span class="tag out">' + (n ? n + " flagged" : "needs a look") + "</span>"; }
+  if (p.status === "fine") return '<span class="tag in">Looks fine</span>';
+  if (p.status === "no_mileage") return '<span class="tag warn">No mileage read</span>';
+  return '<span class="tag out">Email only</span>';
+}
+
+function groupByState(list) {
+  const g = {};
+  list.forEach((x) => { const s = x.state || "??"; (g[s] = g[s] || []).push(x); });
+  return Object.keys(g).sort().map((s) => [s, g[s].slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))]);
+}
+
+function personRow(p) {
+  const key = "p-" + p.id;
+  const isOpen = openIds.has(key) ? " open" : "";
+  const meta = esc(when(p.receivedAt)) + " &middot; " + esc((p.report && p.report.source_filename) || p.subject || "(no subject)") +
+    (p.emails > 1 ? " &middot; " + p.emails + " emails" : "") + (p.reportCount > 1 ? " &middot; read " + p.reportCount + " times, newest shown" : "");
+  let body = "";
+  if (p.report) body += reportDetailHtml(p.report);
+  else if (p.status === "no_mileage") body += '<div class="plain">A sheet came in and is saved, but no mileage log could be read from it.</div>';
+  else body += '<div class="plain">The email arrived with no spreadsheet attached that could be kept.</div>';
+  body += '<div class="actions">' + filesHtml(p.files) +
+    (p.report ? '<button class="mini del" type="button" data-del="' + esc(p.report.id) + '" data-who="' + esc(p.name) + '">Delete this report</button>' : "") + "</div>";
+  return '<details class="person" data-key="' + esc(key) + '"' + isOpen + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(p.name) + '</div><div class="meta">' + meta + "</div></div>" + statusTag(p) + '</summary><div class="detail">' + body + "</div></details>";
+}
+
+function receivedHtml(list) {
+  return groupByState(list).map(([s, people]) => '<div class="st">' + esc(s) + "</div>" + people.map(personRow).join("")).join("");
+}
+
+function missingRowsHtml(list) {
+  return groupByState(list).map(([s, people]) => '<div class="st">' + esc(s) + "</div>" + people.map((p) =>
+    '<div class="row"><div><div class="who">' + esc(p.name) + '</div><div class="meta">' + esc(p.email || "no email on file") + (p.phone ? " &middot; " + esc(p.phone) : "") + '</div></div><span class="tag out">Not in</span></div>').join("")).join("");
+}
+
+function reminderText(missing, end) {
+  return "Time and expense sheets for the period ending " + pretty(end) + " are still outstanding from: " + missing.map((m) => m.name).join(", ") + ". Please send yours to expense@mcrtechservice.com today.";
+}
+
+function render(d) {
+  current = d;
+  const out = document.getElementById("out");
+  const states = Array.from(new Set(d.received.concat(d.missing).map((x) => x.state).filter(Boolean))).sort();
+  const sel = document.getElementById("state");
+  if (!sel.dataset.filled || states.length > lastStates.length) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All states</option>' + states.map((s) => '<option value="' + esc(s) + '">' + esc(s) + "</option>").join("");
+    sel.value = cur; sel.dataset.filled = "1"; lastStates = states;
+  }
+  document.getElementById("period").textContent = "Period ending " + pretty(d.periodEnd);
+  const total = d.received.length + d.missing.length;
+  const m = d.mileage || { read: 0, flagged: 0, noMileage: 0 };
+  const lookList = d.received.filter((p) => p.status === "flagged");
+  const noRead = d.received.filter((p) => p.status === "no_mileage" || p.status === "no_file");
+
+  let html = '<div class="stats">' +
+    '<div class="stat ok"><b>' + d.received.length + "</b><span>Received of " + total + "</span></div>" +
+    '<div class="stat"><b>' + m.read + "</b><span>Mileage read</span></div>" +
+    '<div class="stat look"><b>' + m.flagged + "</b><span>Need a look</span></div>" +
+    '<div class="stat miss"><b>' + d.missing.length + "</b><span>Still missing</span></div></div>";
+
+  html += '<div class="panel"><h2>Need a look <small>' + lookList.length + "</small></h2>" +
+    (lookList.length ? lookList.slice().sort((a, b) => ((b.report.flagged_legs || []).length) - ((a.report.flagged_legs || []).length)).map(personRow).join("") : '<div class="note">Nothing flagged for this period so far.</div>') + "</div>";
+
+  const rest = d.received.filter((p) => p.status !== "flagged");
+  html += '<div class="panel"><h2>Received <small>' + rest.length + (lookList.length ? " &middot; " + lookList.length + " more under Need a look" : "") + (noRead.length ? " &middot; " + noRead.length + " without a mileage log" : "") + "</small></h2>" +
+    (rest.length ? receivedHtml(rest) : '<div class="note">' + (d.received.length ? "Everything received is listed under Need a look." : "Nothing received yet for this period.") + "</div>") + "</div>";
+
+  html += '<div class="panel"><h2>Still missing <small>' + d.missing.length + " of " + total + "</small></h2>";
+  if (d.missing.length) {
+    html += '<div class="msgbox"><textarea id="remind" readonly>' + esc(reminderText(d.missing, d.periodEnd)) + '</textarea><div class="actions">' +
+      '<button id="copy" type="button" class="btn dark">Copy for group text</button>' +
+      '<button id="copyList" type="button" class="btn">Copy list</button>' +
+      '<button id="copyEmails" type="button" class="btn">Copy emails</button><span class="hint" id="copied"></span></div></div>' + missingRowsHtml(d.missing);
+  } else {
+    html += '<div class="note">Everyone expected has sent theirs in.</div>';
+  }
+  html += "</div>";
+
+  if (d.unmatched && d.unmatched.length) {
+    html += '<div class="panel"><h2>Could not tell whose <small>' + d.unmatched.length + "</small></h2>" +
+      d.unmatched.map((u) => '<div class="row"><div><div class="who">' + esc(u.subject || "(no subject)") + '</div><div class="meta">' + esc(u.sender || "") + " &middot; " + esc(when(u.receivedAt)) + " &middot; " + esc(u.reason || "") + '</div>' +
+        ((u.files && u.files.length) ? '<div class="actions" style="margin-top:4px;">' + filesHtml(u.files) + "</div>" : "") + "</div></div>").join("") + "</div>";
+  }
+
+  if (d.otherReports && d.otherReports.length) {
+    html += '<div class="panel"><h2>Other sheets read <small>' + d.otherReports.length + " &middot; not matched to the expected list</small></h2>" +
+      d.otherReports.map((r) => {
+        const n = (r.flagged_legs || []).length;
+        const key = "r-" + r.id;
+        return '<details class="person" data-key="' + esc(key) + '"' + (openIds.has(key) ? " open" : "") + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(r.technicianName || r.technician_name_raw || "Unknown") + '</div><div class="meta">' +
+          esc(r.source_filename || "") + " &middot; period ending " + esc(fmtDay(r.pay_period_end)) + "</div></div>" + (n ? '<span class="tag out">' + n + " flagged</span>" : '<span class="tag in">Looks fine</span>') + '</summary><div class="detail">' +
+          reportDetailHtml(r) + '<div class="actions"><button class="mini del" type="button" data-del="' + esc(r.id) + '" data-who="' + esc(r.technicianName || r.technician_name_raw || "this report") + '">Delete this report</button></div></div></details>';
+      }).join("") + "</div>";
+  }
+
+  html += '<div class="actions"><button id="exportCsv" type="button" class="btn">Export this period (CSV)</button></div>';
+  html += '<div class="note" style="padding:0;">Mail from ' + esc(pretty(d.periodStart)) + " through " + esc(pretty(d.countedUntil)) + " counts for this period. Sheets are read as they arrive; this page refreshes itself every couple of minutes.</div>";
+  out.innerHTML = html;
+}
+
+/* ---------- loading ---------- */
+async function load(quiet) {
+  if (loading) return;
+  loading = true;
+  const out = document.getElementById("out");
+  if (!quiet || !current) out.innerHTML = '<div class="note">Loading...</div>';
+  const q = ["mileage=1"];
+  if (periodEnd) q.push("end=" + encodeURIComponent(periodEnd));
+  const st = document.getElementById("state").value;
+  if (st) q.push("state=" + encodeURIComponent(st));
+  if (document.getElementById("contractors").checked) q.push("includeContractors=1");
+  try {
+    const res = await fetch("/.netlify/functions/get-timesheet-receipts?" + q.join("&"));
+    let d = null;
+    try { d = await res.json(); } catch (e) { throw new Error("The server did not answer (HTTP " + res.status + ")."); }
+    if (!res.ok || d.error) throw new Error(d.error || "HTTP " + res.status);
+    periodEnd = d.periodEnd;
+    render(d);
+    document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+  } catch (e) {
+    if (!quiet || !current) out.innerHTML = '<div class="err">' + esc(e.message) + "</div>";
+  } finally {
+    loading = false;
+  }
+}
+
+document.getElementById("prev").addEventListener("click", () => { if (periodEnd) { periodEnd = shift(periodEnd, -14); current = null; load(); } });
+document.getElementById("next").addEventListener("click", () => { if (periodEnd) { periodEnd = shift(periodEnd, 14); current = null; load(); } });
+document.getElementById("refresh").addEventListener("click", () => load());
+document.getElementById("state").addEventListener("change", () => { current = null; load(); });
+document.getElementById("contractors").addEventListener("change", () => { current = null; load(); });
+
+/* ---------- clicks inside the results ---------- */
+async function copyText(text, label) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const ta = document.getElementById("remind"); if (ta) { ta.select(); document.execCommand("copy"); } }
+  const c = document.getElementById("copied"); if (c) c.textContent = label + " copied";
+}
+
+document.getElementById("out").addEventListener("toggle", (ev) => {
+  const el = ev.target;
+  if (el && el.classList && el.classList.contains("person")) {
+    const key = el.getAttribute("data-key");
+    if (key) { if (el.open) openIds.add(key); else openIds.delete(key); }
+  }
+}, true);
+
+document.getElementById("out").addEventListener("click", async (ev) => {
+  const t = ev.target.closest("button");
+  if (!t) return;
+  if (t.id === "copy") { copyText(document.getElementById("remind").value, "Message"); return; }
+  if (t.id === "copyList" && current) { copyText(current.missing.map((m) => m.name + (m.state ? " (" + m.state + ")" : "")).join("\n"), "List"); return; }
+  if (t.id === "copyEmails" && current) { copyText(current.missing.map((m) => m.email).filter(Boolean).join("; "), "Emails"); return; }
+  if (t.id === "exportCsv") { exportCsv(); return; }
+  const fileId = t.getAttribute("data-open-file");
+  if (fileId) {
+    const label = t.textContent;
+    t.disabled = true; t.textContent = "Opening...";
+    try {
+      const res = await fetch("/.netlify/functions/get-timesheet-file?id=" + encodeURIComponent(fileId));
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to open original sheets.");
+      if (!res.ok || !data.ok) throw new Error(data.error || "HTTP " + res.status);
+      const a = document.createElement("a"); a.href = data.url; a.download = data.filename || ""; document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { alert(e.message); }
+    t.disabled = false; t.textContent = label;
+    return;
+  }
+  const delId = t.getAttribute("data-del");
+  if (delId) {
+    if (!confirm("Delete the report for " + (t.getAttribute("data-who") || "this report") + "?")) return;
+    t.disabled = true;
+    try {
+      const res = await fetch("/.netlify/functions/delete-mileage-report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: delId }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "HTTP " + res.status);
+      load(true);
+    } catch (e) { t.disabled = false; alert("Could not delete: " + e.message); }
+  }
+});
+
+/* ---------- CSV for the period shown ---------- */
+function exportCsv() {
+  if (!current) return;
+  const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  const rows = [];
+  rows.push(["Technician", "State", "Period Ending", "Status", "Received", "File", "Hops Matched", "Total Hops", "Claimed Miles", "Expected Miles", "Flagged Hops", "Unidentified Stops"].map(q).join(","));
+  const label = { flagged: "needs a look", fine: "looks fine", no_mileage: "no mileage read", no_file: "email only" };
+  current.received.forEach((p) => {
+    const r = p.report || {};
+    rows.push([p.name, p.state || "", current.periodEnd, label[p.status] || p.status, p.receivedAt, r.source_filename || (p.files[0] && p.files[0].filename) || "",
+      r.matched_legs, r.total_legs, r.total_claimed_miles, r.total_expected_miles, (r.flagged_legs || []).length, (r.unmatched_legs || []).length].map(q).join(","));
+  });
+  current.missing.forEach((p) => rows.push([p.name, p.state || "", current.periodEnd, "not in", "", "", "", "", "", "", "", ""].map(q).join(",")));
+  rows.push("");
+  rows.push(["-- Flagged / unidentified hop detail --"].map(q).join(","));
+  rows.push(["Technician", "Date", "From", "To", "Claimed Miles", "Expected Miles", "Reason"].map(q).join(","));
+  current.received.forEach((p) => {
+    const r = p.report; if (!r) return;
+    (r.flagged_legs || []).forEach((f) => {
+      const base = f.reason === "negative_or_zero" ? "negative or zero mileage" : f.ratio + "x expected (" + f.expectedSource + ")";
+      rows.push([p.name, fmtDay(f.date), f.fromRaw, f.toRaw, f.claimedMiles, f.expectedMiles == null ? "" : f.expectedMiles, f.cluster ? base + " -- part of a same-day run, check the order" : base].map(q).join(","));
+    });
+    (r.unmatched_legs || []).forEach((u) => {
+      rows.push([p.name, fmtDay(u.date), u.fromRaw, u.toRaw, u.claimedMiles, "", u.reason === "no_distance_data" ? "site matched, no distance on file" : "could not identify this stop"].map(q).join(","));
+    });
+  });
+  const blob = new Blob([rows.join("\r\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = "mileage-check-" + current.periodEnd + ".csv"; a.click(); URL.revokeObjectURL(url);
+}
+
+/* ---------- add one sheet by hand ---------- */
 function mcExtractLegsFromGrid(grid) {
   let technicianNameRaw = null;
   for (const row of grid) {
-    if (row[0] && String(row[0]).trim().toUpperCase() === 'NAME:') {
-      technicianNameRaw = String(row[1] || '').trim();
-      break;
-    }
+    if (row[0] && String(row[0]).trim().toUpperCase() === "NAME:") { technicianNameRaw = String(row[1] || "").trim(); break; }
   }
-  const WEEKDAYS = new Set(['sun','mon','tue','wed','thu','fri','sat']);
+  const WEEKDAYS = new Set(["sun", "mon", "tue", "wed", "thu", "fri", "sat"]);
   const blocks = [];
-  let current = null;
+  let cur = null;
   for (const row of grid) {
     const a = row[0];
-    const aStr = typeof a === 'string' ? a.trim().toLowerCase() : null;
-    if (aStr && WEEKDAYS.has(aStr)) { current = { date: null, rows: [] }; blocks.push(current); }
-    if (!current) continue;
-    current.rows.push(row);
-    if (a instanceof Date && !isNaN(a) && !current.date) current.date = a;
+    const aStr = typeof a === "string" ? a.trim().toLowerCase() : null;
+    if (aStr && WEEKDAYS.has(aStr)) { cur = { date: null, rows: [] }; blocks.push(cur); }
+    if (!cur) continue;
+    cur.rows.push(row);
+    if (a instanceof Date && !isNaN(a) && !cur.date) cur.date = a;
   }
   const legs = [];
   outer:
@@ -186,255 +411,57 @@ function mcExtractLegsFromGrid(grid) {
     const dateStr = block.date.toISOString().slice(0, 10);
     for (const row of block.rows) {
       const b = row[1], c = row[2], d = row[3], e = row[4], f = row[5];
-      if (typeof d === 'string' && /TOTAL MILEAGE/i.test(d)) break outer;
-      const fromRaw = typeof b === 'string' ? b.trim() : '';
-      const toRaw = typeof d === 'string' ? d.trim() : '';
-      if (fromRaw && toRaw && typeof f === 'number') {
-        legs.push({
-          date: dateStr, fromRaw, toRaw,
-          odometerStart: typeof c === 'number' ? c : null,
-          odometerEnd: typeof e === 'number' ? e : null,
-          claimedMiles: f,
-        });
+      if (typeof d === "string" && /TOTAL MILEAGE/i.test(d)) break outer;
+      const fromRaw = typeof b === "string" ? b.trim() : "";
+      const toRaw = typeof d === "string" ? d.trim() : "";
+      if (fromRaw && toRaw && typeof f === "number") {
+        legs.push({ date: dateStr, fromRaw, toRaw, odometerStart: typeof c === "number" ? c : null, odometerEnd: typeof e === "number" ? e : null, claimedMiles: f });
       }
     }
   }
   return { technicianNameRaw, legs };
 }
 
-function mcFmtDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-// Cache of whatever's currently on screen, so Export CSV doesn't need a
-// second round-trip to the server -- it just serializes what mcLoadReports
-// already fetched and rendered.
-let mcCurrentReports = [];
-
-async function mcLoadReports() {
-  const el = document.getElementById('list');
-  el.textContent = 'Loading…';
-  try {
-    const res = await fetch('/.netlify/functions/get-mileage-reports?limit=25');
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    mcCurrentReports = data.reports || [];
-    if (!data.reports.length) { el.innerHTML = '<div class="muted">No reports yet.</div>'; return; }
-    el.innerHTML = data.reports.map(r => {
-      const flagCount = (r.flagged_legs || []).length;
-      const statusClass = flagCount > 0 ? 'bad' : 'ok';
-      const statusText = flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine');
-      const flagRows = (r.flagged_legs || []).map(f => {
-        const clusterNote = f.cluster
-          ? ' <strong style="color:var(--amber);">— part of a run of flags this day; the ORDER of stops may be off, not just this number</strong>'
-          : '';
-        return `<div class="flag">${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> — `
-        + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
-        + (f.reason === 'negative_or_zero' ? ' — negative/zero mileage' : (f.ratio != null ? ` — ${f.ratio}x expected` : ' — flagged'))
-        + clusterNote
-        + `</div>`;
-      }).join('');
-      const unmatchedCountForToggle = (r.unmatched_legs || []).length;
-      const unmatchedRows = (r.unmatched_legs || []).map(u =>
-        `<div class="unmatched">${mcFmtDate(u.date)}: <strong>"${u.fromRaw}"</strong> → <strong>"${u.toRaw}"</strong> — claimed ${u.claimedMiles} mi `
-        + `(${u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop'})</div>`
-      ).join('');
-      // Hidden by default -- most of these are just names the system
-      // hasn't learned yet, not evidence of a problem, and Mike's own
-      // review style (per Mark) doesn't involve tracing individual stop
-      // names anyway. A toggle keeps them one tap away for whoever DOES
-      // want to dig in (Mark, or TJ on his own territory).
-      const unmatchedBlock = unmatchedCountForToggle
-        ? `<div style="margin-top:8px;">`
-          + `<button type="button" class="secondary mc-toggle-unmatched" data-id="${r.id}" style="padding:4px 10px;font-size:12px;">`
-          + `${unmatchedCountForToggle} stop${unmatchedCountForToggle === 1 ? '' : 's'} unidentified — show</button>`
-          + `<div class="mc-unmatched-block" data-id="${r.id}" style="display:none;margin-top:6px;">${unmatchedRows}</div>`
-          + `</div>`
-        : '';
-
-      // Period-vs-history line -- Mike's own way of judging a report,
-      // per Mark: does this look unusual for THIS tech specifically.
-      const hc = r.history_comparison;
-      const historyLine = hc
-        ? `<div style="margin-top:6px;font-size:13px;${hc.flagged ? 'color:var(--bad);font-weight:600;' : 'color:var(--muted);'}">`
-          + `This period: ${hc.currentClaimedMiles} mi vs his own last ${hc.periodsCompared}-period average of ~${hc.averagePastClaimedMiles} mi`
-          + (hc.ratio != null ? ` (${hc.ratio}x usual)` : '')
-          + `${hc.flagged ? ' — worth a look' : ''}</div>`
-        : '';
-
-      // Daily totals -- collapsed to just flagged days by default (Mike's
-      // actual habit, per Mark: eyeball the day subtotal, not every leg).
-      const days = r.day_summaries || [];
-      const flaggedDays = days.filter((d) => d.flagged);
-      const dayLine = (d) => `${mcFmtDate(d.date)}: ${d.stopCount} stop${d.stopCount === 1 ? '' : 's'}, ${d.claimedMiles} mi`
-        + (d.expectedMiles != null ? ` (expected ~${d.expectedMiles} mi${d.ratio != null ? `, ${d.ratio}x` : ''})` : ' (not enough matched stops to judge)');
-      const flaggedDayRows = flaggedDays.map((d) => `<div class="flag">${dayLine(d)}</div>`).join('');
-      const allDayRows = days.map((d) => `<div class="${d.flagged ? 'flag' : 'unmatched'}" style="${d.flagged ? '' : 'background:#11151c;border-left-color:var(--border);color:#bbb;'}">${dayLine(d)}</div>`).join('');
-      const daysBlock = days.length
-        ? `<div style="margin-top:8px;">`
-          + (flaggedDays.length
-            ? `<div class="muted" style="font-size:12px;margin-bottom:4px;">${flaggedDays.length} day${flaggedDays.length === 1 ? '' : 's'} with an off-looking total:</div>${flaggedDayRows}`
-            : `<div class="muted" style="font-size:12px;">No day's total looks out of line.</div>`)
-          + `<button type="button" class="secondary mc-toggle-days" data-id="${r.id}" style="padding:4px 10px;font-size:12px;margin-top:6px;">Show all ${days.length} days</button>`
-          + `<div class="mc-days-block" data-id="${r.id}" style="display:none;margin-top:6px;">${allDayRows}</div>`
-          + `</div>`
-        : '';
-      return `<div class="card" data-id="${r.id}">`
-        + `<div class="card-top"><strong>${r.technicianName || r.technician_name_raw || 'Unknown tech'}</strong>`
-        + `<span class="muted">period ending ${mcFmtDate(r.pay_period_end)} · ${r.source === 'email' ? 'email' : 'upload'}${r.source_filename ? ' · ' + r.source_filename : ''} · <button type="button" class="del" data-id="${r.id}">Delete</button></span></div>`
-        + `<div style="margin-top:6px;">${r.matched_legs}/${r.total_legs} legs matched · claimed ${r.total_claimed_miles} mi vs expected ~${r.total_expected_miles} mi`
-        + (unmatchedCountForToggle ? ` · ${unmatchedCountForToggle} unmatched` : '')
-        + ` · <span class="${statusClass}">${statusText}</span></div>`
-        + historyLine
-        + daysBlock
-        + flagRows + unmatchedBlock + `</div>`;
-    }).join('');
-  } catch (err) {
-    el.textContent = 'Error loading reports: ' + err.message;
-  }
-}
-
-document.getElementById('refreshBtn').addEventListener('click', mcLoadReports);
-
-// Export CSV -- one row per report (the summary line), plus a second
-// section listing every flagged/unmatched leg, so Mike can skim the
-// summary in a spreadsheet and still see exactly which hops to question,
-// without needing to click into this page at all.
-document.getElementById('exportCsvBtn').addEventListener('click', () => {
-  if (!mcCurrentReports.length) { alert('Nothing to export yet -- hit Refresh first.'); return; }
-  const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const rows = [];
-  rows.push(['Technician','Period Ending','Source','File','Legs Matched','Total Legs','Claimed Miles','Expected Miles','Unmatched Legs','Flagged Legs','Status'].map(esc).join(','));
-  for (const r of mcCurrentReports) {
-    const flagCount = (r.flagged_legs || []).length;
-    const unmatchedCount = (r.unmatched_legs || []).length;
-    const statusText = flagCount ? flagCount + ' flagged' : (r.needs_review ? 'needs review' : 'looks fine');
-    rows.push([
-      r.technicianName || r.technician_name_raw || 'Unknown tech',
-      mcFmtDate(r.pay_period_end),
-      r.source === 'email' ? 'email' : 'upload',
-      r.source_filename || '',
-      r.matched_legs, r.total_legs, r.total_claimed_miles, r.total_expected_miles,
-      unmatchedCount, flagCount, statusText,
-    ].map(esc).join(','));
-  }
-  rows.push([]);
-  rows.push(['-- Flagged / unmatched leg detail --'].map(esc).join(','));
-  rows.push(['Technician','Date','From','To','Claimed Miles','Expected Miles','Reason'].map(esc).join(','));
-  for (const r of mcCurrentReports) {
-    const who = r.technicianName || r.technician_name_raw || 'Unknown tech';
-    for (const f of (r.flagged_legs || [])) {
-      const base = f.reason === 'negative_or_zero' ? 'negative/zero mileage' : `${f.ratio}x expected (${f.expectedSource})`;
-      const reason = f.cluster ? `${base} -- part of a same-day run, check the order` : base;
-      rows.push([who, mcFmtDate(f.date), f.fromRaw, f.toRaw, f.claimedMiles, f.expectedMiles ?? '', reason].map(esc).join(','));
-    }
-    for (const u of (r.unmatched_legs || [])) {
-      const reason = u.reason === 'no_distance_data' ? 'site matched, no distance on file' : 'could not identify this stop';
-      rows.push([who, mcFmtDate(u.date), u.fromRaw, u.toRaw, u.claimedMiles, '', reason].map(esc).join(','));
-    }
-  }
-  const csv = rows.join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'mileage-check-' + new Date().toISOString().split('T')[0] + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-});
-
-document.getElementById('list').addEventListener('click', async (ev) => {
-  const toggleUnmatched = ev.target.closest('button.mc-toggle-unmatched');
-  if (toggleUnmatched) {
-    const id = toggleUnmatched.getAttribute('data-id');
-    const block = document.querySelector(`.mc-unmatched-block[data-id="${id}"]`);
-    const count = toggleUnmatched.getAttribute('data-count') || (toggleUnmatched.textContent.match(/^(\d+)/) || [])[1];
-    if (block) {
-      const nowShowing = block.style.display === 'none';
-      block.style.display = nowShowing ? 'block' : 'none';
-      const label = count + ' stop' + (count === '1' ? '' : 's') + ' unidentified — ' + (nowShowing ? 'hide' : 'show');
-      toggleUnmatched.textContent = label;
-      toggleUnmatched.setAttribute('data-count', count);
-    }
-    return;
-  }
-  const toggleDays = ev.target.closest('button.mc-toggle-days');
-  if (toggleDays) {
-    const id = toggleDays.getAttribute('data-id');
-    const block = document.querySelector(`.mc-days-block[data-id="${id}"]`);
-    if (block) {
-      const showing = block.style.display !== 'none';
-      block.style.display = showing ? 'none' : 'block';
-      toggleDays.textContent = showing ? toggleDays.textContent.replace('Hide', 'Show') : toggleDays.textContent.replace('Show', 'Hide');
-    }
-    return;
-  }
-  const btn = ev.target.closest('button.del');
-  if (!btn) return;
-  const id = btn.getAttribute('data-id');
-  const label = btn.closest('.card') && btn.closest('.card').querySelector('strong');
-  const who = label ? label.textContent : 'this report';
-  if (!id || !confirm('Delete the report for ' + who + '?')) return;
-  btn.disabled = true;
-  try {
-    const res = await fetch('/.netlify/functions/delete-mileage-report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    mcLoadReports();
-  } catch (err) {
-    btn.disabled = false;
-    alert('Could not delete: ' + err.message);
-  }
-});
-
-document.getElementById('mcFileInput').addEventListener('change', (ev) => {
+document.getElementById("mcFileInput").addEventListener("change", (ev) => {
   const file = ev.target.files && ev.target.files[0];
-  const statusEl = document.getElementById('status');
+  const statusEl = document.getElementById("status");
   if (!file) return;
-  statusEl.textContent = 'Reading ' + file.name + '…';
+  statusEl.textContent = "Reading " + file.name + "...";
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
-      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
-      const sheetName = wb.SheetNames.find(n => /mileage/i.test(n)) || wb.SheetNames[0];
+      const wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
+      const sheetName = wb.SheetNames.find((n) => /mileage/i.test(n)) || wb.SheetNames[0];
       const ws = wb.Sheets[sheetName];
       const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
       const parsed = mcExtractLegsFromGrid(grid);
       if (!parsed.technicianNameRaw || !parsed.legs.length) {
-        statusEl.textContent = 'No NAME/legs found — is this the mileage-log template? (sheet: ' + sheetName + ')';
+        statusEl.textContent = "No NAME or hops found. Is this the mileage-log template? (sheet: " + sheetName + ")";
         return;
       }
-      statusEl.textContent = 'Checking ' + parsed.legs.length + ' legs for ' + parsed.technicianNameRaw + '…';
-      const res = await fetch('/.netlify/functions/process-mileage-timesheet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          technicianNameRaw: parsed.technicianNameRaw,
-          legs: parsed.legs,
-          sourceFilename: file.name,
-        }),
+      statusEl.textContent = "Checking " + parsed.legs.length + " hops for " + parsed.technicianNameRaw + "...";
+      const res = await fetch("/.netlify/functions/process-mileage-timesheet", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ technicianNameRaw: parsed.technicianNameRaw, legs: parsed.legs, sourceFilename: file.name }),
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      if (!res.ok || !data.ok) throw new Error(data.error || ("HTTP " + res.status));
       const r = data.report || {};
-      statusEl.textContent = 'Done. ' + (r.matched_legs || 0) + '/' + (r.total_legs || parsed.legs.length)
-        + ' legs matched. Claimed ' + (r.total_claimed_miles || '—') + ' vs expected ~' + (r.total_expected_miles || '—')
-        + '. ' + ((r.flagged_legs || []).length) + ' flagged.';
-      mcLoadReports();
+      statusEl.textContent = "Done. " + (r.matched_legs || 0) + "/" + (r.total_legs || parsed.legs.length) + " hops matched. Claimed " + (r.total_claimed_miles || "—") +
+        " vs expected ~" + (r.total_expected_miles || "—") + ". " + ((r.flagged_legs || []).length) + " flagged. It now shows under the period it belongs to.";
+      load(true);
     } catch (err) {
-      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.textContent = "Error: " + err.message;
     }
   };
-  reader.onerror = () => { statusEl.textContent = 'Could not read file.'; };
+  reader.onerror = () => { statusEl.textContent = "Could not read file."; };
   reader.readAsArrayBuffer(file);
 });
 
-mcLoadReports();
+/* ---------- keep itself current ---------- */
+setInterval(() => { if (!document.hidden) load(true); }, 120000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && current) load(true); });
+load();
 </script>
 </body>
 </html>
