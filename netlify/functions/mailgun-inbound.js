@@ -2268,6 +2268,11 @@ exports.handler = async (event) => {
             if (!att.content || !att.content.length || att.content.length > 15 * 1024 * 1024) continue;
             let techRaw = null;
             try { techRaw = parseMileageWorkbookBuffer(att.content).technicianNameRaw || null; } catch (e) { /* name is optional */ }
+            // hours worked per week, read off the Time tab (overtime flag on the Mileage check page)
+            let hoursInfo = null;
+            if (/\.(xlsx|xlsm|xls)$/i.test(att.filename || '')) {
+              try { hoursInfo = require('./lib/timesheet-hours.js').parseTimesheetHoursBuffer(att.content); } catch (e) { hoursInfo = { ok: false, reason: 'Hours could not be read' }; }
+            }
             const safeName = String(att.filename).replace(/[^A-Za-z0-9._-]+/g, '_');
             const storagePath = `${inboundEmailId}/${safeName}`;
             const { error: upErr } = await supabase.storage
@@ -2282,6 +2287,8 @@ exports.handler = async (event) => {
               storage_path: storagePath,
               technician_name_raw: techRaw,
               received_at: receivedAt.toISOString(),
+              hours: hoursInfo,
+              hours_checked_at: hoursInfo ? new Date().toISOString() : null,
             }, { onConflict: 'inbound_email_id,filename' });
             if (rowErr) console.error(`[mailgun-inbound] timesheet_files insert failed (${att.filename}):`, rowErr.message);
             else console.log(`[mailgun-inbound] Timesheet saved: ${att.filename} (${att.content.length} bytes)`);

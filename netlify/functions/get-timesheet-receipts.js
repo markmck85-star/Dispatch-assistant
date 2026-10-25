@@ -7,6 +7,9 @@
  * period, plus a status: flagged / fine / no_mileage (a sheet was kept but no mileage
  * could be read from it) / no_file (the email arrived with no spreadsheet kept).
  * Reports with no matching person on the roster come back as otherReports.
+ * Each person also gets hours { weeks, total, overtime, overtimeWeeks } read from the saved sheet's
+ * Time tab (a week over 40 hours is overtime). Files saved before hours were recorded are read
+ * once, on demand, and the answer stored on the file row (at most 12 per request).
  * Without &mileage=1 the answer is the same as v1.1, so the Timesheet board is untouched.
  *
  * v1.1 (2026-10-12): Tom Ellison added to NOT_EXPECTED (TJ: he does not work for
@@ -82,6 +85,7 @@ function periodEndFor(todayEt) {
 function isPeriodEnd(ymd) { return (dayNumber(ymd) - dayNumber(ANCHOR_END)) % 14 === 0; }
 
 // ---- mileage view (v1.2) ----
+const { parseTimesheetHoursBuffer } = require("./lib/timesheet-hours.js");
 const REPORT_COLS = "id, technician_id, technician_name_raw, pay_period_end, source, source_email_id, source_filename, total_legs, matched_legs, total_claimed_miles, total_expected_miles, flagged_legs, unmatched_legs, day_summaries, history_comparison, needs_review, processed_at";
 
 /**
@@ -117,6 +121,11 @@ function attachMileage(received, missing, unmatched, files, reports) {
     const rep = mine[0] || null;
     if (rep) used.add(rep.id);
     p.files = myFiles;
+    // newest saved sheet whose Time tab could be read
+    const withHours = (p.emailIds || []).flatMap((id) => filesByEmail.get(id) || []).filter((f) => f.hours && f.hours.ok)
+      .sort((a, b) => String(b.received_at).localeCompare(String(a.received_at)))[0];
+    p.hours = withHours ? withHours.hours : null;
+    p.overtime = !!(p.hours && p.hours.overtime);
     p.report = rep;
     p.reportCount = mine.length;
     p.status = rep ? (rep.needs_review ? "flagged" : "fine") : (myFiles.length ? "no_mileage" : "no_file");
@@ -264,9 +273,24 @@ exports.handler = async (event) => {
     let reports = [];
     if (emailIds.length) {
       const { data: fRows, error: fErr } = await supabase.from("timesheet_files")
-        .select("id, inbound_email_id, filename, size_bytes, received_at").in("inbound_email_id", emailIds);
+        .select("id, inbound_email_id, filename, size_bytes, received_at, storage_path, hours, hours_checked_at").in("inbound_email_id", emailIds);
       if (fErr) return json(500, { error: fErr.message });
       files = fRows || [];
+      // one-time read of sheets saved before hours were recorded
+      let budget = 12;
+      for (const f of files) {
+        if (budget <= 0) break;
+        if (f.hours_checked_at || f.hours || !/\.(xlsx|xlsm|xls)$/i.test(f.filename || "")) continue;
+        budget -= 1;
+        try {
+          const dl = await supabase.storage.from("timesheet-files").download(f.storage_path);
+          if (dl.error || !dl.data) continue;
+          const buf = Buffer.from(await dl.data.arrayBuffer());
+          f.hours = parseTimesheetHoursBuffer(buf);
+          f.hours_checked_at = new Date().toISOString();
+          await supabase.from("timesheet_files").update({ hours: f.hours, hours_checked_at: f.hours_checked_at }).eq("id", f.id);
+        } catch (e) { /* leave it unread; tried again next time */ }
+      }
     }
     // Reports belong to the period their last mileage date falls in, or to any email counted above.
     const q1 = await supabase.from("technician_mileage_reports").select(REPORT_COLS).gte("pay_period_end", start).lte("pay_period_end", end).limit(300);
@@ -291,6 +315,7 @@ exports.handler = async (event) => {
       read: received.filter((p) => p.report).length,
       flagged: received.filter((p) => p.status === "flagged").length,
       noMileage: received.filter((p) => p.status === "no_mileage" || p.status === "no_file").length,
+      overtime: received.filter((p) => p.overtime).length,
     };
   }
   return json(200, out);

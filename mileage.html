@@ -28,7 +28,7 @@
   .bar label { font-size:13px; color:var(--muted); display:flex; gap:6px; align-items:center; }
   .period { font-weight:600; }
   .updated { font-size:12px; color:var(--muted); margin-left:auto; }
-  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
   .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
   .stat b { display:block; font-size:28px; letter-spacing:-.04em; }
   .stat span { color:var(--muted); font-size:13px; }
@@ -80,7 +80,7 @@
 <header>
   <div class="kicker">Bi-weekly time and expense</div>
   <h1>Mileage check</h1>
-  <p class="sub">Every sheet that reaches the expense mailbox is saved and its mileage log read automatically, one pay period at a time. It flags numbers that cannot be a real drive (a dropped digit, a backward odometer, 200 miles between two stores next door). A quick look, not an audit.</p>
+  <p class="sub">Every sheet that reaches the expense mailbox is saved and its mileage log read automatically, one pay period at a time. It flags numbers that cannot be a real drive (a dropped digit, a backward odometer, 200 miles between two stores next door). It also flags any week over 40 hours. A quick look, not an audit.</p>
 </header>
 <main class="wrap">
   <div class="bar">
@@ -108,6 +108,7 @@
     <div class="howto">
       <div>Each hop on the Mileage sheet is compared with the known driving distance between those two stops. Lunch detours and a mid-day trip home stay quiet. A negative leg or a claim three times the usual drive lights up.</div>
       <div><span class="tag in">Looks fine</span> the miles written line up with the usual drive between those stops.</div>
+      <div><span class="tag out">Overtime</span> the sheet's Time tab shows more than 40 hours in either week. Judged week by week, so a 45-hour week plus a 30-hour week is still flagged.</div>
       <div><span class="tag out">flagged</span> one hop, or a day's total, cannot be a real drive. Open the row and read that line.</div>
       <div><span class="tag warn">No mileage read</span> the sheet arrived and is saved, but no mileage log could be read from it (different layout, or a picture or PDF). Open the original to look.</div>
       <div><span class="tag out">Email only</span> the email arrived but no spreadsheet came with it.</div>
@@ -173,12 +174,27 @@ function filesHtml(files) {
   return files.map((f) => '<button class="mini" type="button" data-open-file="' + esc(f.id) + '">Open ' + esc(f.filename) + "</button>").join(" ");
 }
 
+function hoursLine(h) {
+  if (!h || !h.ok) return "";
+  const weeks = (h.weeks || []).map((w) => w.label + ": " + w.hours + " h" + (h.overtimeWeeks && h.overtimeWeeks.indexOf(Number(String(w.label).replace(/\D/g, ""))) >= 0 ? " (over " + h.weeklyLimit + ")" : "")).join(" &middot; ");
+  return '<div class="' + (h.overtime ? "flag" : "plain") + '">Hours: ' + weeks + " &middot; total " + esc(h.total) + " h" + (h.overtime ? " — overtime" : "") + "</div>";
+}
+
+function otTag(p) {
+  if (!p.overtime) return "";
+  const h = p.hours;
+  const wk = (h.weeks || []).filter((w) => w.hours > h.weeklyLimit).map((w) => w.hours + " h").join(", ");
+  return '<span class="tag out">Overtime ' + esc(wk) + "</span>";
+}
+
 function statusTag(p) {
   if (p.status === "flagged") { const n = ((p.report && p.report.flagged_legs) || []).length; return '<span class="tag out">' + (n ? n + " flagged" : "needs a look") + "</span>"; }
   if (p.status === "fine") return '<span class="tag in">Looks fine</span>';
   if (p.status === "no_mileage") return '<span class="tag warn">No mileage read</span>';
   return '<span class="tag out">Email only</span>';
 }
+
+function needsLook(p) { return p.status === "flagged" || p.overtime; }
 
 function groupByState(list) {
   const g = {};
@@ -191,13 +207,13 @@ function personRow(p) {
   const isOpen = openIds.has(key) ? " open" : "";
   const meta = esc(when(p.receivedAt)) + " &middot; " + esc((p.report && p.report.source_filename) || p.subject || "(no subject)") +
     (p.emails > 1 ? " &middot; " + p.emails + " emails" : "") + (p.reportCount > 1 ? " &middot; read " + p.reportCount + " times, newest shown" : "");
-  let body = "";
+  let body = hoursLine(p.hours);
   if (p.report) body += reportDetailHtml(p.report);
   else if (p.status === "no_mileage") body += '<div class="plain">A sheet came in and is saved, but no mileage log could be read from it.</div>';
   else body += '<div class="plain">The email arrived with no spreadsheet attached that could be kept.</div>';
   body += '<div class="actions">' + filesHtml(p.files) +
     (p.report ? '<button class="mini del" type="button" data-del="' + esc(p.report.id) + '" data-who="' + esc(p.name) + '">Delete this report</button>' : "") + "</div>";
-  return '<details class="person" data-key="' + esc(key) + '"' + isOpen + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(p.name) + '</div><div class="meta">' + meta + "</div></div>" + statusTag(p) + '</summary><div class="detail">' + body + "</div></details>";
+  return '<details class="person" data-key="' + esc(key) + '"' + isOpen + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(p.name) + '</div><div class="meta">' + meta + "</div></div>" + '<span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">' + otTag(p) + statusTag(p) + "</span></summary><div class=\"detail\">" + body + "</div></details>";
 }
 
 function receivedHtml(list) {
@@ -225,20 +241,21 @@ function render(d) {
   }
   document.getElementById("period").textContent = "Period ending " + pretty(d.periodEnd);
   const total = d.received.length + d.missing.length;
-  const m = d.mileage || { read: 0, flagged: 0, noMileage: 0 };
-  const lookList = d.received.filter((p) => p.status === "flagged");
+  const m = d.mileage || { read: 0, flagged: 0, noMileage: 0, overtime: 0 };
+  const lookList = d.received.filter(needsLook);
   const noRead = d.received.filter((p) => p.status === "no_mileage" || p.status === "no_file");
 
   let html = '<div class="stats">' +
     '<div class="stat ok"><b>' + d.received.length + "</b><span>Received of " + total + "</span></div>" +
     '<div class="stat"><b>' + m.read + "</b><span>Mileage read</span></div>" +
-    '<div class="stat look"><b>' + m.flagged + "</b><span>Need a look</span></div>" +
+    '<div class="stat look"><b>' + m.flagged + "</b><span>Mileage flagged</span></div>" +
+    '<div class="stat look"><b>' + (m.overtime || 0) + "</b><span>Over 40 h in a week</span></div>" +
     '<div class="stat miss"><b>' + d.missing.length + "</b><span>Still missing</span></div></div>";
 
   html += '<div class="panel"><h2>Need a look <small>' + lookList.length + "</small></h2>" +
-    (lookList.length ? lookList.slice().sort((a, b) => ((b.report.flagged_legs || []).length) - ((a.report.flagged_legs || []).length)).map(personRow).join("") : '<div class="note">Nothing flagged for this period so far.</div>') + "</div>";
+    (lookList.length ? lookList.slice().sort((a, b) => (b.overtime ? 1 : 0) - (a.overtime ? 1 : 0) || (((b.report && b.report.flagged_legs) || []).length) - (((a.report && a.report.flagged_legs) || []).length)).map(personRow).join("") : '<div class="note">Nothing flagged for this period so far.</div>') + "</div>";
 
-  const rest = d.received.filter((p) => p.status !== "flagged");
+  const rest = d.received.filter((p) => !needsLook(p));
   html += '<div class="panel"><h2>Received <small>' + rest.length + (lookList.length ? " &middot; " + lookList.length + " more under Need a look" : "") + (noRead.length ? " &middot; " + noRead.length + " without a mileage log" : "") + "</small></h2>" +
     (rest.length ? receivedHtml(rest) : '<div class="note">' + (d.received.length ? "Everything received is listed under Need a look." : "Nothing received yet for this period.") + "</div>") + "</div>";
 
@@ -361,14 +378,16 @@ function exportCsv() {
   if (!current) return;
   const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
   const rows = [];
-  rows.push(["Technician", "State", "Period Ending", "Status", "Received", "File", "Hops Matched", "Total Hops", "Claimed Miles", "Expected Miles", "Flagged Hops", "Unidentified Stops"].map(q).join(","));
+  rows.push(["Technician", "State", "Period Ending", "Status", "Received", "File", "Week 1 Hours", "Week 2 Hours", "Total Hours", "Overtime", "Hops Matched", "Total Hops", "Claimed Miles", "Expected Miles", "Flagged Hops", "Unidentified Stops"].map(q).join(","));
   const label = { flagged: "needs a look", fine: "looks fine", no_mileage: "no mileage read", no_file: "email only" };
   current.received.forEach((p) => {
     const r = p.report || {};
+    const hw = (p.hours && p.hours.ok) ? p.hours.weeks : [];
     rows.push([p.name, p.state || "", current.periodEnd, label[p.status] || p.status, p.receivedAt, r.source_filename || (p.files[0] && p.files[0].filename) || "",
+      hw[0] ? hw[0].hours : "", hw[1] ? hw[1].hours : "", (p.hours && p.hours.ok) ? p.hours.total : "", p.overtime ? "yes" : "",
       r.matched_legs, r.total_legs, r.total_claimed_miles, r.total_expected_miles, (r.flagged_legs || []).length, (r.unmatched_legs || []).length].map(q).join(","));
   });
-  current.missing.forEach((p) => rows.push([p.name, p.state || "", current.periodEnd, "not in", "", "", "", "", "", "", "", ""].map(q).join(",")));
+  current.missing.forEach((p) => rows.push([p.name, p.state || "", current.periodEnd, "not in", "", "", "", "", "", "", "", "", "", "", "", ""].map(q).join(",")));
   rows.push("");
   rows.push(["-- Flagged / unidentified hop detail --"].map(q).join(","));
   rows.push(["Technician", "Date", "From", "To", "Claimed Miles", "Expected Miles", "Reason"].map(q).join(","));
