@@ -18,7 +18,8 @@
 //   3. a closing note on a visit on/after the campaign start that says the change-out was performed
 //      ("completed DCO", "performed decal change over", "performed the dco on printer two" ...)
 // A note that mentions a DCO but reads as not done or still to do ("no dco", "needs dco", "will do dco") is
-// returned as status 'review' so a person decides. Per-printer tracking is not modelled yet: one site, one
+// returned as status 'review' so a person decides. A done note that names another unit at the same spot
+// ("1021 ... 1022") credits that site too. Per-printer tracking is not modelled yet: one site, one
 // done date.
 //
 // GET  ?state=OH                      -> campaign, counts, pace, sites
@@ -149,7 +150,7 @@ exports.handler = async function handler(event) {
     if (!camp) return json(200, { ok: true, state, campaign: null, sites: [], counts: null });
 
     const { data: sites, error: sErr } = await supabase.from('sites')
-      .select('id, site_code, name, county, primary_tech_id, machine_type')
+      .select('id, site_code, name, county, primary_tech_id, machine_type, lat, lng')
       .eq('state', state).eq('active', true).eq('is_placeholder', false).order('site_code');
     if (sErr) return json(500, { ok: false, error: 'sites fetch failed' });
     const ids = (sites || []).map((s) => s.id);
@@ -161,6 +162,20 @@ exports.handler = async function handler(event) {
     {
       const { data } = await supabase.from('dco_marks').select('site_id, status, done_date, note').eq('campaign_id', camp.id);
       (data || []).forEach((m) => { marks[m.site_id] = m; });
+    }
+
+    const siteById = {}, siteByDigits = {};
+    (sites || []).forEach((s) => {
+      siteById[s.id] = s;
+      const m = /^[A-Z]{2}(\d{4})$/.exec(s.site_code || '');
+      if (m) siteByDigits[m[1]] = s;
+    });
+    function nearby(a, b) {
+      // Same spot: within about 150 metres.
+      if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return false;
+      const dLat = (a.lat - b.lat) * 111320;
+      const dLng = (a.lng - b.lng) * 111320 * Math.cos(a.lat * Math.PI / 180);
+      return Math.sqrt(dLat * dLat + dLng * dLng) < 150;
     }
 
     // Closing notes on/after the campaign start that mention a change-out.
@@ -184,6 +199,19 @@ exports.handler = async function handler(event) {
         const slot = (noteHits[v.site_id] = noteHits[v.site_id] || {});
         if (NOT_DONE.test(note)) { if (!slot.review) slot.review = hit; }
         else if (!slot.done) slot.done = hit;
+        // One visit often covers several kiosks at the same address (Hoku sites run two or three units, and
+        // Neumo files one ticket against only one of them). When a completed change-out note names another
+        // unit by its four digits ("... 1021 ... 1022") and that site is at the same spot, credit it too.
+        if (!NOT_DONE.test(note)) {
+          const own = siteById[v.site_id];
+          const named = new Set((note.match(/(?<!\d)\d{4}(?!\d)/g) || []));
+          named.forEach((digits) => {
+            const sib = siteByDigits[digits];
+            if (!sib || !own || sib.id === own.id || !nearby(own, sib)) return;
+            const sl = (noteHits[sib.id] = noteHits[sib.id] || {});
+            if (!sl.done) sl.done = { date: day, tech: v.tech_name_raw || '', note: hit.note, via: own.site_code };
+          });
+        }
       }
     }
 
@@ -230,7 +258,7 @@ exports.handler = async function handler(event) {
       const counterSite = s.machine_type === 'OTHER' || !/^[A-Z]{2}\d{4}$/.test(s.site_code);
       if (m && m.status === 'exempt') { status = 'exempt'; source = 'manual'; evidence = m.note || null; }
       else if (m && m.status === 'done') { status = 'done'; doneDate = m.done_date; source = 'manual'; evidence = m.note || null; }
-      else if (h.done) { status = 'done'; doneDate = h.done.date; source = 'closing note'; evidence = h.done.note; tech = h.done.tech; }
+      else if (h.done) { status = 'done'; doneDate = h.done.date; source = 'closing note'; evidence = h.done.via ? ('Same visit as ' + h.done.via + ': ' + h.done.note) : h.done.note; tech = h.done.tech; }
       else if (tk && tk.closed && woVisit[tk.wo]) { status = 'done'; doneDate = woVisit[tk.wo]; source = 'ticket closed'; evidence = 'Change-out ticket ' + tk.wo + ' completed'; }
       else if (tk && tk.closed) { status = 'review'; source = 'ticket closed'; evidence = 'Change-out ticket ' + tk.wo + ' was closed with no visit recorded (canceled, or done on an earlier visit)'; }
       else if (tk) { status = 'remaining'; source = 'ticket open'; evidence = 'Change-out ticket ' + tk.wo + ' open'; }
