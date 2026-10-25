@@ -30,4 +30,16 @@ async function resolveTechnicianNameFromSender(supabase, sender) {
   return null;
 }
 
-module.exports = { resolveTechnicianNameFromSender, addressOf };
+// A file named for its owner ("MCR_exp_template Zent 10.25") beats the sender: forwarded mail comes
+// from whoever forwarded it. Matches a technician's last name as a whole word; two matches = no answer.
+async function resolveTechnicianNameFromFilename(supabase, filename) {
+  const base = String(filename || '').replace(/\.[a-z0-9]+$/i, '');
+  const fw = new Set(words(base.replace(/[_.]+/g, ' ')));
+  if (!fw.size) return null;
+  const { data, error } = await supabase.from('technicians').select('id, name, active').eq('active', true);
+  if (error || !data) return null;
+  const hits = data.filter((t) => { const w = words(t.name); const last = w.length > 1 ? w[w.length - 1] : ''; return last.length >= 3 && fw.has(last); });
+  return hits.length === 1 ? hits[0].name : null;
+}
+
+module.exports = { resolveTechnicianNameFromSender, resolveTechnicianNameFromFilename, addressOf };

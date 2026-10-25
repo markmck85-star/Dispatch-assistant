@@ -2243,7 +2243,10 @@ exports.handler = async (event) => {
           const legs = parsedM.legs;
           let technicianNameRaw = parsedM.technicianNameRaw;
           // name cells left blank on the sheet: use who it was emailed from
-          if (!technicianNameRaw && legs.length) technicianNameRaw = await require('./lib/timesheet-owner.js').resolveTechnicianNameFromSender(supabase, sender);
+          if (!technicianNameRaw && legs.length) {
+            const own = require('./lib/timesheet-owner.js');
+            technicianNameRaw = (await own.resolveTechnicianNameFromFilename(supabase, att.filename)) || (await own.resolveTechnicianNameFromSender(supabase, sender));
+          }
           if (!technicianNameRaw || !legs.length) {
             console.log(`[mailgun-inbound] Mileage timesheet ${att.filename}: no NAME/legs found -- skipping (possibly not the expected template)`);
             continue;
