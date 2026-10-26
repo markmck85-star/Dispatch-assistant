@@ -50,7 +50,7 @@ const ADMIN_ONLY = new Set([
   'backfill-co-blobs', 'backfill-locations-to-supabase', 'backfill-rma-site-id',
   'backfill-technicians-to-supabase', 'assign-default-techs-co', 'cleanup-duplicate-assignments',
   'cleanup-duplicate-oncall', 'diagnose-appointments-variants', 'diagnose-bluefolder-users',
-  'view-sync-screenshot', 'distance-matrix-usage', 'get-unidentified-stops', 'save-stop-alias',
+  'view-sync-screenshot', 'distance-matrix-usage', 'get-unidentified-stops', 'save-stop-alias', 'admin-tech-logins',
   // Mailbox pulls and syncs that are only ever run by hand:
   'pull-shipments-now', 'pull-mailbox', 'pull-shipments-mailbox', 'pull-state-closings', 'closings-sync',
   'bluefolder-sync', 'bluefolder-service-requests-sync', 'match-mailbox-closings', 'match-meet-replies',

@@ -192,7 +192,9 @@ function statesFor(tech) {
 }
 
 function eligible(tech) {
-  return !!tech && tech.active !== false && tech.is_contractor === false;
+  // is_test: a test login made on the Technician logins page. Kept inactive so dispatchers never see
+  // it, but it may still sign in to the portal.
+  return !!tech && (tech.active !== false || tech.is_test === true) && tech.is_contractor === false;
 }
 
 // ctx = { kind, name, states (array, or null = all states), tech?, key, role? }
@@ -218,13 +220,13 @@ async function authenticate(supabase, token) {
 
   const { data: acct } = await supabase
     .from('tech_accounts')
-    .select('technician_id, username, created_at, password_changed_at')
+    .select('technician_id, username, created_at, password_changed_at, disabled')
     .eq('technician_id', tk.t)
     .maybeSingle();
-  if (!acct || pwVersion(acct) !== tk.p) return null;
+  if (!acct || acct.disabled === true || pwVersion(acct) !== tk.p) return null;
   const { data: tech } = await supabase
     .from('technicians')
-    .select('id, name, home_state, additional_states, is_contractor, active')
+    .select('id, name, home_state, additional_states, is_contractor, active, is_test')
     .eq('id', acct.technician_id)
     .maybeSingle();
   if (!eligible(tech)) return null;
@@ -292,7 +294,7 @@ async function doLogin(supabase, body) {
   if (!staffOnly) {
     const r = await supabase
       .from('tech_accounts')
-      .select('technician_id, username, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
+      .select('technician_id, username, password_hash, failed_attempts, locked_until, created_at, password_changed_at, disabled')
       .eq('username', username)
       .maybeSingle();
     tAcct = r.data;
@@ -331,11 +333,13 @@ async function doLogin(supabase, body) {
     return fail();
   }
 
+  if (tAcct && tAcct.disabled === true) return json(403, { ok: false, error: 'This login is turned off. Contact your dispatcher.' });
+
   let me;
   if (tAcct) {
     const { data: tech } = await supabase
       .from('technicians')
-      .select('id, name, home_state, additional_states, is_contractor, active')
+      .select('id, name, home_state, additional_states, is_contractor, active, is_test')
       .eq('id', acct.technician_id)
       .maybeSingle();
     if (!eligible(tech)) return json(403, { ok: false, error: 'This account is not active.' });
