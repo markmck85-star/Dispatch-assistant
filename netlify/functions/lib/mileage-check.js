@@ -887,6 +887,40 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
   }
 
+  // ── Pass 3c: the technician's own home nickname, learned from this sheet. A label that is both the
+  // ── first stop-from and the last stop-to on two or more days is almost certainly home ("Vinings").
+  // ── Mid-day it is only taken as home where the miles fit home (and, if a store was name-matched
+  // ── instead, where the miles do not fit that store) -- the same evidence test as 3b, so a technician
+  // ── who writes every stop as a bare city is not turned into someone who is always at home.
+  if (techRow) {
+    const bookendCount = {};
+    for (const dayLegs of Object.values(legsByDate)) {
+      const a = normalizePlaceLabel(dayLegs[0].fromRaw).toLowerCase(), b = normalizePlaceLabel(dayLegs[dayLegs.length - 1].toRaw).toLowerCase();
+      if (a && a === b) bookendCount[a] = (bookendCount[a] || 0) + 1;
+    }
+    const learnedHome = new Set(Object.keys(bookendCount).filter((k) => bookendCount[k] >= 2 && !isErrandLabel(k) && !isHomeLabel(k, techRow.home_address, techRow.home_aliases)));
+    if (learnedHome.size) {
+      for (let round = 0; round < 2; round++) {
+        for (const r of resolved) {
+          for (const side of ['from', 'to']) {
+            const raw = side === 'from' ? r.leg.fromRaw : r.leg.toRaw;
+            if (!learnedHome.has(normalizePlaceLabel(raw).toLowerCase())) continue;
+            const place = r[side + 'Place'], other = r[side === 'from' ? 'toPlace' : 'fromPlace'];
+            if (place && !(place.type === 'site' && place.via === 'name')) continue;
+            if (!other || other.type === 'errand' || other.type === 'home') continue;
+            const asHome = side === 'from' ? expectedMilesFor({ type: 'home' }, other) : expectedMilesFor(other, { type: 'home' });
+            if (!inBand(r.leg.claimedMiles, asHome)) continue;
+            if (place) {
+              const asSite = side === 'from' ? expectedMilesFor(place, other) : expectedMilesFor(other, place);
+              if (!asSite || inBand(r.leg.claimedMiles, asSite)) continue;
+            }
+            r[side + 'Place'] = { type: 'home', via: 'learned-home' };
+          }
+        }
+      }
+    }
+  }
+
   // Teach these back to site_aliases so the NEXT timesheet recognizes the
   // name instantly via the fast path above, instead of needing the
   // closed-ticket report every time. Never overwrites an existing alias
