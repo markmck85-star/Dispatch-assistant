@@ -1059,13 +1059,16 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
   }
 
-  // A single leg that looks off while its whole day adds up (within 20% / 25%) is almost always a reading
+  // A single leg that looks off while its whole day adds up (see dayTol below) is almost always a reading
   // written at the neighboring stop: the miles are right, the split between two legs is not. Kept visible
   // but tagged, and it does not by itself put the sheet in "needs a look".
   for (const f of flaggedLegs) {
     if (f.reason === 'negative_or_zero') continue;
     const ds = daySummaries.find((d) => d.date === f.date);
-    if (ds && ds.coverage >= 0.8 && ds.ratio != null && ds.ratio >= 0.8 && ds.ratio <= 1.25) {
+    // "adds up" scales with the day: 10% of expected, but never less than 5 mi of slack nor more than 15 mi
+    // (24% off a 40-mile day is 10 miles; 24% off a 400-mile day would be 96, which is not close)
+    const dayTol = ds && ds.expectedMiles != null ? Math.min(15, Math.max(5, 0.10 * ds.expectedMiles)) : 0;
+    if (ds && ds.coverage >= 0.8 && ds.expectedMiles != null && Math.abs(ds.claimedMiles - ds.expectedMiles) <= dayTol) {
       f.dayFits = true; f.dayClaimedMiles = ds.claimedMiles; f.dayExpectedMiles = ds.expectedMiles;
     }
   }
