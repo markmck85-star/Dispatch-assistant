@@ -52,7 +52,7 @@
 <header>
   <div class="kicker">Mileage check</div>
   <h1>Unidentified stops</h1>
-  <p class="sub">Place names on the mileage sheets that the system could not match to a known site. Tell it once what a name means and that technician's later sheets recognize it (saved names apply to that technician only). Suggestions are ranked by the miles claimed; a star means the site was on the dispatch list or had a ticket that day or the day before. A name that is a technician's own home can be marked as home. Names are shown per technician, most repeated first.</p>
+  <p class="sub">Place names on the mileage sheets that the system could not match to a known site. Tell it once what a name means and that technician's later sheets recognize it (saved names apply to that technician only). Suggestions are ranked by how many of that name's hops the miles fit (all saved sheets in the window are pooled), and a green confident tag means only one site fits every hop; a star means the site was on the dispatch list or had a ticket that day or the day before. A name that is a technician's own home can be marked as home. Names are shown per technician, most repeated first.</p>
 </header>
 <main class="wrap">
   <div class="bar">
@@ -67,7 +67,7 @@
   <div id="out"><div class="note">Loading...</div></div>
 </main>
 <footer>
-  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.2 (2026-10-26)<br />
+  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.4 (2026-10-26)<br />
   Saved names apply to sheets read from now on. Open a sheet on the Expense reports page and press Re-check to apply them to one already read.
 </footer>
 <script>
@@ -116,9 +116,10 @@ function render() {
     t.items.forEach((it, ii) => {
       const id = ti + "-" + ii;
       h += '<div class="item" id="it-' + id + '" data-t="' + ti + '" data-i="' + ii + '">' +
-        '<div><div class="label">' + esc(it.label) + '</div><div class="meta">' + it.count + " time" + (it.count === 1 ? "" : "s") + " &middot; " + it.miles + " mi claimed &middot; " + esc(it.dates.map(fmtDay).join(", ")) + (it.addressLike ? " &middot; looks like a street address, maybe home" : "") + "</div></div>" +
+        '<div><div class="label">' + esc(it.label) + '</div><div class="meta">' + it.count + " time" + (it.count === 1 ? "" : "s") + " &middot; " + it.miles + " mi claimed &middot; " + esc(it.dates.map(fmtDay).join(", ")) + (it.addressLike ? " &middot; looks like a street address, maybe home" : "") + "</div>" +
+        (it.hops && it.hops.length ? '<div class="meta">' + it.hops.map((x) => esc(fmtDay(x.date)) + ": " + x.miles + " mi " + (x.from ? "from/to " + esc(x.from) : "with " + esc(x.other || "unknown") + " (not identified yet)")).join("<br>") + "</div>" : "") + "</div>" +
         '<div class="acts">' +
-        it.suggestions.map((s, si) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + (s.onList ? "&#9733; " : "") + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + (s.note ? '<br><span class="meta">' + esc(s.note) + "</span>" : "") + "</button>").join("") +
+        it.suggestions.map((s, si) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + (s.onList ? "&#9733; " : "") + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + (s.confident ? ' <span class="tag in">confident</span>' : "") + (s.similar ? '<br><span class="meta">similar name</span>' : "") + (s.of ? '<br><span class="meta"><b>fits ' + s.fits + " of " + s.of + " hop" + (s.of === 1 ? "" : "s") + "</b></span>" : "") + (s.hops || []).map((x) => '<br><span class="meta">' + (x.ok ? "&#10003; " : "&#10007; ") + esc(fmtDay(x.date)) + ": about " + x.away + " mi from " + esc(x.from) + ", claimed " + x.claimed + "</span>").join("") + "</button>").join("") +
         '<button class="mini" type="button" data-act="home">This is home</button></div>' +
         '<input class="find" type="search" placeholder="Search for the site by name or code" data-find="' + id + '" />' +
         '<div class="results" id="res-' + id + '"></div><div class="msg" id="msg-' + id + '"></div></div>';
