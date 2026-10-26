@@ -1,5 +1,5 @@
 /**
- * netlify/functions/get-unidentified-stops.js  (v1.1, 2026-10-26)
+ * netlify/functions/get-unidentified-stops.js  (v1.3, 2026-10-26)
  * SAVE AS: netlify/functions/get-unidentified-stops.js
  *
  * GET ?days=120  (default 120, 7 to 400)   &state=GA (optional)
@@ -70,7 +70,7 @@ function suggestByName(label, sites) {
     }
   }
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, 3).map((x) => ({ id: x.site.id, code: x.site.site_code, name: x.site.name, state: x.site.state, onList: false, note: 'similar name' }));
+  return scored.slice(0, 3).map((x) => ({ id: x.site.id, code: x.site.site_code, name: x.site.name, state: x.site.state, onList: false, hops: [], similar: true }));
 }
 
 exports.handler = async (event) => {
@@ -156,7 +156,7 @@ exports.handler = async (event) => {
           it.count += 1;
           it.miles += Number(u.claimedMiles) || 0;
           if (u.date) it.dates.add(u.date);
-          if (u.date && it.occ.length < 8) it.occ.push({ date: u.date, otherRaw: other, miles: Number(u.claimedMiles) || 0 });
+          if (u.date && it.occ.length < 20) it.occ.push({ date: u.date, otherRaw: other, miles: Number(u.claimedMiles) || 0 });
           g.set(key, it);
         }
       }
@@ -252,29 +252,37 @@ exports.handler = async (event) => {
           const withRef = it.occ.filter((o) => o.ref && o.miles > 0);
           const scored = [];
           if (withRef.length) {
+            const total = withRef.length;
             for (const site of cand) {
-              let errSum = 0, n = 0, listed = false, note = '';
+              let errSum = 0, n = 0, fits = 0, listed = false;
+              const hops = [];
               for (const o of withRef) {
                 const d = distFrom(techId, o.ref, site.id);
                 if (d == null) continue;
-                errSum += Math.abs(o.miles - d) / Math.max(o.miles, d, 5);
-                n += 1;
-                if (onList(techId, o.date, site.id)) listed = true;
-                if (!note) note = 'about ' + Math.round(d) + ' mi from ' + (o.ref.type === 'home' ? 'home' : o.ref.name) + ', claimed ' + o.miles;
+                const e = Math.abs(o.miles - d) / Math.max(o.miles, d, 5);
+                const isListed = onList(techId, o.date, site.id);
+                const ok = e <= (isListed ? 0.35 : 0.2);
+                errSum += e; n += 1;
+                if (ok) fits += 1;
+                if (isListed) listed = true;
+                hops.push({ date: o.date, from: o.ref.type === 'home' ? 'home' : o.ref.name, away: Math.round(d), claimed: o.miles, ok });
               }
-              if (!n) continue;
-              const err = errSum / n;
-              if (err > (listed ? 0.35 : 0.2)) continue;
-              scored.push({ site, err, listed, note });
+              // a site must fit at least half of the hops it can be tested on, and at least one
+              if (!n || !fits || fits * 2 < total) continue;
+              scored.push({ site, err: errSum / n, fits, total, listed, hops });
             }
-            scored.sort((a, b) => (b.listed ? 1 : 0) - (a.listed ? 1 : 0) || a.err - b.err);
+            scored.sort((a, b) => b.fits - a.fits || (b.listed ? 1 : 0) - (a.listed ? 1 : 0) || a.err - b.err);
+            // confident: two or more hops, exactly one site fits every one of them
+            const full = scored.filter((x) => x.fits === total);
+            if (total >= 2 && full.length === 1) full[0].confident = true;
           }
-          suggestions = scored.slice(0, 5).map((x) => ({ id: x.site.id, code: x.site.site_code, name: x.site.name, state: x.site.state, onList: x.listed, note: x.note + (x.listed ? ' (on that day\'s list)' : '') }));
+          suggestions = scored.slice(0, 5).map((x) => ({ id: x.site.id, code: x.site.site_code, name: x.site.name, state: x.site.state, onList: x.listed, hops: x.hops, fits: x.fits, of: x.total, confident: !!x.confident }));
           for (const s of suggestByName(it.label, cand)) { if (suggestions.length >= 5) break; if (!suggestions.some((x) => x.id === s.id)) suggestions.push(s); }
         }
         return {
           label: it.label, count: it.count, miles: Math.round(it.miles * 10) / 10,
           dates: Array.from(it.dates).sort().slice(0, 6), addressLike: it.addressLike, suggestions,
+          hops: it.occ.map((o) => ({ date: o.date, miles: o.miles, other: mc.normalizePlaceLabel(o.otherRaw) || '', known: !!o.ref, from: o.ref ? (o.ref.type === 'home' ? 'home' : o.ref.name) : null })),
         };
       });
       techs.push({ id: tech.id, name: tech.name, state: tech.home_state, states: statesOf(tech), homeAddress: tech.home_address || null, homeAliases: tech.home_aliases || [], total: items.reduce((s, i) => s + i.count, 0), items });
