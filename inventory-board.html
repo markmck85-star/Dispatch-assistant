@@ -370,7 +370,7 @@
           <input id="overdueTime" type="time" value="09:00" />
           <p class="hint">Same clock as the reminder unless you want a later overdue badge (e.g. remind at 9:00, mark late at 10:00).</p>
           <label>Weekly text (SMS / email)</label>
-          <textarea id="weeklyText">Hi {first_name} — we do not have this week’s inventory sheet for {state}. Please email it to the inventory mailbox when you can. Thanks.</textarea>
+          <textarea id="weeklyText">Hi {first_name}, we don’t have this week’s inventory sheet for {state} yet. Please send it to inventory@mcrtechservice.com (and TJ if you usually do) when you can. Thanks!</textarea>
         </div>
         <div>
           <label>Month-end reminder rule</label>
@@ -383,7 +383,7 @@
           <label>Month-end reminder time (Eastern)</label>
           <input id="monthEndTime" type="time" value="09:00" />
           <label>Month-end text</label>
-          <textarea id="monthEndText">Hi {first_name} — month-end inventory is due. Attach the Neumo sheet, include partials (only ship rolls at 200 sheets or below), and put box count, LxWxH, and weight in the email so Neumo can issue a call tag.</textarea>
+          <textarea id="monthEndText">Hi {first_name}, month-end inventory is due. Attach the Neumo sheet, include partials (only ship rolls at 200 sheets or below), and put box count, LxWxH, and weight in the email so Neumo can issue a call tag.</textarea>
         </div>
       </div>
       <div class="save-row">
@@ -422,11 +422,11 @@ const DEFAULTS = {
   weeklyDay: "1",
   weeklyTime: "09:00",
   overdueTime: "09:00",
-  weeklyText: "Hi {first_name} — we do not have this week’s inventory sheet for {state}. Please email it to the inventory mailbox when you can. Thanks.",
+  weeklyText: "Hi {first_name}, we don’t have this week’s inventory sheet for {state} yet. Please send it to inventory@mcrtechservice.com (and TJ if you usually do) when you can. Thanks!",
   monthEndRule: "last_working_before_eom",
   monthEndDay: "28",
   monthEndTime: "09:00",
-  monthEndText: "Hi {first_name} — month-end inventory is due. Attach the Neumo sheet, include partials (only ship rolls at 200 sheets or below), and put box count, LxWxH, and weight in the email so Neumo can issue a call tag."
+  monthEndText: "Hi {first_name}, month-end inventory is due. Attach the Neumo sheet, include partials (only ship rolls at 200 sheets or below), and put box count, LxWxH, and weight in the email so Neumo can issue a call tag."
 };
 function loadSettings() {
   let s = DEFAULTS;
