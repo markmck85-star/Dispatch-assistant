@@ -203,7 +203,10 @@ function isHomeCityOnlyLabel(rawLabel, homeAddress) {
 
 function isErrandLabel(rawLabel) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
-  return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
+  if (/^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label)) return true;
+  // 2026-10-26: parts and consumables are often forwarded to a nearby UPS Store or FedEx Office for pickup,
+  // so those names (with or without a town after them: "UPS Store Franklin") are errand stops, not sites.
+  return /^(the )?(ups|fedex|usps)\b/.test(label) || /^(the )?post office\b/.test(label);
 }
 
 // 2026-10-26: a technician who writes home as a street address ("131 Tappan Zee Dr") instead of a
