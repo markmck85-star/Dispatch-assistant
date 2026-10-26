@@ -475,6 +475,20 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     candidateSites = siteRows || [];
   }
 
+  // 2026-10-26: names saved for THIS technician only (technician_stop_aliases). Read first and
+  // non-fatal, so the check still runs if the table is ever unreachable. A site a technician's own
+  // name points to is added to the candidate list even if it sits outside his states.
+  let techAliasRows = [];
+  if (techRow) {
+    try {
+      const { data: taRows, error: taErr } = await supabase
+        .from('technician_stop_aliases').select('alias, site_id, sites(id, name, site_code, lat, lng)').eq('technician_id', techRow.id);
+      if (taErr) console.error('[mileage-check] technician_stop_aliases read failed (non-fatal):', taErr.message);
+      else techAliasRows = (taRows || []).filter((r) => r.sites);
+    } catch (e) { console.error('[mileage-check] technician_stop_aliases read failed (non-fatal):', e.message); }
+    for (const r of techAliasRows) if (!candidateSites.some((s) => s.id === r.sites.id)) candidateSites.push({ ...r.sites });
+  }
+
   // 2026-09-20: colloquial-name fast path. Every technician tends to
   // write a site's name their own way ("Steve Reynolds Kroger" vs the
   // real site name "Gwinnett County Kroger Steve Reynolds") -- token
@@ -503,6 +517,13 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
         aliasMap[a.alias.toLowerCase()] = siteById[a.site_id];
         siteById[a.site_id].aliases.push(a.alias);
       }
+    }
+    // this technician's own names win over the shared ones, for this run only
+    for (const r of techAliasRows) {
+      const s = siteById[r.sites.id];
+      if (!s) continue;
+      aliasMap[r.alias.toLowerCase()] = s;
+      s.aliases.push(r.alias);
     }
   }
 
@@ -975,14 +996,16 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   for (const [key, site] of Object.entries(labelToResolvedSite)) {
     const rawLabel = key.slice(key.indexOf('|') + 1);
     if (aliasMap[rawLabel.toLowerCase()]) continue; // already known (shouldn't normally happen given the check above, but safe)
+    // 2026-10-26: learned names are saved for this technician only, not for everyone in the state
+    // (a bare town name can mean a different site on someone else's route).
     const { data: existing } = await supabase
-      .from('site_aliases').select('site_id').eq('alias', rawLabel).maybeSingle();
+      .from('technician_stop_aliases').select('site_id').eq('technician_id', techRow.id).ilike('alias', rawLabel.replace(/[\\%_]/g, (c) => '\\' + c)).maybeSingle();
     if (existing) {
       if (existing.site_id !== site.id) aliasConflicts.push({ rawLabel, existingSiteId: existing.site_id, resolvedSiteCode: site.site_code });
       continue;
     }
     const { error: aliasInsertErr } = await supabase
-      .from('site_aliases').insert({ alias: rawLabel, site_id: site.id, source: 'mileage_timesheet' });
+      .from('technician_stop_aliases').insert({ technician_id: techRow.id, alias: rawLabel, site_id: site.id, source: 'mileage_timesheet' });
     if (aliasInsertErr) console.error(`[mileage-check] alias write failed for "${rawLabel}" (non-fatal):`, aliasInsertErr.message);
     else aliasMap[rawLabel.toLowerCase()] = site; // so later legs in this same run also benefit
   }
