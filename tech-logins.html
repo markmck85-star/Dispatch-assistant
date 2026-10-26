@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Technician Logins</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink:#1c1916; --muted:#6b6258; --line:#e4dcd0; --paper:#f6f1e8; --card:#fffdf8; --bad:#9f1239; --ok:#3f6b4a; --warn:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans", system-ui, sans-serif; line-height:1.45; }
+  header { padding:24px 20px 16px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fff 0%, var(--paper) 100%); }
+  .kicker { font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  h1 { margin:6px 0 6px; font-size:26px; letter-spacing:-.03em; }
+  .sub { color:var(--muted); max-width:72ch; font-size:14px; margin:0; }
+  .wrap { width:min(1100px, 100%); margin:0 auto; padding:16px 16px 64px; display:grid; gap:16px; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .bar select, .bar button, .bar input { font:inherit; font-size:14px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  .bar input { flex:1 1 200px; min-width:0; }
+  .bar button { cursor:pointer; font-weight:600; }
+  .bar button.dark { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .row { padding:12px 16px; border-top:1px solid var(--line); display:grid; gap:8px; }
+  .row:first-child { border-top:0; }
+  .name { font-weight:600; word-break:break-word; }
+  .meta { color:var(--muted); font-size:12px; }
+  .tag { font-family:"IBM Plex Mono", monospace; font-size:11px; padding:2px 8px; border-radius:999px; background:#eee7db; white-space:nowrap; font-weight:400; margin-left:4px; }
+  .tag.ok { background:#e4f0e6; color:var(--ok); }
+  .tag.warn { background:#fdf0dc; color:var(--warn); }
+  .tag.bad { background:#fbe4ea; color:var(--bad); }
+  .acts { display:flex; flex-wrap:wrap; gap:8px; }
+  button.mini { font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); cursor:pointer; font-weight:600; }
+  button.mini:hover { background:#f3ede2; }
+  button.mini.danger { color:var(--bad); }
+  button:disabled { opacity:.55; cursor:default; }
+  .note { padding:12px 16px; color:var(--muted); font-size:13px; }
+  .err { color:var(--bad); padding:12px 16px; }
+  .msg { font-size:12px; color:var(--ok); }
+  .msg.bad { color:var(--bad); }
+  .result { border:2px solid var(--ok); background:#f1f6f1; border-radius:14px; padding:14px 16px; display:grid; gap:8px; }
+  .result h2 { margin:0; font-size:16px; }
+  .result textarea { width:100%; font-family:"IBM Plex Mono", monospace; font-size:13px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); min-height:150px; }
+  .pw { font-family:"IBM Plex Mono", monospace; font-size:18px; font-weight:500; word-break:break-all; }
+  footer { width:min(1100px, 100%); margin:0 auto; padding:0 16px 40px; color:var(--muted); font-size:13px; }
+  footer a { color:#2b5aa8; }
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">Admin</div>
+  <h1>Technician logins</h1>
+  <p class="sub">Logins for the technician portal. Passwords are stored scrambled, so they cannot be shown. A reset makes a new temporary password, shown once, and signs the technician out of his phones.</p>
+</header>
+<main class="wrap">
+  <div class="bar">
+    <input id="find" type="search" placeholder="Search by name or username" autocomplete="off" />
+    <select id="show" aria-label="Show">
+      <option value="all">Everyone</option>
+      <option value="nologin">No login yet</option>
+      <option value="never">Never signed in</option>
+      <option value="locked">Locked</option>
+      <option value="off">Turned off</option>
+      <option value="test">Test logins</option>
+    </select>
+  </div>
+  <div class="bar">
+    <select id="testState" aria-label="State for the test login"></select>
+    <button id="mkTest" type="button" class="dark">Create a test technician</button>
+    <button id="refresh" type="button">Refresh</button>
+  </div>
+  <div id="result"></div>
+  <div id="out"><div class="note">Loading...</div></div>
+</main>
+<footer>
+  <a href="/mileage-aliases.html">Unidentified stops</a> &middot; <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.0 (2026-10-26)<br />
+  A test technician is kept inactive, so dispatchers never see him and nothing is assigned to him. Add a sample sheet to try the Stop names tab; remove the test technician when finished and everything goes with him.
+</footer>
+<script>
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmt(iso) { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+const PORTAL = location.origin + "/tech-portal.html";
+let rows = [];
+const STATES = ["AL","AR","CA","CO","FL","GA","ID","IL","IN","MI","MN","MS","NC","NV","OH","OR","SC","WV"];
+document.getElementById("testState").innerHTML = STATES.map((s) => '<option value="' + s + '"' + (s === "GA" ? " selected" : "") + ">Test login in " + s + "</option>").join("");
+
+async function api(method, body) {
+  const res = await fetch("/.netlify/functions/admin-tech-logins", method === "GET" ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to use this page.");
+  if (!res.ok || d.error) throw new Error(d.error || "HTTP " + res.status);
+  return d;
+}
+
+async function load() {
+  const out = document.getElementById("out");
+  try {
+    const d = await api("GET");
+    if (!d.ok) throw new Error("The server did not return the list. The new server file may not be in place yet.");
+    rows = d.rows || [];
+    render();
+  } catch (e) { out.innerHTML = '<div class="panel"><div class="err">' + esc(e.message) + "</div></div>"; }
+}
+
+function status(r) {
+  if (!r.hasLogin) return ['<span class="tag">No login</span>', "none"];
+  if (r.disabled) return ['<span class="tag bad">Turned off</span>', "off"];
+  if (r.locked) return ['<span class="tag warn">Locked</span>', "locked"];
+  return ['<span class="tag ok">On</span>', "on"];
+}
+
+function render() {
+  const q = document.getElementById("find").value.trim().toLowerCase();
+  const show = document.getElementById("show").value;
+  const list = rows.filter((r) => {
+    if (q && (r.name + " " + (r.username || "")).toLowerCase().indexOf(q) < 0) return false;
+    if (show === "nologin") return !r.hasLogin;
+    if (show === "never") return r.hasLogin && !r.lastLoginAt;
+    if (show === "locked") return r.locked;
+    if (show === "off") return r.disabled;
+    if (show === "test") return r.test;
+    return true;
+  });
+  const out = document.getElementById("out");
+  if (!list.length) { out.innerHTML = '<div class="panel"><div class="note">Nobody matches.</div></div>'; return; }
+  out.innerHTML = '<div class="panel">' + list.map((r) => {
+    const st = status(r);
+    const tags = (r.test ? '<span class="tag warn">Test</span>' : "") + (!r.active && !r.test ? '<span class="tag">Inactive</span>' : "") + (r.contractor ? '<span class="tag">Contractor</span>' : "");
+    const info = r.hasLogin ? "Username <b>" + esc(r.username) + "</b> &middot; " + (r.lastLoginAt ? "last signed in " + esc(fmt(r.lastLoginAt)) : "never signed in") + (r.everChangedPassword ? " &middot; changed his own password " + esc(fmt(r.passwordChangedAt)) : r.passwordChangedAt ? " &middot; password set " + esc(fmt(r.passwordChangedAt)) : "") : "No portal login yet";
+    const note = r.contractor ? '<div class="meta">Contractors cannot use the portal even with a login.</div>' : (!r.active && !r.test ? '<div class="meta">Inactive technicians cannot sign in even with a login.</div>' : "");
+    const acts = r.hasLogin
+      ? '<button class="mini" data-a="reset">Reset password</button><button class="mini" data-a="set_password">Set password</button>' + (r.locked ? '<button class="mini" data-a="unlock">Unlock</button>' : "") +
+        (r.disabled ? '<button class="mini" data-a="enable">Turn on</button>' : '<button class="mini danger" data-a="disable">Turn off</button>') + '<button class="mini" data-a="rename">Change username</button>'
+      : '<button class="mini" data-a="create">Create login</button>';
+    const testActs = r.test ? '<button class="mini" data-a="add_sample">Add sample sheet</button><button class="mini danger" data-a="remove_test">Remove test technician</button>' : "";
+    return '<div class="row" data-id="' + esc(r.technician_id) + '"><div><div class="name">' + esc(r.name) + ' <span class="tag">' + esc(r.states.join(", ")) + "</span>" + st[0] + tags + '</div><div class="meta">' + info + "</div>" + note + "</div>" +
+      '<div class="acts">' + acts + testActs + '</div><div class="msg"></div></div>';
+  }).join("") + "</div>";
+}
+
+function showResult(title, d, name) {
+  const msgText = "Your MCR Field Portal login\nLink: " + PORTAL + "\nUsername: " + d.username + "\nTemporary password: " + d.password + "\nSign in, then open the Account tab and change your password.";
+  const el = document.getElementById("result");
+  el.innerHTML = '<div class="result"><h2>' + esc(title) + " " + esc(name) + '</h2><div class="meta">Shown once. It cannot be looked up later, only reset.</div><div>Username: <b>' + esc(d.username) + '</b></div><div class="pw">' + esc(d.password) + '</div>' +
+    '<textarea id="msgBox" readonly>' + esc(msgText) + '</textarea><div class="acts"><button class="mini" type="button" id="copyMsg">Copy message</button><button class="mini" type="button" id="closeRes">Done</button></div><div class="msg" id="copyNote"></div></div>';
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("closeRes").onclick = () => { el.innerHTML = ""; };
+  document.getElementById("copyMsg").onclick = async () => {
+    const box = document.getElementById("msgBox");
+    try { await navigator.clipboard.writeText(box.value); document.getElementById("copyNote").textContent = "Copied."; }
+    catch (e) { box.select(); document.getElementById("copyNote").textContent = "Selected. Press copy on your phone."; }
+  };
+}
+
+document.getElementById("out").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-a]");
+  if (!b) return;
+  const rowEl = b.closest(".row"), id = rowEl.getAttribute("data-id");
+  const r = rows.find((x) => x.technician_id === id);
+  const a = b.getAttribute("data-a");
+  const msg = rowEl.querySelector(".msg");
+  let body = { action: a, technician_id: id };
+  if (a === "reset" && !confirm("Reset " + r.name + "'s password? His current password stops working and he is signed out of his phones.")) return;
+  if (a === "disable" && !confirm("Turn off " + r.name + "'s login? He is signed out and cannot sign in until you turn it back on.")) return;
+  if (a === "remove_test" && !confirm("Remove the test technician " + r.name + ", his login and his sample data?")) return;
+  if (a === "set_password") { const p = prompt("New password for " + r.name + " (8 or more characters):"); if (!p) return; body.password = p; }
+  if (a === "rename") { const u = prompt("New username for " + r.name + ":", r.username || ""); if (!u) return; body.username = u; }
+  if (a === "create") { const u = prompt("Username for " + r.name + " (leave as is for the suggested one):", ""); body.username = u || ""; }
+  rowEl.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+  msg.className = "msg"; msg.textContent = "Working...";
+  try {
+    const d = await api("POST", body);
+    if (a === "reset") showResult("New temporary password for", d, r.name);
+    else if (a === "create") showResult("New login for", d, r.name);
+    await load();
+    if (!["reset", "create", "remove_test"].includes(a)) {
+      const again = document.querySelector('.row[data-id="' + id + '"] .msg');
+      if (again) { again.className = "msg"; again.textContent = a === "add_sample" ? "Sample sheet added (" + d.legs + " stops)." : a === "set_password" ? "Password set." : a === "unlock" ? "Unlocked." : a === "disable" ? "Turned off." : a === "enable" ? "Turned on." : a === "rename" ? "Username changed." : "Done."; }
+    }
+  } catch (e) {
+    rowEl.querySelectorAll("button").forEach((x) => { x.disabled = false; });
+    msg.className = "msg bad"; msg.textContent = e.message;
+  }
+});
+
+document.getElementById("mkTest").onclick = async () => {
+  const st = document.getElementById("testState").value;
+  if (!confirm("Create a test technician in " + st + "?")) return;
+  try {
+    const d = await api("POST", { action: "create_test", state: st });
+    showResult("Test login created:", d, d.name);
+    await load();
+  } catch (e) { alert(e.message); }
+};
+document.getElementById("find").addEventListener("input", render);
+document.getElementById("show").addEventListener("change", render);
+document.getElementById("refresh").onclick = load;
+load();
+</script>
+</body>
+</html>
