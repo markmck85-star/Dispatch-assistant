@@ -241,6 +241,23 @@ function looksLikeBareCityLabel(rawLabel) {
  * Suwanee Kroger" -- close to an existing alias, not identical to it --
  * go unmatched even with a relevant alias already on file.
  */
+// 2026-10-25: one-letter spelling slips ("Donvan" for "Donovan", "raligh" for "raleigh") in a long word.
+// Only words of 5+ letters with no digits, and only a single insertion, deletion or swapped-for letter;
+// shorter words stay exact so "Cobb"/"Cobbs"-style near-misses between real places cannot merge.
+function withinOneEdit(a, b) {
+  if (a === b) return true;
+  if (a.length < 5 || b.length < 5 || /\d/.test(a + b)) return false;
+  const d = a.length - b.length;
+  if (d > 1 || d < -1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length === b.length) { i++; j++; } else if (a.length > b.length) i++; else j++;
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
 function matchSiteByName(rawName, candidateSites) {
   const targetTokens = tokenize(rawName);
   if (!targetTokens.length) return null;
@@ -251,7 +268,7 @@ function matchSiteByName(rawName, candidateSites) {
     for (const candidateName of namesToTry) {
       const siteTokens = tokenize(candidateName);
       const setA = new Set(targetTokens), setB = new Set(siteTokens);
-      const intersectionTokens = [...setA].filter((t) => setB.has(t));
+      const intersectionTokens = [...setA].filter((t) => setB.has(t) || [...setB].some((u) => withinOneEdit(t, u)));
       const intersectionWeight = weightedTokenSum(intersectionTokens);
       const siteWeight = weightedTokenSum(siteTokens);
       const smallerWeight = Math.min(targetWeight, siteWeight);
