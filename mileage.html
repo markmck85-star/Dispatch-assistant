@@ -150,6 +150,11 @@ function reportDetailHtml(r) {
   const dayLine = (d) => fmtDay(d.date) + ": " + d.stopCount + " stop" + (d.stopCount === 1 ? "" : "s") + ", " + d.claimedMiles + " mi" +
     (d.expectedMiles != null ? " (expected ~" + d.expectedMiles + " mi" + (d.ratio != null ? ", " + d.ratio + "x" : "") + ")" : " (not enough matched stops to judge)");
   flaggedDays.forEach((d) => { h += '<div class="flag">' + esc(dayLine(d)) + "</div>"; });
+  days.filter((d) => d.explainedByUnidentified).forEach((d) => {
+    h += '<div class="plain">' + esc(fmtDay(d.date)) + ": " + esc(d.claimedMiles) + " mi claimed vs ~" + esc(d.expectedMiles) + " mi expected, but " + esc(d.uncheckedMiles) +
+      " mi of that is on " + esc(d.uncheckedLegs) + " leg" + (d.uncheckedLegs === 1 ? "" : "s") + " the app could not identify. The legs it could check come to " + esc(d.checkedClaimedMiles) +
+      " mi vs ~" + esc(d.expectedMiles) + " mi expected, so this looks like missing site data, not extra miles.</div>";
+  });
   flagged.forEach((f) => {
     if (f.dayFits) {
       h += '<div class="plain">' + esc(fmtDay(f.date)) + ": " + esc(f.fromRaw) + " &rarr; " + esc(f.toRaw) + " — claimed " + esc(f.claimedMiles) + " mi, expected ~" + esc(f.expectedMiles) +

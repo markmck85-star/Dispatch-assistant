@@ -1053,6 +1053,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     const dayClaimed = dayLegsForSummary.reduce((sum, l) => sum + l.claimedMiles, 0);
     let dayExpected = 0;
     let dayMatchedCount = 0;
+    let dayMatchedClaimed = 0;
     for (const r of resolved) {
       if (r.leg.date !== date) continue;
       if ((r.fromPlace && r.fromPlace.type === 'errand') || (r.toPlace && r.toPlace.type === 'errand')) continue;
@@ -1064,12 +1065,26 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       if (!exp) continue;
       dayExpected += exp.miles;
       dayMatchedCount++;
+      dayMatchedClaimed += r.leg.claimedMiles;
     }
     const coverage = dayLegsForSummary.length > 0 ? dayMatchedCount / dayLegsForSummary.length : 0;
     let ratio = null, flagged = false;
     if (coverage >= 0.5 && dayExpected > 0.5) {
       ratio = Math.round((dayClaimed / dayExpected) * 100) / 100;
       if (ratio > MAX_RATIO || ratio < MIN_RATIO) flagged = true;
+    }
+    // A day that looks far over only because some of its legs could not be identified (their miles are in the
+    // claimed total but nothing is expected for them) is a data gap, not an overstatement. When the legs that CAN
+    // be checked add up on their own, say so and do not flag the day.
+    let explainedByUnidentified = false, uncheckedMiles = 0, uncheckedLegs = 0;
+    if (flagged && dayMatchedCount > 0 && dayMatchedCount < dayLegsForSummary.length && dayExpected > 0.5) {
+      const tol = Math.min(15, Math.max(5, 0.10 * dayExpected));
+      if (Math.abs(dayMatchedClaimed - dayExpected) <= tol) {
+        explainedByUnidentified = true;
+        flagged = false;
+        uncheckedMiles = Math.round((dayClaimed - dayMatchedClaimed) * 10) / 10;
+        uncheckedLegs = dayLegsForSummary.length - dayMatchedCount;
+      }
     }
     daySummaries.push({
       date,
@@ -1079,6 +1094,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       coverage: Math.round(coverage * 100) / 100,
       ratio,
       flagged,
+      ...(explainedByUnidentified ? { explainedByUnidentified: true, uncheckedMiles, uncheckedLegs, checkedClaimedMiles: Math.round(dayMatchedClaimed * 10) / 10 } : {}),
     });
   }
   daySummaries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
