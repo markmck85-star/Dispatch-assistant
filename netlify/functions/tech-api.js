@@ -1205,6 +1205,80 @@ async function doNotifyTech(supabase, ctx, body) {
   return json(200, { ok: true, sent, subscribed: true });
 }
 
+// ---------- my stop names (2026-10-26) ----------
+// A technician tells the system what the names he writes on his mileage log mean. His answers wait
+// as 'pending' (technician_stop_aliases) until approved on the admin page; the mileage check only
+// reads approved rows. Scope is the signed-in technician only: his id comes from the token, never
+// from the request, and sites are limited to his own states.
+async function doMyStopNames(supabase, ctx) {
+  if (ctx.kind !== 't') return json(200, { ok: true, items: [], waiting: [], sites: {}, states: [] });
+  const { buildUnidentified } = require('./lib/unidentified-stops.js');
+  const out = await buildUnidentified(supabase, { days: 120, technicianId: ctx.key, forTech: true, activeOnly: true });
+  const t = (out.techs || [])[0];
+  const items = ((t && t.items) || []).map((it) => ({
+    label: it.label, count: it.count, miles: it.miles, dates: it.dates, addressLike: it.addressLike,
+    hops: (it.hops || []).map((h) => ({ date: h.date, miles: h.miles, other: h.other, known: h.known, from: h.from })),
+    suggestions: (it.suggestions || []).map((s) => ({ code: s.code, name: s.name, state: s.state, onList: !!s.onList, fits: s.fits || 0, of: s.of || 0, confident: !!s.confident, similar: !!s.similar })),
+  }));
+  const sites = {};
+  Object.keys(out.sites || {}).forEach((st) => {
+    if (ctx.states.indexOf(st) < 0) return;
+    sites[st] = out.sites[st].map((s) => ({ code: s.code, name: s.name, address: s.address, county: s.county }));
+  });
+  let waiting = [];
+  try {
+    const { data } = await supabase.from('technician_stop_aliases')
+      .select('alias, kind, sites(name, site_code)').eq('technician_id', ctx.key).eq('status', 'pending').order('created_at', { ascending: false }).limit(100);
+    waiting = (data || []).map((r) => ({ alias: r.alias, kind: r.kind, site: r.sites ? r.sites.name : null, code: r.sites ? r.sites.site_code : null }));
+  } catch (e) { /* none */ }
+  return json(200, { ok: true, items, waiting, sites, states: ctx.states });
+}
+
+async function doSaveMyStopName(supabase, ctx, body) {
+  if (ctx.kind !== 't') return json(403, { ok: false, error: 'Not available for this account.' });
+  const mc = require('./lib/mileage-check.js');
+  const { buildUnidentified } = require('./lib/unidentified-stops.js');
+  const alias = mc.normalizePlaceLabel(body.alias);
+  const kind = String(body.kind || '');
+  if (!alias || ['site', 'home', 'not_site'].indexOf(kind) < 0) return json(400, { ok: false, error: 'Missing answer.' });
+
+  // The name must be one that is actually waiting on his own sheets.
+  const out = await buildUnidentified(supabase, { days: 120, technicianId: ctx.key, forTech: true, activeOnly: true });
+  const t = (out.techs || [])[0];
+  const item = t && t.items.find((i) => i.label.toLowerCase() === alias.toLowerCase());
+  const { data: have } = await supabase.from('technician_stop_aliases')
+    .select('id, status').eq('technician_id', ctx.key).ilike('alias', alias.replace(/[\\%_]/g, (c) => '\\' + c));
+  const mine = (have || [])[0] || null;
+  if (mine && mine.status === 'approved') return json(200, { ok: true, already: true });
+  if (!item && !mine) return json(404, { ok: false, error: 'That name is not on your list anymore. Refresh and try again.' });
+
+  let siteId = null, evidence = { count: item ? item.count : 0, miles: item ? item.miles : 0, dates: item ? item.dates : [], hops: item ? item.hops.length : 0 };
+  if (kind === 'site') {
+    const code = String(body.site_code || '').trim();
+    if (!code) return json(400, { ok: false, error: 'Pick a location.' });
+    const { data: site } = await supabase.from('sites').select('id, state, active, is_placeholder').eq('site_code', code).maybeSingle();
+    if (!site || ctx.states.indexOf(String(site.state || '').toUpperCase()) < 0 || site.active === false || site.is_placeholder) {
+      return json(404, { ok: false, error: 'Location not found.' });
+    }
+    siteId = site.id;
+    const sugg = item ? item.suggestions.find((s) => s.id === site.id) : null;
+    if (sugg) evidence = { ...evidence, fits: sugg.fits || 0, of: sugg.of || 0, confident: !!sugg.confident, onList: !!sugg.onList };
+  }
+
+  const row = { kind, site_id: siteId, status: 'pending', evidence, answered_by: 'tech' };
+  if (mine) {
+    const { error } = await supabase.from('technician_stop_aliases').update(row).eq('id', mine.id).eq('status', 'pending');
+    if (error) return json(500, { ok: false, error: 'Could not save.' });
+  } else {
+    const { count } = await supabase.from('technician_stop_aliases').select('id', { count: 'exact', head: true }).eq('technician_id', ctx.key).eq('status', 'pending');
+    if ((count || 0) >= 150) return json(429, { ok: false, error: 'Too many answers are waiting. Try again after they are approved.' });
+    const { error } = await supabase.from('technician_stop_aliases')
+      .insert({ ...row, technician_id: ctx.key, alias, source: 'portal' });
+    if (error) return json(500, { ok: false, error: 'Could not save.' });
+  }
+  return json(200, { ok: true });
+}
+
 async function doChangePassword(supabase, ctx, body) {
   const current = String(body.current || '');
   const next = String(body.next || '');
@@ -1279,6 +1353,8 @@ exports.handler = async (event) => {
     if (action === 'oncall') return await doOnCall(supabase, ctx);
     if (action === 'dispatch_summary') return await doDispatchSummary(supabase, ctx, body);
     if (action.indexOf('push_') === 0) return await doPush(supabase, ctx, action, body);
+    if (action === 'my_stop_names') return await doMyStopNames(supabase, ctx);
+    if (action === 'save_my_stop_name') return await doSaveMyStopName(supabase, ctx, body);
     if (action === 'change_password') return await doChangePassword(supabase, ctx, body);
     return json(400, { ok: false, error: 'Unknown action.' });
   } catch (e) {
@@ -1286,4 +1362,4 @@ exports.handler = async (event) => {
   }
 };
 
-exports._test = { normPw, hashPw, verifyPw, makeToken, readToken, statesFor, eligible, cleanQuery, watchdogOptionsFor, watchRegion, expandWatchSelection };
+exports._test = { doMyStopNames, doSaveMyStopName, normPw, hashPw, verifyPw, makeToken, readToken, statesFor, eligible, cleanQuery, watchdogOptionsFor, watchRegion, expandWatchSelection };
