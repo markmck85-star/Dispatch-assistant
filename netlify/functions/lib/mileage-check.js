@@ -479,12 +479,17 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   // non-fatal, so the check still runs if the table is ever unreachable. A site a technician's own
   // name points to is added to the candidate list even if it sits outside his states.
   let techAliasRows = [];
+  const techErrands = new Set(); // names this technician says are not sites (approved)
   if (techRow) {
     try {
       const { data: taRows, error: taErr } = await supabase
-        .from('technician_stop_aliases').select('alias, site_id, sites(id, name, site_code, lat, lng)').eq('technician_id', techRow.id);
+        .from('technician_stop_aliases').select('alias, site_id, kind, sites(id, name, site_code, lat, lng)').eq('technician_id', techRow.id).eq('status', 'approved');
       if (taErr) console.error('[mileage-check] technician_stop_aliases read failed (non-fatal):', taErr.message);
-      else techAliasRows = (taRows || []).filter((r) => r.sites);
+      else {
+        // 2026-10-26: only APPROVED answers count (technician answers wait as 'pending' until approved).
+        techAliasRows = (taRows || []).filter((r) => r.kind === 'site' && r.sites);
+        for (const r of taRows || []) if (r.kind === 'not_site') techErrands.add(normalizePlaceLabel(r.alias).toLowerCase());
+      }
     } catch (e) { console.error('[mileage-check] technician_stop_aliases read failed (non-fatal):', e.message); }
     for (const r of techAliasRows) if (!candidateSites.some((s) => s.id === r.sites.id)) candidateSites.push({ ...r.sites });
   }
@@ -622,7 +627,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     if (isBookendSlot && dayHomeLabel[date] && normalizePlaceLabel(rawLabel).toLowerCase() === dayHomeLabel[date]) {
       return { type: 'home' };
     }
-    if (isErrandLabel(rawLabel)) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
+    if (isErrandLabel(rawLabel) || techErrands.has(normalizePlaceLabel(rawLabel).toLowerCase())) return { type: 'errand', label: normalizePlaceLabel(rawLabel) };
     const cleaned = normalizePlaceLabel(rawLabel).toLowerCase();
     const aliasHit = aliasMap[cleaned] || aliasMap[String(rawLabel || '').trim().toLowerCase()];
     return aliasHit ? { type: 'site', site: aliasHit } : null;
@@ -779,6 +784,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       const stops = dayLegs.map((l, li) => ({ label: l.toRaw, last: li === dayLegs.length - 1 })).filter(({ label, last }) =>
         !(techRow && isHomeLabel(label, techRow.home_address, techRow.home_aliases) && (last || !isHomeCityOnlyLabel(label, techRow.home_address)))
         && !isErrandLabel(label)
+        && !techErrands.has(normalizePlaceLabel(label).toLowerCase())
         && !isLearnedAddress(label)
         && !(homeLabel && normalizePlaceLabel(label).toLowerCase() === homeLabel && label === dayLegs[dayLegs.length - 1].toRaw)
       ).map((x) => x.label);
@@ -1001,7 +1007,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     const { data: existing } = await supabase
       .from('technician_stop_aliases').select('site_id').eq('technician_id', techRow.id).ilike('alias', rawLabel.replace(/[\\%_]/g, (c) => '\\' + c)).maybeSingle();
     if (existing) {
-      if (existing.site_id !== site.id) aliasConflicts.push({ rawLabel, existingSiteId: existing.site_id, resolvedSiteCode: site.site_code });
+      if (existing.site_id && existing.site_id !== site.id) aliasConflicts.push({ rawLabel, existingSiteId: existing.site_id, resolvedSiteCode: site.site_code });
       continue;
     }
     const { error: aliasInsertErr } = await supabase
