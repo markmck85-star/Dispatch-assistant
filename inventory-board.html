@@ -430,7 +430,13 @@ const DEFAULTS = {
 };
 function loadSettings() {
   let s = DEFAULTS;
-  try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch (e) {}
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) || "{}");
+    // a saved copy of the OLD default wording (before the address was added and the dashes removed) is dropped so the new default shows
+    if (/^Hi \{first_name\} \u2014 /.test(saved.weeklyText || "")) delete saved.weeklyText;
+    if (/^Hi \{first_name\} \u2014 /.test(saved.monthEndText || "")) delete saved.monthEndText;
+    s = { ...DEFAULTS, ...saved };
+  } catch (e) {}
   for (const k of Object.keys(DEFAULTS)) {
     const el = document.getElementById(k);
     if (el) el.value = s[k];
