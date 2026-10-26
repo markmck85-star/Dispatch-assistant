@@ -151,12 +151,17 @@ function reportDetailHtml(r) {
     (d.expectedMiles != null ? " (expected ~" + d.expectedMiles + " mi" + (d.ratio != null ? ", " + d.ratio + "x" : "") + ")" : " (not enough matched stops to judge)");
   flaggedDays.forEach((d) => { h += '<div class="flag">' + esc(dayLine(d)) + "</div>"; });
   flagged.forEach((f) => {
+    if (f.dayFits) {
+      h += '<div class="plain">' + esc(fmtDay(f.date)) + ": " + esc(f.fromRaw) + " &rarr; " + esc(f.toRaw) + " — claimed " + esc(f.claimedMiles) + " mi, expected ~" + esc(f.expectedMiles) +
+        " mi, but the day adds up (" + esc(f.dayClaimedMiles) + " mi claimed vs ~" + esc(f.dayExpectedMiles) + " mi expected), so the miles are probably split differently between neighboring stops</div>";
+      return;
+    }
     const cluster = f.cluster ? " — part of a run of flags this day; the order of stops may be off, not just this number" : "";
     const why = f.reason === "negative_or_zero" ? " — negative or zero mileage" : (f.ratio != null ? " — " + f.ratio + "x expected" : " — flagged");
     h += '<div class="flag">' + esc(fmtDay(f.date)) + ": <strong>" + esc(f.fromRaw) + "</strong> &rarr; <strong>" + esc(f.toRaw) + "</strong> — claimed " + esc(f.claimedMiles) +
       " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc(f.expectedSource) + ")" + esc(why) + esc(cluster) + "</div>";
   });
-  if (!flagged.length && !flaggedDays.length && !(hc && hc.flagged)) h += '<div class="plain">Nothing in this sheet looks out of line.</div>';
+  if (!flagged.some((f) => !f.dayFits) && !flaggedDays.length && !(hc && hc.flagged)) h += '<div class="plain">Nothing in this sheet looks out of line.</div>';
   if (days.length) {
     h += '<details><summary class="hint" style="cursor:pointer;">All ' + days.length + " days</summary>" +
       days.map((d) => '<div class="' + (d.flagged ? "flag" : "plain") + '" style="margin-top:4px;">' + esc(dayLine(d)) + "</div>").join("") + "</details>";
@@ -189,7 +194,7 @@ function otTag(p) {
 }
 
 function statusTag(p) {
-  if (p.status === "flagged") { const n = ((p.report && p.report.flagged_legs) || []).length; return '<span class="tag out">' + (n ? n + " flagged" : "needs a look") + "</span>"; }
+  if (p.status === "flagged") { const n = ((p.report && p.report.flagged_legs) || []).filter((f) => !f.dayFits).length; return '<span class="tag out">' + (n ? n + " flagged" : "needs a look") + "</span>"; }
   if (p.status === "fine") return '<span class="tag in">Looks fine</span>';
   if (p.status === "no_mileage") return '<span class="tag warn">No mileage read</span>';
   return '<span class="tag out">Email only</span>';
@@ -254,7 +259,7 @@ function render(d) {
     '<div class="stat miss"><b>' + d.missing.length + "</b><span>Still missing</span></div></div>";
 
   html += '<div class="panel"><h2>Need a look <small>' + lookList.length + "</small></h2>" +
-    (lookList.length ? lookList.slice().sort((a, b) => (b.overtime ? 1 : 0) - (a.overtime ? 1 : 0) || (((b.report && b.report.flagged_legs) || []).length) - (((a.report && a.report.flagged_legs) || []).length)).map(personRow).join("") : '<div class="note">Nothing flagged for this period so far.</div>') + "</div>";
+    (lookList.length ? lookList.slice().sort((a, b) => (b.overtime ? 1 : 0) - (a.overtime ? 1 : 0) || (((b.report && b.report.flagged_legs) || []).filter((f) => !f.dayFits).length) - (((a.report && a.report.flagged_legs) || []).filter((f) => !f.dayFits).length)).map(personRow).join("") : '<div class="note">Nothing flagged for this period so far.</div>') + "</div>";
 
   const rest = d.received.filter((p) => !needsLook(p));
   html += '<div class="panel"><h2>Received <small>' + rest.length + (lookList.length ? " &middot; " + lookList.length + " more under Need a look" : "") + (noRead.length ? " &middot; " + noRead.length + " without a mileage log" : "") + "</small></h2>" +
@@ -280,7 +285,7 @@ function render(d) {
   if (d.otherReports && d.otherReports.length) {
     html += '<div class="panel"><h2>Other sheets read <small>' + d.otherReports.length + " &middot; not matched to the expected list</small></h2>" +
       d.otherReports.map((r) => {
-        const n = (r.flagged_legs || []).length;
+        const n = (r.flagged_legs || []).filter((f) => !f.dayFits).length;
         const key = "r-" + r.id;
         return '<details class="person" data-key="' + esc(key) + '"' + (openIds.has(key) ? " open" : "") + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(r.technicianName || r.technician_name_raw || "Unknown") + '</div><div class="meta">' +
           esc(r.source_filename || "") + " &middot; period ending " + esc(fmtDay(r.pay_period_end)) + "</div></div>" + (n ? '<span class="tag out">' + n + " flagged</span>" : '<span class="tag in">Looks fine</span>') + '</summary><div class="detail">' +
@@ -401,7 +406,7 @@ function exportCsv() {
     const hw = (p.hours && p.hours.ok) ? p.hours.weeks : [];
     rows.push([p.name, p.state || "", current.periodEnd, label[p.status] || p.status, p.receivedAt, r.source_filename || (p.files[0] && p.files[0].filename) || "",
       hw[0] ? hw[0].hours : "", hw[1] ? hw[1].hours : "", (p.hours && p.hours.ok) ? p.hours.total : "", p.overtime ? "yes" : "",
-      r.matched_legs, r.total_legs, r.total_claimed_miles, r.total_expected_miles, (r.flagged_legs || []).length, (r.unmatched_legs || []).length].map(q).join(","));
+      r.matched_legs, r.total_legs, r.total_claimed_miles, r.total_expected_miles, (r.flagged_legs || []).filter((f) => !f.dayFits).length, (r.unmatched_legs || []).length].map(q).join(","));
   });
   current.missing.forEach((p) => rows.push([p.name, p.state || "", current.periodEnd, "not in", "", "", "", "", "", "", "", "", "", "", "", ""].map(q).join(",")));
   rows.push("");

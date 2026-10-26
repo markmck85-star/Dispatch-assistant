@@ -1059,8 +1059,19 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
   }
 
+  // A single leg that looks off while its whole day adds up (within 20% / 25%) is almost always a reading
+  // written at the neighboring stop: the miles are right, the split between two legs is not. Kept visible
+  // but tagged, and it does not by itself put the sheet in "needs a look".
+  for (const f of flaggedLegs) {
+    if (f.reason === 'negative_or_zero') continue;
+    const ds = daySummaries.find((d) => d.date === f.date);
+    if (ds && ds.coverage >= 0.8 && ds.ratio != null && ds.ratio >= 0.8 && ds.ratio <= 1.25) {
+      f.dayFits = true; f.dayClaimedMiles = ds.claimedMiles; f.dayExpectedMiles = ds.expectedMiles;
+    }
+  }
+
   const needsReview = !!(
-    flaggedLegs.length > 0
+    flaggedLegs.some((f) => !f.dayFits)
     || aliasConflicts.length > 0
     || (legs.length > 0 && unmatchedLegs.length / legs.length > 0.3)
     || !techRow
