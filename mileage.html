@@ -171,7 +171,8 @@ function reportDetailHtml(r) {
 
 function filesHtml(files) {
   if (!files || !files.length) return "";
-  return files.map((f) => '<button class="mini" type="button" data-open-file="' + esc(f.id) + '">Open ' + esc(f.filename) + "</button>").join(" ");
+  return files.map((f) => '<button class="mini" type="button" data-open-file="' + esc(f.id) + '">Open ' + esc(f.filename) + "</button>"
+    + ' <button class="mini" type="button" data-recheck="' + esc(f.id) + '">Re-check</button>').join(" ");
 }
 
 function hoursLine(h) {
@@ -357,6 +358,21 @@ document.getElementById("out").addEventListener("click", async (ev) => {
       if (!res.ok || !data.ok) throw new Error(data.error || "HTTP " + res.status);
       const a = document.createElement("a"); a.href = data.url; a.download = data.filename || ""; document.body.appendChild(a); a.click(); a.remove();
     } catch (e) { alert(e.message); }
+    t.disabled = false; t.textContent = label;
+    return;
+  }
+  const recheckId = t.getAttribute("data-recheck");
+  if (recheckId) {
+    const label = t.textContent;
+    t.disabled = true; t.textContent = "Checking...";
+    try {
+      const res = await fetch("/.netlify/functions/reprocess-timesheet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: recheckId }) });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to re-check sheets.");
+      if (!res.ok || !data.ok) throw new Error(data.error || "HTTP " + res.status);
+      if (!data.report) alert(data.note || "Nothing to check in this file.");
+      load(true);
+    } catch (e) { alert("Could not re-check: " + e.message); }
     t.disabled = false; t.textContent = label;
     return;
   }
