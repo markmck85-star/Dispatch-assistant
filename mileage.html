@@ -160,6 +160,20 @@ function reportDetailHtml(r) {
       (hc.ratio != null ? " (" + esc(hc.ratio) + "x usual)" : "") + (hc.flagged ? " — worth a look" : "") + "</div>";
   }
   const days = r.day_summaries || [];
+  // 2026-10-26: a sheet can run above the expected distance every day without any single day being far
+  // enough off to flag. Say so once, plainly, when the whole period leans high. Information only: it does
+  // not change the status. Days are judged on the stops that could be checked (an unidentified location's
+  // miles are left out), and a sheet that could not really be checked is left alone.
+  if (!cov) {
+    const judged = days.filter((d) => d.expectedMiles != null && Number(d.expectedMiles) > 0)
+      .map((d) => ({ c: Number(d.checkedClaimedMiles != null ? d.checkedClaimedMiles : d.claimedMiles) || 0, e: Number(d.expectedMiles) }));
+    const sumC = judged.reduce((n, d) => n + d.c, 0), sumE = judged.reduce((n, d) => n + d.e, 0);
+    const highDays = judged.filter((d) => d.c / d.e >= 1.3).length;
+    if (judged.length >= 3 && sumE > 0 && sumC / sumE >= 1.35 && highDays >= 3) {
+      h += '<div class="plain">Claimed miles are above the expected distance on ' + highDays + " of " + judged.length + " days (" +
+        Math.round(sumC) + " mi claimed vs about " + Math.round(sumE) + " mi expected, " + (Math.round((sumC / sumE) * 100) / 100) + "x). No single day is far enough off to flag, but the whole period runs high.</div>";
+    }
+  }
   const flaggedDays = days.filter((d) => d.flagged);
   const dayLine = (d) => fmtDay(d.date) + ": " + d.stopCount + " stop" + (d.stopCount === 1 ? "" : "s") + ", " + d.claimedMiles + " mi" +
     (d.expectedMiles != null ? " (expected ~" + d.expectedMiles + " mi" + (d.ratio != null ? ", " + d.ratio + "x" : "") + ")" : " (not enough matched stops to judge)");
