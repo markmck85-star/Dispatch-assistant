@@ -141,6 +141,7 @@
     <div class="tabs">
       <button id="tabToday" class="on">Today</button>
       <button id="tabSites" onclick="tab('Sites')">Locations</button>
+      <button id="tabNames" class="hidden">Stop names</button>
       <button id="tabShip" onclick="tab('Ship')">My shipments</button>
       <button id="tabWatch" onclick="tab('Watch')" class="hidden">Watchdog</button>
       <button id="tabSumm" onclick="tab('Summ')" class="hidden">Summary</button>
@@ -176,6 +177,17 @@
         <div id="results"></div>
       </div>
       <div id="siteDetail" class="hidden"></div>
+    </section>
+
+    <section id="namesPane" class="hidden">
+      <div class="card">
+        <h2>What do these stop names mean?</h2>
+        <p class="muted">These are names from your mileage log that the system could not match to a location. Tap the location each one means. A dispatcher checks your answers before they are used.</p>
+        <div class="shiprow hidden" id="namesStateRow"><select id="namesState" aria-label="State"></select></div>
+      </div>
+      <div id="namesStatus" class="muted"></div>
+      <div id="namesList"></div>
+      <div id="namesWaiting"></div>
     </section>
 
     <section id="shipPane" class="hidden"><div class="shiprow"><select id="shipTech" class="hidden" aria-label="Employee"></select><div class="seg"><button id="segRma" class="on">RMA</button><button id="segCon">Consumables</button></div></div><div id="shipBody"></div></section>
@@ -299,7 +311,7 @@
     // Technicians keep Today first.
     (function () {
       var bar = $('tabToday').parentNode;
-      var order = KIND === 's' ? ['Summ', 'Watch', 'Sites', 'Ship', 'Today', 'Acct'] : ['Today', 'Sites', 'Ship', 'Acct', 'Watch', 'Summ'];
+      var order = KIND === 's' ? ['Summ', 'Watch', 'Sites', 'Ship', 'Today', 'Acct', 'Names'] : ['Today', 'Sites', 'Names', 'Ship', 'Acct', 'Watch', 'Summ'];
       order.forEach(function (n) { bar.appendChild($('tab' + n)); });
     })();
 
@@ -318,6 +330,9 @@
       alertsInit();
     }
     tAlertsInit();
+    $('tabNames').classList.toggle('hidden', KIND !== 't');
+    $('tabNames').textContent = 'Stop names';
+    if (KIND === 't') namesBadge();
     // Summary tab: staff only. Only the states on this login are offered.
     $('tabSumm').classList.toggle('hidden', KIND !== 's' || !sts.length);
     if (KIND === 's') {
@@ -360,7 +375,7 @@
   };
 
   // ----- tabs -----
-  var PANES = { Today: 'todayPane', Sites: 'sitesPane', Ship: 'shipPane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
+  var PANES = { Today: 'todayPane', Sites: 'sitesPane', Names: 'namesPane', Ship: 'shipPane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
   function tab(name) {
     Object.keys(PANES).forEach(function (n) {
       $('tab' + n).classList.toggle('on', n === name);
@@ -368,7 +383,8 @@
     });
     // The portal state bar does not apply to the account or watchdog tabs
     // (the watchdog tab has its own selector).
-    $('stateBar').classList.toggle('hidden', name === 'Acct' || name === 'Watch' || name === 'Summ' || $('stateSel').options.length < 2);
+    $('stateBar').classList.toggle('hidden', name === 'Acct' || name === 'Watch' || name === 'Summ' || name === 'Names' || $('stateSel').options.length < 2);
+    if (name === 'Names') loadNames();
     if (name === 'Ship') loadShipments();
     if (name === 'Watch') loadWatch();
     if (name === 'Summ') loadSumm();
@@ -389,6 +405,7 @@
   $('tabToday').onclick = function () { tab('Today'); };
   window.showTodayTab = function () { tab('Today'); };
   $('tabSites').onclick = function () { tab('Sites'); };
+  $('tabNames').onclick = function () { tab('Names'); };
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabWatch').onclick = function () { tab('Watch'); };
   $('tabSumm').onclick = function () { tab('Summ'); };
@@ -517,6 +534,112 @@
     });
   }
   $('q').addEventListener('input', renderList);
+
+  // ----- stop names: the technician says what the names on his mileage log mean -----
+  var NAMES = null;
+  function namesBadge() {
+    call('my_stop_names').then(function (j) {
+      if (!j || !j.ok) return;
+      NAMES = j;
+      $('tabNames').textContent = 'Stop names' + (j.items.length ? ' (' + j.items.length + ')' : '');
+    });
+  }
+  function fmtShort(iso) {
+    var d = new Date(iso + 'T12:00:00');
+    return isNaN(d) ? iso : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  function siteAddr(code) {
+    if (!NAMES) return '';
+    var out = '';
+    Object.keys(NAMES.sites || {}).forEach(function (st) {
+      NAMES.sites[st].forEach(function (x) { if (x.code === code) out = x.address || ''; });
+    });
+    return out;
+  }
+  async function loadNames() {
+    $('namesStatus').textContent = 'Loading...';
+    var j = await call('my_stop_names');
+    if (!j.ok) { $('namesStatus').innerHTML = '<span class="err">' + esc(j.error || 'Could not load your stop names.') + '</span>'; return; }
+    NAMES = j;
+    var sts = j.states || [];
+    $('namesStateRow').classList.toggle('hidden', sts.length < 2);
+    var ns = $('namesState'), keep = ns.value;
+    ns.innerHTML = '<option value="">All my states</option>' + sts.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+    ns.value = keep && sts.indexOf(keep) >= 0 ? keep : '';
+    $('tabNames').textContent = 'Stop names' + (j.items.length ? ' (' + j.items.length + ')' : '');
+    $('namesStatus').textContent = j.items.length ? j.items.length + ' name' + (j.items.length === 1 ? '' : 's') + ' to sort out' : 'Nothing to sort out right now. Thank you.';
+    renderNames();
+  }
+  function namePool() {
+    var st = $('namesState').value, pool = [];
+    Object.keys((NAMES && NAMES.sites) || {}).forEach(function (k) { if (!st || st === k) pool = pool.concat(NAMES.sites[k].map(function (x) { x.state = k; return x; })); });
+    return pool;
+  }
+  function renderNames() {
+    if (!NAMES) return;
+    var html = '';
+    NAMES.items.forEach(function (it, i) {
+      html += '<div class="card" data-i="' + i + '"><h2 style="margin:0 0 4px;">' + esc(it.label) + '</h2>';
+      html += '<div class="muted">' + it.count + ' time' + (it.count === 1 ? '' : 's') + ' &middot; ' + it.miles + ' mi on your log</div>';
+      html += it.hops.map(function (h) {
+        return '<div class="muted">' + esc(fmtShort(h.date)) + ': ' + h.miles + ' mi ' + (h.known ? 'to or from ' + esc(h.from) : 'with ' + esc(h.other || 'another stop') + ' (not sorted out yet)') + '</div>';
+      }).join('');
+      if (it.suggestions.length) {
+        html += '<h3>Is it one of these?</h3>';
+        it.suggestions.forEach(function (s) {
+          var tags = '';
+          if (s.confident) tags += '<span class="tag restock">Best match</span>';
+          if (s.of) tags += '<span class="tag">fits ' + s.fits + ' of ' + s.of + ' trip' + (s.of === 1 ? '' : 's') + '</span>';
+          if (s.onList) tags += '<span class="tag">on your list that day</span>';
+          html += '<button class="row" data-pick="' + esc(s.code) + '" data-name="' + esc(s.name) + '"><b>' + esc(s.name) + '</b><span class="muted">' + esc(siteAddr(s.code)) + '</span><br>' + tags + '<span class="tag">' + esc(s.code) + '</span></button>';
+        });
+      }
+      html += '<h3>Or find the location</h3><input type="search" class="nfind" data-i="' + i + '" placeholder="Filter by store name, site code, address or county" autocomplete="off"><div class="nres" id="nres-' + i + '"></div>';
+      html += '<div class="shiprow" style="margin-top:10px;gap:8px;flex-wrap:wrap;"><button type="button" class="nother" data-i="' + i + '" data-kind="home">This is my home</button><button type="button" class="nother" data-i="' + i + '" data-kind="not_site">Not a stop (errand, lunch, etc.)</button></div>';
+      html += '<div class="muted" id="nmsg-' + i + '"></div></div>';
+    });
+    $('namesList').innerHTML = html;
+    var w = NAMES.waiting || [];
+    $('namesWaiting').innerHTML = w.length ? '<div class="card"><h2>Waiting for approval (' + w.length + ')</h2>' + w.map(function (x) {
+      return '<div class="muted"><b>' + esc(x.alias) + '</b> &rarr; ' + (x.kind === 'site' ? esc(x.site || '') + (x.code ? ' (' + esc(x.code) + ')' : '') : x.kind === 'home' ? 'your home' : 'not a stop') + '</div>';
+    }).join('') + '</div>' : '';
+  }
+  async function saveName(i, kind, code, label) {
+    var it = NAMES.items[i], msg = $('nmsg-' + i);
+    var what = kind === 'site' ? '"' + it.label + '" means ' + label : kind === 'home' ? '"' + it.label + '" is your home' : '"' + it.label + '" is not a stop at a location';
+    if (!window.confirm('Send this answer? ' + what + '.')) return;
+    msg.className = 'muted'; msg.textContent = 'Sending...';
+    var j = await call('save_my_stop_name', { alias: it.label, kind: kind, site_code: code || '' });
+    if (!j.ok) { msg.className = 'err'; msg.textContent = j.error || 'Could not send.'; return; }
+    await loadNames();
+  }
+  $('namesList').addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('button') : null;
+    if (!b) return;
+    var card = b.closest('.card');
+    var i = card ? Number(card.getAttribute('data-i')) : -1;
+    if (i < 0) return;
+    if (b.hasAttribute('data-pick')) saveName(i, 'site', b.getAttribute('data-pick'), b.getAttribute('data-name'));
+    else if (b.classList.contains('nother')) saveName(i, b.getAttribute('data-kind'), '', '');
+  });
+  $('namesList').addEventListener('input', function (ev) {
+    var el = ev.target;
+    if (!el.classList || !el.classList.contains('nfind')) return;
+    var i = el.getAttribute('data-i'), q = el.value.trim().toLowerCase();
+    var box = $('nres-' + i);
+    if (!q) { box.innerHTML = ''; return; }
+    var words = q.split(/\s+/);
+    var list = namePool().filter(function (x) {
+      var h = (x.name + ' ' + x.code + ' ' + (x.address || '') + ' ' + (x.county || '')).toLowerCase();
+      return words.every(function (w) { return h.indexOf(w) !== -1; });
+    });
+    var more = list.length > 12;
+    box.innerHTML = list.slice(0, 12).map(function (x) {
+      return '<button class="row" data-pick="' + esc(x.code) + '" data-name="' + esc(x.name) + '"><b>' + esc(x.name) + '</b><span class="muted">' + esc(x.address || '') + '</span><br><span class="tag">' + esc(x.code) + '</span><span class="tag">' + esc(x.state) + '</span></button>';
+    }).join('') + (more ? '<p class="muted">Keep typing to narrow it down.</p>' : '') + (!list.length ? '<p class="muted">No locations found.</p>' : '');
+  });
+  $('namesState').onchange = function () { document.querySelectorAll('.nfind').forEach(function (e) { e.value = ''; }); document.querySelectorAll('.nres').forEach(function (e) { e.innerHTML = ''; }); };
+
 
   async function openSite(code) {
     $('searchBox').classList.add('hidden');

@@ -44,6 +44,8 @@
   .err { color:var(--bad); padding:12px 16px; }
   .msg { font-size:12px; color:var(--ok); }
   .msg.bad { color:var(--bad); }
+  .pend { padding:12px 16px; border-top:1px solid var(--line); display:grid; gap:6px; }
+  .pend .acts { margin-top:2px; }
   footer { width:min(1100px, 100%); margin:0 auto; padding:0 16px 40px; color:var(--muted); font-size:13px; }
   footer a { color:#2b5aa8; }
 </style>
@@ -67,7 +69,7 @@
   <div id="out"><div class="note">Loading...</div></div>
 </main>
 <footer>
-  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.4 (2026-10-26)<br />
+  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v2.0 (2026-10-26)<br />
   Saved names apply to sheets read from now on. Open a sheet on the Expense reports page and press Re-check to apply them to one already read.
 </footer>
 <script>
@@ -107,8 +109,22 @@ function render() {
     sel.innerHTML = '<option value="">All states</option>' + all.map((s) => '<option value="' + esc(s) + '">' + esc(s) + "</option>").join("");
     sel.dataset.filled = "1";
   }
-  if (!techs.length) { out.innerHTML = '<div class="panel"><div class="note">Nothing waiting. Every stop name on the sheets in this window is recognized.</div></div>'; return; }
-  let h = '<div class="panel">';
+  const pend = data.pending || [];
+  let ph = "";
+  if (pend.length) {
+    const sure = pend.filter((p) => p.kind === "site" && p.evidence && p.evidence.confident).length;
+    ph = '<div class="panel"><details class="tech" open><summary><span>Answers waiting for approval</span><span class="tag warn">' + pend.length + "</span></summary>" +
+      (sure ? '<div class="home"><button class="mini pick" type="button" data-pend="approveall">Approve all ' + sure + " confident</button></div>" : "") +
+      pend.map((p) => {
+        const what = p.kind === "site" ? "means " + esc(p.site ? p.site.name : "?") + (p.site ? " (" + esc(p.site.code) + ")" : "") + (p.site && p.site.address ? '<br><span class="meta">' + esc(p.site.address) + "</span>" : "") : p.kind === "home" ? "is his or her home" : "is not a site";
+        const ev = p.evidence || {};
+        const evl = (ev.confident ? '<span class="tag in">confident</span> ' : "") + (ev.of ? "fits " + ev.fits + " of " + ev.of + " hops &middot; " : "") + (ev.onList ? "on the list that day &middot; " : "") + (ev.count ? ev.count + " time" + (ev.count === 1 ? "" : "s") + " &middot; " + ev.miles + " mi" : "");
+        return '<div class="pend" id="pd-' + esc(p.id) + '"><div><div class="label">' + esc(p.tech) + ': ' + esc(p.alias) + '</div><div>' + what + '</div><div class="meta">' + evl + '</div></div>' +
+          '<div class="acts"><button class="mini pick" type="button" data-pend="approve" data-id="' + esc(p.id) + '">Approve</button><button class="mini" type="button" data-pend="reject" data-id="' + esc(p.id) + '">Reject</button></div><div class="msg"></div></div>';
+      }).join("") + "</details></div>";
+  }
+  if (!techs.length) { out.innerHTML = ph + '<div class="panel"><div class="note">Nothing waiting. Every stop name on the sheets in this window is recognized.</div></div>'; return; }
+  let h = ph + '<div class="panel">';
   techs.forEach((t, ti) => {
     const open = openTechs.has(t.id) || (ti === 0 && !openTechs.size) ? " open" : "";
     h += '<details class="tech" data-id="' + esc(t.id) + '"' + open + "><summary><span>" + esc(t.name) + ' <span class="tag">' + esc(t.state || "") + '</span></span><span class="tag warn">' + t.items.length + " name" + (t.items.length === 1 ? "" : "s") + "</span></summary>";
@@ -120,7 +136,7 @@ function render() {
         (it.hops && it.hops.length ? '<div class="meta">' + it.hops.map((x) => esc(fmtDay(x.date)) + ": " + x.miles + " mi " + (x.from ? "from/to " + esc(x.from) : "with " + esc(x.other || "unknown") + " (not identified yet)")).join("<br>") + "</div>" : "") + "</div>" +
         '<div class="acts">' +
         it.suggestions.map((s, si) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + (s.onList ? "&#9733; " : "") + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + (s.confident ? ' <span class="tag in">confident</span>' : "") + (s.similar ? '<br><span class="meta">similar name</span>' : "") + (s.of ? '<br><span class="meta"><b>fits ' + s.fits + " of " + s.of + " hop" + (s.of === 1 ? "" : "s") + "</b></span>" : "") + (s.hops || []).map((x) => '<br><span class="meta">' + (x.ok ? "&#10003; " : "&#10007; ") + esc(fmtDay(x.date)) + ": about " + x.away + " mi from " + esc(x.from) + ", claimed " + x.claimed + "</span>").join("") + "</button>").join("") +
-        '<button class="mini" type="button" data-act="home">This is home</button></div>' +
+        '<button class="mini" type="button" data-act="home">This is home</button><button class="mini" type="button" data-act="notsite">Not a site</button></div>' +
         '<input class="find" type="search" placeholder="Search for the site by name or code" data-find="' + id + '" />' +
         '<div class="results" id="res-' + id + '"></div><div class="msg" id="msg-' + id + '"></div></div>';
     });
@@ -153,6 +169,28 @@ document.getElementById("out").addEventListener("toggle", (ev) => {
 }, true);
 
 document.getElementById("out").addEventListener("click", async (ev) => {
+  const pb = ev.target.closest("button[data-pend]");
+  if (!pb) return;
+  const kind = pb.getAttribute("data-pend");
+  const row = pb.closest(".pend");
+  if (kind === "approveall" && !confirm("Approve every answer marked confident?")) return;
+  pb.disabled = true;
+  try {
+    const body = kind === "approveall" ? { action: "approve_confident" } : { action: kind, id: pb.getAttribute("data-id") };
+    const res = await fetch("/.netlify/functions/save-stop-alias", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.ok) throw new Error(d.error || "HTTP " + res.status);
+    if (kind === "approveall") { await load(); return; }
+    row.querySelectorAll(".acts").forEach((x) => x.remove());
+    const m = row.querySelector(".msg"); m.className = "msg"; m.textContent = kind === "approve" ? "Approved." : "Rejected. He can answer again.";
+  } catch (e) {
+    pb.disabled = false;
+    const m = row ? row.querySelector(".msg") : null;
+    if (m) { m.className = "msg bad"; m.textContent = e.message; } else alert(e.message);
+  }
+});
+
+document.getElementById("out").addEventListener("click", async (ev) => {
   const b = ev.target.closest("button[data-act]");
   if (!b) return;
   const item = b.closest(".item");
@@ -162,18 +200,19 @@ document.getElementById("out").addEventListener("click", async (ev) => {
   const act = b.getAttribute("data-act");
   const sname = b.getAttribute("data-sname");
   if (act === "site" && !confirm('Save "' + it.label + '" as a name for ' + sname + "?")) return;
+  if (act === "notsite" && !confirm('Mark "' + it.label + '" as not a site (errand, lunch, etc.) for ' + t.name + "?")) return;
   if (act === "home" && !confirm('Save "' + it.label + '" as how ' + t.name + " writes his or her own home?")) return;
   item.querySelectorAll("button").forEach((x) => { x.disabled = true; });
   msg.className = "msg"; msg.textContent = "Saving...";
   try {
-    const body = act === "site" ? { action: "site", technician_id: t.id, alias: it.label, site_id: b.getAttribute("data-site") } : { action: "home", technician_id: t.id, alias: it.label };
+    const body = act === "notsite" ? { action: "not_site", technician_id: t.id, alias: it.label } : act === "site" ? { action: "site", technician_id: t.id, alias: it.label, site_id: b.getAttribute("data-site") } : { action: "home", technician_id: t.id, alias: it.label };
     const res = await fetch("/.netlify/functions/save-stop-alias", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const d = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to save names.");
     if (!res.ok || !d.ok) throw new Error(d.error || "HTTP " + res.status);
     item.classList.add("done");
     item.querySelectorAll(".acts, input.find, .results").forEach((x) => x.remove());
-    msg.textContent = act === "home" ? "Saved as home." : "Saved. Now means " + sname + ".";
+    msg.textContent = act === "home" ? "Saved as home." : act === "notsite" ? "Saved. Not a site." : "Saved. Now means " + sname + ".";
   } catch (e) {
     item.querySelectorAll("button").forEach((x) => { x.disabled = false; });
     msg.className = "msg bad"; msg.textContent = e.message;
