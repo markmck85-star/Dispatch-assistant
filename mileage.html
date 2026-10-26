@@ -108,6 +108,7 @@
     <div class="howto">
       <div>Each hop on the Mileage sheet is compared with the known driving distance between those two stops. Lunch detours and a mid-day trip home stay quiet. A negative leg or a claim three times the usual drive lights up.</div>
       <div><span class="tag in">Looks fine</span> the miles written line up with the usual drive between those stops.</div>
+      <div><span class="tag warn">Could not verify</span> fewer than half the hops could be matched to a known site, so there was little or nothing to compare. This is not an all-clear. Open the row to see which stops were not recognized.</div>
       <div><span class="tag out">Overtime</span> the sheet's Time tab shows more than 40 hours in either week. Judged week by week, so a 45-hour week plus a 30-hour week is still flagged.</div>
       <div><span class="tag out">flagged</span> one hop, or a day's total, cannot be a real drive. Open the row and read that line.</div>
       <div><span class="tag warn">No mileage read</span> the sheet arrived and is saved, but no mileage log could be read from it (different layout, or a picture or PDF). Open the original to look.</div>
@@ -132,13 +133,22 @@ let current = null;            // last answer from the server
 let loading = false;
 const openIds = new Set();     // rows the viewer has expanded, kept across refreshes
 
+// Fewer than half the hops matched a known site: the sheet could not really be checked.
+// Keep the 0.5 in step with LOW_COVERAGE in get-timesheet-receipts.js.
+function lowCoverage(r) {
+  const t = Number(r && r.total_legs) || 0;
+  return t > 0 && (Number(r.matched_legs) || 0) / t < 0.5;
+}
+
 /* ---------- one report's detail (flagged hops, day totals, history, unidentified stops) ---------- */
 function reportDetailHtml(r) {
   if (!r) return "";
   let h = "";
   const flagged = r.flagged_legs || [];
   const unmatched = r.unmatched_legs || [];
-  h += '<div class="line">' + esc(r.matched_legs) + "/" + esc(r.total_legs) + " hops matched &middot; claimed " + esc(r.total_claimed_miles) + " mi vs expected ~" + esc(r.total_expected_miles) + " mi" +
+  const cov = lowCoverage(r);
+  h += '<div class="line">' + esc(r.matched_legs) + "/" + esc(r.total_legs) + " hops matched &middot; claimed " + esc(r.total_claimed_miles) + " mi" +
+    (Number(r.matched_legs) > 0 ? " vs expected ~" + esc(r.total_expected_miles) + " mi" : " &middot; no known distances to compare against") +
     (unmatched.length ? " &middot; " + unmatched.length + " unidentified" : "") + "</div>";
   const hc = r.history_comparison;
   if (hc) {
@@ -170,13 +180,17 @@ function reportDetailHtml(r) {
     h += '<div class="flag">' + esc(fmtDay(f.date)) + ": <strong>" + esc(f.fromRaw) + "</strong> &rarr; <strong>" + esc(f.toRaw) + "</strong> — claimed " + esc(f.claimedMiles) +
       " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc(f.expectedSource) + ")" + esc(why) + esc(cluster) + "</div>";
   });
-  if (!flagged.some((f) => !f.dayFits) && !flaggedDays.length && !(hc && hc.flagged)) h += '<div class="plain">Nothing in this sheet looks out of line.</div>';
+  if (cov) {
+    h += '<div class="unm">Could not check this sheet. Only ' + esc(r.matched_legs) + " of " + esc(r.total_legs) + " hops matched a known site, so nothing here is confirmed either way. The miles claimed are not shown to be right or wrong.</div>";
+  } else if (!flagged.some((f) => !f.dayFits) && !flaggedDays.length && !(hc && hc.flagged)) {
+    h += '<div class="plain">Nothing in the hops that could be checked looks out of line' + (unmatched.length ? " (" + esc(r.matched_legs) + " of " + esc(r.total_legs) + " hops checked)" : "") + ".</div>";
+  }
   if (days.length) {
     h += '<details><summary class="hint" style="cursor:pointer;">All ' + days.length + " days</summary>" +
       days.map((d) => '<div class="' + (d.flagged ? "flag" : "plain") + '" style="margin-top:4px;">' + esc(dayLine(d) + unidNote(d)) + "</div>").join("") + "</details>";
   }
   if (unmatched.length) {
-    h += '<details><summary class="hint" style="cursor:pointer;">' + unmatched.length + " stop" + (unmatched.length === 1 ? "" : "s") + " unidentified</summary>" +
+    h += '<details' + (cov ? " open" : "") + '><summary class="hint" style="cursor:pointer;">' + unmatched.length + " stop" + (unmatched.length === 1 ? "" : "s") + " unidentified</summary>" +
       unmatched.map((u) => '<div class="unm" style="margin-top:4px;">' + esc(fmtDay(u.date)) + ': "' + esc(u.fromRaw) + '" &rarr; "' + esc(u.toRaw) + '" — claimed ' + esc(u.claimedMiles) + " mi (" +
         (u.reason === "no_distance_data" ? "site matched, no distance on file" : "could not identify this stop") + ")</div>").join("") + "</details>";
   }
@@ -204,12 +218,13 @@ function otTag(p) {
 
 function statusTag(p) {
   if (p.status === "flagged") { const n = ((p.report && p.report.flagged_legs) || []).filter((f) => !f.dayFits).length; return '<span class="tag out">' + (n ? n + " flagged" : "needs a look") + "</span>"; }
+  if (p.status === "unverified") return '<span class="tag warn">Could not verify</span>';
   if (p.status === "fine") return '<span class="tag in">Looks fine</span>';
   if (p.status === "no_mileage") return '<span class="tag warn">No mileage read</span>';
   return '<span class="tag out">Email only</span>';
 }
 
-function needsLook(p) { return p.status === "flagged" || p.overtime; }
+function needsLook(p) { return p.status === "flagged" || p.status === "unverified" || p.overtime; }
 
 function groupByState(list) {
   const g = {};
@@ -256,7 +271,7 @@ function render(d) {
   }
   document.getElementById("period").textContent = "Period ending " + pretty(d.periodEnd);
   const total = d.received.length + d.missing.length;
-  const m = d.mileage || { read: 0, flagged: 0, noMileage: 0, overtime: 0 };
+  const m = d.mileage || { read: 0, flagged: 0, unverified: 0, noMileage: 0, overtime: 0 };
   const lookList = d.received.filter(needsLook);
   const noRead = d.received.filter((p) => p.status === "no_mileage" || p.status === "no_file");
 
@@ -264,6 +279,7 @@ function render(d) {
     '<div class="stat ok"><b>' + d.received.length + "</b><span>Received of " + total + "</span></div>" +
     '<div class="stat"><b>' + m.read + "</b><span>Mileage read</span></div>" +
     '<div class="stat look"><b>' + m.flagged + "</b><span>Mileage flagged</span></div>" +
+    '<div class="stat warn"><b>' + (m.unverified || 0) + "</b><span>Could not verify</span></div>" +
     '<div class="stat look"><b>' + (m.overtime || 0) + "</b><span>Over 40 h in a week</span></div>" +
     '<div class="stat miss"><b>' + d.missing.length + "</b><span>Still missing</span></div></div>";
 
@@ -297,7 +313,7 @@ function render(d) {
         const n = (r.flagged_legs || []).filter((f) => !f.dayFits).length;
         const key = "r-" + r.id;
         return '<details class="person" data-key="' + esc(key) + '"' + (openIds.has(key) ? " open" : "") + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(r.technicianName || r.technician_name_raw || "Unknown") + '</div><div class="meta">' +
-          esc(r.source_filename || "") + " &middot; period ending " + esc(fmtDay(r.pay_period_end)) + "</div></div>" + (n ? '<span class="tag out">' + n + " flagged</span>" : '<span class="tag in">Looks fine</span>') + '</summary><div class="detail">' +
+          esc(r.source_filename || "") + " &middot; period ending " + esc(fmtDay(r.pay_period_end)) + "</div></div>" + (n ? '<span class="tag out">' + n + " flagged</span>" : (lowCoverage(r) ? '<span class="tag warn">Could not verify</span>' : '<span class="tag in">Looks fine</span>')) + '</summary><div class="detail">' +
           reportDetailHtml(r) + '<div class="actions"><button class="mini del" type="button" data-del="' + esc(r.id) + '" data-who="' + esc(r.technicianName || r.technician_name_raw || "this report") + '">Delete this report</button></div></div></details>';
       }).join("") + "</div>";
   }
@@ -409,7 +425,7 @@ function exportCsv() {
   const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
   const rows = [];
   rows.push(["Technician", "State", "Period Ending", "Status", "Received", "File", "Week 1 Hours", "Week 2 Hours", "Total Hours", "Overtime", "Hops Matched", "Total Hops", "Claimed Miles", "Expected Miles", "Flagged Hops", "Unidentified Stops"].map(q).join(","));
-  const label = { flagged: "needs a look", fine: "looks fine", no_mileage: "no mileage read", no_file: "email only" };
+  const label = { flagged: "needs a look", unverified: "could not verify", fine: "looks fine", no_mileage: "no mileage read", no_file: "email only" };
   current.received.forEach((p) => {
     const r = p.report || {};
     const hw = (p.hours && p.hours.ok) ? p.hours.weeks : [];
