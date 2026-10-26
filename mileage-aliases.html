@@ -67,7 +67,7 @@
   <div id="out"><div class="note">Loading...</div></div>
 </main>
 <footer>
-  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.0 (2026-10-26)<br />
+  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.1 (2026-10-26)<br />
   Saved names apply to sheets read from now on. Open a sheet on the Expense reports page and press Re-check to apply them to one already read.
 </footer>
 <script>
@@ -89,7 +89,7 @@ async function load() {
     const res = await fetch("/.netlify/functions/get-unidentified-stops?" + q);
     const d = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to use this page.");
-    if (!res.ok || d.error) throw new Error(d.error || "HTTP " + res.status);
+    if (!res.ok || d.error || !d.ok) throw new Error(d.error || (res.ok ? "The server did not return the stop list. The new server files may not be in place yet." : "HTTP " + res.status));
     data = d;
     render();
   } catch (e) {
