@@ -52,7 +52,7 @@
 <header>
   <div class="kicker">Mileage check</div>
   <h1>Unidentified stops</h1>
-  <p class="sub">Place names on the mileage sheets that the system could not match to a known site. Tell it once what a name means and every later sheet recognizes it. A name that is a technician's own home can be marked as home. Names are shown per technician, most repeated first.</p>
+  <p class="sub">Place names on the mileage sheets that the system could not match to a known site. Tell it once what a name means and that technician's later sheets recognize it (saved names apply to that technician only). Suggestions are ranked by the miles claimed; a star means the site was on the dispatch list or had a ticket that day or the day before. A name that is a technician's own home can be marked as home. Names are shown per technician, most repeated first.</p>
 </header>
 <main class="wrap">
   <div class="bar">
@@ -67,7 +67,7 @@
   <div id="out"><div class="note">Loading...</div></div>
 </main>
 <footer>
-  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.1 (2026-10-26)<br />
+  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.2 (2026-10-26)<br />
   Saved names apply to sheets read from now on. Open a sheet on the Expense reports page and press Re-check to apply them to one already read.
 </footer>
 <script>
@@ -118,7 +118,7 @@ function render() {
       h += '<div class="item" id="it-' + id + '" data-t="' + ti + '" data-i="' + ii + '">' +
         '<div><div class="label">' + esc(it.label) + '</div><div class="meta">' + it.count + " time" + (it.count === 1 ? "" : "s") + " &middot; " + it.miles + " mi claimed &middot; " + esc(it.dates.map(fmtDay).join(", ")) + (it.addressLike ? " &middot; looks like a street address, maybe home" : "") + "</div></div>" +
         '<div class="acts">' +
-        it.suggestions.map((s, si) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + "</button>").join("") +
+        it.suggestions.map((s, si) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + (s.onList ? "&#9733; " : "") + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + (s.note ? '<br><span class="meta">' + esc(s.note) + "</span>" : "") + "</button>").join("") +
         '<button class="mini" type="button" data-act="home">This is home</button></div>' +
         '<input class="find" type="search" placeholder="Search for the site by name or code" data-find="' + id + '" />' +
         '<div class="results" id="res-' + id + '"></div><div class="msg" id="msg-' + id + '"></div></div>';
@@ -165,7 +165,7 @@ document.getElementById("out").addEventListener("click", async (ev) => {
   item.querySelectorAll("button").forEach((x) => { x.disabled = true; });
   msg.className = "msg"; msg.textContent = "Saving...";
   try {
-    const body = act === "site" ? { action: "site", alias: it.label, site_id: b.getAttribute("data-site") } : { action: "home", technician_id: t.id, alias: it.label };
+    const body = act === "site" ? { action: "site", technician_id: t.id, alias: it.label, site_id: b.getAttribute("data-site") } : { action: "home", technician_id: t.id, alias: it.label };
     const res = await fetch("/.netlify/functions/save-stop-alias", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const d = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to save names.");
