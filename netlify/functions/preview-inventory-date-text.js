@@ -72,18 +72,35 @@ function firstName(name) {
   const w = String(name || "").trim().split(/\s+/).filter(Boolean);
   return w[0] || "there";
 }
-function draftText(name, filename, lines, transitLines) {
+// Wording (2026-10-25): short, friendly, and says the exact fix instead of a general "needs a date fix".
+// The file name is only quoted in the card above the text, not repeated in it.
+function dateAsk(filename, sheetIso, lines, arrived) {
+  const fd = fileDateOf(filename);
+  const ymd = (iso) => String(iso || "").replace(/-/g, "");
+  const yr = String(arrived || "").slice(0, 4);
+  if (!sheetIso) return "I can't find a count date inside your inventory sheet. Could you fill in the Inv Date cell, make sure the file name ends in that date as YYYYMMDD, and resend it to inventory@mcrtechservice.com?";
+  if (lines.some((t) => /is not a real date|has no YYYYMMDD/.test(t))) return `the date in your inventory file name${fd.raw ? " (" + fd.raw + ")" : ""} isn't a real date. Could you rename the file with the count date as YYYYMMDD (it should be ${ymd(sheetIso)}) and resend it to inventory@mcrtechservice.com?`;
+  if (fd.iso && dayDiff(fd.iso, sheetIso) >= 3) return `the count date inside your inventory sheet is still ${ymd(sheetIso)}, but the file name says ${ymd(fd.iso)}. Could you update the Inv Date cell to the day you counted and resend it to inventory@mcrtechservice.com?`;
+  if (fd.iso && fd.iso !== sheetIso) {
+    return `the date in your inventory file name (${ymd(fd.iso)}) doesn't match the count date inside the sheet (${ymd(sheetIso)}). Could you make them match and resend it to inventory@mcrtechservice.com?`;
+  }
+  if (lines.some((t) => /wrong year/.test(t))) return `your inventory sheet has the wrong year in its date (${sheetIso}, it should start with ${yr}). Could you fix the date in the Inv Date cell and the file name and resend it to inventory@mcrtechservice.com?`;
+  if (lines.some((t) => /same sheet date|more than \d+ days before/.test(t))) return `your inventory sheet still shows ${ymd(sheetIso)} as the count date. Could you update the Inv Date cell and the file name to this week's count and resend it to inventory@mcrtechservice.com?`;
+  return "your inventory sheet has a date problem (" + lines.slice(0, 2).join(". ") + "). Could you fix the Inv Date cell and the date in the file name (YYYYMMDD) and resend it to inventory@mcrtechservice.com?";
+}
+function draftText(name, filename, lines, transitLines, sheetIso, arrived) {
   const tl = transitLines || [];
+  const hi = `Hi ${firstName(name)}, quick one: `;
   if (!tl.length) {
-    const why = lines.slice(0, 2).join(". ");
-    return `Hi ${firstName(name)}, the inventory sheet ${filename} needs a date fix (${why}). Please resend it to inventory@mcrtechservice.com with the count date in the Inv Date cell and as YYYYMMDD in the file name. Thanks.`;
+    const ask = dateAsk(filename, sheetIso, lines, arrived);
+    return hi + ask + " Thanks!";
   }
   const inTransit = tl.slice(0, 2).join(". ");
   if (!lines.length) {
-    return `Hi ${firstName(name)}, the inventory sheet ${filename} needs a fix: ${inTransit}. Please add it to the In Transit column and resend it to inventory@mcrtechservice.com. Thanks.`;
+    return `${hi}your inventory sheet is missing something in the In Transit column (${inTransit}). Could you add it and resend it to inventory@mcrtechservice.com? Thanks!`;
   }
-  const why = lines.slice(0, 2).join(". ");
-  return `Hi ${firstName(name)}, the inventory sheet ${filename} needs fixes. Date: ${why}. Also, ${inTransit}. Please correct both (count date in the Inv Date cell and as YYYYMMDD in the file name, shipments in the In Transit column) and resend it to inventory@mcrtechservice.com. Thanks.`;
+  const ask = dateAsk(filename, sheetIso, lines, arrived);
+  return `${hi}two small things on your inventory sheet. First, ${ask} Second, the In Transit column: ${inTransit}. One resend with both fixed is perfect. Thanks!`;
 }
 function truthy(v) {
   if (v === true || v === "true") return true;
@@ -175,7 +192,7 @@ async function loadDrafts(supabase, since) {
       smsAddress: tech.sms_address || null,
       phone: tech.phone || null,
       issues: lines.concat(transitLines),
-      text: draftText(tech.name, r.filename, lines, transitLines),
+      text: draftText(tech.name, r.filename, lines, transitLines, r.inv || null, arrived),
       receivedAt: r.received_at,
     });
   }
