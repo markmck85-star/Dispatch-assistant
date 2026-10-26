@@ -49,7 +49,8 @@
 const { createClient } = require('@supabase/supabase-js');
 const serviceResponses = require('./list-service-responses');
 
-const EMAIL_STATES = ['MI', 'OH', 'NV', 'CO', 'OR'];
+// 2026-10-26: AR and MS added (Lance and Brit's OTC close-outs).
+const EMAIL_STATES = ['MI', 'OH', 'NV', 'CO', 'OR', 'AR', 'MS'];
 
 function isoOrNull(raw) {
   if (!raw) return null;

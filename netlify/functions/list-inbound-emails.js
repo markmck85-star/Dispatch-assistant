@@ -147,10 +147,15 @@ exports.handler = async (event) => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  // Over-fetch when a state filter is applied so client-side inference still
-  // has enough rows after dropping other states. 3x is enough for a busy day.
-  const fetchLimit = state && /^[A-Z]{2}$/.test(state) ? Math.min(limit * 3, 200) : limit;
+  // State is inferred per message after the fetch, so a state filter pages through the newest
+  // messages (up to SCAN_CAP) until enough of that state are found. A fixed over-fetch missed
+  // states whose mail was not among the newest few hundred (2026-10-26).
+  const hasState = !!(state && /^[A-Z]{2}$/.test(state));
+  const PAGE = 200;
+  const SCAN_CAP = 3000;
+  const fetchLimit = hasState ? PAGE : limit;
 
+  const makeQuery = () => {
   let q = supabase
     .from("inbound_emails")
     .select("id, mailbox, sender, subject, body_text, body_html, received_at, classified_as, parse_status")
@@ -203,11 +208,25 @@ exports.handler = async (event) => {
     const stateName = STATE_NAMES[state] ? `,body_text.ilike.%${STATE_NAMES[state]}%` : "";
     q = q.or(`subject.ilike.%${state}%,body_text.ilike.%${state}%,sender.ilike.%${state}%${stateName}`);
   }
+  return q;
+  };
 
-  const { data, error } = await q;
-  if (error) return json(500, { ok: false, error: "inbound_emails query failed: " + error.message });
+  let rows = [];
+  if (hasState) {
+    for (let from = 0; from < SCAN_CAP; from += PAGE) {
+      const { data: part, error: pErr } = await makeQuery().range(from, from + PAGE - 1);
+      if (pErr) return json(500, { ok: false, error: "inbound_emails query failed: " + pErr.message });
+      const got = part || [];
+      rows = rows.concat(got.filter((r) => inferState(r) === state));
+      if (rows.length >= limit || got.length < PAGE) break;
+    }
+  } else {
+    const { data, error } = await makeQuery();
+    if (error) return json(500, { ok: false, error: "inbound_emails query failed: " + error.message });
+    rows = data || [];
+  }
 
-  let emails = (data || []).map((row) => {
+  let emails = rows.map((row) => {
     const { snippet, truncated } = cleanBody(row.body_text, row.body_html, maxChars);
     const inferredState = inferState(row);
     return {

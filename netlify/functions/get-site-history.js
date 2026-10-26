@@ -10,12 +10,17 @@
 // the Salesforce closed-ticket report). Deduped by WO against existing
 // visits so kiosk sites don't show the same job twice.
 //
+// 2026-10-26: OTC / testing-station sites (T and C codes) also show the ITI service-response close-outs
+// (times, miles, resolution notes) that were matched to the site, since those jobs never get a
+// site_visits row. Matching and de-duplication are done by list-service-responses.
+//
 // 2026-10-07: each closed-ticket visit now also carries manual_restock,
 // manual_nonrestock and counts_as_restock so the restock tracker's history
 // popup can show (and let the user change) how that visit is counted.
 
 const { createClient } = require('@supabase/supabase-js');
 const { isClosedAnyWay } = require('./lib/ticket-state.js');
+const serviceResponses = require('./list-service-responses');
 
 function json(statusCode, obj) {
   return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
@@ -203,7 +208,43 @@ exports.handler = async (event) => {
     extraFromBf = (bfRows || []).map(bfAsVisit);
   }
 
-  const merged = [...extraFromTickets, ...extraFromBf, ...visitsWithEmail].sort((a, b) => {
+  // ITI service-response close-outs for OTC / testing-station sites. Non-fatal if it fails.
+  let extraFromResponses = [];
+  if (offset === 0 && /^[A-Z]{2}[TC]\d{3}$/.test(site.site_code)) {
+    try {
+      const res = await serviceResponses.handler({ httpMethod: 'GET', queryStringParameters: { state: site.state, limit: '500' } });
+      if (res.statusCode === 200) {
+        const have = new Set(extraFromTickets.map((t) => String(t.wo_number || '')).filter(Boolean));
+        const toIso = (raw) => { if (!raw) return null; const d = new Date(raw); return isNaN(d.getTime()) ? null : d.toISOString(); };
+        for (const r of (JSON.parse(res.body).rows || [])) {
+          if (r.source !== 'email' || r.siteCode !== site.site_code) continue;
+          const tk = String(r.ticketNumber || '');
+          if (tk && have.has(tk)) continue;
+          const started = toIso(r.arrivalTime) || r.closedAt || null;
+          extraFromResponses.push({
+            started_at: started,
+            ended_at: toIso(r.endTime),
+            duration_min: r.onsiteMin == null ? null : r.onsiteMin,
+            tech_name_raw: r.technician || null,
+            remediation: r.callType || 'Service response',
+            remediation_detail: null,
+            is_restock: /\b(prevent|preventative|restock)\b/i.test(String(r.callType || '')),
+            wo_number: tk || null,
+            appointment_number: null,
+            needs_review: false,
+            ticket_id: null,
+            closing_note: r.notes ? String(r.notes) : null,
+            inbound_email_id: null,
+            source: 'email_closing',
+            ticket_status: r.responseStatus || null,
+            ticket_kind: null,
+          });
+        }
+      }
+    } catch (e) { /* history still loads without the close-outs */ }
+  }
+
+  const merged = [...extraFromTickets, ...extraFromBf, ...extraFromResponses, ...visitsWithEmail].sort((a, b) => {
     const da = a.started_at ? new Date(a.started_at).getTime() : 0;
     const db = b.started_at ? new Date(b.started_at).getTime() : 0;
     return db - da;
@@ -222,7 +263,7 @@ exports.handler = async (event) => {
   }
 
   const visitCount = totalVisits != null ? totalVisits : visitsWithEmail.length;
-  const extraCount = extraFromTickets.length + extraFromBf.length;
+  const extraCount = extraFromTickets.length + extraFromBf.length + extraFromResponses.length;
   const totalShownBase = visitCount + extraCount;
 
   return json(200, {

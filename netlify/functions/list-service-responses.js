@@ -4,6 +4,9 @@
  * Service responses page and its Excel download.
  * GET ?state=MI&testing=1[&format=xlsx]
  *
+ * 2026-10-26: Arkansas and Mississippi added (ALL_STATES, state names, "Arkansas" / "Mississippi" Component
+ * inference, and the "AR - " / "MS - " site-name prefix). Their close-outs arrive via the Mailgun address, like Oregon.
+ *
  * 2026-10-02 (kiosk): optional kiosk=1 adds Salesforce kiosk visits
  * (site_visits.source = 'salesforce_report') for the same states, tagged
  * source "kiosk", so one list covers kiosk visits as well as OTC / PM /
@@ -35,7 +38,7 @@
 const { createClient } = require("@supabase/supabase-js");
 const XLSX = require("xlsx");
 
-const ALL_STATES = ["MI", "OH", "NV", "CO", "OR"];
+const ALL_STATES = ["MI", "OH", "NV", "CO", "OR", "AR", "MS"];
 const MAILBOX_STATE = { "imap-mi": "MI", "imap-oh": "OH", "imap-nv": "NV", "imap-co": "CO", "imap-or": "OR" };
 const EMAIL_LOOKBACK_DAYS = 180;
 const EMAIL_LIMIT = 900;
@@ -143,7 +146,7 @@ function isTesting(sr, siteText) {
 }
 
 function stateName(code) {
-  return ({ MI: "Michigan", OH: "Ohio", NV: "Nevada", CO: "Colorado", OR: "Oregon", GA: "Georgia" })[code] || code;
+  return ({ MI: "Michigan", OH: "Ohio", NV: "Nevada", CO: "Colorado", OR: "Oregon", AR: "Arkansas", MS: "Mississippi", GA: "Georgia" })[code] || code;
 }
 
 // Which state an email belongs to: its mailbox label if it came by IMAP,
@@ -151,6 +154,8 @@ function stateName(code) {
 function inferState(email, parsed) {
   if (MAILBOX_STATE[email.mailbox]) return MAILBOX_STATE[email.mailbox];
   const pick = (hay) => {
+    if (/arkansas/i.test(hay)) return "AR";
+    if (/mississippi/i.test(hay)) return "MS";
     if (/michigan|itimic/i.test(hay)) return "MI";
     if (/nevada|itinev/i.test(hay)) return "NV";
     if (/ohio|itioh/i.test(hay)) return "OH";
@@ -174,7 +179,7 @@ function nameKey(s) {
   return String(s || "")
     .toLowerCase()
     .replace(/&amp;/g, "&")
-    .replace(/^(mi|oh|nv|co|or)\s*-\s*/, "")
+    .replace(/^(mi|oh|nv|co|or|ar|ms)\s*-\s*/, "")
     .replace(/\s*-\s*\d*\s*$/, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
