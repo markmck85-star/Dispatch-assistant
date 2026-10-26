@@ -800,11 +800,32 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   for (const r of resolved) {
     if (!r.fromPlace) {
       const site = matchSiteByName(normalizePlaceLabel(r.leg.fromRaw), candidateSites);
-      if (site) r.fromPlace = { type: 'site', site };
+      if (site) r.fromPlace = { type: 'site', site, via: 'name' };
     }
     if (!r.toPlace) {
       const site = matchSiteByName(normalizePlaceLabel(r.leg.toRaw), candidateSites);
-      if (site) r.toPlace = { type: 'site', site };
+      if (site) r.toPlace = { type: 'site', site, via: 'name' };
+    }
+  }
+
+  // ── Pass 3b: a bare label that is the technician's own home CITY ("macon" for someone living in
+  // ── Macon), mid-day, that name-matching pinned to a site (a Columbus store on Macon Road, say). The text
+  // ── cannot say whether it means home or that store, but the miles can: if the store makes the leg an
+  // ── outlier and home makes it fit, it was home. Both fitting (or neither) leaves the site match alone.
+  const inBand = (claimed, e) => !!e && claimed > 0 && (claimed / Math.max(e.miles, 0.5)) >= MIN_RATIO && (claimed / Math.max(e.miles, 0.5)) <= MAX_RATIO;
+  if (techRow) {
+    for (const r of resolved) {
+      for (const side of ['from', 'to']) {
+        const place = r[side + 'Place'], other = r[side === 'from' ? 'toPlace' : 'fromPlace'];
+        const raw = side === 'from' ? r.leg.fromRaw : r.leg.toRaw;
+        if (!place || place.type !== 'site' || place.via !== 'name' || !other || other.type === 'errand' || other.type === 'home') continue;
+        if (!isHomeCityOnlyLabel(raw, techRow.home_address)) continue;
+        const asSite = side === 'from' ? expectedMilesFor(place, other) : expectedMilesFor(other, place);
+        const asHome = side === 'from' ? expectedMilesFor({ type: 'home' }, other) : expectedMilesFor(other, { type: 'home' });
+        if (asSite && !inBand(r.leg.claimedMiles, asSite) && inBand(r.leg.claimedMiles, asHome)) {
+          r[side + 'Place'] = { type: 'home', via: 'home-city-miles' };
+        }
+      }
     }
   }
 
@@ -983,6 +1004,9 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       if (r.leg.date !== date) continue;
       if ((r.fromPlace && r.fromPlace.type === 'errand') || (r.toPlace && r.toPlace.type === 'errand')) continue;
       if (!r.fromPlace || !r.toPlace) continue;
+      // a leg with the same label at both ends is left unscored per leg (unmatched), so it is left out of the day total too
+      const _fc = normalizePlaceLabel(r.leg.fromRaw).toLowerCase(), _tc = normalizePlaceLabel(r.leg.toRaw).toLowerCase();
+      if (_fc && _fc === _tc && !(r.fromPlace.type === 'home' && r.toPlace.type === 'home')) continue;
       const exp = expectedMilesFor(r.fromPlace, r.toPlace);
       if (!exp) continue;
       dayExpected += exp.miles;
