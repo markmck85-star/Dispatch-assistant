@@ -150,6 +150,10 @@ function reportDetailHtml(r) {
   h += '<div class="line">' + esc(r.matched_legs) + "/" + esc(r.total_legs) + " hops matched &middot; claimed " + esc(r.total_claimed_miles) + " mi" +
     (Number(r.matched_legs) > 0 ? " vs expected ~" + esc(r.total_expected_miles) + " mi" : " &middot; no known distances to compare against") +
     (unmatched.length ? " &middot; " + unmatched.length + " unidentified" : "") + "</div>";
+  const townTotal = (r.day_summaries || []).reduce((n, d) => n + (Number(d.townLegs) || 0), 0);
+  if (townTotal) {
+    h += '<div class="plain">' + townTotal + " of these hops " + (townTotal === 1 ? "was" : "were") + " checked by driving distance between town centers, since no site is set up for those stops yet. That is an estimate, a few miles off at most, and is judged loosely.</div>";
+  }
   const hc = r.history_comparison;
   if (hc) {
     h += '<div class="' + (hc.flagged ? "flag" : "plain") + '">This period: ' + esc(hc.currentClaimedMiles) + " mi vs their own last " + esc(hc.periodsCompared) + "-period average of ~" + esc(hc.averagePastClaimedMiles) + " mi" +
@@ -178,7 +182,7 @@ function reportDetailHtml(r) {
     const cluster = f.cluster ? " — part of a run of flags this day; the order of stops may be off, not just this number" : "";
     const why = f.reason === "negative_or_zero" ? " — negative or zero mileage" : (f.ratio != null ? " — " + f.ratio + "x expected" : " — flagged");
     h += '<div class="flag">' + esc(fmtDay(f.date)) + ": <strong>" + esc(f.fromRaw) + "</strong> &rarr; <strong>" + esc(f.toRaw) + "</strong> — claimed " + esc(f.claimedMiles) +
-      " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc(f.expectedSource) + ")" + esc(why) + esc(cluster) + "</div>";
+      " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc(f.expectedSource === "town-estimate" ? "town-to-town estimate" : f.expectedSource) + ")" + esc(why) + esc(cluster) + "</div>";
   });
   if (cov) {
     h += '<div class="unm">Could not check this sheet. Only ' + esc(r.matched_legs) + " of " + esc(r.total_legs) + " hops matched a known site, so nothing here is confirmed either way. The miles claimed are not shown to be right or wrong.</div>";
@@ -440,7 +444,7 @@ function exportCsv() {
   current.received.forEach((p) => {
     const r = p.report; if (!r) return;
     (r.flagged_legs || []).forEach((f) => {
-      const base = f.reason === "negative_or_zero" ? "negative or zero mileage" : f.ratio + "x expected (" + f.expectedSource + ")";
+      const base = f.reason === "negative_or_zero" ? "negative or zero mileage" : f.ratio + "x expected (" + (f.expectedSource === "town-estimate" ? "town-to-town estimate" : f.expectedSource) + ")";
       rows.push([p.name, fmtDay(f.date), f.fromRaw, f.toRaw, f.claimedMiles, f.expectedMiles == null ? "" : f.expectedMiles, f.cluster ? base + " -- part of a same-day run, check the order" : base].map(q).join(","));
     });
     (r.unmatched_legs || []).forEach((u) => {
