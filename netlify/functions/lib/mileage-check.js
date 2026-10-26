@@ -101,6 +101,14 @@ function tokenize(s) {
   });
 }
 
+const { estimateTownLegs } = require('./town-legs.js');
+
+// Legs scored from a town-level estimate (see lib/town-legs.js) are judged more loosely: a town center is
+// a few miles from the actual office, and the other end may be a town too. They are flagged only when far
+// outside this band AND at least TOWN_MIN_GAP miles off.
+const TOWN_MIN_RATIO = 0.55;
+const TOWN_MAX_RATIO = 1.6;
+const TOWN_MIN_GAP = 8;
 const MIN_RATIO = 0.4;
 const MAX_RATIO = 2.5;
 const SITE_MATCH_THRESHOLD = 0.65;
@@ -1016,6 +1024,44 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     else aliasMap[rawLabel.toLowerCase()] = site; // so later legs in this same run also benefit
   }
 
+  // ── Town-level estimates for what is still unidentified ──
+  // 2026-10-26: a stop written as a bare town name with no site set up for it yet (Arkansas on day one) was
+  // left unchecked. Where every unidentified end of a leg is a bare town, ask for the driving miles between
+  // the two places (cached) and score the leg against that, with a looser band. Skipped for technicians who
+  // cover more than one state (a bare town name could be in either), and never changes how a leg that
+  // already resolved to a site is scored.
+  try {
+    const townState = techRow && techRow.home_state && !(techRow.additional_states || []).length ? techRow.home_state : null;
+    if (townState) {
+      const endFor = (place, raw) => {
+        if (place) {
+          if (place.type === 'home') return techRow.home_address ? { kind: 'home', text: techRow.home_address } : null;
+          if (place.type === 'site' && place.site && place.site.lat != null && place.site.lng != null) {
+            return { kind: 'site', lat: Number(place.site.lat), lng: Number(place.site.lng) };
+          }
+          return null;
+        }
+        if (looksLikeBareCityLabel(raw) && !looksLikeStreetAddress(raw)) return { kind: 'town', text: normalizePlaceLabel(raw) };
+        return null;
+      };
+      const townItems = [];
+      resolved.forEach((r, idx) => {
+        if (r.fromPlace && r.toPlace) return;
+        if ((r.fromPlace && r.fromPlace.type === 'errand') || (r.toPlace && r.toPlace.type === 'errand')) return;
+        const fc = normalizePlaceLabel(r.leg.fromRaw).toLowerCase(), tc = normalizePlaceLabel(r.leg.toRaw).toLowerCase();
+        if (fc && fc === tc) return;
+        const from = endFor(r.fromPlace, r.leg.fromRaw), to = endFor(r.toPlace, r.leg.toRaw);
+        if (from && to) townItems.push({ idx, from, to });
+      });
+      if (townItems.length) {
+        const townMiles = await estimateTownLegs(supabase, townItems, townState);
+        for (const [idx, miles] of townMiles) resolved[idx].townMiles = miles;
+      }
+    }
+  } catch (e) {
+    console.error('[mileage-check] town-level estimates failed (non-fatal):', e && e.message);
+  }
+
   // ── Score every leg against its (now possibly pass-2-resolved) places ──
   const flaggedLegs = [];
   const unmatchedLegs = [];
@@ -1033,18 +1079,23 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     }
     const fromClean = normalizePlaceLabel(leg.fromRaw).toLowerCase();
     const toClean = normalizePlaceLabel(leg.toRaw).toLowerCase();
-    if (fromClean && fromClean === toClean && !(fromPlace.type === 'home' && toPlace.type === 'home')) {
+    if (fromClean && fromClean === toClean && !(fromPlace && toPlace && fromPlace.type === 'home' && toPlace.type === 'home')) {
       unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'same_label_both_ends' });
       continue;
     }
+    let expected;
     if (!fromPlace || !toPlace) {
-      unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'site_not_matched' });
-      continue;
-    }
-    const expected = expectedMilesFor(fromPlace, toPlace);
-    if (!expected) {
-      unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'no_distance_data' });
-      continue;
+      if (resolved[idx].townMiles == null) {
+        unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'site_not_matched' });
+        continue;
+      }
+      expected = { miles: resolved[idx].townMiles, type: 'town-estimate' };
+    } else {
+      expected = expectedMilesFor(fromPlace, toPlace);
+      if (!expected) {
+        unmatchedLegs.push({ date: leg.date, fromRaw: leg.fromRaw, toRaw: leg.toRaw, claimedMiles: leg.claimedMiles, reason: 'no_distance_data' });
+        continue;
+      }
     }
     matchedCount++;
     totalExpected += expected.miles;
@@ -1053,7 +1104,9 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     if (leg.claimedMiles <= 0 && expected.miles > 0.5) reason = 'negative_or_zero';
     else {
       const ratio = leg.claimedMiles / Math.max(expected.miles, 0.5);
-      if (ratio > MAX_RATIO || ratio < MIN_RATIO) reason = 'ratio_outlier';
+      if (expected.type === 'town-estimate') {
+        if ((ratio > TOWN_MAX_RATIO || ratio < TOWN_MIN_RATIO) && Math.abs(leg.claimedMiles - expected.miles) >= TOWN_MIN_GAP) reason = 'ratio_outlier';
+      } else if (ratio > MAX_RATIO || ratio < MIN_RATIO) reason = 'ratio_outlier';
     }
     if (reason) {
       const flaggedLeg = {
@@ -1111,15 +1164,17 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
     let dayExpected = 0;
     let dayMatchedCount = 0;
     let dayMatchedClaimed = 0;
+    let dayTownCount = 0;
     for (const r of resolved) {
       if (r.leg.date !== date) continue;
       if ((r.fromPlace && r.fromPlace.type === 'errand') || (r.toPlace && r.toPlace.type === 'errand')) continue;
-      if (!r.fromPlace || !r.toPlace) continue;
+      if ((!r.fromPlace || !r.toPlace) && r.townMiles == null) continue;
       // a leg with the same label at both ends is left unscored per leg (unmatched), so it is left out of the day total too
       const _fc = normalizePlaceLabel(r.leg.fromRaw).toLowerCase(), _tc = normalizePlaceLabel(r.leg.toRaw).toLowerCase();
-      if (_fc && _fc === _tc && !(r.fromPlace.type === 'home' && r.toPlace.type === 'home')) continue;
-      const exp = expectedMilesFor(r.fromPlace, r.toPlace);
+      if (_fc && _fc === _tc && !(r.fromPlace && r.toPlace && r.fromPlace.type === 'home' && r.toPlace.type === 'home')) continue;
+      const exp = (!r.fromPlace || !r.toPlace) ? { miles: r.townMiles } : expectedMilesFor(r.fromPlace, r.toPlace);
       if (!exp) continue;
+      if (!r.fromPlace || !r.toPlace) dayTownCount++;
       dayExpected += exp.miles;
       dayMatchedCount++;
       dayMatchedClaimed += r.leg.claimedMiles;
@@ -1151,6 +1206,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       coverage: Math.round(coverage * 100) / 100,
       ratio,
       flagged,
+      ...(dayTownCount ? { townLegs: dayTownCount } : {}),
       ...(explainedByUnidentified ? { explainedByUnidentified: true, uncheckedMiles, uncheckedLegs, checkedClaimedMiles: Math.round(dayMatchedClaimed * 10) / 10 } : {}),
     });
   }
