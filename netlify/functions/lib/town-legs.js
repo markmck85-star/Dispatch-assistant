@@ -17,6 +17,9 @@
 
 const MAX_NEW_LOOKUPS = 60;
 const TIMEOUT_MS = 8000;
+// A driving distance between two places in one state is never this long; anything over it means
+// Google matched a name to the wrong place, so the answer is thrown away and never cached.
+const MAX_PLAUSIBLE_MI = 300;
 
 function clean(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9.,#\s-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -46,7 +49,8 @@ async function googleMiles(origin, destination, apiKey) {
     const j = await res.json();
     const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
     if (!el || el.status !== 'OK' || !el.distance || typeof el.distance.value !== 'number') return null;
-    return Math.round((el.distance.value / 1609.344) * 10) / 10;
+    const mi = Math.round((el.distance.value / 1609.344) * 10) / 10;
+    return mi > MAX_PLAUSIBLE_MI ? null : mi;
   } catch (e) {
     return null;
   } finally {
