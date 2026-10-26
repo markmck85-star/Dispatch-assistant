@@ -198,6 +198,22 @@ function isErrandLabel(rawLabel) {
   return /^(warehouse|shop|ups|fedex|usps|post office|parts|lunch)$/.test(label);
 }
 
+// 2026-10-26: a technician who writes home as a street address ("131 Tappan Zee Dr") instead of a
+// city. A house number followed by a street name is specific, unlike a bare city, so once a day is
+// seen to start and end on one, that address means home anywhere on the sheet (see learnedAddrKeys).
+// Found on a Georgia sheet where the address on the technician card (129 Tappen Zee Dr) did not match
+// what he writes (131 Tappan Zee Dr), and the old bookend check skipped any label with 3+ digits.
+const STREET_SUFFIXES = new Set(['dr', 'drive', 'st', 'street', 'rd', 'road', 'ln', 'lane', 'ave', 'avenue', 'blvd', 'boulevard',
+  'ct', 'court', 'cir', 'circle', 'way', 'pl', 'place', 'trl', 'trail', 'pkwy', 'parkway', 'hwy', 'highway', 'ter', 'terrace']);
+function looksLikeStreetAddress(rawLabel) {
+  const label = normalizePlaceLabel(rawLabel).toLowerCase();
+  return /^\d{1,6}\s+[a-z]/.test(label) && !isErrandLabel(label);
+}
+// "131 Tappan Zee Dr" and "131 Tappan Zee" are the same address.
+function addressKey(rawLabel) {
+  return normalizePlaceLabel(rawLabel).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((t) => t && !STREET_SUFFIXES.has(t)).join(' ');
+}
+
 /**
  * True if rawLabel LOOKS like a bare city name (short, no store word, no
  * digits) -- on its own this says nothing about whether it means home,
@@ -567,10 +583,21 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       dayHomeLabel[date] = firstLabel;
     }
   }
+  // 2026-10-26: street-address home. A day that starts and ends on the same street address (house
+  // number included, street suffix ignored) teaches that address as home for the whole sheet. Safe
+  // unlike a bare city: a house number plus street is never a store or a town.
+  const learnedAddrKeys = new Set();
+  for (const dayLegs of Object.values(legsByDate)) {
+    const first = dayLegs[0], last = dayLegs[dayLegs.length - 1];
+    if (!first || !last || !looksLikeStreetAddress(first.fromRaw) || !looksLikeStreetAddress(last.toRaw)) continue;
+    if (addressKey(first.fromRaw) === addressKey(last.toRaw)) learnedAddrKeys.add(addressKey(first.fromRaw));
+  }
+  const isLearnedAddress = (raw) => looksLikeStreetAddress(raw) && learnedAddrKeys.has(addressKey(raw));
 
   function resolveEnd(rawLabel, isBookendSlot, date) {
     if (techRow && isHomeLabel(rawLabel, techRow.home_address, techRow.home_aliases)
         && (isBookendSlot || !isHomeCityOnlyLabel(rawLabel, techRow.home_address))) return { type: 'home' };
+    if (isLearnedAddress(rawLabel)) return { type: 'home' };
     if (isBookendSlot && dayHomeLabel[date] && normalizePlaceLabel(rawLabel).toLowerCase() === dayHomeLabel[date]) {
       return { type: 'home' };
     }
@@ -731,6 +758,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       const stops = dayLegs.map((l, li) => ({ label: l.toRaw, last: li === dayLegs.length - 1 })).filter(({ label, last }) =>
         !(techRow && isHomeLabel(label, techRow.home_address, techRow.home_aliases) && (last || !isHomeCityOnlyLabel(label, techRow.home_address)))
         && !isErrandLabel(label)
+        && !isLearnedAddress(label)
         && !(homeLabel && normalizePlaceLabel(label).toLowerCase() === homeLabel && label === dayLegs[dayLegs.length - 1].toRaw)
       ).map((x) => x.label);
       const visitSites = (visitsByDate[date] || []).map((v) => v.sites).filter(Boolean);
@@ -1183,5 +1211,6 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
 
 module.exports = {
   tokenize, matchSiteByName, isHomeLabel, isErrandLabel, normalizePlaceLabel, homeCityFromAddress, haversineMiles,
+  looksLikeStreetAddress, addressKey,
   extractMileageLegs, parseMileageWorkbookBuffer, evaluateMileageReport,
 };
