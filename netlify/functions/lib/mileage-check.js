@@ -171,9 +171,11 @@ function homeCityFromAddress(homeAddress) {
   return '';
 }
 
-function isHomeLabel(rawLabel, homeAddress) {
+function isHomeLabel(rawLabel, homeAddress, homeAliases) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   if (!label) return false;
+  // nicknames the technician uses for home (technicians.home_aliases), e.g. a neighborhood name
+  if (Array.isArray(homeAliases) && homeAliases.some((a) => normalizePlaceLabel(a).toLowerCase() === label)) return true;
   if (label === 'home' || label === 'house' || label === 'my house' || label === 'office' || label === 'shop') return true;
   if (!homeAddress) return false;
   const addr = homeAddress.toLowerCase();
@@ -413,7 +415,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   let techRow = null;
   const { data: exactTech, error: techErr } = await supabase
     .from('technicians')
-    .select('id, name, home_state, additional_states, home_address, lat, lng')
+    .select('id, name, home_state, additional_states, home_address, home_aliases, lat, lng')
     .ilike('name', rawName)
     .maybeSingle();
   if (techErr) throw new Error('Technician lookup failed: ' + techErr.message);
@@ -421,7 +423,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   if (!techRow && rawName) {
     const { data: allTechs } = await supabase
       .from('technicians')
-      .select('id, name, home_state, additional_states, home_address, lat, lng');
+      .select('id, name, home_state, additional_states, home_address, home_aliases, lat, lng');
     const tokens = rawName.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
     const last = tokens[tokens.length - 1];
     const hits = (allTechs || []).filter((t) => {
@@ -550,7 +552,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
   }
 
   function resolveEnd(rawLabel, isBookendSlot, date) {
-    if (techRow && isHomeLabel(rawLabel, techRow.home_address)
+    if (techRow && isHomeLabel(rawLabel, techRow.home_address, techRow.home_aliases)
         && (isBookendSlot || !isHomeCityOnlyLabel(rawLabel, techRow.home_address))) return { type: 'home' };
     if (isBookendSlot && dayHomeLabel[date] && normalizePlaceLabel(rawLabel).toLowerCase() === dayHomeLabel[date]) {
       return { type: 'home' };
@@ -710,7 +712,7 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       const dayLegs = legs.filter((l) => l.date === date);
       const homeLabel = dayHomeLabel[date];
       const stops = dayLegs.map((l, li) => ({ label: l.toRaw, last: li === dayLegs.length - 1 })).filter(({ label, last }) =>
-        !(techRow && isHomeLabel(label, techRow.home_address) && (last || !isHomeCityOnlyLabel(label, techRow.home_address)))
+        !(techRow && isHomeLabel(label, techRow.home_address, techRow.home_aliases) && (last || !isHomeCityOnlyLabel(label, techRow.home_address)))
         && !isErrandLabel(label)
         && !(homeLabel && normalizePlaceLabel(label).toLowerCase() === homeLabel && label === dayLegs[dayLegs.length - 1].toRaw)
       ).map((x) => x.label);
