@@ -149,10 +149,14 @@ function reportDetailHtml(r) {
   const flaggedDays = days.filter((d) => d.flagged);
   const dayLine = (d) => fmtDay(d.date) + ": " + d.stopCount + " stop" + (d.stopCount === 1 ? "" : "s") + ", " + d.claimedMiles + " mi" +
     (d.expectedMiles != null ? " (expected ~" + d.expectedMiles + " mi" + (d.ratio != null ? ", " + d.ratio + "x" : "") + ")" : " (not enough matched stops to judge)");
-  flaggedDays.forEach((d) => { h += '<div class="flag">' + esc(dayLine(d)) + "</div>"; });
+  // locations on a day that could not be identified, so a high total reads as missing site data rather than extra miles
+  const unidByDate = {};
+  unmatched.forEach((u) => { const k = u.date; (unidByDate[k] = unidByDate[k] || { n: 0, mi: 0 }); unidByDate[k].n++; unidByDate[k].mi += Number(u.claimedMiles) || 0; });
+  const unidNote = (d) => { const u = unidByDate[d.date]; return u ? " — " + u.n + " unidentified location" + (u.n === 1 ? "" : "s") + " (" + (Math.round(u.mi * 10) / 10) + " mi claimed on them)" : ""; };
+  flaggedDays.forEach((d) => { h += '<div class="flag">' + esc(dayLine(d) + unidNote(d)) + "</div>"; });
   days.filter((d) => d.explainedByUnidentified).forEach((d) => {
     h += '<div class="plain">' + esc(fmtDay(d.date)) + ": " + esc(d.claimedMiles) + " mi claimed vs ~" + esc(d.expectedMiles) + " mi expected, but " + esc(d.uncheckedMiles) +
-      " mi of that is on " + esc(d.uncheckedLegs) + " leg" + (d.uncheckedLegs === 1 ? "" : "s") + " the app could not identify. The legs it could check come to " + esc(d.checkedClaimedMiles) +
+      " mi of that is on " + esc(d.uncheckedLegs) + " unidentified location" + (d.uncheckedLegs === 1 ? "" : "s") + ". The stops it could check come to " + esc(d.checkedClaimedMiles) +
       " mi vs ~" + esc(d.expectedMiles) + " mi expected, so this looks like missing site data, not extra miles.</div>";
   });
   flagged.forEach((f) => {
@@ -169,7 +173,7 @@ function reportDetailHtml(r) {
   if (!flagged.some((f) => !f.dayFits) && !flaggedDays.length && !(hc && hc.flagged)) h += '<div class="plain">Nothing in this sheet looks out of line.</div>';
   if (days.length) {
     h += '<details><summary class="hint" style="cursor:pointer;">All ' + days.length + " days</summary>" +
-      days.map((d) => '<div class="' + (d.flagged ? "flag" : "plain") + '" style="margin-top:4px;">' + esc(dayLine(d)) + "</div>").join("") + "</details>";
+      days.map((d) => '<div class="' + (d.flagged ? "flag" : "plain") + '" style="margin-top:4px;">' + esc(dayLine(d) + unidNote(d)) + "</div>").join("") + "</details>";
   }
   if (unmatched.length) {
     h += '<details><summary class="hint" style="cursor:pointer;">' + unmatched.length + " stop" + (unmatched.length === 1 ? "" : "s") + " unidentified</summary>" +
