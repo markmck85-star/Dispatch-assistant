@@ -1,5 +1,5 @@
 /**
- * list-inbound-emails.js — 2026-09-24
+ * list-inbound-emails.js — 2026-10-26 (AR and MS added: state codes, full-name inference from "Component: Arkansas OTC")
  *
  * Read-only inbox feed over inbound_emails for inbound-mail.html.
  * No send. Filters: mailbox (classified_as group), inferred state, text query.
@@ -25,8 +25,16 @@ const MAILBOXES = {
 };
 
 const STATE_CODES = [
-  "AL", "CA", "CO", "FL", "GA", "ID", "IL", "IN", "MI", "MN", "NC", "NV", "OH", "OR", "SC", "WV",
+  "AL", "AR", "CA", "CO", "FL", "GA", "ID", "IL", "IN", "MI", "MN", "MS", "NC", "NV", "OH", "OR", "SC", "WV",
 ];
+
+// Service-response emails name the state in words ("Component: Arkansas OTC"), with no state code.
+const STATE_NAMES = {
+  AL: "Alabama", AR: "Arkansas", CA: "California", CO: "Colorado", FL: "Florida", GA: "Georgia",
+  ID: "Idaho", IL: "Illinois", IN: "Indiana", MI: "Michigan", MN: "Minnesota", MS: "Mississippi",
+  NC: "North Carolina", NV: "Nevada", OH: "Ohio", OR: "Oregon", SC: "South Carolina", WV: "West Virginia",
+};
+const NAME_TO_CODE = Object.fromEntries(Object.entries(STATE_NAMES).map(([c, n]) => [n.toLowerCase(), c]));
 
 function json(statusCode, obj) {
   return {
@@ -94,6 +102,8 @@ function inferState(row) {
   if (code && STATE_CODES.includes(code[1])) return code[1];
   const loc = hay.match(/\bLocation:\s*([A-Z]{2})\b/i) || hay.match(/\b([A-Z]{2})\s*[-–]\s+/);
   if (loc && STATE_CODES.includes(loc[1].toUpperCase())) return loc[1].toUpperCase();
+  const comp = hay.match(/\bComponent:\s*([A-Za-z ]+?)\s+(?:OTC|PM|Testing|SST)\b/i);
+  if (comp && NAME_TO_CODE[comp[1].trim().toLowerCase()]) return NAME_TO_CODE[comp[1].trim().toLowerCase()];
   return null;
 }
 
@@ -190,7 +200,8 @@ exports.handler = async (event) => {
 
   if (state && /^[A-Z]{2}$/.test(state)) {
     // Cheap prefilter: site code, "GA -", or "Location: GA"
-    q = q.or(`subject.ilike.%${state}%,body_text.ilike.%${state}%,sender.ilike.%${state}%`);
+    const stateName = STATE_NAMES[state] ? `,body_text.ilike.%${STATE_NAMES[state]}%` : "";
+    q = q.or(`subject.ilike.%${state}%,body_text.ilike.%${state}%,sender.ilike.%${state}%${stateName}`);
   }
 
   const { data, error } = await q;
