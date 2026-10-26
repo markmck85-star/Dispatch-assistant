@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Unidentified Stops</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink:#1c1916; --muted:#6b6258; --line:#e4dcd0; --paper:#f6f1e8; --card:#fffdf8; --bad:#9f1239; --ok:#3f6b4a; --warn:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans", system-ui, sans-serif; line-height:1.45; }
+  header { padding:24px 20px 16px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fff 0%, var(--paper) 100%); }
+  .kicker { font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  h1 { margin:6px 0 6px; font-size:26px; letter-spacing:-.03em; }
+  .sub { color:var(--muted); max-width:72ch; font-size:14px; margin:0; }
+  .wrap { width:min(1100px, 100%); margin:0 auto; padding:16px 16px 64px; display:grid; gap:16px; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .bar select, .bar button { font:inherit; font-size:14px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  .bar button { cursor:pointer; font-weight:600; }
+  .bar button.dark { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  details.tech > summary { list-style:none; cursor:pointer; padding:12px 16px; display:flex; justify-content:space-between; gap:10px; align-items:center; background:#fbf8f2; font-weight:600; }
+  details.tech > summary::-webkit-details-marker { display:none; }
+  details.tech + details.tech { border-top:1px solid var(--line); }
+  .tag { font-family:"IBM Plex Mono", monospace; font-size:11px; padding:2px 8px; border-radius:999px; background:#eee7db; white-space:nowrap; font-weight:400; }
+  .tag.warn { background:#fdf0dc; color:var(--warn); }
+  .tag.in { background:#e4f0e6; color:var(--ok); }
+  .home { padding:8px 16px; font-size:12px; color:var(--muted); border-top:1px solid var(--line); }
+  .item { padding:12px 16px; border-top:1px solid var(--line); display:grid; gap:8px; }
+  .item.done { background:#f1f6f1; }
+  .label { font-weight:600; word-break:break-word; }
+  .meta { color:var(--muted); font-size:12px; }
+  .acts { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button.mini { font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); cursor:pointer; font-weight:600; text-align:left; }
+  button.mini:hover { background:#f3ede2; }
+  button.mini.pick { border-color:#c9d9cc; background:#f1f6f1; }
+  button:disabled { opacity:.55; cursor:default; }
+  input.find { font:inherit; font-size:14px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; color:var(--ink); }
+  .results { display:grid; gap:6px; }
+  .note { padding:12px 16px; color:var(--muted); font-size:13px; }
+  .err { color:var(--bad); padding:12px 16px; }
+  .msg { font-size:12px; color:var(--ok); }
+  .msg.bad { color:var(--bad); }
+  footer { width:min(1100px, 100%); margin:0 auto; padding:0 16px 40px; color:var(--muted); font-size:13px; }
+  footer a { color:#2b5aa8; }
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">Mileage check</div>
+  <h1>Unidentified stops</h1>
+  <p class="sub">Place names on the mileage sheets that the system could not match to a known site. Tell it once what a name means and every later sheet recognizes it. A name that is a technician's own home can be marked as home. Names are shown per technician, most repeated first.</p>
+</header>
+<main class="wrap">
+  <div class="bar">
+    <select id="days" aria-label="How far back">
+      <option value="45">Last 45 days</option>
+      <option value="120" selected>Last 120 days</option>
+      <option value="400">Last year</option>
+    </select>
+    <select id="state" aria-label="State"><option value="">All states</option></select>
+    <button id="refresh" type="button" class="dark">Refresh</button>
+  </div>
+  <div id="out"><div class="note">Loading...</div></div>
+</main>
+<footer>
+  <a href="/mileage.html">Expense reports</a> &middot; <a href="/admin.html">Admin panel</a> &middot; Page v1.0 (2026-10-26)<br />
+  Saved names apply to sheets read from now on. Open a sheet on the Expense reports page and press Re-check to apply them to one already read.
+</footer>
+<script>
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmtDay(iso) { return new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
+
+let data = null;
+let loading = false;
+const openTechs = new Set();
+
+async function load() {
+  if (loading) return;
+  loading = true;
+  const out = document.getElementById("out");
+  out.innerHTML = '<div class="note">Loading...</div>';
+  const st = document.getElementById("state").value;
+  const q = "days=" + encodeURIComponent(document.getElementById("days").value) + (st ? "&state=" + encodeURIComponent(st) : "");
+  try {
+    const res = await fetch("/.netlify/functions/get-unidentified-stops?" + q);
+    const d = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to use this page.");
+    if (!res.ok || d.error) throw new Error(d.error || "HTTP " + res.status);
+    data = d;
+    render();
+  } catch (e) {
+    out.innerHTML = '<div class="err">' + esc(e.message) + "</div>";
+  } finally { loading = false; }
+}
+
+function render() {
+  const out = document.getElementById("out");
+  const techs = data.techs || [];
+  // state list for the filter, filled once from whatever came back
+  const sel = document.getElementById("state");
+  if (!sel.dataset.filled && techs.length) {
+    const all = Array.from(new Set(techs.flatMap((t) => t.states || []))).sort();
+    sel.innerHTML = '<option value="">All states</option>' + all.map((s) => '<option value="' + esc(s) + '">' + esc(s) + "</option>").join("");
+    sel.dataset.filled = "1";
+  }
+  if (!techs.length) { out.innerHTML = '<div class="panel"><div class="note">Nothing waiting. Every stop name on the sheets in this window is recognized.</div></div>'; return; }
+  let h = '<div class="panel">';
+  techs.forEach((t, ti) => {
+    const open = openTechs.has(t.id) || (ti === 0 && !openTechs.size) ? " open" : "";
+    h += '<details class="tech" data-id="' + esc(t.id) + '"' + open + "><summary><span>" + esc(t.name) + ' <span class="tag">' + esc(t.state || "") + '</span></span><span class="tag warn">' + t.items.length + " name" + (t.items.length === 1 ? "" : "s") + "</span></summary>";
+    h += '<div class="home">Home on file: ' + esc(t.homeAddress || "none") + (t.homeAliases.length ? " &middot; also written as: " + esc(t.homeAliases.join(", ")) : "") + "</div>";
+    t.items.forEach((it, ii) => {
+      const id = ti + "-" + ii;
+      h += '<div class="item" id="it-' + id + '" data-t="' + ti + '" data-i="' + ii + '">' +
+        '<div><div class="label">' + esc(it.label) + '</div><div class="meta">' + it.count + " time" + (it.count === 1 ? "" : "s") + " &middot; " + it.miles + " mi claimed &middot; " + esc(it.dates.map(fmtDay).join(", ")) + (it.addressLike ? " &middot; looks like a street address, maybe home" : "") + "</div></div>" +
+        '<div class="acts">' +
+        it.suggestions.map((s, si) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + "</button>").join("") +
+        '<button class="mini" type="button" data-act="home">This is home</button></div>' +
+        '<input class="find" type="search" placeholder="Search for the site by name or code" data-find="' + id + '" />' +
+        '<div class="results" id="res-' + id + '"></div><div class="msg" id="msg-' + id + '"></div></div>';
+    });
+    h += "</details>";
+  });
+  h += "</div>";
+  out.innerHTML = h;
+}
+
+function siteResults(t, q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const pool = (t.states || [t.state]).flatMap((s) => (data.sites && data.sites[s]) || []);
+  return pool.filter((s) => { const hay = (s.name + " " + (s.code || "")).toLowerCase(); return words.every((w) => hay.indexOf(w) >= 0); }).slice(0, 8);
+}
+
+document.getElementById("out").addEventListener("input", (ev) => {
+  const el = ev.target;
+  const id = el.getAttribute && el.getAttribute("data-find");
+  if (!id) return;
+  const item = document.getElementById("it-" + id);
+  const t = data.techs[Number(item.getAttribute("data-t"))];
+  const box = document.getElementById("res-" + id);
+  box.innerHTML = siteResults(t, el.value).map((s) => '<button class="mini pick" type="button" data-act="site" data-site="' + esc(s.id) + '" data-sname="' + esc(s.name) + '">' + esc(s.name) + (s.code ? " (" + esc(s.code) + ")" : "") + "</button>").join("");
+});
+
+document.getElementById("out").addEventListener("toggle", (ev) => {
+  const el = ev.target;
+  if (el && el.classList && el.classList.contains("tech")) { const id = el.getAttribute("data-id"); if (el.open) openTechs.add(id); else openTechs.delete(id); }
+}, true);
+
+document.getElementById("out").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  if (!b) return;
+  const item = b.closest(".item");
+  const t = data.techs[Number(item.getAttribute("data-t"))];
+  const it = t.items[Number(item.getAttribute("data-i"))];
+  const msg = item.querySelector(".msg");
+  const act = b.getAttribute("data-act");
+  const sname = b.getAttribute("data-sname");
+  if (act === "site" && !confirm('Save "' + it.label + '" as a name for ' + sname + "?")) return;
+  if (act === "home" && !confirm('Save "' + it.label + '" as how ' + t.name + " writes his or her own home?")) return;
+  item.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+  msg.className = "msg"; msg.textContent = "Saving...";
+  try {
+    const body = act === "site" ? { action: "site", alias: it.label, site_id: b.getAttribute("data-site") } : { action: "home", technician_id: t.id, alias: it.label };
+    const res = await fetch("/.netlify/functions/save-stop-alias", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) throw new Error("Sign in with an admin login to save names.");
+    if (!res.ok || !d.ok) throw new Error(d.error || "HTTP " + res.status);
+    item.classList.add("done");
+    item.querySelectorAll(".acts, input.find, .results").forEach((x) => x.remove());
+    msg.textContent = act === "home" ? "Saved as home." : "Saved. Now means " + sname + ".";
+  } catch (e) {
+    item.querySelectorAll("button").forEach((x) => { x.disabled = false; });
+    msg.className = "msg bad"; msg.textContent = e.message;
+  }
+});
+
+document.getElementById("refresh").addEventListener("click", load);
+document.getElementById("days").addEventListener("change", load);
+document.getElementById("state").addEventListener("change", load);
+load();
+</script>
+</body>
+</html>
