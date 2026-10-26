@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-275 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-276 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -4770,7 +4770,10 @@ function distanceMatrixStatus(state) {
                                 name: (LOCATIONS[item.code] || {}).name || item.code,
                                 snapshot: { code: item.code },
                                 originalIndex: 0,
-                                inQueue: false
+                                inQueue: false,
+                                // the day this completion was recorded on (an earlier board); the map uses it to keep
+                                // the stop as a muted completed pin without drawing a route line through it
+                                completedOnDate: itemDs
                             });
                         }
                         return false;
@@ -9912,7 +9915,7 @@ ${content}
                 (completedByTech[tech] || []).forEach(r => {
                     const loc = LOCATIONS[r.code];
                     if (!loc || loc.lat == null || loc.lng == null) { unmappedCodes.push(r.code); return; }
-                    completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code: r.code, loc: loc });
+                    completedPts.push({ lat: Number(loc.lat), lng: Number(loc.lng), code: r.code, loc: loc, earlier: !!(completedBeforeBoardDay || (r.completedOnDate && _mapBoardIso && r.completedOnDate < _mapBoardIso)) });
                 });
 
                 const info = TECHS[tech] || {};
@@ -10021,7 +10024,7 @@ ${content}
                     if (latlngs.length) {
                         const donePath = [];
                         donePath.push([route.home.lat, route.home.lng]);
-                        if (!route.completedBeforeBoardDay) (route.completedPts || []).forEach(function(p) { donePath.push([p.lat, p.lng]); });
+                        (route.completedPts || []).forEach(function(p) { if (!p.earlier) donePath.push([p.lat, p.lng]); });
                         const dottedSegs = [];
                         for (var di = 0; di < donePath.length - 1; di++) {
                             dottedSegs.push([donePath[di], donePath[di + 1]]);
@@ -10075,7 +10078,7 @@ ${content}
                         ? (Math.round(p.leg.distanceMi * 10) / 10) + ' mi'
                             + (p.leg.durationMin != null ? ' · ' + formatDriveTime(p.leg.durationMin) : '')
                             + (p.leg.isReal ? '' : ' (est.)')
-                            + (i === 0 ? ((route.completedPts && route.completedPts.length && !route.completedBeforeBoardDay) ? ' from last completed' : ' from home') : ' from prev. stop')
+                            + (i === 0 ? ((route.completedPts && route.completedPts.some(function(p) { return !p.earlier; })) ? ' from last completed' : ' from home') : ' from prev. stop')
                         : '';
                     L.marker([p.lat, p.lng], {
                         icon: L.divIcon({
