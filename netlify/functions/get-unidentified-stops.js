@@ -114,8 +114,15 @@ exports.handler = async (event) => {
     for (const a of aliasRows) { const s = siteById.get(a.site_id); if (s) s.aliases.push(a.alias); }
     const sitesByState = {};
     for (const s of siteById.values()) (sitesByState[s.state] = sitesByState[s.state] || []).push(s);
-    const aliasToSite = new Map();
-    for (const s of siteById.values()) for (const a of s.aliases) aliasToSite.set(a.toLowerCase(), s);
+    // alias -> every site that carries it. A name only counts for a technician when the site is in
+    // one of HIS states (the same alias text can exist in two states, and a Georgia alias must never
+    // identify a stop for an Arkansas technician).
+    const aliasSites = new Map();
+    for (const s of siteById.values()) for (const a of s.aliases) {
+      const k = a.toLowerCase();
+      (aliasSites.get(k) || aliasSites.set(k, []).get(k)).push(s);
+    }
+    const aliasHit = (k, tech) => (aliasSites.get(k) || []).find((s) => statesOf(tech).indexOf(s.state) >= 0) || null;
 
     // names already saved for one technician (v1.1)
     const techAliasRows = [];
@@ -148,7 +155,7 @@ exports.handler = async (event) => {
           const key = label.toLowerCase();
           if (mc.isErrandLabel(label)) continue;
           if (mc.isHomeLabel(label, tech.home_address, tech.home_aliases)) continue;
-          if (mine.has(key) || aliasToSite.has(key)) continue;
+          if (mine.has(key) || aliasHit(key, tech)) continue;
           if (mc.matchSiteByName(label, cand)) continue;
           const g = groups.get(tech.id) || new Map();
           groups.set(tech.id, g);
@@ -181,7 +188,7 @@ exports.handler = async (event) => {
           else if (mc.isErrandLabel(other)) ref = null;
           else {
             const lk = other.toLowerCase();
-            const hit = mine.get(lk) || aliasToSite.get(lk) || mc.matchSiteByName(other, cand);
+            const hit = mine.get(lk) || aliasHit(lk, tech) || mc.matchSiteByName(other, cand);
             if (hit && hit.id) ref = { type: 'site', id: hit.id, name: hit.name || other };
           }
           occ.ref = ref;
