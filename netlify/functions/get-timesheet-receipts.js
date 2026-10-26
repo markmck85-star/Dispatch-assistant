@@ -1,6 +1,14 @@
 /**
- * get-timesheet-receipts.js  (v1.2, 2026-10-25)
+ * get-timesheet-receipts.js  (v1.3, 2026-10-26)
  * SAVE AS: netlify/functions/get-timesheet-receipts.js
+ *
+ * v1.3 (2026-10-26): a sheet where fewer than half the hops matched a known site is no longer
+ * "fine" or a bare "needs a look". It gets its own status, "unverified": little or nothing could be
+ * checked, so nothing is confirmed either way. Found on a sheet with 0 of 55 hops matched that still
+ * read "Nothing in this sheet looks out of line". A real flag (a bad hop, a bad day total, a period
+ * far off the person's own history) still wins and stays "flagged". Derived at read time from the
+ * stored report, so existing reports pick it up without being re-checked. Counted under
+ * mileage.unverified. LOW_COVERAGE must match lowCoverage() in mileage.html.
  *
  * v1.2 (2026-10-25): optional &mileage=1 adds, for the Mileage Check page, each
  * received person's saved sheet(s) (timesheet_files) and newest mileage report for the
@@ -88,6 +96,26 @@ function isPeriodEnd(ymd) { return (dayNumber(ymd) - dayNumber(ANCHOR_END)) % 14
 const { parseTimesheetHoursBuffer } = require("./lib/timesheet-hours.js");
 const REPORT_COLS = "id, technician_id, technician_name_raw, pay_period_end, source, source_email_id, source_filename, total_legs, matched_legs, total_claimed_miles, total_expected_miles, flagged_legs, unmatched_legs, day_summaries, history_comparison, needs_review, processed_at";
 
+// v1.3: below this share of hops matched, a sheet could not really be checked. Keep in step with mileage.html.
+const LOW_COVERAGE = 0.5;
+function coverageOf(rep) {
+  const t = Number(rep.total_legs) || 0;
+  return t > 0 ? (Number(rep.matched_legs) || 0) / t : 1;
+}
+// A flag that stands on its own evidence: a bad hop (not one whose day adds up), a bad day total,
+// or a period far off the person's own history.
+function hasRealFlag(rep) {
+  return (rep.flagged_legs || []).some((f) => !f.dayFits)
+    || (rep.day_summaries || []).some((d) => d.flagged)
+    || !!(rep.history_comparison && rep.history_comparison.flagged);
+}
+function mileageStatus(rep, hasFiles) {
+  if (!rep) return hasFiles ? "no_mileage" : "no_file";
+  if (hasRealFlag(rep)) return "flagged";
+  if (coverageOf(rep) < LOW_COVERAGE) return "unverified";
+  return rep.needs_review ? "flagged" : "fine";
+}
+
 /**
  * Pure: attach files + newest report to each received person. A person with no email counted
  * but a report in the period (sheet uploaded by hand, or mail that came through another
@@ -128,7 +156,7 @@ function attachMileage(received, missing, unmatched, files, reports) {
     p.overtime = !!(p.hours && p.hours.overtime);
     p.report = rep;
     p.reportCount = mine.length;
-    p.status = rep ? (rep.needs_review ? "flagged" : "fine") : (myFiles.length ? "no_mileage" : "no_file");
+    p.status = mileageStatus(rep, myFiles.length > 0);
   }
   for (const u of unmatched) {
     u.files = (filesByEmail.get(u.id) || []).map(fileInfo);
@@ -314,6 +342,7 @@ exports.handler = async (event) => {
     out.mileage = {
       read: received.filter((p) => p.report).length,
       flagged: received.filter((p) => p.status === "flagged").length,
+      unverified: received.filter((p) => p.status === "unverified").length,
       noMileage: received.filter((p) => p.status === "no_mileage" || p.status === "no_file").length,
       overtime: received.filter((p) => p.overtime).length,
     };
@@ -326,3 +355,4 @@ exports._matchTimesheets = matchTimesheets;
 exports._isTimesheetMail = isTimesheetMail;
 exports._periodEndFor = periodEndFor;
 exports._attachMileage = attachMileage;
+exports._mileageStatus = mileageStatus;
