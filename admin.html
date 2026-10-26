@@ -130,6 +130,8 @@
           <a href="/inventory-board" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">📦 Inventory</a>
           <a id="adminMileageBtn" href="/mileage.html" style="display:none;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">🧾 Expense reports</a>
           <a href="/mileage-log.html" style="display:inline-block;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">🛣️ Mileage log</a>
+          <a id="adminTechLoginsBtn" href="/tech-logins.html" style="display:none;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">🔑 Technician logins</a>
+          <a id="adminStopNamesBtn" href="/mileage-aliases.html" style="display:none;background:#181818;color:#7edb8e;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;font-size:14px;margin-left:8px;">🏷️ Stop names</a>
         </p>
 
         <!-- State selector bar -->
@@ -179,7 +181,7 @@
         <div id="sectionUsers" class="section">
             <div class="form-section">
                 <h2 id="userFormTitle">Add Login</h2>
-                <p style="font-size:13px;color:#555;margin-bottom:10px;">Creates a dispatcher login (username + PIN) used on this Admin Panel and the main board. Admin role can manage users and the Distance Matrix. Deactivate instead of deleting when someone leaves so history stays intact.</p>
+                <p style="font-size:13px;color:#555;margin-bottom:10px;">Creates a dispatcher login (username + PIN) used on this Admin Panel and the main board. Admin role can manage users and the Distance Matrix. Deactivate instead of deleting when someone leaves so history stays intact. Technician portal logins are managed on the <a href="/tech-logins.html">Technician logins</a> page.</p>
                 <input type="hidden" id="userEditId" value="">
                 <label for="userUsername">Username</label>
                 <input type="text" id="userUsername" placeholder="e.g. justin" autocapitalize="none" autocomplete="off">
@@ -1892,6 +1894,11 @@
             // Mileage check page: admin-role logins only (the old Mileage Check tab is hidden now that this page replaces it)
             var mcBtn = document.getElementById('adminMileageBtn');
             if (mcBtn) mcBtn.style.display = (currentUser.role === 'admin') ? 'inline-block' : 'none';
+            // Technician logins and the stop-name review page: admin-role logins only
+            ['adminTechLoginsBtn', 'adminStopNamesBtn'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.style.display = (currentUser.role === 'admin') ? 'inline-block' : 'none';
+            });
 
             var invUser = String(currentUser.username || '').toLowerCase();
             var invLink = document.getElementById('inventoryTrackerLink');
