@@ -147,9 +147,12 @@ function reportDetailHtml(r) {
   const flagged = r.flagged_legs || [];
   const unmatched = r.unmatched_legs || [];
   const cov = lowCoverage(r);
+  // errand stops (UPS Store, FedEx, shop and the like) are not sites: their miles are not checked, and are not "unidentified"
+  const errands = unmatched.filter((u) => u.reason === "errand_stop");
+  const unid = unmatched.filter((u) => u.reason !== "errand_stop");
   h += '<div class="line">' + esc(r.matched_legs) + "/" + esc(r.total_legs) + " hops matched &middot; claimed " + esc(r.total_claimed_miles) + " mi" +
     (Number(r.matched_legs) > 0 ? " vs expected ~" + esc(r.total_expected_miles) + " mi" : " &middot; no known distances to compare against") +
-    (unmatched.length ? " &middot; " + unmatched.length + " unidentified" : "") + "</div>";
+    (unid.length ? " &middot; " + unid.length + " unidentified" : "") + (errands.length ? " &middot; " + errands.length + " on errand stops" : "") + "</div>";
   const townTotal = (r.day_summaries || []).reduce((n, d) => n + (Number(d.townLegs) || 0), 0);
   if (townTotal) {
     h += '<div class="plain">' + townTotal + " of these hops " + (townTotal === 1 ? "was" : "were") + " checked by driving distance between town centers, since no site is set up for those stops yet. That is an estimate, a few miles off at most, and is judged loosely.</div>";
@@ -207,9 +210,13 @@ function reportDetailHtml(r) {
     h += '<details><summary class="hint" style="cursor:pointer;">All ' + days.length + " days</summary>" +
       days.map((d) => '<div class="' + (d.flagged ? "flag" : "plain") + '" style="margin-top:4px;">' + esc(dayLine(d) + unidNote(d)) + "</div>").join("") + "</details>";
   }
-  if (unmatched.length) {
-    h += '<details' + (cov ? " open" : "") + '><summary class="hint" style="cursor:pointer;">' + unmatched.length + " stop" + (unmatched.length === 1 ? "" : "s") + " unidentified</summary>" +
-      unmatched.map((u) => '<div class="unm" style="margin-top:4px;">' + esc(fmtDay(u.date)) + ': "' + esc(u.fromRaw) + '" &rarr; "' + esc(u.toRaw) + '" — claimed ' + esc(u.claimedMiles) + " mi (" +
+  if (errands.length) {
+    h += '<details><summary class="hint" style="cursor:pointer;">' + errands.length + " hop" + (errands.length === 1 ? "" : "s") + " on errand stops (UPS, shop, parts), miles not checked</summary>" +
+      errands.map((u) => '<div class="plain" style="margin-top:4px;">' + esc(fmtDay(u.date)) + ': "' + esc(u.fromRaw) + '" &rarr; "' + esc(u.toRaw) + '" — claimed ' + esc(u.claimedMiles) + " mi</div>").join("") + "</details>";
+  }
+  if (unid.length) {
+    h += '<details' + (cov ? " open" : "") + '><summary class="hint" style="cursor:pointer;">' + unid.length + " stop" + (unid.length === 1 ? "" : "s") + " unidentified</summary>" +
+      unid.map((u) => '<div class="unm" style="margin-top:4px;">' + esc(fmtDay(u.date)) + ': "' + esc(u.fromRaw) + '" &rarr; "' + esc(u.toRaw) + '" — claimed ' + esc(u.claimedMiles) + " mi (" +
         (u.reason === "no_distance_data" ? "site matched, no distance on file" : "could not identify this stop") + ")</div>").join("") + "</details>";
   }
   return h;
