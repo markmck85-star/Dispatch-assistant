@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.57): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.58): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.57</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.58</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2020,7 +2020,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.57) ----------
+// ---------- Driving mode (v0.58) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2320,9 +2320,10 @@ function dmReportHtml() {
   days.forEach(d => {
     let sub = 0;
     h += '<div class="dm-rday">' + weekdayLabel(d) + '</div>';
-    byDay[d].forEach(l => {
+    byDay[d].forEach((l, di) => {
       if (typeof l.miles === 'number') sub += l.miles;
       const li = legs.indexOf(l);
+      const nx = byDay[d][di + 1];
       if (dmDelIdx === li) {
         // second tap: confirm before anything is removed
         h += '<div class="dm-rrow" style="flex-direction:column;align-items:stretch;border:2px solid #ef4444;">' +
@@ -2333,6 +2334,15 @@ function dmReportHtml() {
         h += '<div class="dm-rrow"><span>' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + '</span><b>' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.estimated ? ' <span style="color:#888;font-weight:500;font-size:.7em;">est.</span>' : '') + '</b>' +
           '<button type="button" aria-label="Add a missed stop in this trip" onclick="dmOpenIns(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#f59e0b;">＋</button>' +
           '<button type="button" aria-label="Delete this stop" onclick="dmAskDelete(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#ef4444;">✕</button></div>';
+      }
+      // the next trip does not start where this one ended: a stop is missing in between
+      if (nx && !dmSameSpot(l, 'to', nx, 'from')) {
+        const gap = (l.odo_end != null && nx.odo_start != null) ? nx.odo_start - l.odo_end : null;
+        h += '<div class="dm-rrow" style="flex-direction:column;align-items:stretch;border:2px dashed #f59e0b;background:#1c1710;">' +
+          '<div style="white-space:normal;"><b style="color:#f59e0b;">Missing trip:</b> ' + dmLegName(l, 'to') + ' → ' + dmLegName(nx, 'from') +
+          (gap != null && gap > 0 ? ' <span style="color:#aaa;">(' + gap + ' mi unaccounted for)</span>' : '') + '</div>' +
+          (gap != null && gap > 0 ? '<button type="button" class="dm-wide" style="margin-top:8px;background:#2a2a2a;color:#f59e0b;min-height:clamp(52px,7vh,84px);font-size:clamp(17px,4.4vw,30px);" onclick="dmFillGap(' + li + ')">＋ Add that trip back</button>' : '') +
+          '</div>';
       }
     });
     const lastL = byDay[d][byDay[d].length - 1];
@@ -2354,6 +2364,32 @@ function dmOpenReport() { dmLog('report_open'); dmRepOffset = 0; dmDelIdx = -1; 
 // anything, and an Undo toast afterwards. Uses the same removeLeg the full log uses, so the saved
 // log, the day's next starting reading and the totals all follow.
 let dmDelIdx = -1;
+
+// same place at the end of one trip and the start of the next?
+function dmSameSpot(a, sa, b, sb) {
+  const ka = a[sa + '_kind'], kb = b[sb + '_kind'];
+  if (ka === 'home' || kb === 'home') return ka === kb;
+  if (ka === 'site' && kb === 'site') return !!a[sa + '_site_id'] && a[sa + '_site_id'] === b[sb + '_site_id'];
+  const nm = (l, side) => String(l[side + '_print'] || l[side + '_picker'] || '').trim().toLowerCase();
+  return nm(a, sa) === nm(b, sb);
+}
+
+// Put back the trip between two legs that do not meet, using the miles the odometer says are missing.
+function dmFillGap(i) {
+  const A = legs[i], B = legs[i + 1];
+  if (!A || !B || A.odo_end == null || B.odo_start == null || B.odo_start <= A.odo_end) return;
+  const leg = newLeg(A.date, legStop(A, 'to'), legStop(B, 'from'), A.odo_end, B.odo_start, {});
+  legs.splice(i + 1, 0, leg);
+  persistLocal(); renderLegs(); dmResyncForm(); saveLog('draft');
+  dmLog('stop_inserted', 'gap_filled');
+  dmRender();
+  dmToastMsg('Added ' + dmLegName(leg, 'from') + ' → ' + dmLegName(leg, 'to'), () => {
+    let k = -1;
+    legs.forEach((l, j) => { if (l.date === A.date && l.odo_start === leg.odo_start && l.odo_end === leg.odo_end && dmSameSpot(l, 'from', leg, 'from') && dmSameSpot(l, 'to', leg, 'to')) k = j; });
+    if (k >= 0) legs.splice(k, 1);
+    persistLocal(); renderLegs(); dmResyncForm(); saveLog('draft'); dmRender();
+  });
+}
 
 // Day ended at a store with no trip home logged: add it, estimated from the matrix (same as the full
 // log's "Add drive home"). Needs a distance on file, otherwise nothing is guessed.
