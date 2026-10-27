@@ -75,6 +75,8 @@ import perfImportPkg from './lib/perform-import.js';
 const { performImport } = perfImportPkg;
 import closingNotesPkg from './lib/closing-notes.js';
 const { runClosingNotesPass } = closingNotesPkg;
+import ganttStatusPkg from './lib/gantt-status.js';
+const { runStatusPass } = ganttStatusPkg;
 
 
 function easternHourNow() {
@@ -753,6 +755,33 @@ export default async (req, context) => {
       }
     }
 
+    // Technician appointment-status pass (added 2026-10-27) -- reads the Field Service Gantt's own data
+    // (technician, status, actual start/end) in a second tab of this same login. Off unless
+    // settings.salesforceStatusSyncEnabled === true (State Console toggle). Wrapped so a failure here
+    // can never affect the report import above or the closing-notes pass below. A failure sends at most
+    // one alert every 6 hours so a broken page does not text every 20 minutes.
+    let statusSummary = null;
+    try {
+      const statusSettings = (await getStore('dispatch').get('settings/global', { type: 'json' })) || {};
+      if (statusSettings.salesforceStatusSyncEnabled === true) {
+        await setStage('Reading technician status');
+        statusSummary = await runStatusPass(page, supabase, {});
+        console.log(`[status-sync] ${statusSummary.ok ? 'OK' : 'FAILED'}: ${statusSummary.rowsSeen} appointments, ${statusSummary.matchedTechs} technicians matched${statusSummary.error ? ' -- ' + statusSummary.error : ''}`);
+        if (!statusSummary.ok) {
+          const lastRaw = await store.get('status-alert-sent').catch(() => null);
+          const lastMs = lastRaw ? Number(lastRaw) : 0;
+          if (!lastMs || Date.now() - lastMs > 6 * 3600 * 1000) {
+            await store.set('status-alert-sent', String(Date.now()));
+            await sendAlert('Technician status read failed', `The technician status pass could not read the Salesforce Gantt:\n\n${statusSummary.error}\n\nThe report sync and closing notes are unaffected. You can switch the status pass off in the State Console while this is looked at.`);
+          }
+        } else {
+          try { await store.delete('status-alert-sent'); } catch (e) { /* fine */ }
+        }
+      }
+    } catch (statusErr) {
+      console.error('[status-sync] Pass threw unexpectedly (import numbers above are unaffected):', statusErr);
+    }
+
     // Closing-notes extraction pass (added 2026-09-11) -- reuses this same
     // login session, runs AFTER the report import above has already
     // succeeded but BEFORE recordSuccess() below, so its results can ride
@@ -817,6 +846,7 @@ export default async (req, context) => {
       rowErrorCount: allRowErrors.length,
       insertedSamples: allInsertedSamples,
       closingNotes: notesSummary, // null when the toggle is off, an object when it ran
+      statusSync: statusSummary ? { ok: statusSummary.ok, rows: statusSummary.rowsSeen, techs: statusSummary.matchedTechs, error: statusSummary.error } : null,
     });
 
     if (allRowErrors.length) {
