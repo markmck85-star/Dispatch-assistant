@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-308 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-310 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -843,6 +843,10 @@
                         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
                             <input type="checkbox" id="hideReturnLegToggle" onchange="toggleHideReturnLeg(this.checked)">
                             One-way mileage only (leave out the drive home, to compare with Google)
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#888;margin:4px 0;">
+                            <input type="checkbox" id="techLastStopsToggle" onchange="toggleTechLastStops(this.checked)">
+                            Show where technicians last logged a stop <span id="techLastStopsMeta" style="color:#777;"></span>
                         </label>
                         <div style="font-size:11px;color:#777;margin:0 0 4px;">&#x1F4C5; dashed pin = pushed to a later date (not part of today's route/mileage)</div>
                         <div id="dispatchMapLegend"></div>
@@ -5463,6 +5467,19 @@ function distanceMatrixStatus(state) {
                     // urgent item with no SLA data at all), preserving prior
                     // behavior there.
                     const urgentBadge = stopKindBadgeHtml(item, false);
+                    // Reference line for trouble tickets: closest technician by straight line among those
+                    // with a recent logged stop (map layer toggle must be on so the data is loaded).
+                    // Information only; times and wording kept plain. Never throws into the board.
+                    const nearTechLine = (function () {
+                        try {
+                            if (!item.urgent || item.ticketDueToday === false || typeof window.nearestLoggedTech !== 'function') return '';
+                            const n = window.nearestLoggedTech(loc && loc.lat, loc && loc.lng);
+                            if (!n) return '';
+                            const mins = Math.max(0, Math.round(n.ageMin));
+                            const when = mins < 2 ? 'just now' : (mins < 60 ? mins + ' min ago' : Math.floor(mins / 60) + ' hr ago');
+                            return '<div style="font-size:11px;color:#7a9;margin-top:1px;">Nearest logged: ' + String(n.name).split(' ')[0] + ', ' + Math.round(n.mi) + ' mi, ' + when + '</div>';
+                        } catch (e) { return ''; }
+                    })();
                     const sameDayBadge = '';
                     const rightFormBadge = item.hasRightForms ? '<span style="background:#1a5c1a;color:#88dd88;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">📋 Right Forms</span>' : '';
                     const reassignBadge = item.reassignedFrom 
@@ -5539,6 +5556,7 @@ function distanceMatrixStatus(state) {
                                 <div class="os-stop-main">
                                     <div><span class="os-stop-name" onclick="showSiteHistory('${item.code}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;" title="View recent visit history"><span style="color:#7ec8e3;font-size:11px;">#${index + 1}</span> <strong>${item.code}</strong> - ${loc.name}</span> ${urgentBadge}${sameDayBadge}${rightFormBadge}${dcoDueBadgeHtml(item, 'board')}${reassignBadge}${noDefaultBadge}${supabaseOnlyBadge}${needsReviewBadge}${restockByStr}</div>
                                     <div style="font-size:12px; color:#666;">${loc.address}</div>
+                                    ${nearTechLine}
                                     <div style="font-size:11px;color:#888;margin-top:1px;">${isFuturePushed ? legLabel : '📏 ' + legLabel + (index === 0 ? ' from home' : ' from prev. stop')}</div>
                                     ${ticketInfoStr}
                                     ${receivedStr}
@@ -11272,6 +11290,151 @@ ${content}
     }
     paint();
     window.addEventListener('resize', paint);
+})();
+</script>
+<script>
+/* Technician last-stop map layer (reference information only).
+ * Shows, per technician, the newest of: their last logged stop, or their newest closed ticket.
+ * Fades with age. "Home" stays a normal, full-strength marker until 17:00 in the tech's own time
+ * zone (techs are on call through the workday) and is muted after that or on a later day.
+ * Never shows anything older than the server's 36 hour window. Dispatchers and admins only
+ * (the server refuses techs). Off by default; the choice is remembered per browser.
+ * Keep internal reasoning here in comments, not in visible text. */
+(function () {
+    var ON_CALL_END_HOUR = 17;      // local hour (tech's time zone) when "home" stops counting as available
+    var REFRESH_MS = 60000;
+    var layer = null, timer = null, techs = [], loadedAt = 0;
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function miles(a, b, c, d) {
+        var r = Math.PI / 180, dl = (c - a) * r, dg = (d - b) * r;
+        var x = Math.sin(dl / 2) * Math.sin(dl / 2) + Math.cos(a * r) * Math.cos(c * r) * Math.sin(dg / 2) * Math.sin(dg / 2);
+        return 3958.8 * 2 * Math.asin(Math.sqrt(x));
+    }
+    function localParts(ms, tz) {
+        try {
+            var f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            var o = {}; f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = p.value; });
+            return { ymd: o.year + '-' + o.month + '-' + o.day, hour: Number(o.hour) % 24 };
+        } catch (e) { var d = new Date(ms); return { ymd: d.toISOString().slice(0, 10), hour: d.getHours() }; }
+    }
+    function clock(ms, tz) {
+        try { return new Date(ms).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
+    }
+    function ago(ms) {
+        var m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+        if (m < 2) return 'just now';
+        if (m < 60) return m + ' min ago';
+        var h = Math.floor(m / 60), r = m % 60;
+        return h + ' hr' + (r >= 10 ? ' ' + r + ' min' : '') + ' ago';
+    }
+    function initials(name) {
+        var p = String(name || '?').trim().split(/\s+/);
+        return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+    }
+    // 0..1 strength: full for the first hour, then fades to a faint trace by 6 hours
+    function strength(ageMin, kind) {
+        // a closed ticket usually means the tech has left the site, so it fades sooner:
+        // full for 30 minutes, a faint trace by 3 hours. Arrived / on the way: full for an hour, faint by 6.
+        var full = kind === 'closed' ? 30 : 60, gone = kind === 'closed' ? 180 : 360;
+        if (ageMin <= full) return 1;
+        if (ageMin >= gone) return 0.22;
+        return 1 - 0.78 * ((ageMin - full) / (gone - full));
+    }
+    // state of one technician's marker
+    function describe(t) {
+        if (!t.last_at || t.lat == null || t.lng == null) return null;
+        var at = Date.parse(t.last_at), tz = t.tz || 'America/New_York';
+        var ageMin = (Date.now() - at) / 60000;
+        var d = { t: t, at: at, tz: tz, ageMin: ageMin, kind: t.last_kind, op: strength(ageMin, t.last_kind), muted: false };
+        if (t.last_kind === 'home') {
+            var now = localParts(Date.now(), tz), then = localParts(at, tz);
+            var stillOnCall = then.ymd === now.ymd && now.hour < ON_CALL_END_HOUR;
+            d.op = stillOnCall ? 1 : 0.35;
+            d.muted = !stillOnCall;
+        }
+        return d;
+    }
+    function iconFor(d) {
+        var col = d.muted ? '#8a949e' : (d.kind === 'home' ? '#2a6fb0' : (d.kind === 'closed' ? '#2e7d4f' : (d.kind === 'enroute' ? '#6a4fb0' : '#d97706')));
+        var inner = d.kind === 'home' ? '&#x1F3E0;' : esc(initials(d.t.name));
+        var ring = (d.kind === 'closed' || d.kind === 'enroute') ? 'border:3px dashed ' + col + ';background:#fff;color:' + col + ';' : 'border:3px solid #fff;background:' + col + ';color:#fff;';
+        var html = '<div style="width:30px;height:30px;border-radius:50%;' + ring + 'box-shadow:0 1px 4px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font:700 11px -apple-system,Segoe UI,sans-serif;opacity:' + d.op.toFixed(2) + ';">' + inner + '</div>';
+        return L.divIcon({ className: 'techLastStop', html: html, iconSize: [30, 30], iconAnchor: [15, 15] });
+    }
+    function label(d) {
+        var t = d.t, when = clock(d.at, d.tz) + ' (' + ago(d.at) + ')';
+        if (d.kind === 'home') return '<b>' + esc(t.name) + '</b><br>Home &middot; ' + when;
+        if (d.kind === 'enroute') return '<b>' + esc(t.name) + '</b><br>On the way to ' + esc(t.last_name) + '<br>' + when;
+        if (d.kind === 'closed') return '<b>' + esc(t.name) + '</b><br>Closed a ticket at ' + esc(t.last_name) + '<br>' + when;
+        if (t.last_status) return '<b>' + esc(t.name) + '</b><br>' + esc(t.last_status) + ' at ' + esc(t.last_name) + '<br>' + when;
+        return '<b>' + esc(t.name) + '</b><br>Logged a stop at ' + esc(t.last_name) + (t.estimated ? ' (estimated)' : '') + '<br>' + when;
+    }
+    function draw() {
+        var map = (typeof _dispatchMap !== 'undefined') ? _dispatchMap : null;
+        if (layer && map) { map.removeLayer(layer); layer = null; }
+        if (!map || typeof L === 'undefined' || !isOn()) return;
+        layer = L.layerGroup();
+        techs.forEach(function (t) {
+            var d = describe(t);
+            if (!d) return;
+            L.marker([Number(t.lat), Number(t.lng)], { icon: iconFor(d), zIndexOffset: 500, keyboard: false })
+                .bindPopup(label(d)).bindTooltip(esc(t.name) + ' · ' + ago(d.at), { direction: 'top', offset: [0, -14] }).addTo(layer);
+        });
+        layer.addTo(map);
+    }
+    function isOn() { try { return localStorage.getItem('mcrTechLastStops') === '1'; } catch (e) { return false; } }
+    function setMeta(text) { var el = document.getElementById('techLastStopsMeta'); if (el) el.textContent = text || ''; }
+
+    function load() {
+        return fetch('/.netlify/functions/get-last-stops', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: '{}' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j.ok) throw new Error(j.error || 'failed');
+                techs = j.techs || []; loadedAt = Date.now();
+                var n = techs.filter(function (t) { return describe(t); }).length;
+                setMeta(n ? n + ' shown' : 'nothing logged recently');
+                draw();
+            })
+            .catch(function (e) { setMeta('unavailable'); });
+    }
+    function start() {
+        if (timer) clearInterval(timer);
+        load();
+        timer = setInterval(function () { if (isOn()) { load(); } }, REFRESH_MS);
+    }
+    function stop() { if (timer) clearInterval(timer); timer = null; draw(); setMeta(''); }
+
+    window.toggleTechLastStops = function (checked) {
+        try { localStorage.setItem('mcrTechLastStops', checked ? '1' : '0'); } catch (e) {}
+        if (checked) start(); else stop();
+    };
+    // nearest technician with a usable logged position, for a ticket's site (information only)
+    window.nearestLoggedTech = function (lat, lng) {
+        if (lat == null || lng == null) return null;
+        var best = null;
+        techs.forEach(function (t) {
+            var d = describe(t);
+            if (!d || d.muted || d.ageMin > 360) return;
+            var mi = miles(Number(lat), Number(lng), Number(t.lat), Number(t.lng));
+            if (!best || mi < best.mi) best = { name: t.name, mi: mi, ageMin: d.ageMin, kind: d.kind, at: d.at, tz: d.tz };
+        });
+        return best;
+    };
+    window.techLastStopsLoad = load;
+
+    // The map is built lazily by the board code, so wait for it, then restore the saved choice.
+    function boot() {
+        var box = document.getElementById('techLastStopsToggle');
+        if (box) box.checked = isOn();
+        if (isOn()) {
+            var tries = 0, w = setInterval(function () {
+                tries++;
+                if ((typeof _dispatchMap !== 'undefined' && _dispatchMap) || tries > 40) { clearInterval(w); start(); }
+            }, 1500);
+        }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
 </script>
 </body>
