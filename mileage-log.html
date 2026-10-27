@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.48): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.51): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.48</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.51</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2011,7 +2011,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.48) ----------
+// ---------- Driving mode (v0.51) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2039,12 +2039,23 @@ function dmDistTo(s) {
 
 // Only asks the phone for its location when the tech has turned nearby stops on, and only at the
 // moment LOG STOP is tapped. The reading is used to sort the list and is never saved.
+// Usage log (who/when/event only, never a location). Fire and forget; never blocks the screen.
+function dmLog(ev, detail) {
+  try {
+    const u = currentUser() || {};
+    fetch('/.netlify/functions/log-mileage-event', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ event: ev, detail: detail || null, username: u.username || null, technician_id: (ctx && ctx.technician && ctx.technician.id) || u.technician_id || null })
+    }).catch(() => {});
+  } catch (er) {}
+}
+
 function dmGetPos() {
   if (!dmGpsOn || !navigator.geolocation) return;
   dmGpsMsg = 'Finding you…';
   navigator.geolocation.getCurrentPosition(
-    (p) => { dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; dmGpsMsg = ''; if (dmStage === 'pick') dmRender(); },
-    () => { dmPos = null; dmGpsMsg = 'Location not available. Showing your usual stops.'; if (dmStage === 'pick') dmRender(); },
+    (p) => { dmLog('gps_allowed'); dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; dmGpsMsg = ''; if (dmStage === 'pick') dmRender(); },
+    (err) => { dmLog(err && err.code === 1 ? 'gps_denied' : 'gps_unavailable', err && err.code ? 'code ' + err.code : null); dmPos = null; dmGpsMsg = 'Location not available. Showing your usual stops.'; if (dmStage === 'pick') dmRender(); },
     { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
   );
 }
@@ -2052,6 +2063,7 @@ function dmGetPos() {
 function dmToggleGps() {
   dmGpsOn = !dmGpsOn;
   try { localStorage.setItem('dmGps', dmGpsOn ? '1' : '0'); } catch (er) {}
+  dmLog(dmGpsOn ? 'gps_on' : 'gps_off');
   if (!dmGpsOn) { dmPos = null; dmGpsMsg = ''; }
   else dmGetPos();   // this is what makes the phone show its one-time permission box
   dmRender();
@@ -2077,6 +2089,7 @@ function dmVoice() {
 function dmFmt(n) { return (n == null || n === '') ? '' : Number(n).toLocaleString(); }
 
 function dmOpen() {
+  dmLog('drive_open');
   if (!ctx) { alert('Still loading. Try again in a moment.'); return; }
   const today = todayLocal();
   const s = document.getElementById('periodStart').value, e = document.getElementById('periodEnd').value;
@@ -2133,7 +2146,7 @@ function dmRender() {
       '<div class="dm-bigstats"><div><div class="n">' + dmTodayMiles().toLocaleString() + '</div><div class="l">miles today</div></div>' +
       '<div><div class="n">' + dmTodayLegs().length + '</div><div class="l">stops today</div></div></div></div>' +
       '<div class="dm-last" style="margin-top:8px;font-size:clamp(16px,4vw,30px);display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
-      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Checks your location for a moment each time you tap LOG STOP. Nothing is saved.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
+      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Closest stops first. Your location is never stored.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
       '<button type="button" onclick="dmToggleGps()" style="min-width:clamp(84px,20vw,150px);padding:clamp(12px,3vw,24px) 14px;font-size:clamp(18px,4.6vw,34px);background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
       '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
   } else if (dmStage === 'report') {
@@ -2235,7 +2248,17 @@ function dmReportHtml() {
     h += '<div class="dm-rday">' + weekdayLabel(d) + '</div>';
     byDay[d].forEach(l => {
       if (typeof l.miles === 'number') sub += l.miles;
-      h += '<div class="dm-rrow"><span>' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + '</span><b>' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.estimated ? ' <span style="color:#888;font-weight:500;font-size:.7em;">est.</span>' : '') + '</b></div>';
+      const li = legs.indexOf(l);
+      if (dmDelIdx === li) {
+        // second tap: confirm before anything is removed
+        h += '<div class="dm-rrow" style="flex-direction:column;align-items:stretch;border:2px solid #ef4444;">' +
+          '<div style="margin-bottom:10px;">Delete <b style="white-space:normal;">' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + ' (' + (l.miles == null ? '?' : l.miles) + ' mi)</b>?</div>' +
+          '<div style="display:flex;gap:10px;"><button type="button" class="dm-wide" style="background:#b91c1c;color:#fff;" onclick="dmConfirmDelete(' + li + ')">Delete</button>' +
+          '<button type="button" class="dm-wide" onclick="dmCancelDelete()">Keep</button></div></div>';
+      } else {
+        h += '<div class="dm-rrow"><span>' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + '</span><b>' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.estimated ? ' <span style="color:#888;font-weight:500;font-size:.7em;">est.</span>' : '') + '</b>' +
+          '<button type="button" aria-label="Delete this stop" onclick="dmAskDelete(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#ef4444;">✕</button></div>';
+      }
     });
     h += '<div class="dm-rtot">Day total: ' + sub + ' mi</div>';
   });
@@ -2246,9 +2269,34 @@ function dmReportHtml() {
   return h;
 }
 
-function dmOpenReport() { dmRepOffset = 0; dmStage = 'report'; dmRender(); }
+function dmOpenReport() { dmLog('report_open'); dmRepOffset = 0; dmDelIdx = -1; dmStage = 'report'; dmRender(); }
+
+// Delete a stop from the report screen. Two taps (x, then Delete) so a stray touch never removes
+// anything, and an Undo toast afterwards. Uses the same removeLeg the full log uses, so the saved
+// log, the day's next starting reading and the totals all follow.
+let dmDelIdx = -1;
+function dmAskDelete(i) { dmDelIdx = i; dmRender(); }
+function dmCancelDelete() { dmDelIdx = -1; dmRender(); }
+function dmConfirmDelete(i) {
+  const leg = legs[i];
+  dmDelIdx = -1;
+  if (!leg) { dmRender(); return; }
+  dmLog('stop_deleted');
+  const name = dmLegName(leg, 'to');
+  removeLeg(i);
+  dmRender();
+  dmToastMsg('Deleted ' + name, () => {
+    legs.splice(Math.min(i, legs.length), 0, leg);
+    persistLocal();
+    renderLegs();
+    if (leg.date) resyncForm(leg.date);
+    saveLog('draft');
+    dmRender();
+  });
+}
 
 async function dmRepShift(n) {
+  dmDelIdx = -1;
   dmRepOffset += n / 14;
   shiftPeriod(n);
   // loadContext runs inside shiftPeriod; give it a moment, then redraw with the new period's stops
@@ -2257,6 +2305,7 @@ async function dmRepShift(n) {
 }
 
 async function dmCloseReport() {
+  dmDelIdx = -1;
   if (dmRepOffset !== 0) {
     // back to the current pay period so new stops land in the right place
     initPeriod();
@@ -2325,6 +2374,7 @@ async function dmAfterPick() {
 async function dmChoose(i) {
   const s = dmHits[i];
   if (!s) return;
+  dmLog(s.kind === 'home' ? 'stop_home' : (dmPos && i === 0 && !dmSearch.trim() ? 'stop_nearest' : 'stop_listed'));
   let stop;
   if (s.recent) stop = { kind: 'other', id: null, picker: s.picker, print: s.print };
   else {
@@ -2339,6 +2389,7 @@ async function dmChoose(i) {
 
 async function dmChooseTyped() {
   const t = dmSearch.trim();
+  dmLog('stop_typed');
   dmSetTo({ kind: 'other', id: null, picker: t, print: t });
   await dmAfterPick();
 }
@@ -2364,12 +2415,14 @@ async function dmSaveStart() {
 async function dmSave() {
   const full = dmFull();
   if (full == null) return;
+  dmLog('odo_typed');
   document.getElementById('odoEnd').value = String(full);
   onOdoEndInput();
   await dmFinish(false);
 }
 
 async function dmUseMatrix() {
+  dmLog('estimate_used');
   useMatrixEnd();
   if (!document.getElementById('odoEnd').value) return;
   await dmFinish(true);
