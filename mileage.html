@@ -344,7 +344,7 @@ function render(d) {
         const key = "r-" + r.id;
         return '<details class="person" data-key="' + esc(key) + '"' + (openIds.has(key) ? " open" : "") + "><summary><div><div class=\"who\" style=\"font-weight:600\">" + esc(r.technicianName || r.technician_name_raw || "Unknown") + '</div><div class="meta">' +
           esc(r.source_filename || "") + " &middot; period ending " + esc(fmtDay(r.pay_period_end)) + "</div></div>" + (n ? '<span class="tag out">' + n + " flagged</span>" : (lowCoverage(r) ? '<span class="tag warn">Could not verify</span>' : '<span class="tag in">Looks fine</span>')) + '</summary><div class="detail">' +
-          reportDetailHtml(r) + '<div class="actions"><button class="mini del" type="button" data-del="' + esc(r.id) + '" data-who="' + esc(r.technicianName || r.technician_name_raw || "this report") + '">Delete this report</button></div></div></details>';
+          reportDetailHtml(r) + '<div class="actions">' + filesHtml(r.files) + ' <button class="mini del" type="button" data-del="' + esc(r.id) + '" data-who="' + esc(r.technicianName || r.technician_name_raw || "this report") + '">Delete this report</button></div></div></details>';
       }).join("") + "</div>";
   }
 
