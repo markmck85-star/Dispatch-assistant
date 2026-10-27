@@ -97,6 +97,8 @@ exports.handler = async (event) => {
         name: s.name,
         state: s.state,
         sst_name: s.sst_name,
+        lat: s.lat != null ? Number(s.lat) : null,
+        lng: s.lng != null ? Number(s.lng) : null,
         aliases: aliasBySite[s.id] || [],
         usual: s.primary_tech_id === tech.id || s.fallback_tech_id === tech.id,
       };
@@ -159,6 +161,8 @@ exports.handler = async (event) => {
         home_city: homeCity,
         home_label_picker: homeCity + ' (Home)',
         home_label_print: homeCity,
+        lat: tech.lat != null ? Number(tech.lat) : null,
+        lng: tech.lng != null ? Number(tech.lng) : null,
         has_geo: tech.lat != null && tech.lng != null,
       },
       period_start: periodStart,
