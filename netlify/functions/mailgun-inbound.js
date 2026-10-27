@@ -26,7 +26,7 @@ const {
   getOrCreateUnassignedTech,
 } = require("./lib/placeholder-sites");
 const { parseMileageWorkbookBuffer, evaluateMileageReport } = require("./lib/mileage-check.js");
-const { parseInventoryWorkbookBuffer, isInventorySheet, inspectInventoryAttachment } = require("./lib/inventory-sheet.js");
+const { parseInventoryWorkbookBuffer, isInventorySheet, inspectInventoryAttachment, identifyTech } = require("./lib/inventory-sheet.js");
 
 // 2026-09-20: extracts file attachments from a raw multipart/form-data
 // body, byte-accurately -- added for the technician mileage sanity-check
@@ -1829,13 +1829,28 @@ exports.handler = async (event) => {
     // tech name plus the item table with registration-form rows
     // (see lib/inventory-sheet.js). Used below to keep such mail out of the
     // dispatch/ticket paths and to save the files.
+    // 2026-10-27: a sheet from a technician we can identify (sender's address, else their name in the file
+    // name) is accepted even if the sheet has no "Tech Name:" cell or no recognizable form rows; those
+    // become warnings. Before this, such sheets were kept as "Not readable" and counted for nothing.
+    const invSenderAddr = ((String(fields["sender"] || fields["from"] || "").match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || "").toLowerCase();
+    let invRoster = null;
+    const getInvRoster = async () => {
+      if (invRoster) return invRoster;
+      try {
+        const { data } = await supabase.from('technicians').select('id, name, email').eq('active', true);
+        invRoster = data || [];
+      } catch (rosterEx) { invRoster = []; }
+      return invRoster;
+    };
     const inventorySheetAtts = [];
     for (const a of attachments) {
       if (!/\.(xlsx|xlsm|xls)$/i.test(a.filename || "") || !a.content || !a.content.length) continue;
       if (timesheetAttachments.includes(a)) continue;
       try {
-        const ps = parseInventoryWorkbookBuffer(a.content);
-        if (ps && isInventorySheet(ps)) inventorySheetAtts.push({ att: a, parsed: ps });
+        const invTech = identifyTech(await getInvRoster(), a.filename, invSenderAddr);
+        const invOpts = invTech ? { tech: invTech, techSource: 'sender / file name' } : null;
+        const ps = parseInventoryWorkbookBuffer(a.content, invOpts);
+        if (ps && isInventorySheet(ps, invOpts)) inventorySheetAtts.push({ att: a, parsed: ps });
       } catch (invParseEx) { /* not an inventory sheet */ }
     }
 
@@ -2374,7 +2389,7 @@ exports.handler = async (event) => {
             if (a.content.length > 15 * 1024 * 1024) continue;
             // small pictures are email-signature logos, not a count sheet
             if (/\.(png|jpe?g|gif)$/i.test(a.filename) && a.content.length < 30 * 1024) continue;
-            const verdict = inspectInventoryAttachment(a.filename, a.content);
+            const verdict = inspectInventoryAttachment(a.filename, a.content, { roster: await getInvRoster(), senderEmail: invSenderAddr });
             const safeName = String(a.filename).replace(/[^A-Za-z0-9._-]+/g, '_');
             const storagePath = `${inboundEmailId}/${safeName}`;
             const { error: upErr } = await supabase.storage
