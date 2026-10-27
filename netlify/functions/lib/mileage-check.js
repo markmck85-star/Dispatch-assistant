@@ -494,9 +494,23 @@ async function evaluateMileageReport(supabase, { technicianNameRaw, legs, payPer
       .select('id, name, home_state, additional_states, home_address, home_aliases, lat, lng');
     const tokens = rawName.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
     const last = tokens[tokens.length - 1];
+    // 2026-10-26: a sheet signed "Timothy J Stoffel" for a technician on the roster as "Tim Stoffel" matched
+    // nobody (only the last name lined up), so none of his stops were checked and the sheet landed under
+    // "Other sheets read". A first name now also matches when one is the start of the other (Tim / Timothy)
+    // or a common nickname pair (Mike / Michael). Still needs exactly one technician to fit.
+    const NICK = { mike: 'michael', tom: 'thomas', tommy: 'thomas', ben: 'benjamin', joe: 'joseph', joey: 'joseph', bill: 'william', will: 'william', bob: 'robert', rob: 'robert', jim: 'james', rick: 'richard', dick: 'richard', tony: 'anthony', dave: 'david', ken: 'kenneth', ron: 'ronald', don: 'donald', larry: 'lawrence', jake: 'jacob', josh: 'joshua', andy: 'andrew', drew: 'andrew', nick: 'nicholas', pete: 'peter', sam: 'samuel', ed: 'edward', ted: 'edward', al: 'albert', fred: 'frederick', hank: 'henry', jack: 'john', johnny: 'john', liz: 'elizabeth', beth: 'elizabeth', kate: 'katherine', kathy: 'katherine', cathy: 'catherine', sue: 'susan', jen: 'jennifer', jenny: 'jennifer', becky: 'rebecca', peggy: 'margaret', maggie: 'margaret' };
+    const canon = (w) => NICK[w] || w;
+    const nameWordMatches = (tok, n) => {
+      if (n.includes(tok)) return true;
+      return n.split(/\s+/).some((w) => {
+        if (!w) return false;
+        if (canon(w) === canon(tok)) return true;
+        return (w.length >= 3 && tok.length >= 3 && (tok.startsWith(w) || w.startsWith(tok)));
+      });
+    };
     const hits = (allTechs || []).filter((t) => {
       const n = String(t.name || '').toLowerCase();
-      return last && n.includes(last) && tokens.filter((tok) => n.includes(tok)).length >= Math.min(2, tokens.length);
+      return last && n.includes(last) && tokens.filter((tok) => nameWordMatches(tok, n)).length >= Math.min(2, tokens.length);
     });
     if (hits.length === 1) techRow = hits[0];
   }
