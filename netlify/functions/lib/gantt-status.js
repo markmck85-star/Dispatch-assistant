@@ -41,6 +41,10 @@ function extractServices(bodyText) {
       if (!f || !f.AppointmentNumber) continue;
       out.push({
         appointment_number: String(f.AppointmentNumber),
+        // The work order number (same value as tickets.wo_number): ParentRecord, or ParentFields.WorkOrderNumber.
+        work_order: (f.ParentRecord || (val(item && item.ParentFields) || {}).WorkOrderNumber) ? String(f.ParentRecord || val(item.ParentFields).WorkOrderNumber) : null,
+        street: f.Street ? String(f.Street) : null,
+        city: f.City ? String(f.City) : null,
         resource_name: item.ResourceName ? String(item.ResourceName) : null,
         status: f.Status ? String(f.Status) : null,
         status_category: f.StatusCategory ? String(f.StatusCategory) : null,
@@ -52,6 +56,52 @@ function extractServices(bodyText) {
         actual_start: ts(f.ActualStartTime), actual_end: ts(f.ActualEndTime),
         sf_last_modified: ts(item.ServiceAppointmentLastModifiedDate || f.LastModifiedDate),
       });
+    }
+  }
+  return out;
+}
+
+// Moves a board assignment onto the technician Salesforce actually has the appointment on, but ONLY when
+// the board's technician came from the system's own defaults (auto / fallback_rule / contractor_rule).
+// A manual choice on the board is never touched. A moved row is marked assigned_by 'manual' (so a later
+// reprocess keeps it), with sf_synced_at / sf_prev_tech so the card can say it was moved to match
+// Salesforce. Matching is by work order number (tickets.wo_number = the appointment's ParentRecord).
+const OVERRIDABLE = new Set(['auto', 'fallback_rule', 'contractor_rule']);
+const LIVE_STATUSES = new Set(['Scheduled', 'Dispatched', 'In Progress']);
+async function reconcileAssignments(supabase, list) {
+  const out = { checked: 0, moved: 0, moves: [] };
+  const live = list.filter((r) => r.work_order && r.technician_id && LIVE_STATUSES.has(r.status));
+  if (!live.length) return out;
+  const woToTech = new Map();
+  for (const r of live) {
+    const prev = woToTech.get(r.work_order);
+    if (!prev || (r.sf_last_modified || '') >= (prev.sf_last_modified || '')) woToTech.set(r.work_order, r);
+  }
+  const { data: tickets } = await supabase.from('tickets').select('id, wo_number').in('wo_number', Array.from(woToTech.keys()));
+  const woByTicket = new Map((tickets || []).map((t) => [t.id, t.wo_number]));
+  if (!woByTicket.size) return out;
+  const { data: rows } = await supabase
+    .from('assignments')
+    .select('id, ticket_id, technician_id, assigned_by, status, locked, technicians(name)')
+    .in('ticket_id', Array.from(woByTicket.keys()))
+    .in('status', ['planned', 'notified']);
+  const { data: techs } = await supabase.from('technicians').select('id, name');
+  const nameById = new Map((techs || []).map((t) => [t.id, t.name]));
+  for (const a of rows || []) {
+    out.checked++;
+    const sf = woToTech.get(woByTicket.get(a.ticket_id));
+    if (!sf || sf.technician_id === a.technician_id) continue;
+    if (a.locked || !OVERRIDABLE.has(a.assigned_by)) continue;
+    const { error } = await supabase.from('assignments').update({
+      technician_id: sf.technician_id,
+      assigned_by: 'manual',
+      sf_synced_at: new Date().toISOString(),
+      sf_prev_tech: (a.technicians && a.technicians.name) || nameById.get(a.technician_id) || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', a.id).eq('technician_id', a.technician_id).in('assigned_by', Array.from(OVERRIDABLE));
+    if (!error) {
+      out.moved++;
+      out.moves.push(woByTicket.get(a.ticket_id) + ': ' + ((a.technicians && a.technicians.name) || '?') + ' -> ' + (nameById.get(sf.technician_id) || '?'));
     }
   }
   return out;
@@ -116,6 +166,15 @@ async function runStatusPass(page, supabase, opts) {
       const { error } = await supabase.from('sa_live_status').upsert(list.slice(i, i + 200), { onConflict: 'sa_key' });
       if (error) throw new Error('Saving appointments failed: ' + error.message);
     }
+    // optional: make the board follow Salesforce for default-assigned tickets (opts.matchAssignments !== false)
+    summary.assignmentsMoved = 0;
+    if (!opts || opts.matchAssignments !== false) {
+      try {
+        const rec = await reconcileAssignments(supabase, list);
+        summary.assignmentsMoved = rec.moved;
+        summary.moves = rec.moves;
+      } catch (e) { summary.matchError = e.message; }
+    }
     // keep the table small: drop anything not modified or scheduled within the last 4 days
     const cutoff = new Date(Date.now() - 4 * 86400000).toISOString();
     await supabase.from('sa_live_status').delete().lt('seen_at', cutoff);
@@ -135,4 +194,4 @@ async function runStatusPass(page, supabase, opts) {
   return summary;
 }
 
-module.exports = { runStatusPass, extractServices };
+module.exports = { runStatusPass, extractServices, reconcileAssignments };
