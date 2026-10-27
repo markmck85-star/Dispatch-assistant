@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.38): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.39): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -73,7 +73,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.38</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.39</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -1999,13 +1999,16 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.38) ----------
+// ---------- Driving mode (v0.39) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
 let dmDigits = '';
 let dmSearch = '';
 let dmToastTimer = null;
+let dmGpsOn = false;       // opt-in: nearby-stop suggestions. Off until the tech turns it on.
+let dmGpsMsg = '';
+try { dmGpsOn = localStorage.getItem('dmGps') === '1'; } catch (er) {}
 let dmPos = null;          // { lat, lng } from the phone's GPS, used only to rank the stop list
 let dmListening = false;
 let dmRec = null;
@@ -2022,13 +2025,24 @@ function dmDistTo(s) {
   return dmMiles(dmPos, { lat: Number(s.lat), lng: Number(s.lng) });
 }
 
+// Only asks the phone for its location when the tech has turned nearby stops on, and only at the
+// moment LOG STOP is tapped. The reading is used to sort the list and is never saved.
 function dmGetPos() {
-  if (!navigator.geolocation) return;
+  if (!dmGpsOn || !navigator.geolocation) return;
+  dmGpsMsg = 'Finding you…';
   navigator.geolocation.getCurrentPosition(
-    (p) => { dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; if (dmStage === 'pick') dmRender(); },
-    () => {},
+    (p) => { dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; dmGpsMsg = ''; if (dmStage === 'pick') dmRender(); },
+    () => { dmPos = null; dmGpsMsg = 'Location not available. Showing your usual stops.'; if (dmStage === 'pick') dmRender(); },
     { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
   );
+}
+
+function dmToggleGps() {
+  dmGpsOn = !dmGpsOn;
+  try { localStorage.setItem('dmGps', dmGpsOn ? '1' : '0'); } catch (er) {}
+  if (!dmGpsOn) { dmPos = null; dmGpsMsg = ''; }
+  else dmGetPos();   // this is what makes the phone show its one-time permission box
+  dmRender();
 }
 
 function dmVoice() {
@@ -2061,7 +2075,6 @@ function dmOpen() {
   try { if (localStorage.getItem('dmLight') === '1') document.getElementById('dm').classList.add('light'); } catch (er) {}
   document.getElementById('dm').classList.add('open');
   dmStage = 'home';
-  dmGetPos();
   dmRender();
 }
 
@@ -2101,6 +2114,9 @@ function dmRender() {
       'Last: <b>' + escHtml(from) + '</b>' + (odo ? ' at <b>' + dmFmt(odo) + '</b>' : ' (no reading yet)') + '</div>' +
       '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG<br>STOP</button>' +
       '<div class="dm-title">Tap when you arrive</div></div>' +
+      '<div class="dm-last" style="margin-top:8px;font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
+      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:14px;">' + (dmGpsOn ? 'On. Checks your location for a moment each time you tap LOG STOP. Nothing is saved.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
+      '<button type="button" onclick="dmToggleGps()" style="min-width:84px;padding:12px 14px;font-size:18px;background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
       '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
   } else if (dmStage === 'pick') {
     const q = dmSearch.toLowerCase().trim();
@@ -2109,12 +2125,13 @@ function dmRender() {
     list = list.filter(s => !(picked.from && picked.from.kind === 'site' && s.kind === 'site' && s.id === picked.from.id));
     list.forEach(s => { s._d = dmDistTo(s); });
     if (!q && dmPos) {
-      // GPS known: places within about a mile come first, nearest first, then the usual order
+      // GPS fix: closest first, nearest to farthest. Places with no coordinates go after the rest.
       list.sort((a, b) => {
-        const an = a._d != null && a._d <= 1, bn = b._d != null && b._d <= 1;
-        if (an !== bn) return an ? -1 : 1;
-        if (an && bn) return a._d - b._d;
-        return (b.kind === 'home') - (a.kind === 'home') || (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0);
+        const ad = a._d, bd = b._d;
+        if (ad != null && bd != null) return ad - bd;
+        if (ad != null) return -1;
+        if (bd != null) return 1;
+        return (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0);
       });
     } else {
       list.sort((a, b) => (b.kind === 'home') - (a.kind === 'home') || (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0));
@@ -2122,10 +2139,10 @@ function dmRender() {
     list = list.slice(0, q ? 12 : 10);
     dmHits = list;
     let tiles = list.map((s, i) => '<button type="button" class="dm-tile' + (s.kind === 'home' ? ' home' : '') + '" onclick="dmChoose(' + i + ')">' +
-      (s.kind === 'home' ? '🏠 ' : (!q && s._d != null && s._d <= 1 ? '📍 ' : '')) + escHtml(q ? labelForQuery(s, q) : s.picker) + (s._d != null && s._d <= 5 ? '<small>' + (s._d < 0.1 ? 'right here' : s._d.toFixed(1) + ' mi away') + '</small>' : (s.recent ? '<small>used before</small>' : '')) + '</button>').join('');
+      (s.kind === 'home' ? '🏠 ' : (!q && s._d != null && s._d <= 0.5 ? '📍 ' : '')) + escHtml(q ? labelForQuery(s, q) : s.picker) + (s._d != null ? '<small>' + (s._d < 0.1 ? 'right here' : s._d.toFixed(1) + ' mi away') + '</small>' : (s.recent ? '<small>used before</small>' : '')) + '</button>').join('');
     if (q.length >= 3) tiles += '<button type="button" class="dm-tile" onclick="dmChooseTyped()">Use “' + escHtml(dmSearch.trim()) + '”<small>not in list, include the town</small></button>';
     body.innerHTML =
-      '<div class="dm-title">Where are you?</div>' +
+      '<div class="dm-title">Where are you?' + (dmGpsMsg ? ' <span style="color:#888;font-size:15px;">' + dmGpsMsg + '</span>' : '') + '</div>' +
       '<input class="dm-search" id="dmQ" placeholder="Search a store or city" value="' + escHtml(dmSearch) + '" oninput="dmSearchInput(this.value)" autocomplete="off">' +
       '<div class="dm-tiles">' + (tiles || '<div class="dm-title">No match</div>') + '</div>' +
       '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmBack()">Back</button>';
