@@ -338,7 +338,18 @@ exports.handler = async (event) => {
       const { data: tn } = await supabase.from("technicians").select("id, name, home_state").in("id", unknownIds);
       for (const t of tn || []) nameById.set(t.id, t);
     }
-    out.otherReports = extra.otherReports.map((r) => ({ ...r, technicianName: (nameById.get(r.technician_id) || {}).name || r.technician_name_raw, state: (nameById.get(r.technician_id) || {}).home_state || null }));
+    // 2026-10-26: the sheet file behind each of these, so a sheet that was not tied to anyone can be re-checked
+    // (after a name or roster fix) from the "Other sheets read" box like any other sheet.
+    const otherFilesByEmail = new Map();
+    const otherEmailIds = Array.from(new Set(extra.otherReports.map((r) => r.source_email_id).filter(Boolean)));
+    if (otherEmailIds.length) {
+      const { data: ofRows } = await supabase.from("timesheet_files").select("id, inbound_email_id, filename").in("inbound_email_id", otherEmailIds);
+      for (const f of ofRows || []) {
+        if (!otherFilesByEmail.has(f.inbound_email_id)) otherFilesByEmail.set(f.inbound_email_id, []);
+        otherFilesByEmail.get(f.inbound_email_id).push({ id: f.id, filename: f.filename });
+      }
+    }
+    out.otherReports = extra.otherReports.map((r) => ({ ...r, files: otherFilesByEmail.get(r.source_email_id) || [], technicianName: (nameById.get(r.technician_id) || {}).name || r.technician_name_raw, state: (nameById.get(r.technician_id) || {}).home_state || null }));
     out.mileage = {
       read: received.filter((p) => p.report).length,
       flagged: received.filter((p) => p.status === "flagged").length,
