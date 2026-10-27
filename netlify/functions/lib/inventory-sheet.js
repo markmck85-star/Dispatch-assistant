@@ -22,6 +22,7 @@
  * Pure function (no database), so it can be tested on its own.
  */
 const XLSX = require('xlsx');
+const { resolveSheetTech } = require('./inventory-names.js');
 
 function cellText(v) {
   if (v === null || v === undefined) return '';
@@ -269,23 +270,51 @@ function parseInventoryGrid(grid) {
 // Why a parsed workbook is NOT treated as a count sheet (null = it is one).
 // This is the single acceptance rule; mailgun-inbound.js and the diagnostic
 // tool both use it so they can never disagree.
-function rejectReason(ps) {
+// opts.tech (optional): the technician identified from the sender's address or the file name (see
+// identifyTech). A sheet from a KNOWN technician is accepted even when the sheet itself has no
+// "Tech Name:" cell or no recognizable registration-form rows; those become warnings, not rejections.
+function rejectReason(ps, opts) {
   if (!ps) return 'The workbook could not be read';
-  if (!ps.techName) return 'No "Tech Name:" cell was found in the top rows';
+  const known = !!(opts && opts.tech);
+  if (!ps.techName && !known) return 'No "Tech Name:" cell was found in the top rows';
   if (!ps.items || ps.items.length < 5) {
     const n = ps.items ? ps.items.length : 0;
     const hdr = (ps.warnings || []).find((w) => /Item table header/.test(w));
     return hdr ? 'No item table found (needs "Product Code" and "Inventory Count" column headings)'
       : 'Only ' + n + ' item row' + (n === 1 ? '' : 's') + ' read (needs at least 5)';
   }
-  if (!ps.summary || !ps.summary.forms || ps.summary.forms.length === 0) return 'No registration-form rows were recognized in the item list';
+  if (!known && (!ps.summary || !ps.summary.forms || ps.summary.forms.length === 0)) return 'No registration-form rows were recognized in the item list';
   return null;
 }
-function isInventorySheet(ps) { return rejectReason(ps) === null; }
+function isInventorySheet(ps, opts) { return rejectReason(ps, opts) === null; }
+
+// Who sent this count sheet: the sender's address against the roster, else the technician's name found
+// in the file name ("FL SST - MCR JOHN KHOURY Current.xlsx"). Returns a roster entry or null.
+function identifyTech(roster, filename, senderEmail) {
+  const real = (roster || []).filter((t) => !t.extra);
+  if (senderEmail) {
+    const e = String(senderEmail).toLowerCase();
+    const hit = real.filter((t) => t.email && String(t.email).toLowerCase().split(/[,;\s]+/).includes(e));
+    if (hit.length === 1) return hit[0];
+  }
+  const base = String(filename || '').replace(/\.(xlsx|xlsm|xls)$/i, '');
+  return resolveSheetTech(real, base);
+}
+function applyKnownTech(ps, opts) {
+  if (!ps || !opts || !opts.tech) return ps;
+  if (!ps.techName) {
+    ps.techName = opts.tech.name;
+    ps.warnings = (ps.warnings || []).concat('Tech name not on the sheet; taken from the ' + (opts.techSource || 'sender / file name'));
+  }
+  if (ps.summary && (!ps.summary.forms || !ps.summary.forms.length)) {
+    ps.warnings = (ps.warnings || []).concat('No registration-form rows recognized');
+  }
+  return ps;
+}
 
 // Reads the workbook. The count sheet is normally the first tab; if the first
 // tab is not a count sheet but another tab is, that tab is used (2026-10-11).
-function parseInventoryWorkbookBuffer(buffer) {
+function parseInventoryWorkbookBuffer(buffer, opts) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   let first = null;
   for (let i = 0; i < wb.SheetNames.length; i++) {
@@ -294,7 +323,7 @@ function parseInventoryWorkbookBuffer(buffer) {
     const ps = parseInventoryGrid(grid);
     ps.sheetName = wb.SheetNames[i];
     if (i === 0) first = ps;
-    if (isInventorySheet(ps)) return ps;
+    if (isInventorySheet(ps, opts)) return applyKnownTech(ps, opts);
   }
   return first;
 }
@@ -303,7 +332,7 @@ const EXCEL_EXT = /\.(xlsx|xlsm|xls)$/i;
 // Full verdict for one attachment: { accepted, parsed, reason, sheetNames }.
 // Never throws. Used by the saver (to record why a file was kept but not read)
 // and by the recovery tool.
-function inspectInventoryAttachment(filename, buffer) {
+function inspectInventoryAttachment(filename, buffer, hints) {
   if (!EXCEL_EXT.test(String(filename || ''))) {
     const ext = (String(filename || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
     return { accepted: false, parsed: null, reason: 'Not an Excel file' + (ext ? ' (.' + ext.toLowerCase() + ')' : ''), sheetNames: [] };
@@ -312,12 +341,14 @@ function inspectInventoryAttachment(filename, buffer) {
   let sheetNames = [];
   try {
     sheetNames = XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames || [];
-    const ps = parseInventoryWorkbookBuffer(buffer);
-    const reason = rejectReason(ps);
+    const tech = hints && identifyTech(hints.roster, filename, hints.senderEmail);
+    const opts = tech ? { tech, techSource: 'sender / file name' } : null;
+    const ps = parseInventoryWorkbookBuffer(buffer, opts);
+    const reason = rejectReason(ps, opts);
     return { accepted: reason === null, parsed: ps, reason, sheetNames };
   } catch (e) {
     return { accepted: false, parsed: null, reason: 'Could not open the workbook: ' + String(e && e.message || e).slice(0, 120), sheetNames };
   }
 }
 
-module.exports = { parseInventoryWorkbookBuffer, parseInventoryGrid, normCode, rejectReason, isInventorySheet, inspectInventoryAttachment };
+module.exports = { identifyTech, parseInventoryWorkbookBuffer, parseInventoryGrid, normCode, rejectReason, isInventorySheet, inspectInventoryAttachment };
