@@ -250,7 +250,7 @@ function cleanQuery(q) {
 // What the page needs to draw itself: the account's states that actually have
 // locations (for the state dropdown) and which one to open first. Staff also get
 // the watchdog tab's options and default selection.
-async function buildMe(supabase, kind, name, states, defaultState, role) {
+async function buildMe(supabase, kind, name, states, defaultState, role, technicianId) {
   let list = states || [];
   if (list.length > 1) {
     const { data } = await supabase
@@ -265,7 +265,8 @@ async function buildMe(supabase, kind, name, states, defaultState, role) {
     if (filtered.length) list = filtered;
   }
   const home = defaultState && list.includes(defaultState) ? defaultState : (list[0] || null);
-  const me = { name, states: list, home, kind };
+  // technician_id lets the portal open the mileage log for this person (tech or staff)
+  const me = { name, states: list, home, kind, technician_id: technicianId || null };
   if (kind === 's') {
     // Options come from the account's full profile states, not the filtered
     // list above, so a state with no locations loaded still has a watchdog view.
@@ -303,7 +304,7 @@ async function doLogin(supabase, body) {
   if (!tAcct) {
     const r = await supabase
       .from('staff_accounts')
-      .select('username, dispatcher_username, display_name, default_state, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
+      .select('username, dispatcher_username, display_name, default_state, technician_id, password_hash, failed_attempts, locked_until, created_at, password_changed_at')
       .eq('username', username)
       .maybeSingle();
     sAcct = r.data;
@@ -343,15 +344,15 @@ async function doLogin(supabase, body) {
       .eq('id', acct.technician_id)
       .maybeSingle();
     if (!eligible(tech)) return json(403, { ok: false, error: 'This account is not active.' });
-    me = await buildMe(supabase, 't', tech.name, statesFor(tech), tech.home_state ? String(tech.home_state).toUpperCase() : null);
+    me = await buildMe(supabase, 't', tech.name, statesFor(tech), tech.home_state ? String(tech.home_state).toUpperCase() : null, undefined, tech.id);
   } else {
     const { data: d } = await supabase
       .from('dispatchers')
-      .select('username, role, states, active')
+      .select('username, role, states, active, technician_id')
       .eq('username', acct.dispatcher_username)
       .maybeSingle();
     if (!staffOk(d)) return json(403, { ok: false, error: 'This account is not active.' });
-    me = await buildMe(supabase, 's', acct.display_name, staffStates(d), acct.default_state || null, d.role);
+    me = await buildMe(supabase, 's', acct.display_name, staffStates(d), acct.default_state || null, d.role, d.technician_id || acct.technician_id || null);
   }
 
   await supabase
@@ -1343,7 +1344,7 @@ exports.handler = async (event) => {
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
 
-    if (action === 'me') return json(200, { ok: true, me: await buildMe(supabase, ctx.kind, ctx.name, ctx.states, ctx.defaultState, ctx.role) });
+    if (action === 'me') return json(200, { ok: true, me: await buildMe(supabase, ctx.kind, ctx.name, ctx.states, ctx.defaultState, ctx.role, ctx.kind === 's' ? ctx.technicianId : (ctx.tech && ctx.tech.id)) });
     if (action === 'search') return await doSearch(supabase, ctx, body);
     if (action === 'site') return await doSite(supabase, ctx, body);
     if (action === 'shipments') return await doShipments(supabase, ctx, body);
