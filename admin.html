@@ -1386,6 +1386,27 @@
 
         <!-- CLOSED TICKETS TAB -->
         <div id="sectionClosedtickets" class="section">
+            <div class="form-section" id="syncControlsCard" style="display:none;">
+                <h2>Salesforce sync switches</h2>
+                <p style="color:#aaa;font-size:12px;margin:0 0 12px 0;">
+                    Admin only. Turn any part of the automatic sync off here if it is causing trouble. The other parts keep running.
+                </p>
+                <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:14px;cursor:pointer;">
+                    <input type="checkbox" id="autoSyncToggle" onchange="toggleSyncSwitch('autoSyncToggle','salesforceReportSyncEnabled')" checked>
+                    Automatic closed-ticket sync every 20 minutes
+                </label>
+                <div id="autoSyncToggleStatus" style="font-size:12px;color:#aaa;margin:0 0 10px 26px;"></div>
+                <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:14px;cursor:pointer;">
+                    <input type="checkbox" id="closingNotesToggle" onchange="toggleSyncSwitch('closingNotesToggle','closingNotesEnabled')">
+                    Capture closing notes during sync
+                </label>
+                <div id="closingNotesToggleStatus" style="font-size:12px;color:#aaa;margin:0 0 10px 26px;"></div>
+                <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:14px;cursor:pointer;">
+                    <input type="checkbox" id="statusSyncToggle" onchange="toggleSyncSwitch('statusSyncToggle','salesforceStatusSyncEnabled')">
+                    Read technician appointment status during sync
+                </label>
+                <div id="statusSyncToggleStatus" style="font-size:12px;color:#aaa;margin:0 0 4px 26px;"></div>
+            </div>
             <div class="form-section">
                 <h2>Closed Tickets — Salesforce Import</h2>
                 <p style="color:#aaa;font-size:12px;margin:0 0 14px 0;">
@@ -1886,10 +1907,75 @@
             document.getElementById('loginPin').value = '';
         }
 
+
+        // ---- Salesforce sync switches (admin only). Same settings key the sync functions read
+        // (dispatch store, settings/global). Report sync: absent means ON. Closing notes and
+        // technician status: absent means OFF.
+        function describeStatusRun(r, enabled) {
+            if (!r || !r.last) return enabled ? 'ON. No run recorded yet; it runs as part of the next sync cycle.' : 'OFF.';
+            var l = r.last;
+            var mins = Math.max(0, Math.round((Date.now() - new Date(l.ran_at).getTime()) / 60000));
+            var ago = mins < 2 ? 'just now' : (mins < 90 ? mins + ' min ago' : Math.round(mins / 60) + ' hr ago');
+            var base = enabled ? 'ON' : 'OFF';
+            if (l.ok) return base + '. Last read ' + ago + ': ' + l.rows_seen + ' appointments, ' + l.matched_techs + ' technicians.';
+            return base + '. Last attempt ' + ago + ' failed: ' + (l.error || 'unknown problem') + '.';
+        }
+        async function loadSyncSwitches() {
+            try {
+                var res = await fetch('/.netlify/functions/get-settings');
+                var data = await res.json();
+                var st = data.settings || {};
+                var a = document.getElementById('autoSyncToggle');
+                var c = document.getElementById('closingNotesToggle');
+                var s = document.getElementById('statusSyncToggle');
+                a.checked = st.salesforceReportSyncEnabled !== false;
+                c.checked = st.closingNotesEnabled === true;
+                s.checked = st.salesforceStatusSyncEnabled === true;
+                document.getElementById('autoSyncToggleStatus').textContent = a.checked ? 'ON. Runs every 20 minutes.' : 'OFF. Scheduled runs exit immediately. Refresh Now on the State Console still works.';
+                document.getElementById('closingNotesToggleStatus').textContent = c.checked ? 'ON. Runs as part of each sync cycle.' : 'OFF.';
+                var run = null;
+                try { run = await (await fetch('/.netlify/functions/get-status-sync-status')).json(); } catch (e) {}
+                document.getElementById('statusSyncToggleStatus').textContent = describeStatusRun(run, s.checked);
+            } catch (err) {
+                ['autoSyncToggleStatus', 'closingNotesToggleStatus', 'statusSyncToggleStatus'].forEach(function (id) {
+                    var el = document.getElementById(id); if (el) el.textContent = 'Could not load the setting.';
+                });
+            }
+        }
+        async function toggleSyncSwitch(boxId, field) {
+            var cb = document.getElementById(boxId);
+            var statusEl = document.getElementById(boxId + 'Status');
+            var enabled = cb.checked;
+            cb.disabled = true;
+            statusEl.textContent = 'Saving…';
+            try {
+                var body = { state: 'global' };
+                body[field] = enabled;
+                var res = await fetch('/.netlify/functions/save-settings', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                var data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                statusEl.textContent = enabled ? 'ON. Takes effect on the next sync cycle.' : 'OFF. Takes effect on the next sync cycle. Everything else in the sync is unchanged.';
+            } catch (err) {
+                statusEl.textContent = 'Failed to save: ' + err.message;
+                cb.checked = !enabled;
+            } finally {
+                cb.disabled = false;
+            }
+        }
+
         function showAdminPanel() {
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('adminPanel').style.display = 'block';
             document.getElementById('userInfo').textContent = currentUser.username + ' (' + currentUser.role + ')';
+
+            // Sync switches live in the Closed Tickets tab, admins only (the server also refuses non-admins)
+            var syncCard = document.getElementById('syncControlsCard');
+            if (syncCard) {
+                syncCard.style.display = (currentUser.role === 'admin') ? '' : 'none';
+                if (currentUser.role === 'admin') loadSyncSwitches();
+            }
 
             // Mileage check page: admin-role logins only (the old Mileage Check tab is hidden now that this page replaces it)
             var mcBtn = document.getElementById('adminMileageBtn');

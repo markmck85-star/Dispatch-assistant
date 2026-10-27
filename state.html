@@ -315,21 +315,7 @@
     <div class="import-box">
       <div id="importFreshnessNearBtn" class="status-line" style="font-size:11px;margin-bottom:8px;"></div>
       <button id="refreshNowBtn" onclick="triggerManualSync()" style="padding:10px 16px;background:#2e7d5b;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:8px;">🔄 Refresh Now</button>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" id="autoSyncToggle" onchange="toggleAutoSync()" checked>
-        Automatic sync every 20 minutes
-      </label>
-      <div id="autoSyncToggleStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" id="closingNotesToggle" onchange="toggleClosingNotes()">
-        Capture closing notes during sync
-      </label>
-      <div id="closingNotesToggleStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;cursor:pointer;">
-        <input type="checkbox" id="statusSyncToggle" onchange="toggleStatusSync()">
-        Read technician appointment status during sync
-      </label>
-      <div id="statusSyncToggleStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+      <!-- 2026-10-27: the sync on/off switches moved to the Admin panel (Closed Tickets tab, admins only) -->
       <div id="refreshProgressWrap" style="display:none;margin-top:6px;margin-bottom:8px;">
         <div style="background:#333;border-radius:6px;height:14px;overflow:hidden;">
           <div id="refreshProgressBar" style="background:linear-gradient(90deg,#2e7d5b,#4fa87b);height:100%;width:0%;transition:width 0.4s ease;"></div>
@@ -2478,6 +2464,7 @@ const START_GRACE_PERIOD_MS = 20000; // background function can take a few secon
 async function loadAutoSyncToggle() {
   const cb = document.getElementById('autoSyncToggle');
   const statusEl = document.getElementById('autoSyncToggleStatus');
+  if (!cb || !statusEl) return;   // switches now live in the Admin panel
   try {
     const res = await fetch('/.netlify/functions/get-settings');
     const data = await res.json();
@@ -2526,6 +2513,7 @@ document.addEventListener('DOMContentLoaded', loadAutoSyncToggle);
 async function loadClosingNotesToggle() {
   const cb = document.getElementById('closingNotesToggle');
   const statusEl = document.getElementById('closingNotesToggleStatus');
+  if (!cb || !statusEl) return;   // switches now live in the Admin panel
   try {
     const res = await fetch('/.netlify/functions/get-settings');
     const data = await res.json();
@@ -2561,59 +2549,6 @@ async function toggleClosingNotes() {
 }
 document.addEventListener('DOMContentLoaded', loadClosingNotesToggle);
 
-// ── Technician appointment-status read on/off toggle (added 2026-10-27) -- same pattern and same
-// Blobs key (dispatch store, "settings/global"), field salesforceStatusSyncEnabled. Like closing
-// notes, absence of the field means OFF (the sync only runs it on a literal `=== true`). Turning it
-// off never affects the report import or closing notes.
-function describeStatusRun(r, enabled) {
-  if (!r || !r.last) return enabled ? 'ON -- no run recorded yet; it runs as part of the next sync cycle.' : 'OFF.';
-  const l = r.last;
-  const mins = Math.max(0, Math.round((Date.now() - new Date(l.ran_at).getTime()) / 60000));
-  const ago = mins < 2 ? 'just now' : (mins < 90 ? mins + ' min ago' : Math.round(mins / 60) + ' hr ago');
-  const base = enabled ? 'ON' : 'OFF';
-  if (l.ok) return base + ' -- last read ' + ago + ': ' + l.rows_seen + ' appointments, ' + l.matched_techs + ' technicians.';
-  return base + ' -- last attempt ' + ago + ' failed: ' + (l.error || 'unknown problem') + '.';
-}
-async function loadStatusSyncToggle() {
-  const cb = document.getElementById('statusSyncToggle');
-  const statusEl = document.getElementById('statusSyncToggleStatus');
-  if (!cb) return;
-  try {
-    const res = await fetch('/.netlify/functions/get-settings');
-    const data = await res.json();
-    cb.checked = data.settings?.salesforceStatusSyncEnabled === true;
-    let run = null;
-    try { run = await (await fetch('/.netlify/functions/get-status-sync-status')).json(); } catch (e) {}
-    statusEl.textContent = describeStatusRun(run, cb.checked);
-  } catch (err) {
-    statusEl.textContent = 'Could not load setting -- assuming off.';
-  }
-}
-async function toggleStatusSync() {
-  const cb = document.getElementById('statusSyncToggle');
-  const statusEl = document.getElementById('statusSyncToggleStatus');
-  const enabled = cb.checked;
-  cb.disabled = true;
-  statusEl.textContent = 'Saving…';
-  try {
-    const res = await fetch('/.netlify/functions/save-settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state: 'global', salesforceStatusSyncEnabled: enabled })
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    statusEl.textContent = enabled
-      ? 'ON -- it will read technician status on the next sync cycle (every 20 minutes).'
-      : 'OFF -- technician status is no longer read. Everything else in the sync is unchanged.';
-  } catch (err) {
-    statusEl.textContent = 'Failed to save: ' + err.message;
-    cb.checked = !enabled;
-  } finally {
-    cb.disabled = false;
-  }
-}
-document.addEventListener('DOMContentLoaded', loadStatusSyncToggle);
 
 async function triggerManualSync() {
   const btn = document.getElementById('refreshNowBtn');
