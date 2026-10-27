@@ -122,12 +122,12 @@ function parseInventoryGrid(grid) {
   for (let r = 0; r < grid.length; r++) {
     const row = grid[r] || [];
     const texts = row.map(cellText);
-    if (texts.some((t) => /^product code$/i.test(t)) && texts.some((t) => /inventory count/i.test(t))) {
+    if (texts.some((t) => /^product code$/i.test(t)) && texts.some((t) => /inventory count|^on[\s-]*hand$/i.test(t))) {
       hdr = r;
       texts.forEach((t, c) => {
         if (/^product code$/i.test(t)) col.code = c;
         else if (/^par$/i.test(t)) col.par = c;
-        else if (/inventory count/i.test(t)) col.count = c;
+        else if (/inventory count|^on[\s-]*hand$/i.test(t)) col.count = c;
         else if (/in transit/i.test(t)) col.transit = c;
         else if (/to be ordered/i.test(t)) col.order = c;
         else if (/^comments?$/i.test(t)) col.comments = c;
@@ -157,6 +157,26 @@ function parseInventoryGrid(grid) {
       if (col.par === undefined) col.par = ci - 1;   // the heading over par can hold a stray value
       col.name = 1;
       warnings.push('Item table heading "Product Code" missing; read the table by its position');
+      break;
+    }
+  }
+  if (hdr < 0) {
+    // Newer templates leave the count column's heading blank: Product Code | description | Par | (blank) |
+    // In Transit | To Be Ordered | Comments. Accept "Product Code" plus "Par" and read the count from the
+    // column right after Par.
+    for (let r = 0; r < Math.min(grid.length, 40); r++) {
+      const texts = (grid[r] || []).map(cellText);
+      const ci = texts.findIndex((t) => /^product code$/i.test(t));
+      const pi = texts.findIndex((t) => /^par$/i.test(t));
+      if (ci < 0 || pi < 0) continue;
+      hdr = r;
+      col = { code: ci, name: ci + 1, par: pi, count: pi + 1 };
+      texts.forEach((t, c) => {
+        if (/in transit/i.test(t)) col.transit = c;
+        else if (/to be ordered/i.test(t)) col.order = c;
+        else if (/^comments?$/i.test(t)) col.comments = c;
+      });
+      warnings.push('Count column heading blank; read the column after Par as the count');
       break;
     }
   }
