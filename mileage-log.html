@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.40): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.41): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -42,8 +42,11 @@
   #dm .dm-last { background:#1a1a1a; border:1px solid #333; border-radius:14px; padding:14px; font-size:20px; margin-bottom:10px; }
   #dm .dm-last b { color:#f59e0b; }
   #dm .dm-center { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; min-height:300px; }
-  #dm .dm-big { width:min(72vw,300px); height:min(72vw,300px); border-radius:50% !important; background:#f97316 !important; color:#000 !important; font-size:40px; letter-spacing:1px; box-shadow:0 0 0 10px rgba(249,115,22,.18); }
-  #dm .dm-big:active { background:#ea580c !important; }
+  #dm .dm-big { width:56vw; height:56vw; min-width:210px; min-height:210px; max-width:520px; max-height:520px; border-radius:50% !important; background:#f59e0b !important; color:#000 !important; font-size:clamp(26px,7.5vw,56px); font-weight:900; letter-spacing:.5px; box-shadow:0 0 50px rgba(245,158,11,.30); transition:transform .1s; }
+  #dm .dm-big:active { background:#d97706 !important; transform:scale(.95); }
+  #dm .dm-bigstats { display:flex; gap:40px; justify-content:center; text-align:center; }
+  #dm .dm-bigstats .n { font-size:clamp(34px,9vw,60px); font-weight:800; font-variant-numeric:tabular-nums; line-height:1.1; }
+  #dm .dm-bigstats .l { font-size:clamp(14px,3.6vw,24px); color:#888; }
   #dm .dm-wide { width:100%; min-height:76px; font-size:26px; }
   #dm .dm-go { background:#16a34a !important; color:#fff; }
   #dm .dm-go[disabled] { background:#2a2a2a !important; color:#666; }
@@ -73,7 +76,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.40</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.41</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2000,7 +2003,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.40) ----------
+// ---------- Driving mode (v0.41) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2096,6 +2099,10 @@ function dmTodayLegs() {
   return legs.filter(l => l.date === d);
 }
 
+function dmTodayMiles() {
+  return dmTodayLegs().reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
+}
+
 function dmStatsHtml() {
   const t = dmTodayLegs();
   const mi = t.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
@@ -2103,7 +2110,8 @@ function dmStatsHtml() {
 }
 
 function dmRender() {
-  document.getElementById('dmStats').innerHTML = dmStatsHtml();
+  // the home screen shows the totals big under the button, so the corner copy is only for the other screens
+  document.getElementById('dmStats').innerHTML = dmStage === 'home' ? '' : dmStatsHtml();
   const body = document.getElementById('dmBody');
   const from = picked.from ? picked.from.picker : 'Home';
   const odo = document.getElementById('odoStart').value;
@@ -2113,8 +2121,9 @@ function dmRender() {
     body.innerHTML =
       '<div class="dm-last">' + (off ? '<b>' + weekdayLabel(date) + '</b> (not today)<br>' : '') +
       'Last: <b>' + escHtml(from) + '</b>' + (odo ? ' at <b>' + dmFmt(odo) + '</b>' : ' (no reading yet)') + '</div>' +
-      '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG<br>STOP</button>' +
-      '<div class="dm-title">Tap when you arrive</div></div>' +
+      '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG STOP</button>' +
+      '<div class="dm-bigstats"><div><div class="n">' + dmTodayMiles().toLocaleString() + '</div><div class="l">miles today</div></div>' +
+      '<div><div class="n">' + dmTodayLegs().length + '</div><div class="l">stops today</div></div></div></div>' +
       '<div class="dm-last" style="margin-top:8px;font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
       '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:14px;">' + (dmGpsOn ? 'On. Checks your location for a moment each time you tap LOG STOP. Nothing is saved.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
       '<button type="button" onclick="dmToggleGps()" style="min-width:84px;padding:12px 14px;font-size:18px;background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
@@ -2178,7 +2187,7 @@ function dmRender() {
       '<div class="dm-last">' + (isStart ? 'Starting at <b>' + escHtml(from) + '</b>' : escHtml(from) + ' → <b>' + escHtml(picked.to ? picked.to.picker : '') + '</b>') + '</div>' +
       '<div class="dm-title" style="text-align:center;">' + (isStart ? 'Odometer now' : 'Odometer at this stop') + '</div>' +
       '<div class="dm-readout">' + readout + '</div>' +
-      '<button type="button" class="dm-wide" style="min-height:56px;font-size:20px;margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening… say the numbers' : '🎙 Say the odometer') + '</button>' +
+      '<button type="button" class="dm-wide" style="min-height:56px;font-size:20px;margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening…' : (autoPrefix && !isStart ? '🎙 Say the last 3 digits' : '🎙 Say the odometer')) + '</button>' +
       '<div class="dm-hint' + (bad ? ' bad' : '') + '">' + hint + '</div>' +
       '<div class="dm-pad">' + [1,2,3,4,5,6,7,8,9].map(n => '<button type="button" onclick="dmKey(' + n + ')">' + n + '</button>').join('') +
       '<button type="button" onclick="dmBack()" style="font-size:22px;">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
