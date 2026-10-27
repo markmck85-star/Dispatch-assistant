@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.53): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.54): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.53</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.54</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2011,7 +2011,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.53) ----------
+// ---------- Driving mode (v0.54) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2187,15 +2187,24 @@ function dmRender() {
     if (q) list = list.filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1);
     // not the two ends of this trip: a stop "between" A and B is somewhere else
     list = list.filter(s => !(s.kind === 'site' && (s.id === L.from_site_id || s.id === L.to_site_id)));
+    if (L.from_kind === 'home' || L.to_kind === 'home') list = list.filter(s => s.kind !== 'home');
     list.forEach(s => { s._d = dmDistTo(s); });
+    // without a GPS fix, rank by how close each stop is to either end of this trip
+    const ends = [];
+    const endPt = (kind, id) => { const e = kind === 'home' ? homeStop() : allStops().find(x => x.kind === 'site' && x.id === id); if (e && e.lat != null && e.lng != null && Number.isFinite(Number(e.lat)) && Number.isFinite(Number(e.lng))) ends.push({ lat: Number(e.lat), lng: Number(e.lng) }); };
+    endPt(L.from_kind, L.from_site_id); endPt(L.to_kind, L.to_site_id);
+    const tripD = (x) => {
+      if (x.lat == null || x.lng == null || !Number.isFinite(Number(x.lat)) || !ends.length) return null;
+      const p = { lat: Number(x.lat), lng: Number(x.lng) };
+      return Math.min.apply(null, ends.map(e => dmMiles(e, p)));
+    };
+    list.forEach(x => { x._t = tripD(x); });
     list.sort((a, b) => {
-      // with a GPS fix: closest first, places without coordinates last
-      if (dmPos) {
-        const ad = a._d, bd = b._d;
-        if (ad != null && bd != null) return ad - bd;
-        if (ad != null) return -1;
-        if (bd != null) return 1;
-      }
+      // with a GPS fix: closest to the phone first; otherwise closest to the trip's ends. No coordinates goes last.
+      const ad = dmPos ? a._d : a._t, bd = dmPos ? b._d : b._t;
+      if (ad != null && bd != null) return ad - bd;
+      if (ad != null) return -1;
+      if (bd != null) return 1;
       return (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0);
     });
     list = list.slice(0, q ? 12 : 10);
