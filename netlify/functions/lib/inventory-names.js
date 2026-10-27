@@ -12,16 +12,21 @@ const ALIASES = {
   "cayden torry": ["caden torry", "cayden torry"],
   "steve wiseley": ["steven wiseley", "steve wiseley"],
 };
+// Short forms of first names that sheets and the roster use interchangeably (Ed / Edward). Both
+// sides are folded to one spelling before comparing, so a sheet that says "Edward Bailey" finds the
+// roster's "Ed Bailey" (and the other way round) without a per-person alias.
+const NICK = { ed: "edward", eddie: "edward", ted: "edward", dave: "david", steve: "steven", stephen: "steven", sid: "sidney", mike: "michael", tom: "thomas", tommy: "thomas", tim: "timothy", jim: "james", jimmy: "james", bob: "robert", rob: "robert", robbie: "robert", bill: "william", will: "william", billy: "william", joe: "joseph", jeff: "jeffrey", matt: "matthew", chris: "christopher", dan: "daniel", danny: "daniel", tony: "anthony", andy: "andrew", drew: "andrew", ben: "benjamin", nick: "nicholas", jon: "jonathan", zach: "zachary", zack: "zachary", don: "donald", ron: "ronald", ken: "kenneth", greg: "gregory", pat: "patrick", rich: "richard", rick: "richard", dick: "richard", jerry: "gerald", larry: "lawrence", cayden: "caden" };
+const cw = (w) => NICK[w] || w;
 function rawWords(s) { return String(s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean); }
 function sheetTokens(raw) { const noParens = String(raw || "").replace(/\([^)]*\)/g, " "); return rawWords(noParens).filter((w) => !NOISE.has(w) && !PLACES.has(w)); }
 function resolveSheetTech(roster, rawName) {
   const toks = sheetTokens(rawName); if (!toks.length) return null;
-  const set = new Set(toks); const real = (roster || []).filter((t) => !t.extra);
+  const set = new Set(toks.map(cw)); const real = (roster || []).filter((t) => !t.extra);
   const aliasTargets = ALIASES[toks.join(" ")];
   if (aliasTargets) { const hit = real.filter((t) => aliasTargets.includes(rawWords(t.name).join(" "))); if (hit.length === 1) return hit[0]; }
-  const full = real.filter((t) => { const tw = rawWords(t.name); return tw.length >= 2 && tw.every((w) => set.has(w)); });
+  const full = real.filter((t) => { const tw = rawWords(t.name).map(cw); return tw.length >= 2 && tw.every((w) => set.has(w)); });
   if (full.length === 1) return full[0]; if (full.length > 1) return null;
-  const byInitial = real.filter((t) => { const tw = rawWords(t.name); if (tw.length < 2) return false; const first = tw[0]; const last = tw[tw.length - 1]; if (!set.has(last)) return false; return toks.some((x) => x !== last && (x === first || (x.length === 1 && x === first[0]))); });
+  const byInitial = real.filter((t) => { const tw = rawWords(t.name).map(cw); if (tw.length < 2) return false; const first = tw[0]; const last = tw[tw.length - 1]; if (!set.has(last)) return false; return toks.some((x) => cw(x) !== last && (cw(x) === first || (x.length === 1 && x === first[0]))); });
   return byInitial.length === 1 ? byInitial[0] : null;
 }
 module.exports = { resolveSheetTech, sheetTokens };
