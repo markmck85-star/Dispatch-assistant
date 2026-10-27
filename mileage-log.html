@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.51): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.52): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.51</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.52</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2011,7 +2011,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.51) ----------
+// ---------- Driving mode (v0.52) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2179,6 +2179,51 @@ function dmRender() {
       '<input class="dm-search" id="dmQ" placeholder="Search a store or city" value="' + escHtml(dmSearch) + '" oninput="dmSearchInput(this.value)" autocomplete="off">' +
       '<div class="dm-tiles">' + (tiles || '<div class="dm-title">No match</div>') + '</div>' +
       '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmBack()">Back</button>';
+  } else if (dmStage === 'insPick') {
+    const L = legs[dmInsIdx];
+    if (!L) { dmStage = 'report'; dmRender(); return; }
+    const q = dmSearch.toLowerCase().trim();
+    let list = allStops().filter(s => s.id !== 'other');
+    if (q) list = list.filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1);
+    // not the two ends of this trip: a stop "between" A and B is somewhere else
+    list = list.filter(s => !(s.kind === 'site' && (s.id === L.from_site_id || s.id === L.to_site_id)));
+    list.sort((a, b) => (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0));
+    list = list.slice(0, q ? 12 : 10);
+    dmHits = list;
+    let tiles = list.map((s, i) => '<button type="button" class="dm-tile' + (s.kind === 'home' ? ' home' : '') + '" onclick="dmInsChoose(' + i + ')">' +
+      (s.kind === 'home' ? '🏠 ' : '') + escHtml(q ? labelForQuery(s, q) : s.picker) + '</button>').join('');
+    if (q.length >= 3) tiles += '<button type="button" class="dm-tile" onclick="dmInsChooseTyped()">Use “' + escHtml(dmSearch.trim()) + '”<small>not in list, include the town</small></button>';
+    body.innerHTML =
+      '<div class="dm-last">Missed a stop during<br><b>' + dmLegName(L, 'from') + ' → ' + dmLegName(L, 'to') + '</b></div>' +
+      '<div class="dm-title">Which stop did you miss?</div>' +
+      '<input class="dm-search" id="dmQ" placeholder="Search a store or city" value="' + escHtml(dmSearch) + '" oninput="dmSearchInput(this.value)" autocomplete="off">' +
+      '<div class="dm-tiles">' + (tiles || '<div class="dm-title">No match</div>') + '</div>' +
+      '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmInsCancel()">Back</button>';
+  } else if (dmStage === 'insOdo') {
+    const L = legs[dmInsIdx];
+    if (!L || !dmInsStop) { dmStage = 'report'; dmRender(); return; }
+    const a = Number(L.odo_start), c = Number(L.odo_end);
+    const prefix = a >= 1000 ? String(Math.floor(a / 1000)) : '';
+    let readout;
+    if (dmDigits.length <= 3) readout = prefix + (dmDigits + '___').slice(0, 3).replace(/_/g, '<span class="ph">_</span>');
+    else readout = dmFmt(dmDigits);
+    const full = dmInsReading();
+    let hint = 'Odometer at the missed stop, or tap Estimate', bad = false;
+    if (full != null) {
+      if (full < a || full > c) { hint = 'Outside this trip (' + dmFmt(a) + ' to ' + dmFmt(c) + '). Check it.'; bad = true; }
+      else hint = (full - a) + ' mi from the start of this trip';
+    }
+    const ok = full != null && full >= a && full <= c;
+    body.innerHTML =
+      '<div class="dm-last">' + dmLegName(L, 'from') + ' → <b>' + escHtml(dmInsStop.picker) + '</b> → ' + dmLegName(L, 'to') + '</div>' +
+      '<div class="dm-title" style="text-align:center;">Odometer at the missed stop</div>' +
+      '<div class="dm-readout">' + readout + '</div>' +
+      '<button type="button" class="dm-wide" style="min-height:clamp(60px,8vh,100px);font-size:clamp(20px,5vw,34px);margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening… tap to stop' : '🎙 Say the last 3 digits') + '</button>' +
+      '<div class="dm-hint' + (bad ? ' bad' : '') + '">' + hint + '</div>' +
+      '<div class="dm-pad">' + [1,2,3,4,5,6,7,8,9].map(n => '<button type="button" onclick="dmKey(' + n + ')">' + n + '</button>').join('') +
+      '<button type="button" onclick="dmInsBackToPick()" style="font-size:clamp(20px,5vw,36px);">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
+      '<button type="button" class="dm-wide dm-amber" style="min-height:clamp(64px,9vh,110px);font-size:clamp(20px,5vw,34px);" onclick="dmInsSave(true)">Not sure · Estimate it</button>' +
+      '<button type="button" class="dm-wide dm-go" ' + (ok ? '' : 'disabled') + ' onclick="dmInsSave(false)" style="margin-top:10px;">SAVE STOP</button>';
   } else {
     const isStart = dmStage === 'start';
     const prefix = (!isStart && autoPrefix) ? autoPrefix : '';
@@ -2243,6 +2288,7 @@ function dmReportHtml() {
     '<div class="dm-rcard"><div class="n">' + total.toLocaleString() + '</div><div class="l">Total miles</div></div>' +
     '<div class="dm-rcard"><div class="n">' + legs.length + '</div><div class="l">Stops</div></div></div>';
   if (!days.length) h += '<div class="dm-title" style="text-align:center;margin-top:30px;">No stops logged in this period.</div>';
+  else h += '<div style="color:#888;font-size:clamp(13px,3.3vw,22px);margin:4px 2px 2px;"><b style="color:#f59e0b;">＋</b> adds a stop you missed inside that trip &nbsp; <b style="color:#ef4444;">✕</b> deletes it</div>';
   days.forEach(d => {
     let sub = 0;
     h += '<div class="dm-rday">' + weekdayLabel(d) + '</div>';
@@ -2257,6 +2303,7 @@ function dmReportHtml() {
           '<button type="button" class="dm-wide" onclick="dmCancelDelete()">Keep</button></div></div>';
       } else {
         h += '<div class="dm-rrow"><span>' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + '</span><b>' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.estimated ? ' <span style="color:#888;font-weight:500;font-size:.7em;">est.</span>' : '') + '</b>' +
+          '<button type="button" aria-label="Add a missed stop in this trip" onclick="dmOpenIns(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#f59e0b;">＋</button>' +
           '<button type="button" aria-label="Delete this stop" onclick="dmAskDelete(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#ef4444;">✕</button></div>';
       }
     });
@@ -2275,6 +2322,77 @@ function dmOpenReport() { dmLog('report_open'); dmRepOffset = 0; dmDelIdx = -1; 
 // anything, and an Undo toast afterwards. Uses the same removeLeg the full log uses, so the saved
 // log, the day's next starting reading and the totals all follow.
 let dmDelIdx = -1;
+
+// Add a stop that was missed inside an already-logged trip (A -> B becomes A -> X -> B). Uses the
+// same doInsert the full log uses: with an odometer reading the split is exact, without one it is
+// estimated from the distance matrix and marked estimated.
+let dmInsIdx = -1, dmInsStop = null;
+function dmOpenIns(i) { dmInsIdx = i; dmInsStop = null; dmSearch = ''; dmDigits = ''; dmDelIdx = -1; dmStage = 'insPick'; dmRender(); }
+function dmInsCancel() { dmInsIdx = -1; dmInsStop = null; dmDigits = ''; dmSearch = ''; dmStage = 'report'; dmRender(); }
+function dmInsBackToPick() { dmDigits = ''; dmStage = 'insPick'; dmRender(); }
+function dmInsChoose(i) {
+  const s = dmHits[i];
+  if (!s) return;
+  if (s.recent) dmInsStop = { kind: 'other', id: null, picker: s.picker, print: s.print };
+  else {
+    const label = labelForQuery(s, dmSearch.toLowerCase().trim());
+    dmInsStop = Object.assign({}, s, { picker: label, print: label });
+  }
+  dmDigits = ''; dmStage = 'insOdo'; dmRender();
+}
+function dmInsChooseTyped() {
+  const t = dmSearch.trim();
+  dmInsStop = { kind: 'other', id: null, picker: t, print: t };
+  dmDigits = ''; dmStage = 'insOdo'; dmRender();
+}
+function dmInsReading() {
+  const L = legs[dmInsIdx];
+  if (!L || !dmDigits) return null;
+  const a = Number(L.odo_start);
+  if (dmDigits.length <= 3) {
+    if (dmDigits.length < 3) return null;
+    let cand = Math.floor(a / 1000) * 1000 + Number(dmDigits);
+    if (cand < a) cand += 1000;   // odometer rolled past a thousand during the trip
+    return cand;
+  }
+  return Number(dmDigits);
+}
+async function dmInsSave(useEstimate) {
+  const L = legs[dmInsIdx];
+  if (!L || !dmInsStop) return;
+  let reading = '';
+  if (!useEstimate) {
+    const r = dmInsReading();
+    if (r == null) return;
+    reading = String(r);
+  }
+  dmLog('stop_inserted', useEstimate ? 'estimated' : 'odometer');
+  // hand the choice to the full log's insert, which does the splitting and the checks
+  const sel = document.getElementById('insertLeg');
+  sel.innerHTML = '<option value="' + dmInsIdx + '" selected>trip</option>';
+  sel.value = String(dmInsIdx);
+  picked.ins = dmInsStop;
+  insertCtx = null;
+  document.getElementById('insertOdo').value = reading;
+  document.getElementById('insertMsg').textContent = '';
+  const idx = dmInsIdx, orig = L, before = legs.length, name = dmInsStop.picker;
+  await doInsert();
+  if (legs.length <= before) {
+    // nothing was split: show why (for example "outside this trip" or "matrix has no distance")
+    dmToastMsg(document.getElementById('insertMsg').textContent || 'Could not add that stop.');
+    return;
+  }
+  dmInsIdx = -1; dmInsStop = null; dmDigits = ''; dmSearch = ''; dmStage = 'report';
+  dmRender();
+  dmToastMsg('Added ' + name + (useEstimate ? ' (estimate)' : ''), () => {
+    // undo: put the original single trip back
+    legs.splice(idx, 2, orig);
+    persistLocal(); renderLegs();
+    if (orig.date) resyncForm(orig.date);
+    saveLog('draft');
+    dmRender();
+  });
+}
 function dmAskDelete(i) { dmDelIdx = i; dmRender(); }
 function dmCancelDelete() { dmDelIdx = -1; dmRender(); }
 function dmConfirmDelete(i) {
