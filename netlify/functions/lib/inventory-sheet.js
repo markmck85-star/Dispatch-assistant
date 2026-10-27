@@ -135,6 +135,30 @@ function parseInventoryGrid(grid) {
       break;
     }
   }
+  if (hdr < 0) {
+    // Some sheets lose the "Product Code" heading (the cell above the codes is blank or renamed) but
+    // keep "Inventory Count". The layout is still code | description | par | count, so accept the row
+    // that has "Inventory Count" when the codes' column (A) heading is empty or code-like.
+    for (let r = 0; r < Math.min(grid.length, 40); r++) {
+      const texts = (grid[r] || []).map(cellText);
+      const ci = texts.findIndex((t) => /inventory count/i.test(t));
+      if (ci < 2) continue;
+      const first = texts[0] || '';
+      if (first && !/product|part|item|sku|code|number|#/i.test(first)) continue;
+      hdr = r;
+      col = { code: 0, count: ci };
+      texts.forEach((t, c) => {
+        if (/^par$/i.test(t)) col.par = c;
+        else if (/in transit/i.test(t)) col.transit = c;
+        else if (/to be ordered/i.test(t)) col.order = c;
+        else if (/^comments?$/i.test(t)) col.comments = c;
+      });
+      if (col.par === undefined) col.par = ci - 1;   // the heading over par can hold a stray value
+      col.name = 1;
+      warnings.push('Item table heading "Product Code" missing; read the table by its position');
+      break;
+    }
+  }
   if (hdr < 0 || col.count === undefined) {
     warnings.push('Item table header (Product Code / Inventory Count) not found');
     return out;
