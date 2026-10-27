@@ -29,12 +29,14 @@ exports.handler = async (event) => {
   async function homeDistance(siteId) {
     const { data, error } = await supabase
       .from('tech_site_distances')
-      .select('distance_mi')
+      .select('mode, distance_mi')
       .eq('technician_id', techId)
-      .eq('site_id', siteId)
-      .limit(1);
+      .eq('site_id', siteId);
     if (error) throw new Error(error.message);
-    return data && data.length && data[0].distance_mi != null ? Number(data[0].distance_mi) : null;
+    // a site can have both a road-distance row and an older straight-line row; use the road distance
+    const rows = (data || []).filter(r => r.distance_mi != null);
+    const row = rows.find(r => r.mode === 'driving') || rows[0];
+    return row ? Number(row.distance_mi) : null;
   }
 
   try {
