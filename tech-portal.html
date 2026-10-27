@@ -217,7 +217,7 @@
     </section>
 
     <section id="summPane" class="hidden">
-      <div class="summban"><b>App plan only. Not confirmed in Salesforce.</b><br>This is the plan in the dispatch app, either the default or as edited by a dispatcher. It may differ from what is assigned in Salesforce. Check Salesforce before relying on it.</div>
+      <div class="summban"><b>App plan. Status colours come from Salesforce.</b><br>This is the plan in the dispatch app, either the default or as edited by a dispatcher. It may differ from what is assigned in Salesforce. Status is read from Salesforce about every 20 minutes. Check Salesforce before relying on it.</div>
       <div class="wdbar sumbar">
         <select id="summState" aria-label="State"></select>
         <input type="date" id="summDate" aria-label="Date">
@@ -483,6 +483,25 @@
     } catch (e) { alert('Could not update'); }
     finally { $('summPubBtn').disabled = false; }
   };
+  // Salesforce appointment status for a stop (reference only), same colours as the Gantt.
+  var SF_STY = { 'Scheduled': ['#f4c542', '#3a2f00', 'Scheduled'], 'Dispatched': ['#4fb3e8', '#04273a', 'On the way'], 'In Progress': ['#9b6bd6', '#ffffff', 'In progress'], 'Completed': ['#4caf50', '#ffffff', 'Done'], 'Canceled': ['#8a8f98', '#ffffff', 'Canceled'] };
+  function sfNorm(x) { return String(x || '').toLowerCase().replace(/[^a-z]/g, ''); }
+  function sfChip(sf, boardTech) {
+    var st = sf && SF_STY[sf.status];
+    if (!st) return '';
+    var d = sf.changedAt ? new Date(sf.changedAt) : null;
+    var when = '';
+    if (d && !isNaN(d)) {
+      var same = d.toDateString() === new Date().toDateString();
+      when = ' · ' + (same ? '' : d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ') + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+    var html = '<span class="tag" style="background:' + st[0] + ';color:' + st[1] + ';font-weight:bold">' + st[2] + when + '</span>';
+    var open = sf.status === 'Scheduled' || sf.status === 'Dispatched' || sf.status === 'In Progress';
+    if (open && sf.techName && boardTech && sfNorm(sf.techName) !== sfNorm(boardTech)) {
+      html += '<span class="tag">Salesforce: ' + esc(String(sf.techName).split(' ')[0]) + '</span>';
+    }
+    return html;
+  }
   async function loadSumm() {
     summMarks();
     if (KIND !== 's') return;
@@ -507,6 +526,7 @@
           (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
           '<br>' + (s.outOfService ? '<span class="tag alert">Out of service</span>' : '') +
           (s.woNumber ? '<span class="tag">' + esc(s.woNumber) + '</span>' : '') +
+          sfChip(s.sf, 'Unassigned') +
           (s.category ? '<span class="tag">' + esc(s.category) + '</span>' : '') +
           (s.due ? '<span class="tag warn">Due ' + esc(fmtDT(s.due)) + '</span>' : '') + '</div>';
       }).join('') + '</div>' : '';
@@ -524,6 +544,7 @@
             (s.address ? '<br><span class="muted">' + esc(s.address) + '</span>' : '') +
             '<br>' + (s.ticketKind === 'trouble' ? '<span class="tag alert">Trouble ticket</span>' : (s.ticketKind === 'maintenance' ? '<span class="tag restock">Restock</span>' : '')) +
             (s.woNumber ? '<span class="tag">' + esc(s.woNumber) + '</span>' : '') +
+            sfChip(s.sf, g.tech) +
             (s.due ? '<span class="tag warn">Due ' + esc(fmtDT(s.due)) + '</span>' : '') + '</div>';
         }).join('') + '</div>';
     }).join('');
