@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.52): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.53): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.52</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.53</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2011,7 +2011,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.52) ----------
+// ---------- Driving mode (v0.53) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2054,8 +2054,8 @@ function dmGetPos() {
   if (!dmGpsOn || !navigator.geolocation) return;
   dmGpsMsg = 'Finding you…';
   navigator.geolocation.getCurrentPosition(
-    (p) => { dmLog('gps_allowed'); dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; dmGpsMsg = ''; if (dmStage === 'pick') dmRender(); },
-    (err) => { dmLog(err && err.code === 1 ? 'gps_denied' : 'gps_unavailable', err && err.code ? 'code ' + err.code : null); dmPos = null; dmGpsMsg = 'Location not available. Showing your usual stops.'; if (dmStage === 'pick') dmRender(); },
+    (p) => { dmLog('gps_allowed'); dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; dmGpsMsg = ''; if (dmStage === 'pick' || dmStage === 'insPick') dmRender(); },
+    (err) => { dmLog(err && err.code === 1 ? 'gps_denied' : 'gps_unavailable', err && err.code ? 'code ' + err.code : null); dmPos = null; dmGpsMsg = 'Location not available. Showing your usual stops.'; if (dmStage === 'pick' || dmStage === 'insPick') dmRender(); },
     { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
   );
 }
@@ -2187,15 +2187,25 @@ function dmRender() {
     if (q) list = list.filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1);
     // not the two ends of this trip: a stop "between" A and B is somewhere else
     list = list.filter(s => !(s.kind === 'site' && (s.id === L.from_site_id || s.id === L.to_site_id)));
-    list.sort((a, b) => (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0));
+    list.forEach(s => { s._d = dmDistTo(s); });
+    list.sort((a, b) => {
+      // with a GPS fix: closest first, places without coordinates last
+      if (dmPos) {
+        const ad = a._d, bd = b._d;
+        if (ad != null && bd != null) return ad - bd;
+        if (ad != null) return -1;
+        if (bd != null) return 1;
+      }
+      return (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0);
+    });
     list = list.slice(0, q ? 12 : 10);
     dmHits = list;
     let tiles = list.map((s, i) => '<button type="button" class="dm-tile' + (s.kind === 'home' ? ' home' : '') + '" onclick="dmInsChoose(' + i + ')">' +
-      (s.kind === 'home' ? '🏠 ' : '') + escHtml(q ? labelForQuery(s, q) : s.picker) + '</button>').join('');
+      (s.kind === 'home' ? '🏠 ' : '') + escHtml(q ? labelForQuery(s, q) : s.picker) + (s._d != null ? '<small>' + (s._d < 0.1 ? 'right here' : s._d.toFixed(1) + ' mi away') + '</small>' : '') + '</button>').join('');
     if (q.length >= 3) tiles += '<button type="button" class="dm-tile" onclick="dmInsChooseTyped()">Use “' + escHtml(dmSearch.trim()) + '”<small>not in list, include the town</small></button>';
     body.innerHTML =
       '<div class="dm-last">Missed a stop during<br><b>' + dmLegName(L, 'from') + ' → ' + dmLegName(L, 'to') + '</b></div>' +
-      '<div class="dm-title">Which stop did you miss?</div>' +
+      '<div class="dm-title">Which stop did you miss?' + (dmGpsMsg ? ' <span style="color:#888;font-size:15px;">' + dmGpsMsg + '</span>' : '') + '</div>' +
       '<input class="dm-search" id="dmQ" placeholder="Search a store or city" value="' + escHtml(dmSearch) + '" oninput="dmSearchInput(this.value)" autocomplete="off">' +
       '<div class="dm-tiles">' + (tiles || '<div class="dm-title">No match</div>') + '</div>' +
       '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmInsCancel()">Back</button>';
@@ -2327,7 +2337,7 @@ let dmDelIdx = -1;
 // same doInsert the full log uses: with an odometer reading the split is exact, without one it is
 // estimated from the distance matrix and marked estimated.
 let dmInsIdx = -1, dmInsStop = null;
-function dmOpenIns(i) { dmInsIdx = i; dmInsStop = null; dmSearch = ''; dmDigits = ''; dmDelIdx = -1; dmStage = 'insPick'; dmRender(); }
+function dmOpenIns(i) { dmInsIdx = i; dmInsStop = null; dmSearch = ''; dmDigits = ''; dmDelIdx = -1; dmStage = 'insPick'; dmGetPos(); dmRender(); }
 function dmInsCancel() { dmInsIdx = -1; dmInsStop = null; dmDigits = ''; dmSearch = ''; dmStage = 'report'; dmRender(); }
 function dmInsBackToPick() { dmDigits = ''; dmStage = 'insPick'; dmRender(); }
 function dmInsChoose(i) {
