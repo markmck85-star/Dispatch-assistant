@@ -970,6 +970,27 @@ async function doMyStops(supabase, ctx, body) {
   return json(200, { ok: true, date, stops, message, techName: techName || '' });
 }
 
+// Live appointment status per work order, read from sa_live_status (filled by the report sync's status pass).
+// Reference only; best effort. Returns { woNumber: { status, changedAt, techName } }.
+async function sfStatusByWo(supabase, wos) {
+  const out = {};
+  const list = [...new Set((wos || []).filter(Boolean))];
+  try {
+    for (let i = 0; i < list.length; i += 150) {
+      const { data } = await supabase.from('sa_live_status')
+        .select('work_order, status, resource_name, sf_last_modified')
+        .in('work_order', list.slice(i, i + 150));
+      for (const r of data || []) {
+        const prev = out[r.work_order];
+        if (!prev || String(r.sf_last_modified || '') >= String(prev.changedAt || '')) {
+          out[r.work_order] = { status: r.status, changedAt: r.sf_last_modified, techName: r.resource_name || null };
+        }
+      }
+    }
+  } catch (e) { /* optional */ }
+  return out;
+}
+
 // ---------- dispatch summary (staff only, read only) ----------
 // Shows the app's own plan for a state and date (default or dispatcher-edited).
 // It is NOT a record of what is assigned in Salesforce. Technician logins get 403,
@@ -1040,6 +1061,9 @@ async function doDispatchSummary(supabase, ctx, body) {
     }
   }
 
+  const sfMap = await sfStatusByWo(supabase, Object.values(ticketById).map((t) => t.wo_number).concat(openTroubles.map((o) => o.woNumber)));
+  openTroubles.forEach((o) => { o.sf = (o.woNumber && sfMap[o.woNumber]) || null; });
+
   let updatedAt = null;
   const groups = {};
   mine.forEach((a) => {
@@ -1053,6 +1077,7 @@ async function doDispatchSummary(supabase, ctx, body) {
       siteCode: s.site_code, siteName: s.name, address: s.address,
       woNumber: t.wo_number || null, ticketKind: t.ticket_kind || null,
       due: t.ticket_kind === 'trouble' ? (t.sla_ends_at || t.due_at || null) : null,
+      sf: (t.wo_number && sfMap[t.wo_number]) || null,
     });
   });
   const techs = Object.values(groups);
