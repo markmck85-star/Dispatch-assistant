@@ -28,8 +28,8 @@
   input[type=text], input[type=password], input[type=search] { width:100%; padding:11px 12px; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
   button.primary { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:11px 16px; font-size:16px; cursor:pointer; margin-top:12px; }
   button.link { background:none; border:0; color:var(--brand); cursor:pointer; padding:0; font-size:inherit; text-decoration:underline; }
-  .tabs { display:flex; gap:6px; margin-bottom:12px; }
-  .tabs button { flex:1; padding:10px 4px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; font-size:14px; cursor:pointer; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; overflow-x:auto; }
+  .tabs button { flex:1 0 auto; white-space:nowrap; padding:10px 10px; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; font-size:14px; cursor:pointer; }
   .tabs button.on { background:var(--brand); color:#fff; border-color:var(--brand); }
   .err { color:var(--bad); font-size:14px; margin-top:8px; }
   .okmsg { color:var(--ok); font-size:14px; margin-top:8px; }
@@ -145,6 +145,7 @@
       <button id="tabShip" onclick="tab('Ship')">My shipments</button>
       <button id="tabWatch" onclick="tab('Watch')" class="hidden">Watchdog</button>
       <button id="tabSumm" onclick="tab('Summ')" class="hidden">Summary</button>
+      <button id="tabMileage" onclick="tab('Mileage')">Mileage</button>
       <button id="tabAcct" onclick="tab('Acct')">Account</button>
     </div>
 
@@ -228,6 +229,15 @@
       <div id="summList"></div>
     </section>
 
+    <section id="milePane" class="hidden">
+      <p class="muted">Keep your own mileage as you drive. It saves to your pay period and can be printed or exported. Optional: the spreadsheet is still official.</p>
+      <div id="mileBox">
+        <button class="primary" id="mileDrive" style="width:100%;padding:22px 10px;font-size:20px;margin-bottom:10px;">🚗 Driving mode (big buttons)</button>
+        <button id="mileOpen" style="width:100%;padding:14px 10px;font-size:16px;">Open the full mileage log</button>
+      </div>
+      <p class="muted hidden" id="mileNone">This login is not linked to a technician record yet, so the mileage log cannot open. Ask an admin to link it.</p>
+    </section>
+
     <section id="acctPane" class="hidden">
       <div class="card">
         <h2>Change password</h2>
@@ -246,7 +256,7 @@
 <script>
 (function () {
   var API = '/.netlify/functions/tech-api';
-  var SUMM_SEQ = 0, TOKEN = null, KIND = 't', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null, ME_WATCH_DATA = null;
+  var SUMM_SEQ = 0, TOKEN = null, KIND = 't', ME_TECH_ID = null, ME_NAME = '', ME_USER = '', STATE = null, WATCH_OK = false, WATCH_SEQ = 0, SHIP_TECH = '', SHIP_VIEW = 'rma', SHIP_DATA = null, ME_WATCH_DATA = null;
   var $ = function (id) { return document.getElementById(id); };
 
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -296,6 +306,10 @@
     $('appView').classList.remove('hidden');
     $('whoName').textContent = me.name;
     KIND = me.kind || 't';
+    ME_TECH_ID = me.technician_id || null;
+    ME_NAME = me.name || '';
+    $('mileBox').classList.toggle('hidden', !ME_TECH_ID);
+    $('mileNone').classList.toggle('hidden', !!ME_TECH_ID);
     var sts = me.states || [];
     STATE = null;
     SHIP_TECH = '';
@@ -311,7 +325,7 @@
     // Technicians keep Today first.
     (function () {
       var bar = $('tabToday').parentNode;
-      var order = KIND === 's' ? ['Summ', 'Watch', 'Sites', 'Ship', 'Today', 'Acct', 'Names'] : ['Today', 'Sites', 'Names', 'Ship', 'Acct', 'Watch', 'Summ'];
+      var order = KIND === 's' ? ['Summ', 'Watch', 'Sites', 'Ship', 'Today', 'Mileage', 'Acct', 'Names'] : ['Today', 'Mileage', 'Sites', 'Names', 'Ship', 'Acct', 'Watch', 'Summ'];
       order.forEach(function (n) { bar.appendChild($('tab' + n)); });
     })();
 
@@ -375,7 +389,7 @@
   };
 
   // ----- tabs -----
-  var PANES = { Today: 'todayPane', Sites: 'sitesPane', Names: 'namesPane', Ship: 'shipPane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
+  var PANES = { Today: 'todayPane', Sites: 'sitesPane', Names: 'namesPane', Ship: 'shipPane', Mileage: 'milePane', Watch: 'watchPane', Summ: 'summPane', Acct: 'acctPane' };
   function tab(name) {
     Object.keys(PANES).forEach(function (n) {
       $('tab' + n).classList.toggle('on', n === name);
@@ -389,6 +403,20 @@
     if (name === 'Watch') loadWatch();
     if (name === 'Summ') loadSumm();
   }
+  // Mileage tab: hands the signed-in person to the mileage log page (same site, same tab).
+  function openMileage(drive) {
+    if (!ME_TECH_ID) return;
+    try {
+      sessionStorage.setItem('dispatchUser', JSON.stringify({
+        username: ME_NAME, displayName: ME_NAME, name: ME_NAME, technician_id: ME_TECH_ID,
+        role: KIND === 's' ? 'staff' : 'tech'
+      }));
+      sessionStorage.setItem('mileageFromPortal', '1');
+    } catch (e) {}
+    location.href = '/mileage-log' + (drive ? '?drive=1' : '');
+  }
+  $('mileDrive').onclick = function () { openMileage(true); };
+  $('mileOpen').onclick = function () { openMileage(false); };
   $('stateSel').onchange = function () {
     STATE = $('stateSel').value;
     SHIP_TECH = '';
@@ -409,6 +437,7 @@
   $('tabShip').onclick = function () { tab('Ship'); };
   $('tabWatch').onclick = function () { tab('Watch'); };
   $('tabSumm').onclick = function () { tab('Summ'); };
+  $('tabMileage').onclick = function () { tab('Mileage'); };
   // (no Refresh button: tapping the highlighted Today/Tomorrow button reloads that day)
   $('summState').onchange = function () { loadSumm(); };
   $('summDate').onchange = function () { loadSumm(); };
