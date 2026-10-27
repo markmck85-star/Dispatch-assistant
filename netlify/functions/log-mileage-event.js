@@ -7,7 +7,7 @@ const { createClient } = require('@supabase/supabase-js');
 const ALLOWED = new Set([
   'gps_on', 'gps_off', 'gps_allowed', 'gps_denied', 'gps_unavailable',
   'stop_nearest', 'stop_listed', 'stop_typed', 'stop_home',
-  'estimate_used', 'odo_typed', 'drive_open', 'report_open', 'stop_deleted'
+  'estimate_used', 'odo_typed', 'drive_open', 'report_open', 'stop_deleted', 'stop_inserted'
 ]);
 
 function json(statusCode, obj) {
