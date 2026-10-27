@@ -23,6 +23,7 @@ const {
   findPlaceholderByAddress,
   flagPlaceholderForPromotion,
   flagInactiveSiteForActivation,
+  getOrCreateUnassignedTech,
 } = require("./lib/placeholder-sites");
 const { parseMileageWorkbookBuffer, evaluateMileageReport } = require("./lib/mileage-check.js");
 const { parseInventoryWorkbookBuffer, isInventorySheet, inspectInventoryAttachment } = require("./lib/inventory-sheet.js");
@@ -466,9 +467,18 @@ async function autoAddTicketToBoard({
         if (['trouble', 'maintenance', 'install', 'site_survey'].includes(ticketKind || 'trouble') && siteId) {
           try {
             const { data: siteDetail, error: siteDetailErr } = await supabase
-              .from('sites').select('primary_tech_id, state').eq('id', siteId).maybeSingle();
+              .from('sites').select('primary_tech_id, fallback_tech_id, state').eq('id', siteId).maybeSingle();
             if (siteDetailErr) console.error('[mailgun-inbound] site detail lookup failed:', siteDetailErr.message);
-            else if (siteDetail && siteDetail.primary_tech_id) {
+            else if (siteDetail) {
+              // 2026-10-27: a site with no primary technician used to get NO board entry at all (silently
+              // skipped), so a real ticket (NV Fallon DMV) never showed on its state's board. Fall back to
+              // the site's fallback tech, then the state's "Unassigned (New Site)" group, so it always shows
+              // and a dispatcher can assign it.
+              let baseTechId = siteDetail.primary_tech_id || siteDetail.fallback_tech_id || null;
+              if (!baseTechId && siteDetail.state) {
+                try { baseTechId = await getOrCreateUnassignedTech(supabase, siteDetail.state); }
+                catch (unErr) { console.error('[mailgun-inbound] unassigned-tech lookup failed:', unErr.message); }
+              }
               let dispatchDateStr;
               if (['maintenance', 'install', 'site_survey'].includes(ticketKind || 'trouble') && dueDateRaw) {
                 const dd = new Date(dueDateRaw);
@@ -645,7 +655,7 @@ async function autoAddTicketToBoard({
                   .insert({
                     dispatch_date: dispatchDateStr,
                     site_id: siteId,
-                    technician_id: onCallTechId || siteDetail.primary_tech_id,
+                    technician_id: onCallTechId || baseTechId,
                     assigned_by: 'auto',
                     status: 'planned',
                     ticket_id: newTicketId,
