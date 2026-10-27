@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.44): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.47): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -76,7 +76,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.44</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.47</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -164,7 +164,7 @@
   <div id="insertBox" class="card" style="display:none;">
     <div style="font-weight:600;color:#12325a;">Add a missed stop into a trip</div>
     <label>Stop</label>
-    <input id="insQ" placeholder="Type a city or store" oninput="searchStops('ins')" onfocus="focusStops('ins')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <input id="insQ" placeholder="Service location, home, or side trip (add the town)" oninput="searchStops('ins')" onfocus="focusStops('ins')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="insSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="insPicked"></div>
     <label>Which trip was it during?</label>
@@ -181,19 +181,19 @@
 
   <details class="card" id="missBox">
     <summary style="font-size:16px;font-weight:600;color:#12325a;">I missed a stop</summary>
-    <p class="muted">Forgot to write down a reading? Enter where you are now and the odometer. If you give the trip meter (reset at the missed stop) the reading is exact. Without it, the app splits the trip using the distance matrix and marks it estimated.</p>
+    <p class="muted">Forgot to log a stop? Enter the stop you missed, where you are now, and the odometer here. The app splits the trip using the distance matrix and marks the missed stop as an estimate. A stop is a service location, home, or a side trip that added real miles. Stops along your route, like gas or a quick errand, do not need to be logged. For a place not in the list, type it with the town.</p>
     <div id="missLast" class="muted"></div>
     <label>Missed stop</label>
-    <input id="missQ" placeholder="Type a city or store" oninput="searchStops('miss')" onfocus="focusStops('miss')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <input id="missQ" placeholder="Service location, home, or side trip (add the town)" oninput="searchStops('miss')" onfocus="focusStops('miss')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="missSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="missPicked"></div>
     <label>Where you are now</label>
-    <input id="hereQ" placeholder="Type a city or store" oninput="searchStops('here')" onfocus="focusStops('here')" autocomplete="off" style="width:100%;box-sizing:border-box;">
+    <input id="hereQ" placeholder="Service location, home, or side trip (add the town)" oninput="searchStops('here')" onfocus="focusStops('here')" autocomplete="off" style="width:100%;box-sizing:border-box;">
     <div id="hereSuggest" class="suggest" style="display:none;"></div>
     <div class="muted" id="herePicked"></div>
     <div class="row">
       <label>Odometer now <input id="hereOdo" type="text" inputmode="numeric" pattern="[0-9]*" style="width:120px;"></label>
-      <label>Trip meter (optional) <input id="tripMeter" type="text" inputmode="decimal" style="width:100px;"></label>
+      <label>Miles since the missed stop (optional) <input id="tripMeter" type="text" inputmode="decimal" style="width:100px;"></label>
     </div>
     <div class="row" style="margin-top:10px;"><button type="button" onclick="addMissedStop()">Add both stops</button></div>
     <div id="missMsg" class="flag" style="margin-top:8px;"></div>
@@ -2003,7 +2003,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.44) ----------
+// ---------- Driving mode (v0.47) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
