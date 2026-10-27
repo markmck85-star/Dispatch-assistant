@@ -51,7 +51,7 @@ exports.handler = async (event) => {
 
     const { data, error } = await supabase
       .from("assignments")
-      .select("status, assigned_by, sequence_order, locked, restock_form_counts, received_at, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review, attributes)")
+      .select("status, assigned_by, sequence_order, locked, restock_form_counts, received_at, sf_synced_at, sf_prev_tech, sites(site_code, state), technicians(name), tickets(id, wo_number, issue_category, issue_detail, ticket_kind, sla_ends_at, earliest_start_at, received_at, address, needs_review, attributes)")
       .eq("dispatch_date", dispatchDate);
 
     if (error) return json(500, { error: "Query failed: " + error.message });
@@ -81,6 +81,25 @@ exports.handler = async (event) => {
         });
       }
     }
+
+    // 2026-10-27: live Salesforce appointment status per work order (sa_live_status, filled by the report
+    // sync's status pass). Reference only: the board shows it as a chip. Best effort, never fails the call.
+    const sfByWo = {};
+    try {
+      const wos = [...new Set((data || []).map(row => row.tickets && row.tickets.wo_number).filter(Boolean))];
+      if (wos.length) {
+        const { data: sfRows } = await supabase
+          .from("sa_live_status")
+          .select("work_order, status, status_category, resource_name, sf_last_modified, actual_start, actual_end")
+          .in("work_order", wos);
+        for (const r of (sfRows || [])) {
+          const prev = sfByWo[r.work_order];
+          if (!prev || (r.sf_last_modified || "") >= (prev.changedAt || "")) {
+            sfByWo[r.work_order] = { status: r.status, category: r.status_category, techName: r.resource_name, changedAt: r.sf_last_modified, actualStart: r.actual_start, actualEnd: r.actual_end };
+          }
+        }
+      }
+    } catch (e) { /* status chips are optional */ }
 
     const assignments = (data || [])
       .filter(row => row.sites && row.technicians) // defensive: skip any row with a dangling reference
@@ -119,6 +138,11 @@ exports.handler = async (event) => {
           // Saturday on-call page show a real "confirmed" signal instead
           // of relying on the tech replying to the text itself.
           receivedAt: row.received_at || null,
+          // 2026-10-27: Salesforce appointment status for this ticket's work order (null when none seen), and,
+          // when the status sync moved this stop onto the technician Salesforce has it on, when and from whom.
+          sf: (row.tickets && sfByWo[row.tickets.wo_number]) || null,
+          sfSyncedAt: row.sf_synced_at || null,
+          sfPrevTech: row.sf_prev_tech || null,
           // 2026-09-17: restock form counts (LF/RF/Journal/consumables/etc),
           // persisted by save-assignment.js when a stop is first saved from
           // a fresh dispatch-list paste. Null for assignments saved before

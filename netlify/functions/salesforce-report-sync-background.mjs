@@ -765,8 +765,8 @@ export default async (req, context) => {
       const statusSettings = (await getStore('dispatch').get('settings/global', { type: 'json' })) || {};
       if (statusSettings.salesforceStatusSyncEnabled === true) {
         await setStage('Reading technician status');
-        statusSummary = await runStatusPass(page, supabase, {});
-        console.log(`[status-sync] ${statusSummary.ok ? 'OK' : 'FAILED'}: ${statusSummary.rowsSeen} appointments, ${statusSummary.matchedTechs} technicians matched${statusSummary.error ? ' -- ' + statusSummary.error : ''}`);
+        statusSummary = await runStatusPass(page, supabase, { matchAssignments: statusSettings.salesforceAssignmentMatch !== false });
+        console.log(`[status-sync] ${statusSummary.ok ? 'OK' : 'FAILED'}: ${statusSummary.rowsSeen} appointments, ${statusSummary.matchedTechs} technicians matched${statusSummary.assignmentsMoved ? ', ' + statusSummary.assignmentsMoved + ' assignment(s) moved to match Salesforce: ' + (statusSummary.moves || []).join('; ') : ''}${statusSummary.error ? ' -- ' + statusSummary.error : ''}`);
         if (!statusSummary.ok) {
           const lastRaw = await store.get('status-alert-sent').catch(() => null);
           const lastMs = lastRaw ? Number(lastRaw) : 0;
