@@ -31,15 +31,15 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.43): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.44): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
   #dm .dm-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-  #dm .dm-x { font-size:22px; padding:12px 18px; }
-  #dm .dm-stats { font-size:22px; font-weight:800; color:#f5f5f5; text-align:right; }
-  #dm .dm-stats span { color:#888; font-size:14px; font-weight:600; display:block; }
-  #dm .dm-last { background:#1a1a1a; border:1px solid #333; border-radius:14px; padding:14px; font-size:20px; margin-bottom:10px; }
+  #dm .dm-x { font-size:clamp(18px,4.6vw,34px); padding:clamp(10px,2.4vw,22px) clamp(14px,3.4vw,30px); }
+  #dm .dm-stats { font-size:clamp(20px,5vw,40px); font-weight:800; color:#f5f5f5; text-align:right; }
+  #dm .dm-stats span { color:#888; font-size:clamp(12px,3vw,22px); font-weight:600; display:block; }
+  #dm .dm-last { background:#1a1a1a; border:1px solid #333; border-radius:14px; padding:clamp(12px,3vw,22px); font-size:clamp(17px,4.4vw,32px); margin-bottom:10px; }
   #dm .dm-last b { color:#f59e0b; }
   #dm .dm-center { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; min-height:300px; }
   #dm .dm-big { width:56vw; height:56vw; min-width:210px; min-height:210px; max-width:520px; max-height:520px; border-radius:50% !important; background:#f59e0b !important; color:#000 !important; font-size:clamp(26px,7.5vw,56px); font-weight:900; letter-spacing:.5px; box-shadow:0 0 50px rgba(245,158,11,.30); transition:transform .1s; }
@@ -47,22 +47,22 @@
   #dm .dm-bigstats { display:flex; gap:40px; justify-content:center; text-align:center; }
   #dm .dm-bigstats .n { font-size:clamp(34px,9vw,60px); font-weight:800; font-variant-numeric:tabular-nums; line-height:1.1; }
   #dm .dm-bigstats .l { font-size:clamp(14px,3.6vw,24px); color:#888; }
-  #dm .dm-wide { width:100%; min-height:76px; font-size:26px; }
+  #dm .dm-wide { width:100%; min-height:clamp(66px,9vh,120px); font-size:clamp(22px,5.6vw,40px); }
   #dm .dm-go { background:#16a34a !important; color:#fff; }
   #dm .dm-go[disabled] { background:#2a2a2a !important; color:#666; }
   #dm .dm-amber { background:#f59e0b !important; color:#000 !important; }
-  #dm .dm-search { width:100%; font-size:26px; padding:16px; background:#262626; color:#fff; border:2px solid #444; border-radius:14px; margin-bottom:10px; box-sizing:border-box; }
+  #dm .dm-search { width:100%; font-size:clamp(22px,5.4vw,38px); padding:clamp(14px,3vw,24px); background:#262626; color:#fff; border:2px solid #444; border-radius:14px; margin-bottom:10px; box-sizing:border-box; }
   #dm .dm-tiles { display:grid; grid-template-columns:1fr; gap:10px; }
-  #dm .dm-tile { text-align:left; padding:18px 16px !important; font-size:24px; min-height:72px; background:#1f1f1f !important; border:1px solid #333 !important; font-weight:700 !important; }
-  #dm .dm-tile small { display:block; color:#888; font-size:15px; font-weight:500; margin-top:4px; }
+  #dm .dm-tile { text-align:left; padding:clamp(16px,3.6vw,28px) 16px !important; font-size:clamp(22px,5.4vw,38px); min-height:clamp(72px,10vh,120px); background:#1f1f1f !important; border:1px solid #333 !important; font-weight:700 !important; }
+  #dm .dm-tile small { display:block; color:#888; font-size:clamp(14px,3.4vw,24px); font-weight:500; margin-top:4px; }
   #dm .dm-tile.home { background:#7c2d12 !important; border-color:#f97316 !important; }
-  #dm .dm-title { font-size:20px; color:#aaa; margin:6px 0; }
-  #dm .dm-readout { font-size:56px; font-weight:900; text-align:center; letter-spacing:2px; margin:6px 0; font-variant-numeric:tabular-nums; }
+  #dm .dm-title { font-size:clamp(18px,4.4vw,30px); color:#aaa; margin:6px 0; }
+  #dm .dm-readout { font-size:clamp(56px,14vw,120px); font-weight:900; text-align:center; letter-spacing:2px; margin:6px 0; font-variant-numeric:tabular-nums; }
   #dm .dm-readout .ph { color:#555; }
-  #dm .dm-hint { text-align:center; color:#fbbf24; font-size:20px; min-height:28px; margin-bottom:6px; }
+  #dm .dm-hint { text-align:center; color:#fbbf24; font-size:clamp(18px,4.4vw,32px); min-height:1.4em; margin-bottom:6px; }
   #dm .dm-hint.bad { color:#f87171; }
-  #dm .dm-pad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0; }
-  #dm .dm-pad button { height:62px; font-size:34px; background:#262626; }
+  #dm .dm-pad { display:grid; grid-template-columns:repeat(3,1fr); grid-auto-rows:1fr; gap:10px; margin:6px 0; flex:1; min-height:300px; }
+  #dm .dm-pad button { height:auto; min-height:clamp(60px,9vh,120px); font-size:clamp(34px,9vw,72px); background:#262626; }
   #dm .dm-pad button:active { background:#444; }
   #dm .dm-toast { position:absolute; left:14px; right:14px; bottom:14px; background:#14532d; border-radius:14px; padding:14px; font-size:20px; display:none; justify-content:space-between; align-items:center; gap:10px; }
   #dm .dm-toast button { padding:10px 16px; font-size:18px; background:#0b3a1f; }
@@ -76,7 +76,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.43</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.44</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2003,7 +2003,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.43) ----------
+// ---------- Driving mode (v0.44) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2124,9 +2124,9 @@ function dmRender() {
       '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG STOP</button>' +
       '<div class="dm-bigstats"><div><div class="n">' + dmTodayMiles().toLocaleString() + '</div><div class="l">miles today</div></div>' +
       '<div><div class="n">' + dmTodayLegs().length + '</div><div class="l">stops today</div></div></div></div>' +
-      '<div class="dm-last" style="margin-top:8px;font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
-      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:14px;">' + (dmGpsOn ? 'On. Checks your location for a moment each time you tap LOG STOP. Nothing is saved.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
-      '<button type="button" onclick="dmToggleGps()" style="min-width:84px;padding:12px 14px;font-size:18px;background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
+      '<div class="dm-last" style="margin-top:8px;font-size:clamp(16px,4vw,30px);display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
+      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Checks your location for a moment each time you tap LOG STOP. Nothing is saved.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
+      '<button type="button" onclick="dmToggleGps()" style="min-width:clamp(84px,20vw,150px);padding:clamp(12px,3vw,24px) 14px;font-size:clamp(18px,4.6vw,34px);background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
       '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
   } else if (dmStage === 'pick') {
     const q = dmSearch.toLowerCase().trim();
@@ -2182,15 +2182,15 @@ function dmRender() {
     }
     const ok = full != null && (isStart || (odo !== '' && full >= Number(odo)));
     const matrixBtn = (!isStart && expectedMi != null && odo)
-      ? '<button type="button" class="dm-wide dm-amber" style="min-height:60px;font-size:20px;" onclick="dmUseMatrix()">About ' + expectedMi + ' mi · Use ' + dmFmt(Number(odo) + expectedMi) + '?</button>' : '';
+      ? '<button type="button" class="dm-wide dm-amber" style="min-height:clamp(64px,9vh,110px);font-size:clamp(20px,5vw,34px);" onclick="dmUseMatrix()">About ' + expectedMi + ' mi · Use ' + dmFmt(Number(odo) + expectedMi) + '?</button>' : '';
     body.innerHTML =
       '<div class="dm-last">' + (isStart ? 'Starting at <b>' + escHtml(from) + '</b>' : escHtml(from) + ' → <b>' + escHtml(picked.to ? picked.to.picker : '') + '</b>') + '</div>' +
       '<div class="dm-title" style="text-align:center;">' + (isStart ? 'Odometer now' : 'Odometer at this stop') + '</div>' +
       '<div class="dm-readout">' + readout + '</div>' +
-      '<button type="button" class="dm-wide" style="min-height:56px;font-size:20px;margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening…' : (autoPrefix && !isStart ? '🎙 Say the last 3 digits' : '🎙 Say the odometer')) + '</button>' +
+      '<button type="button" class="dm-wide" style="min-height:clamp(60px,8vh,100px);font-size:clamp(20px,5vw,34px);margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening…' : (autoPrefix && !isStart ? '🎙 Say the last 3 digits' : '🎙 Say the odometer')) + '</button>' +
       '<div class="dm-hint' + (bad ? ' bad' : '') + '">' + hint + '</div>' +
       '<div class="dm-pad">' + [1,2,3,4,5,6,7,8,9].map(n => '<button type="button" onclick="dmKey(' + n + ')">' + n + '</button>').join('') +
-      '<button type="button" onclick="dmBack()" style="font-size:22px;">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
+      '<button type="button" onclick="dmBack()" style="font-size:clamp(20px,5vw,36px);">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
       matrixBtn +
       '<button type="button" class="dm-wide dm-go" ' + (ok ? '' : 'disabled') + ' onclick="' + (isStart ? 'dmSaveStart()' : 'dmSave()') + '" style="margin-top:10px;">' + (isStart ? 'CONTINUE' : 'SAVE STOP') + '</button>';
   }
