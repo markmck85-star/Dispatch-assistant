@@ -198,7 +198,13 @@ function isHomeLabel(rawLabel, homeAddress, homeAliases) {
 function isHomeCityOnlyLabel(rawLabel, homeAddress) {
   const label = normalizePlaceLabel(rawLabel).toLowerCase();
   const city = homeCityFromAddress(homeAddress);
-  return !!(label && city && (label === city || label === city.replace(/\s+/g, '')));
+  if (!label || !city) return false;
+  const squashed = city.replace(/\s+/g, '');
+  if (label === city || label === squashed) return true;
+  // 2026-10-26: a clipped or mistyped city ("greenwoo" for Greenwood) is still just the city name. It said
+  // "home" on both ends of a Greenwood technician's trip to the Greenwood site, so a 4 mile run read as 0.
+  if (label.length >= 5 && !/\d/.test(label) && (city.startsWith(label) || squashed.startsWith(label) || withinOneEdit(label, city) || withinOneEdit(label, squashed))) return true;
+  return false;
 }
 
 function isErrandLabel(rawLabel) {
