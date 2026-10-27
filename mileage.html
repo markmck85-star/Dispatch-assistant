@@ -175,6 +175,11 @@ function reportDetailHtml(r) {
     if (judged.length >= 3 && sumE > 0 && sumC / sumE >= 1.35 && highDays >= 3) {
       h += '<div class="plain">Claimed miles are above the expected distance on ' + highDays + " of " + judged.length + " days (" +
         Math.round(sumC) + " mi claimed vs about " + Math.round(sumE) + " mi expected, " + (Math.round((sumC / sumE) * 100) / 100) + "x). No single day is far enough off to flag, but the whole period runs high.</div>";
+    } else if (judged.length >= 3 && sumE > 0 && sumC / sumE >= 0.9 && sumC / sumE <= 1.15 && !days.some((d) => d.flagged)) {
+      // the other half of the same picture: the period as a whole matches the known distances, even if one hop is off
+      const close = judged.filter((d) => d.c / d.e >= 0.85 && d.c / d.e <= 1.15).length;
+      h += '<div class="plain"><strong>Overall the miles add up:</strong> ' + Math.round(sumC) + " mi claimed vs about " + Math.round(sumE) + " mi expected (" +
+        (Math.round((sumC / sumE) * 100) / 100) + "x), and no day is flagged. " + close + " of " + judged.length + " days land within 15% of expected.</div>";
     }
   }
   const flaggedDays = days.filter((d) => d.flagged);
