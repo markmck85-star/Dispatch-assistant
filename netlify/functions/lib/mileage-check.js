@@ -291,14 +291,32 @@ function withinOneEdit(a, b) {
   return edits + (a.length - i) + (b.length - j) <= 1;
 }
 
+// 2026-10-26: what KIND of place a name describes, when it says so: a government office (tag office, DMV,
+// tax collector...) or a store (grocery, pharmacy...). A technician's "Tag Office Abercorn" was matched to
+// "Publix - Abercorn" because the street name was the only word in common. A government office is never
+// a grocery store, so a name that clearly says one kind is not matched to a site that clearly says the
+// other. A name that says neither (or both) is judged on its words alone, as before.
+const GOV_KIND = /\b(tag|tags|tax|dmv|bmv|dds|license|licence|licensing|courthouse|county clerk|secretary of state|motor vehicle|motor vehicles)\b/;
+const STORE_KIND = /\b(kroger|publix|meijer|jewel|jewel osco|mariano|marianos|safeway|walmart|ingles|food lion|fred meyer|albertsons|giant eagle|hy vee|hyvee|schnucks|harris teeter|king soopers|winn dixie|piggly wiggly|big y|stop and shop|shoprite|sprouts|aldi|costco|sams club|target|walgreens|cvs|rite aid|grocery|supermarket|pharmacy)\b/;
+function placeKind(name) {
+  const n = String(name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ');
+  const gov = GOV_KIND.test(n), store = STORE_KIND.test(n);
+  if (gov && !store) return 'gov';
+  if (store && !gov) return 'store';
+  return null;
+}
+
 function matchSiteByName(rawName, candidateSites) {
   const targetTokens = tokenize(rawName);
   if (!targetTokens.length) return null;
+  const targetKind = placeKind(rawName);
   const targetWeight = weightedTokenSum(targetTokens);
   let best = null, bestScore = 0;
   for (const site of candidateSites) {
     const namesToTry = [site.name, ...(site.aliases || [])];
     for (const candidateName of namesToTry) {
+      const candKind = targetKind ? placeKind(candidateName) : null;
+      if (targetKind && candKind && candKind !== targetKind) continue;
       const siteTokens = tokenize(candidateName);
       const setA = new Set(targetTokens), setB = new Set(siteTokens);
       const intersectionTokens = [...setA].filter((t) => setB.has(t) || [...setB].some((u) => withinOneEdit(t, u)));
