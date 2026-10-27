@@ -60,27 +60,20 @@ function extractServices(bodyText) {
 async function runStatusPass(page, supabase, opts) {
   const started = Date.now();
   const summary = { ok: false, rowsSeen: 0, matchedTechs: 0, statuses: {}, error: null };
-  let tab = null, ctx2 = null;
+  let tab = null, onResp = null;
   try {
-    // The sync opens its page with browser.newPage(), whose context cannot make another page, so make a
-    // separate context carrying the same signed-in cookies and open the Gantt page in that.
-    const state = await page.context().storageState();
-    ctx2 = await page.context().browser().newContext({
-      storageState: state,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      viewport: { width: 1920, height: 1080 },
-    });
-    await ctx2.addInitScript(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
-    tab = await ctx2.newPage();
-    tab.setDefaultTimeout(30000);
+    // Use the sync's own signed-in page: after the report import nothing else needs it (the closing-notes
+    // pass navigates for itself). A separate browser context did not receive the Gantt data.
+    tab = page;
     const bodies = [];
     const pending = [];
-    tab.on('response', (resp) => {
+    onResp = (resp) => {
       if (!/\/dispatchconsole\/apexremote/.test(resp.url())) return;
       pending.push((async () => {
         try { const t = await resp.text(); if (t && t.includes('FSL.ctrl001_Gantt')) bodies.push(t); } catch (e) { /* ignore */ }
       })());
-    });
+    };
+    tab.on('response', onResp);
     try { await tab.goto(HOME_URL, { waitUntil: 'commit' }); } catch (e) { /* often benign */ }
 
     // wait for the Gantt's data calls (up to ~50 s), then a short settle for the second call
@@ -102,7 +95,7 @@ async function runStatusPass(page, supabase, opts) {
       }
     }
     summary.rowsSeen = rows.size;
-    if (!rows.size) throw new Error(got ? 'The Gantt responded but no appointments could be read from it (format may have changed).' : 'The Gantt data calls never arrived (page did not load the Gantt).');
+    if (!rows.size) throw new Error(got ? 'The Gantt responded but no appointments could be read from it (format may have changed).' : 'The Gantt data calls never arrived (page did not load the Gantt; ended on ' + String(tab.url()).slice(0, 120) + (await tab.locator('#username').count().catch(() => 0) ? ', which is a sign-in page' : '') + ').');
 
     // match technicians by name
     const { data: techs } = await supabase.from('technicians').select('id, name').eq('active', true);
@@ -130,8 +123,7 @@ async function runStatusPass(page, supabase, opts) {
   } catch (e) {
     summary.error = e.message;
   } finally {
-    if (tab) { try { await tab.close(); } catch (e) { /* ignore */ } }
-    if (ctx2) { try { await ctx2.close(); } catch (e) { /* ignore */ } }
+    if (tab && onResp) { try { tab.off('response', onResp); } catch (e) { /* ignore */ } }
   }
   try {
     await supabase.from('sa_status_sync_runs').insert({
