@@ -31,12 +31,49 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
+  /* Driving mode (v0.38): big dark screens for a phone in a car mount */
+  #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
+  #dm.open { display:flex; }
+  #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
+  #dm .dm-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  #dm .dm-x { font-size:22px; padding:12px 18px; }
+  #dm .dm-stats { font-size:22px; font-weight:800; color:#f5f5f5; text-align:right; }
+  #dm .dm-stats span { color:#888; font-size:14px; font-weight:600; display:block; }
+  #dm .dm-last { background:#1a1a1a; border:1px solid #333; border-radius:14px; padding:14px; font-size:20px; margin-bottom:10px; }
+  #dm .dm-last b { color:#f59e0b; }
+  #dm .dm-center { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; min-height:300px; }
+  #dm .dm-big { width:min(72vw,300px); height:min(72vw,300px); border-radius:50% !important; background:#f97316 !important; color:#000 !important; font-size:40px; letter-spacing:1px; box-shadow:0 0 0 10px rgba(249,115,22,.18); }
+  #dm .dm-big:active { background:#ea580c !important; }
+  #dm .dm-wide { width:100%; min-height:76px; font-size:26px; }
+  #dm .dm-go { background:#16a34a !important; color:#fff; }
+  #dm .dm-go[disabled] { background:#2a2a2a !important; color:#666; }
+  #dm .dm-amber { background:#f59e0b !important; color:#000 !important; }
+  #dm .dm-search { width:100%; font-size:26px; padding:16px; background:#262626; color:#fff; border:2px solid #444; border-radius:14px; margin-bottom:10px; box-sizing:border-box; }
+  #dm .dm-tiles { display:grid; grid-template-columns:1fr; gap:10px; }
+  #dm .dm-tile { text-align:left; padding:18px 16px !important; font-size:24px; min-height:72px; background:#1f1f1f !important; border:1px solid #333 !important; font-weight:700 !important; }
+  #dm .dm-tile small { display:block; color:#888; font-size:15px; font-weight:500; margin-top:4px; }
+  #dm .dm-tile.home { background:#7c2d12 !important; border-color:#f97316 !important; }
+  #dm .dm-title { font-size:20px; color:#aaa; margin:6px 0; }
+  #dm .dm-readout { font-size:56px; font-weight:900; text-align:center; letter-spacing:2px; margin:6px 0; font-variant-numeric:tabular-nums; }
+  #dm .dm-readout .ph { color:#555; }
+  #dm .dm-hint { text-align:center; color:#fbbf24; font-size:20px; min-height:28px; margin-bottom:6px; }
+  #dm .dm-hint.bad { color:#f87171; }
+  #dm .dm-pad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:6px 0; }
+  #dm .dm-pad button { height:62px; font-size:34px; background:#262626; }
+  #dm .dm-pad button:active { background:#444; }
+  #dm .dm-toast { position:absolute; left:14px; right:14px; bottom:14px; background:#14532d; border-radius:14px; padding:14px; font-size:20px; display:none; justify-content:space-between; align-items:center; gap:10px; }
+  #dm .dm-toast button { padding:10px 16px; font-size:18px; background:#0b3a1f; }
+  #dm.light { background:#fafafa; color:#111; }
+  #dm.light .dm-last, #dm.light .dm-tile { background:#fff !important; color:#111 !important; border-color:#bbb !important; }
+  #dm.light .dm-pad button, #dm.light button { background:#e5e7eb; color:#111; }
+  #dm.light .dm-search { background:#fff; color:#111; border-color:#888; }
+  #dm.light .dm-stats, #dm.light .dm-readout { color:#111; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.min.js"></script>
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.36</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.38</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -45,6 +82,7 @@
   </div>
   <div id="appBox" style="display:none;">
   <div id="who" class="muted"></div>
+  <button type="button" onclick="dmOpen()" style="width:100%;font-size:22px;font-weight:800;padding:18px;margin:8px 0;background:#f97316;color:#000;border-radius:12px;">🚗 Driving mode (big buttons)</button>
   <div class="row">
     <label>Suggest sites in
       <select id="siteState" onchange="loadContext()">
@@ -167,6 +205,16 @@
   </div>
   <p class="muted">If you cannot use this page, turn in the mileage spreadsheet as usual.</p>
   <p><button type="button" class="secondary" onclick="doLogout()">Log out</button></p>
+  </div>
+
+  <div id="dm" role="dialog" aria-label="Driving mode">
+    <div class="dm-top">
+      <button type="button" class="dm-x" onclick="dmClose()">✕ Exit</button>
+      <button type="button" class="dm-x" id="dmTheme" onclick="dmToggleTheme()">☀ Light</button>
+      <div class="dm-stats" id="dmStats"></div>
+    </div>
+    <div id="dmBody" style="display:flex;flex-direction:column;flex:1;"></div>
+    <div class="dm-toast" id="dmToast"></div>
   </div>
 
 <script>
@@ -404,7 +452,9 @@ function homeStop() {
     kind: 'home',
     id: 'home',
     picker: ctx.technician.home_label_picker,
-    print: ctx.technician.home_label_print
+    print: ctx.technician.home_label_print,
+    lat: ctx.technician.lat,
+    lng: ctx.technician.lng
   };
 }
 
@@ -449,7 +499,9 @@ function allStops() {
       picker: brief,
       print: brief,
       search: (s.site_code + ' ' + s.name + ' ' + aliases + ' ' + brief + ' ' + (s.sst_name || '')).toLowerCase(),
-      usual: s.usual
+      usual: s.usual,
+      lat: s.lat,
+      lng: s.lng
     });
   };
   (ctx.sites_usual || []).forEach(push);
@@ -1945,6 +1997,308 @@ function printLog() {
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
+}
+
+// ---------- Driving mode (v0.38) ----------
+// A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
+// calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
+let dmStage = 'home';      // home | pick | start | end
+let dmDigits = '';
+let dmSearch = '';
+let dmToastTimer = null;
+let dmPos = null;          // { lat, lng } from the phone's GPS, used only to rank the stop list
+let dmListening = false;
+let dmRec = null;
+
+function dmMiles(a, b) {
+  const R = 3958.8, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function dmDistTo(s) {
+  if (!dmPos || s.lat == null || s.lng == null || !Number.isFinite(Number(s.lat))) return null;
+  return dmMiles(dmPos, { lat: Number(s.lat), lng: Number(s.lng) });
+}
+
+function dmGetPos() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (p) => { dmPos = { lat: p.coords.latitude, lng: p.coords.longitude }; if (dmStage === 'pick') dmRender(); },
+    () => {},
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  );
+}
+
+function dmVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { dmToastMsg('Voice is not available in this browser.'); return; }
+  if (dmListening && dmRec) { try { dmRec.stop(); } catch (e) {} return; }
+  const r = new SR();
+  r.lang = 'en-US'; r.continuous = false; r.interimResults = false;
+  r.onresult = (ev) => {
+    const digits = String(ev.results[0][0].transcript).replace(/\D/g, '');
+    if (digits) { dmDigits = digits.slice(0, 7); }
+  };
+  r.onend = () => { dmListening = false; dmRec = null; dmRender(); };
+  r.onerror = () => { dmListening = false; dmRec = null; dmRender(); };
+  dmRec = r; dmListening = true;
+  try { r.start(); } catch (e) { dmListening = false; }
+  dmRender();
+}
+
+function dmFmt(n) { return (n == null || n === '') ? '' : Number(n).toLocaleString(); }
+
+function dmOpen() {
+  if (!ctx) { alert('Still loading. Try again in a moment.'); return; }
+  const today = todayLocal();
+  const s = document.getElementById('periodStart').value, e = document.getElementById('periodEnd').value;
+  if (today >= s && today <= e) {
+    document.getElementById('legDate').value = today;
+    onLegDateChange();
+  }
+  try { if (localStorage.getItem('dmLight') === '1') document.getElementById('dm').classList.add('light'); } catch (er) {}
+  document.getElementById('dm').classList.add('open');
+  dmStage = 'home';
+  dmGetPos();
+  dmRender();
+}
+
+function dmClose() {
+  document.getElementById('dm').classList.remove('open');
+  renderLegs();
+}
+
+function dmToggleTheme() {
+  const el = document.getElementById('dm');
+  el.classList.toggle('light');
+  try { localStorage.setItem('dmLight', el.classList.contains('light') ? '1' : '0'); } catch (er) {}
+  document.getElementById('dmTheme').textContent = el.classList.contains('light') ? '🌙 Dark' : '☀ Light';
+}
+
+function dmTodayLegs() {
+  const d = document.getElementById('legDate').value;
+  return legs.filter(l => l.date === d);
+}
+
+function dmStatsHtml() {
+  const t = dmTodayLegs();
+  const mi = t.reduce((s, l) => s + (typeof l.miles === 'number' ? l.miles : 0), 0);
+  return mi.toLocaleString() + ' mi<span>' + t.length + ' stop' + (t.length === 1 ? '' : 's') + ' today</span>';
+}
+
+function dmRender() {
+  document.getElementById('dmStats').innerHTML = dmStatsHtml();
+  const body = document.getElementById('dmBody');
+  const from = picked.from ? picked.from.picker : 'Home';
+  const odo = document.getElementById('odoStart').value;
+  if (dmStage === 'home') {
+    const date = document.getElementById('legDate').value;
+    const off = date !== todayLocal();
+    body.innerHTML =
+      '<div class="dm-last">' + (off ? '<b>' + weekdayLabel(date) + '</b> (not today)<br>' : '') +
+      'Last: <b>' + escHtml(from) + '</b>' + (odo ? ' at <b>' + dmFmt(odo) + '</b>' : ' (no reading yet)') + '</div>' +
+      '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG<br>STOP</button>' +
+      '<div class="dm-title">Tap when you arrive</div></div>' +
+      '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
+  } else if (dmStage === 'pick') {
+    const q = dmSearch.toLowerCase().trim();
+    let list = allStops().filter(s => s.id !== 'other');
+    if (q) list = list.filter(s => (s.search || s.picker.toLowerCase()).indexOf(q) !== -1);
+    list = list.filter(s => !(picked.from && picked.from.kind === 'site' && s.kind === 'site' && s.id === picked.from.id));
+    list.forEach(s => { s._d = dmDistTo(s); });
+    if (!q && dmPos) {
+      // GPS known: places within about a mile come first, nearest first, then the usual order
+      list.sort((a, b) => {
+        const an = a._d != null && a._d <= 1, bn = b._d != null && b._d <= 1;
+        if (an !== bn) return an ? -1 : 1;
+        if (an && bn) return a._d - b._d;
+        return (b.kind === 'home') - (a.kind === 'home') || (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0);
+      });
+    } else {
+      list.sort((a, b) => (b.kind === 'home') - (a.kind === 'home') || (b.recent ? 1 : 0) - (a.recent ? 1 : 0) || (b.usual ? 1 : 0) - (a.usual ? 1 : 0));
+    }
+    list = list.slice(0, q ? 12 : 10);
+    dmHits = list;
+    let tiles = list.map((s, i) => '<button type="button" class="dm-tile' + (s.kind === 'home' ? ' home' : '') + '" onclick="dmChoose(' + i + ')">' +
+      (s.kind === 'home' ? '🏠 ' : (!q && s._d != null && s._d <= 1 ? '📍 ' : '')) + escHtml(q ? labelForQuery(s, q) : s.picker) + (s._d != null && s._d <= 5 ? '<small>' + (s._d < 0.1 ? 'right here' : s._d.toFixed(1) + ' mi away') + '</small>' : (s.recent ? '<small>used before</small>' : '')) + '</button>').join('');
+    if (q.length >= 3) tiles += '<button type="button" class="dm-tile" onclick="dmChooseTyped()">Use “' + escHtml(dmSearch.trim()) + '”<small>not in list, include the town</small></button>';
+    body.innerHTML =
+      '<div class="dm-title">Where are you?</div>' +
+      '<input class="dm-search" id="dmQ" placeholder="Search a store or city" value="' + escHtml(dmSearch) + '" oninput="dmSearchInput(this.value)" autocomplete="off">' +
+      '<div class="dm-tiles">' + (tiles || '<div class="dm-title">No match</div>') + '</div>' +
+      '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmBack()">Back</button>';
+  } else {
+    const isStart = dmStage === 'start';
+    const prefix = (!isStart && autoPrefix) ? autoPrefix : '';
+    let shown;
+    if (isStart) shown = dmDigits || '';
+    else if (prefix && dmDigits.length <= 3) shown = prefix + dmDigits;
+    else shown = dmDigits;
+    let readout;
+    if (prefix && dmDigits.length <= 3) {
+      const rest = (dmDigits + '___').slice(0, 3).replace(/_/g, '<span class="ph">_</span>');
+      readout = prefix + rest;
+    } else readout = shown ? dmFmt(shown) : '<span class="ph">_ _ _ _ _ _</span>';
+    let hint = '', bad = false;
+    if (isStart) hint = 'Starting odometer at ' + escHtml(from);
+    else if (expectedMi != null && odo) hint = 'About ' + expectedMi + ' mi, near ' + dmFmt(Number(odo) + expectedMi);
+    else hint = 'Type the odometer';
+    const full = dmFull();
+    if (!isStart && full != null && odo) {
+      const m = full - Number(odo);
+      if (m < 0) { hint = 'Odometer went down. Check it.'; bad = true; }
+      else if (m > 400) { hint = m + ' mi. Extra digit?'; bad = true; }
+      else if (expectedMi != null && m > expectedMi + 50) { hint = m + ' mi vs about ' + expectedMi + '. Glance at it.'; }
+      else hint = m + ' mi';
+    }
+    const ok = full != null && (isStart || (odo !== '' && full >= Number(odo)));
+    const matrixBtn = (!isStart && expectedMi != null && odo)
+      ? '<button type="button" class="dm-wide dm-amber" style="min-height:60px;font-size:20px;" onclick="dmUseMatrix()">No reading? Use ' + dmFmt(Number(odo) + expectedMi) + ' (estimate)</button>' : '';
+    body.innerHTML =
+      '<div class="dm-last">' + (isStart ? 'Starting at <b>' + escHtml(from) + '</b>' : escHtml(from) + ' → <b>' + escHtml(picked.to ? picked.to.picker : '') + '</b>') + '</div>' +
+      '<div class="dm-title" style="text-align:center;">' + (isStart ? 'Odometer now' : 'Odometer at this stop') + '</div>' +
+      '<div class="dm-readout">' + readout + '</div>' +
+      '<button type="button" class="dm-wide" style="min-height:56px;font-size:20px;margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening… say the numbers' : '🎙 Say the odometer') + '</button>' +
+      '<div class="dm-hint' + (bad ? ' bad' : '') + '">' + hint + '</div>' +
+      '<div class="dm-pad">' + [1,2,3,4,5,6,7,8,9].map(n => '<button type="button" onclick="dmKey(' + n + ')">' + n + '</button>').join('') +
+      '<button type="button" onclick="dmBack()" style="font-size:22px;">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
+      matrixBtn +
+      '<button type="button" class="dm-wide dm-go" ' + (ok ? '' : 'disabled') + ' onclick="' + (isStart ? 'dmSaveStart()' : 'dmSave()') + '" style="margin-top:10px;">' + (isStart ? 'CONTINUE' : 'SAVE STOP') + '</button>';
+  }
+}
+let dmHits = [];
+
+function dmFull() {
+  if (!dmDigits) return null;
+  if (dmStage === 'end' && autoPrefix && dmDigits.length <= 3) {
+    return dmDigits.length === 3 ? Number(autoPrefix + dmDigits) : null;
+  }
+  return Number(dmDigits);
+}
+
+function dmKey(k) {
+  if (k === 'x') dmDigits = dmDigits.slice(0, -1);
+  else if (dmDigits.length < 7) dmDigits += String(k);
+  dmRender();
+}
+
+function dmSearchInput(v) {
+  dmSearch = v;
+  dmRender();
+  const el = document.getElementById('dmQ');
+  if (el) { el.focus(); try { el.setSelectionRange(v.length, v.length); } catch (e) {} }
+}
+
+function dmGoPick() { dmSearch = ''; dmStage = 'pick'; dmGetPos(); dmRender(); }
+
+function dmBack() {
+  if (dmStage === 'end' || dmStage === 'start') {
+    picked.to = null; expectedMi = null; autoPrefix = '';
+    document.getElementById('odoEnd').value = '';
+    dmDigits = '';
+    dmStage = 'pick';
+  } else dmStage = 'home';
+  dmRender();
+}
+
+function dmSetTo(stop) {
+  picked.to = stop;
+  document.getElementById('toQ').value = stop.print || stop.picker || '';
+  document.getElementById('toPicked').textContent = 'Using: ' + (stop.picker || '');
+  document.getElementById('odoEnd').value = '';
+  autoPrefix = '';
+  dmDigits = '';
+}
+
+async function dmAfterPick() {
+  const odo = document.getElementById('odoStart').value;
+  if (odo === '') { dmStage = 'start'; dmDigits = ''; dmRender(); return; }
+  dmStage = 'end';
+  dmRender();
+  await refreshExpected(false);   // also fills the leading digits (autoPrefix) from the matrix
+  dmRender();
+}
+
+async function dmChoose(i) {
+  const s = dmHits[i];
+  if (!s) return;
+  let stop;
+  if (s.recent) stop = { kind: 'other', id: null, picker: s.picker, print: s.print };
+  else {
+    const q = dmSearch.toLowerCase().trim();
+    const label = labelForQuery(s, q);
+    stop = Object.assign({}, s, { picker: label, print: label });
+  }
+  dmSetTo(stop);
+  if (picked.from && picked.from.kind === 'home' && stop.kind === 'home') { dmToastMsg('You are already home.'); dmStage = 'home'; dmRender(); return; }
+  await dmAfterPick();
+}
+
+async function dmChooseTyped() {
+  const t = dmSearch.trim();
+  dmSetTo({ kind: 'other', id: null, picker: t, print: t });
+  await dmAfterPick();
+}
+
+async function dmEndDay() {
+  if (picked.from && picked.from.kind === 'home') { dmToastMsg('You are already home.'); return; }
+  dmSetTo(homeStop());
+  await dmAfterPick();
+}
+
+async function dmSaveStart() {
+  const full = dmFull();
+  if (full == null) return;
+  document.getElementById('odoStart').value = String(full);
+  onOdoStartInput();
+  dmDigits = '';
+  dmStage = 'end';
+  dmRender();
+  await refreshExpected(false);
+  dmRender();
+}
+
+async function dmSave() {
+  const full = dmFull();
+  if (full == null) return;
+  document.getElementById('odoEnd').value = String(full);
+  onOdoEndInput();
+  await dmFinish(false);
+}
+
+async function dmUseMatrix() {
+  useMatrixEnd();
+  if (!document.getElementById('odoEnd').value) return;
+  await dmFinish(true);
+}
+
+async function dmFinish(est) {
+  const before = legs.length;
+  const name = picked.to ? picked.to.picker : '';
+  await addLeg();
+  if (legs.length <= before) { dmStage = 'home'; dmRender(); return; }
+  const idx = legs.length - 1, leg = legs[idx];
+  dmDigits = '';
+  dmStage = 'home';
+  dmRender();
+  dmToastMsg('Logged ' + name + ' · ' + (leg.miles != null ? leg.miles + ' mi' : '') + (est ? ' (estimate)' : ''), () => { if (legs[idx] === leg) { removeLeg(idx); dmRender(); } });
+}
+
+function dmToastMsg(text, undoFn) {
+  const el = document.getElementById('dmToast');
+  el.innerHTML = '<span></span>';
+  el.firstChild.textContent = text;
+  if (undoFn) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = 'Undo';
+    b.onclick = () => { undoFn(); el.style.display = 'none'; };
+    el.appendChild(b);
+  }
+  el.style.display = 'flex';
+  clearTimeout(dmToastTimer);
+  dmToastTimer = setTimeout(() => { el.style.display = 'none'; }, 12000);
 }
 
 initPeriod();
