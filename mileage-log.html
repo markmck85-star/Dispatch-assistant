@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.42): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.43): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -76,7 +76,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.42</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.43</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2003,7 +2003,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.42) ----------
+// ---------- Driving mode (v0.43) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2182,7 +2182,7 @@ function dmRender() {
     }
     const ok = full != null && (isStart || (odo !== '' && full >= Number(odo)));
     const matrixBtn = (!isStart && expectedMi != null && odo)
-      ? '<button type="button" class="dm-wide dm-amber" style="min-height:60px;font-size:20px;" onclick="dmUseMatrix()">About ' + expectedMi + ' mi · Use ' + dmFmt(Number(odo) + expectedMi) + '</button>' : '';
+      ? '<button type="button" class="dm-wide dm-amber" style="min-height:60px;font-size:20px;" onclick="dmUseMatrix()">About ' + expectedMi + ' mi · Use ' + dmFmt(Number(odo) + expectedMi) + '?</button>' : '';
     body.innerHTML =
       '<div class="dm-last">' + (isStart ? 'Starting at <b>' + escHtml(from) + '</b>' : escHtml(from) + ' → <b>' + escHtml(picked.to ? picked.to.picker : '') + '</b>') + '</div>' +
       '<div class="dm-title" style="text-align:center;">' + (isStart ? 'Odometer now' : 'Odometer at this stop') + '</div>' +
