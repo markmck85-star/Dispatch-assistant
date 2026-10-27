@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.54): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.55): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.54</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.55</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -1708,7 +1708,7 @@ function legStop(l, side) {
   return { kind: 'other', id: null, picker: n, print: n };
 }
 
-async function doInsert() {
+async function doInsert(allowOnEstimated) {
   const msg = document.getElementById('insertMsg');
   function say(t) { msg.className = 'flag neg'; msg.textContent = t; }
   const idx = Number(document.getElementById('insertLeg').value);
@@ -1723,7 +1723,7 @@ async function doInsert() {
     b = Number(typed);
     if (b < a || b > c) { say('That reading (' + b + ') is outside this trip (' + a + ' to ' + c + ').'); return; }
   } else {
-    if (L.estimated) { say('This trip already has an estimated reading. Enter the odometer you noted for this stop.'); return; }
+    if (L.estimated && !allowOnEstimated) { say('This trip already has an estimated reading. Enter the odometer you noted for this stop.'); return; }
     msg.className = 'muted'; msg.textContent = 'Estimating from the matrix…';
     const fromS = legStop(L, 'from'), toS = legStop(L, 'to');
     const dAB = await getMatrixMiles(fromS, picked.ins);
@@ -2011,7 +2011,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.54) ----------
+// ---------- Driving mode (v0.55) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2395,7 +2395,7 @@ async function dmInsSave(useEstimate) {
   document.getElementById('insertOdo').value = reading;
   document.getElementById('insertMsg').textContent = '';
   const idx = dmInsIdx, orig = L, before = legs.length, name = dmInsStop.picker;
-  await doInsert();
+  await doInsert(true);   // the car flow may split a trip that is itself estimated; both halves stay marked estimated
   if (legs.length <= before) {
     // nothing was split: show why (for example "outside this trip" or "matrix has no distance")
     dmToastMsg(document.getElementById('insertMsg').textContent || 'Could not add that stop.');
