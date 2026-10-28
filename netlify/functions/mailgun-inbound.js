@@ -293,7 +293,8 @@ function zonedTimeToUtc(year, month, day, hour, minute, second, tz) {
 async function pickOnCallTechId(supabase, siteId, siteState, dateStr) {
   try {
     const st = String(siteState || '').toUpperCase();
-    const schedState = (st === 'NC' || st === 'SC' || st === 'AL') ? 'GA' : st;
+    // Alabama deliberately NOT rolled into the GA rotation: no AL Saturday on-call yet.
+    const schedState = (st === 'NC' || st === 'SC') ? 'GA' : st;
     if (!schedState || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return null;
     const { data: rows, error } = await supabase
       .from('on_call_schedule')
