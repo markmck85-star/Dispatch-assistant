@@ -21,6 +21,9 @@ function formatForTwilio(body) {
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[ \t]+\n/g, '\n')
+    .replace(/(\S)[ \t]{2,}(?=\S)/g, '$1 ')   // gap left where an emoji was removed
+    .replace(/^[ \t]\b/gm, '')                  // single stray space at the start of a line (indent of 2+ is kept)
+    .replace(/^ (?=\S)/gm, '')
     .trim();
   if (!/^MCR Dispatch\b/i.test(t)) t = BRAND + ' ' + t;
   if (!/\bSTOP\b/.test(t)) t += '\n' + OPT_OUT;
