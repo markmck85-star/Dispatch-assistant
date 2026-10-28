@@ -20,7 +20,7 @@ exports.handler = async (event) => {
     }
 
     try {
-        const { to, email, body, htmlBody, subject, deliverAt } = JSON.parse(event.body);
+        const { to, email, body, htmlBody, subject, deliverAt, smsFallback } = JSON.parse(event.body);
 
         const apiKey = process.env.MAILGUN_API_KEY;
         const domain = process.env.MAILGUN_DOMAIN || 'mcrdispatch.net';
@@ -57,7 +57,7 @@ exports.handler = async (event) => {
                 from: `MCR Dispatch <dispatch@${domain}>`,
                 to: to,
                 subject: 'MCR Dispatch',
-                text: body || 'MCR Dispatch notification'
+                text: smsFallback || body || 'MCR Dispatch notification'
             });
             if (deliveryTime) smsParams.set('o:deliverytime', deliveryTime);
 
