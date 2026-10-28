@@ -59,7 +59,7 @@ async function tryTwilio(to, body) {
     if (resp.ok) return { handled: true, ok: true, sid: j.sid };
     console.log('[sms-send] Twilio error', resp.status, j.code, j.message);
     // 21610 = recipient replied STOP. Respect it: do not fall back to the gateway.
-    if (j.code === 21610) return { handled: true, ok: false, code: j.code, error: 'recipient opted out' };
+    if (j.code === 21610) { await setOptOut(num, true); return { handled: true, ok: false, code: j.code, error: 'recipient opted out' }; }
     return { handled: false, reason: 'twilio_error', code: j.code, error: j.message };
   } catch (e) {
     console.log('[sms-send] Twilio failed:', e.message);
@@ -67,4 +67,17 @@ async function tryTwilio(to, body) {
   }
 }
 
-module.exports = { tryTwilio, toE164, configured, fromNumber };
+// Remember (or clear) the opt-out on the technician whose saved text address or phone has this number.
+async function setOptOut(e164, optedOut) {
+  try {
+    const d = String(e164).replace(/\D/g, '').slice(-10);
+    if (d.length !== 10 || !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return 0;
+    const { createClient } = require('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const patch = { sms_opted_out: optedOut, sms_opted_out_at: optedOut ? new Date().toISOString() : null };
+    const { data } = await sb.from('technicians').update(patch).ilike('sms_address', d + '@%').select('id');
+    return (data || []).length;
+  } catch (e) { console.log('[sms-send] setOptOut failed:', e.message); return 0; }
+}
+
+module.exports = { setOptOut, tryTwilio, toE164, configured, fromNumber };

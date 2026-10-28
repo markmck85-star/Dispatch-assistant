@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.58): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.59): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.58</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.59</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -1477,6 +1477,11 @@ function applyStartFor(dateStr, force) {
       homeBtn = true;
     }
   }
+  {
+    const _d = dateStr || document.getElementById('legDate').value;
+    const _ov = _d ? readStartOverride(_d) : '';
+    if (_ov && !legs.some(x => x.date === _d)) odo.value = _ov;
+  }
   fromQ.value = picked.from.picker;
   fromPicked.textContent = 'Using: ' + picked.from.picker;
   setDayNote(note, homeBtn);
@@ -2020,7 +2025,7 @@ function printLog() {
   w.document.close();
 }
 
-// ---------- Driving mode (v0.58) ----------
+// ---------- Driving mode (v0.59) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
 // calls addLeg(), so every rule (home handling, matrix estimate, flags, saving) stays the same.
 let dmStage = 'home';      // home | pick | start | end
@@ -2149,8 +2154,9 @@ function dmRender() {
     const date = document.getElementById('legDate').value;
     const off = date !== todayLocal();
     body.innerHTML =
-      '<div class="dm-last">' + (off ? '<b>' + weekdayLabel(date) + '</b> (not today)<br>' : '') +
-      'Last: <b>' + escHtml(from) + '</b>' + (odo ? ' at <b>' + dmFmt(odo) + '</b>' : ' (no reading yet)') + '</div>' +
+      '<div class="dm-last" onclick="dmStartEdit()" style="cursor:pointer;">' + (off ? '<b>' + weekdayLabel(date) + '</b> (not today)<br>' : '') +
+      'Last: <b>' + escHtml(from) + '</b>' + (odo ? ' at <b>' + dmFmt(odo) + '</b>' : ' (no reading yet)') +
+      '<div style="color:#888;font-size:clamp(12px,3vw,20px);margin-top:2px;">Wrong reading? Tap here to correct it</div></div>' +
       '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG STOP</button>' +
       '<div class="dm-bigstats"><div><div class="n">' + dmTodayMiles().toLocaleString() + '</div><div class="l">miles today</div></div>' +
       '<div><div class="n">' + dmTodayLegs().length + '</div><div class="l">stops today</div></div></div></div>' +
@@ -2265,7 +2271,7 @@ function dmRender() {
       readout = prefix + rest;
     } else readout = shown ? dmFmt(shown) : '<span class="ph">_ _ _ _ _ _</span>';
     let hint = '', bad = false;
-    if (isStart) hint = 'Starting odometer at ' + escHtml(from);
+    if (isStart) hint = dmEditStart ? 'Type the odometer you start from today' : 'Starting odometer at ' + escHtml(from);
     else if (expectedMi != null && odo) hint = autoPrefix ? 'or type the last 3 digits' : 'Type the odometer';
     else hint = 'Type the odometer';
     const full = dmFull();
@@ -2288,10 +2294,11 @@ function dmRender() {
       '<div class="dm-pad">' + [1,2,3,4,5,6,7,8,9].map(n => '<button type="button" onclick="dmKey(' + n + ')">' + n + '</button>').join('') +
       '<button type="button" onclick="dmBack()" style="font-size:clamp(20px,5vw,36px);">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
       matrixBtn +
-      '<button type="button" class="dm-wide dm-go" ' + (ok ? '' : 'disabled') + ' onclick="' + (isStart ? 'dmSaveStart()' : 'dmSave()') + '" style="margin-top:10px;">' + (isStart ? 'CONTINUE' : 'SAVE STOP') + '</button>';
+      '<button type="button" class="dm-wide dm-go" ' + (ok ? '' : 'disabled') + ' onclick="' + (isStart ? 'dmSaveStart()' : 'dmSave()') + '" style="margin-top:10px;">' + (isStart ? (dmEditStart ? 'SAVE READING' : 'CONTINUE') : 'SAVE STOP') + '</button>';
   }
 }
 let dmHits = [];
+let dmEditStart = false; // the starting reading is being corrected from the home screen
 let dmRepOffset = 0;   // pay periods back from the current one while the report is open
 
 function dmLegName(l, side) {
@@ -2560,6 +2567,7 @@ function dmSearchInput(v) {
 function dmGoPick() { dmSearch = ''; dmStage = 'pick'; dmGetPos(); dmRender(); }
 
 function dmBack() {
+  if (dmEditStart) { dmEditStart = false; dmDigits = ''; dmStage = 'home'; dmRender(); return; }
   if (dmStage === 'end' || dmStage === 'start') {
     picked.to = null; expectedMi = null; autoPrefix = '';
     document.getElementById('odoEnd').value = '';
@@ -2616,12 +2624,41 @@ async function dmEndDay() {
   await dmAfterPick();
 }
 
+// Correct the reading the day starts from (the carried-over reading can be wrong: an estimate, a test, a
+// typo). Remembered for that day on this phone so closing and reopening driving mode does not bring the old
+// one back; once the day has a stop, the stop's own reading takes over.
+function startOverrideKey() { return localKey() + ':startOverride'; }
+function readStartOverride(dateStr) {
+  try { const o = JSON.parse(localStorage.getItem(startOverrideKey()) || 'null'); return (o && o.date === dateStr && o.odo) ? String(o.odo) : ''; } catch (e) { return ''; }
+}
+function dmStartEdit() {
+  if (!ctx) return;
+  
+  dmEditStart = true;
+  picked.to = null;
+  document.getElementById('odoEnd').value = '';
+  dmDigits = '';
+  dmStage = 'start';
+  dmRender();
+}
+
 async function dmSaveStart() {
   const full = dmFull();
   if (full == null) return;
   document.getElementById('odoStart').value = String(full);
   onOdoStartInput();
   dmDigits = '';
+  if (dmEditStart) {
+    dmEditStart = false;
+    const d = document.getElementById('legDate').value;
+    try { localStorage.setItem(startOverrideKey(), JSON.stringify({ date: d, odo: full })); } catch (e) {}
+    persistLocal();
+    dmLog('odo_typed', 'start_edit');
+    dmStage = 'home';
+    dmRender();
+    dmToastMsg('Starting reading set to ' + dmFmt(full));
+    return;
+  }
   dmStage = 'end';
   dmRender();
   await refreshExpected(false);

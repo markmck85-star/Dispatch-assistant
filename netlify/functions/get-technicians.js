@@ -82,7 +82,7 @@ exports.handler = async (event) => {
       // real NC/SC home_state.
       const { data: techs, error: techErr } = await supabase
         .from("technicians")
-        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, active, title, city, is_contractor, lat, lng, geocoded_at")
+        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, sms_opted_out, active, title, city, is_contractor, lat, lng, geocoded_at")
         .or(`home_state.eq.${state},additional_states.cs.{${state}}`);
 
       if (techErr) throw techErr;
@@ -112,6 +112,7 @@ exports.handler = async (event) => {
           email: t.email || "",
           homeAddress: t.home_address || "",
           smsAddress: t.sms_address || "",
+          smsOptedOut: t.sms_opted_out === true,
           active: t.active !== false,
           title: t.title || "",
           city: t.city || "",

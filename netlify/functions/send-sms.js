@@ -46,7 +46,13 @@ exports.handler = async (event) => {
         const results = [];
 
         // Send SMS ping if SMS address provided
-        if (to) {
+        let twilioDone = false;
+        if (to && !deliveryTime) {
+            // 2026-10-27: Twilio toll-free first (scheduled sends keep using the gateway: Mailgun holds them)
+            const tw = await require('./lib/sms-send.js').tryTwilio(to, body || 'MCR Dispatch notification');
+            if (tw.handled) { results.push({ type: 'sms', ok: tw.ok, via: 'twilio', error: tw.error }); twilioDone = true; }
+        }
+        if (to && !twilioDone) {
             const smsParams = new URLSearchParams({
                 from: `MCR Dispatch <dispatch@${domain}>`,
                 to: to,
@@ -91,9 +97,11 @@ exports.handler = async (event) => {
         }
 
         const allOk = results.length > 0 && results.every(r => r.ok);
+        const smsBlocked = results.some(r => r.type === 'sms' && r.error === 'recipient opted out');
         return {
             statusCode: allOk ? 200 : 502,
-            body: JSON.stringify({ ok: allOk, results, scheduledFor: deliveryTime })
+            body: JSON.stringify({ ok: allOk, results, scheduledFor: deliveryTime, smsBlocked,
+                error: allOk ? undefined : (smsBlocked ? 'This person replied STOP, so texts are blocked. Email was still sent.' : undefined) })
         };
 
     } catch (err) {

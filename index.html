@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-325 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-327 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -8278,6 +8278,7 @@ function distanceMatrixStatus(state) {
             const techKey = techName.toLowerCase().replace(/\s+/g, '-');
             let smsAddress = null;
             let techEmail = null;
+            let smsBlocked = false;
             let techPhone = (typeof TECHS !== 'undefined' && TECHS[techName] && TECHS[techName].phone) || '';
 
             try {
@@ -8285,11 +8286,12 @@ function distanceMatrixStatus(state) {
                 const data = await res.json();
                 const tech = data[techKey];
                 smsAddress = tech && tech.smsAddress ? tech.smsAddress : null;
+                if (tech && tech.smsOptedOut && smsAddress) { smsBlocked = true; smsAddress = null; }
                 techEmail = tech && tech.email ? tech.email : null;
                 if (tech && tech.phone) techPhone = tech.phone;
             } catch(e) {}
 
-            if (!smsAddress) {
+            if (!smsAddress && !smsBlocked) {
                 const picked = await promptMissingSms(techName, techEmail, techPhone);
                 if (!picked) return;
                 if (picked.mode === 'email-only') {
@@ -8348,6 +8350,7 @@ function distanceMatrixStatus(state) {
                 <div style="font-weight:bold;margin-bottom:8px;">📤 Send to ${techName}</div>
                 ${techEmail ? `<div style="color:#5bc8af;font-size:12px;margin-bottom:4px;">📧 Email: ${techEmail}</div>` : ''}
                 ${smsAddress ? `<div style="color:#aaa;font-size:12px;margin-bottom:8px;">📱 SMS ping: ${smsAddress}</div>` : ''}
+                ${smsBlocked ? `<div style="color:#e8b44c;font-size:12px;margin-bottom:8px;">📵 Texts blocked (they replied STOP). Email only.</div>` : ''}
                 <textarea id="send-modal-txt" style="width:100%;box-sizing:border-box;height:160px;background:#2a2a3e;color:#f0f0f0;border:1px solid #555;border-radius:5px;padding:8px;font-size:13px;resize:vertical;">${txt}</textarea>
                 <div style="display:flex;gap:8px;margin-top:10px;">
                     <button id="send-modal-cancel" style="flex:1;padding:8px;background:#444;color:#fff;border:none;border-radius:5px;cursor:pointer;">Cancel</button>
@@ -8377,7 +8380,7 @@ function distanceMatrixStatus(state) {
                     if (d.ok) {
                         alert(`✅ Sent to ${techName}!${techEmail ? '\n📧 Full details emailed' : ''}${smsAddress ? '\n📱 SMS ping sent' : ''}`);
                     } else {
-                        alert(`❌ Send failed: ${d.error || 'Unknown error'}`);
+                        alert(`${d.smsBlocked ? '⚠️' : '❌'} ${d.smsBlocked ? '' : 'Send failed: '}${d.error || 'Unknown error'}`);
                     }
                 } catch(e) {
                     alert(`❌ Send failed: ${e.message}`);

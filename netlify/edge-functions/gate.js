@@ -24,6 +24,7 @@ const PUBLIC = new Set([
   'tech-api',                       // technician portal: its own sign-in
   'confirm-receipt',                // /ack link technicians tap (signed token inside)
   'mailgun-inbound',                // Mailgun webhook
+  'twilio-sms-webhook',             // Twilio STOP/START notices (checks Twilio's signature)
   'mcp-server',                     // has its own shared secret
   'salesforce-report-sync-background', // called by its own scheduler
   // Inventory pages used by Neumo staff without accounts:
