@@ -50,7 +50,7 @@ exports.handler = async (event) => {
   }
 
   // Georgia's board also covers NC and SC.
-  const states = state === "GA" ? ["GA", "NC", "SC"] : [state];
+  const states = state === "GA" ? ["GA", "NC", "SC", "AL"] : [state];
 
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);

@@ -75,7 +75,7 @@ const STALE_GRACE_MS = STALE_GRACE_DAYS * 24 * 60 * 60 * 1000;
 // tickets belong under it. Only GA is an umbrella today (Gina's combined
 // Georgia / NC / SC territory).
 const REGION_MEMBERS = {
-  GA: ["GA", "NC", "SC"],
+  GA: ["GA", "NC", "SC", "AL"],
 };
 
 function json(statusCode, obj) {

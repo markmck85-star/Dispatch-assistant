@@ -79,7 +79,7 @@ const ticketState = require('./lib/ticket-state');
 const { computeSlaDeadline, resolveTimezone, HOLIDAYS_2026 } = require('./slaCalculator.js');
 
 // ---------------------------------------------------------------- config
-const REGION_STATES = { GA: ['GA', 'NC', 'SC'] };
+const REGION_STATES = { GA: ['GA', 'NC', 'SC', 'AL'] };
 
 const STATE_TIMEZONES = {
   GA: 'America/New_York', NC: 'America/New_York', SC: 'America/New_York',

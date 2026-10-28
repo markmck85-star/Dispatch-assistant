@@ -38,7 +38,7 @@ exports.handler = async (event) => {
 
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    const states = state === "GA" ? ["GA", "NC", "SC"] : [state];
+    const states = state === "GA" ? ["GA", "NC", "SC", "AL"] : [state];
     const { data, error } = await supabase
       .from("sites")
       .select("id, site_code, name, address, activation_candidate_wo_number")

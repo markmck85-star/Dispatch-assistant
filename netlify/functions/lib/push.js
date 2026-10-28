@@ -11,7 +11,7 @@
 // Nothing here may break ticket intake: every exported function swallows its
 // own errors and returns a summary instead of throwing.
 
-const GA_BUNDLED_STATES = ['NC', 'SC']; // same umbrella the SMS filter uses
+const GA_BUNDLED_STATES = ['NC', 'SC', 'AL']; // same umbrella the SMS filter uses
 
 function pushConfigured() {
   return !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);

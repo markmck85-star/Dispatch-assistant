@@ -1190,7 +1190,7 @@ function stateMapRowInRegion(a, state) {
   const code = String(a.siteCode || '').toUpperCase();
   const siteState = String(a.state || '').toUpperCase();
   if (siteState === state) return true;
-  if (state === 'GA') return /^(GA|NC|SC)/.test(code);
+  if (state === 'GA') return /^(GA|NC|SC|AL)/.test(code);
   return code.startsWith(state);
 }
 function stateMapLocation(locations, code) {

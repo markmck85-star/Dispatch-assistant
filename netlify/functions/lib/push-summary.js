@@ -20,7 +20,7 @@
 
 const SUMMARY_START_MIN = 8 * 60;        // 8:00 AM local
 const SUMMARY_END_MIN = 8 * 60 + 44;     // tolerate a late scheduler run
-const GA_BUNDLED = ['NC', 'SC'];
+const GA_BUNDLED = ['NC', 'SC', 'AL'];
 
 function localParts(now, tz) {
   const fmt = new Intl.DateTimeFormat('en-US', {

@@ -47,7 +47,7 @@ const FRESH_MS = 3 * 60 * 1000;          // reuse the stored copy this long
 const MIN_RETRY_MS = 60 * 1000;          // never call 511GA more than once a minute
 const STALE_AFTER_MS = 10 * 60 * 1000;   // older than this = tell the viewer it is stale
 const FEED_TIMEOUT_MS = 8000;
-const REGION_STATES = { GA: ['GA', 'NC', 'SC'], MI: ['MI'] };
+const REGION_STATES = { GA: ['GA', 'NC', 'SC', 'AL'], MI: ['MI'] };
 const TIMEZONE = 'America/New_York';
 const DEFAULT_RADIUS_MI = 10;
 const MAX_RADIUS_MI = 25;

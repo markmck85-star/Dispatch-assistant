@@ -293,7 +293,7 @@ function zonedTimeToUtc(year, month, day, hour, minute, second, tz) {
 async function pickOnCallTechId(supabase, siteId, siteState, dateStr) {
   try {
     const st = String(siteState || '').toUpperCase();
-    const schedState = (st === 'NC' || st === 'SC') ? 'GA' : st;
+    const schedState = (st === 'NC' || st === 'SC' || st === 'AL') ? 'GA' : st;
     if (!schedState || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return null;
     const { data: rows, error } = await supabase
       .from('on_call_schedule')
@@ -1661,7 +1661,7 @@ async function sendSms(to, body, subject) {
 // duplicating it risked silently reintroducing any of them in the new path.
 // Pure given (store, ticketState) -- no side effects, safe to call from
 // either SMS trigger.
-const GA_BUNDLED_STATES = ['NC', 'SC'];
+const GA_BUNDLED_STATES = ['NC', 'SC', 'AL'];
 function recipientCoversState(recipientStates, tState) {
   if (!tState) return true; // still can't determine state -- fail open, don't drop a real ticket
   if (recipientStates.includes(tState)) return true;
@@ -3316,7 +3316,7 @@ exports.handler = async (event) => {
         if (bodyHash === lastHash) {
           console.log('[mailgun-inbound] Dispatch-list SMS skipped: identical content already notified (re-forward/resend).');
         } else {
-          const GA_BUNDLED_STATES = ['NC', 'SC'];
+          const GA_BUNDLED_STATES = ['NC', 'SC', 'AL'];
           const recipientCoversAnyState = (recipientStates, listStates) => {
             if (recipientStates.includes('ALL')) return true;
             return listStates.some(s =>

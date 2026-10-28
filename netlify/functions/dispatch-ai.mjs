@@ -757,7 +757,7 @@ async function loadContext(supabase, state, techNames, siteCodes) {
   const sites = {};
   const siteIdByCode = {};
   const siteNames = {};
-  const regionStates = state === 'GA' ? ['GA', 'NC', 'SC'] : [state];
+  const regionStates = state === 'GA' ? ['GA', 'NC', 'SC', 'AL'] : [state];
   {
     const { data, error } = await supabase
       .from('sites')

@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-334 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-335 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -757,7 +757,7 @@
                             <option value="CA">California</option>
                             <option value="CO">Colorado</option>
                             <option value="FL">Florida</option>
-                            <option value="GA">Georgia / NC / SC</option>
+                            <option value="GA">Georgia / NC / SC / AL</option>
                             <option value="ID">Idaho</option>
                             <option value="IL">Illinois</option>
                             <option value="IN">Indiana</option>
@@ -1694,6 +1694,7 @@ function hoursForDay(hoursText, weekdayIdx) {
                 { blobState: 'GA', targetMap: LOCATIONS_GA },
                 { blobState: 'NC', targetMap: LOCATIONS_GA },
                 { blobState: 'SC', targetMap: LOCATIONS_GA },
+                { blobState: 'AL', targetMap: LOCATIONS_GA }, // Alabama rides the Georgia board like NC/SC
                 { blobState: 'FL', targetMap: LOCATIONS_FL },
                 { blobState: 'MI', targetMap: LOCATIONS_MI },
                 { blobState: 'IN', targetMap: LOCATIONS_IN },
@@ -2936,7 +2937,7 @@ function distanceMatrixStatus(state) {
             sel.innerHTML = '';
             const labels = {
                 AL:'Alabama', CA:'California', CO:'Colorado', FL:'Florida',
-                GA:'Georgia / NC / SC', ID:'Idaho', IL:'Illinois', IN:'Indiana',
+                GA:'Georgia / NC / SC / AL', ID:'Idaho', IL:'Illinois', IN:'Indiana',
                 MI:'Michigan', MN:'Minnesota', NV:'Nevada', OH:'Ohio',
                 OR:'Oregon', WV:'West Virginia'
             };
@@ -3456,7 +3457,7 @@ function distanceMatrixStatus(state) {
             if (existing) existing.remove();
 
             const STATE_LABELS = {
-                'GA': 'Georgia / NC / SC', 'FL': 'Florida', 'MI': 'Michigan',
+                'GA': 'Georgia / NC / SC / AL', 'FL': 'Florida', 'MI': 'Michigan',
                 'IN': 'Indiana', 'OH': 'Ohio', 'NV': 'Nevada', 'IL': 'Illinois',
                 'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
@@ -3494,7 +3495,7 @@ function distanceMatrixStatus(state) {
             const toast = document.getElementById('heavyDayTriggerToast');
             if (toast) toast.remove();
             const STATE_LABELS = {
-                'GA': 'Georgia / NC / SC', 'FL': 'Florida', 'MI': 'Michigan',
+                'GA': 'Georgia / NC / SC / AL', 'FL': 'Florida', 'MI': 'Michigan',
                 'IN': 'Indiana', 'OH': 'Ohio', 'NV': 'Nevada', 'IL': 'Illinois',
                 'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
@@ -3544,7 +3545,7 @@ function distanceMatrixStatus(state) {
             if (existing) existing.remove();
 
             const STATE_LABELS = {
-                'GA': 'Georgia / NC / SC', 'FL': 'Florida', 'MI': 'Michigan',
+                'GA': 'Georgia / NC / SC / AL', 'FL': 'Florida', 'MI': 'Michigan',
                 'IN': 'Indiana', 'OH': 'Ohio', 'NV': 'Nevada', 'IL': 'Illinois',
                 'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
@@ -3581,7 +3582,7 @@ function distanceMatrixStatus(state) {
             const toast = document.getElementById('journalThresholdToast');
             if (toast) toast.remove();
             const STATE_LABELS = {
-                'GA': 'Georgia / NC / SC', 'FL': 'Florida', 'MI': 'Michigan',
+                'GA': 'Georgia / NC / SC / AL', 'FL': 'Florida', 'MI': 'Michigan',
                 'IN': 'Indiana', 'OH': 'Ohio', 'NV': 'Nevada', 'IL': 'Illinois',
                 'MN': 'Minnesota', 'WV': 'West Virginia', 'OR': 'Oregon', 'CO': 'Colorado', 'ID': 'Idaho', 'AL': 'Alabama'
             };
@@ -3922,7 +3923,7 @@ function distanceMatrixStatus(state) {
             // NC and SC mirror GA's own entry since they're dispatched as
             // one combined territory, not separate boards.
             const STATE_PREFIXES = {
-                'GA': '(GA|NC|SC)', 'NC': '(GA|NC|SC)', 'SC': '(GA|NC|SC)', 'FL': '(FL)', 'MI': '(MI)', 'IN': '(IN)',
+                'GA': '(GA|NC|SC|AL)', 'NC': '(GA|NC|SC|AL)', 'SC': '(GA|NC|SC|AL)', 'FL': '(FL)', 'MI': '(MI)', 'IN': '(IN)',
                 'OH': '(OH)', 'NV': '(NV)', 'IL': '(IL)', 'MN': '(MN)', 'CO': '(CO)', 'ID': '(ID)', 'AL': '(AL)',
                 'WV': '(WV)', 'OR': '(OR)', 'CA': '(CA)'
             };
@@ -3960,7 +3961,7 @@ function distanceMatrixStatus(state) {
                 lines.forEach(line => {
                     if (line === 'NV') { inNvSection = true; return; }
                     // New state line resets context
-                    if (/^(GA|FL|MI|IN|OH|MN|WV|OR|IL|NC|SC)$/.test(line)) { inNvSection = false; return; }
+                    if (/^(GA|FL|MI|IN|OH|MN|WV|OR|IL|NC|SC|AL)$/.test(line)) { inNvSection = false; return; }
                     if (!inNvSection) return;
                     // Only match machine numbers at end of a location name line (after a dash)
                     const m = line.match(/[-–]\s*(\d{3,4})\s*$/);
@@ -4019,7 +4020,7 @@ function distanceMatrixStatus(state) {
             // Line-by-line parser for newline-per-field format (Taylor's dispatch format for all states)
             // Only runs if parsedFormCounts is mostly empty (indicating the tab parser missed entries)
             const parsedCount = Object.keys(window.parsedFormCounts).length;
-            const statePrefix = CURRENT_STATE === 'GA' ? /^(GA|NC|SC)\d/ : new RegExp('^' + CURRENT_STATE + '\\d');
+            const statePrefix = CURRENT_STATE === 'GA' ? /^(GA|NC|SC|AL)\d/ : new RegExp('^' + CURRENT_STATE + '\\d');
             const expectedCodes = (codesInput.value.match(/\b[A-Z]{2}\d{3,5}\b/g) || []).filter(c => statePrefix.test(c));
             const nvOnly = CURRENT_STATE === 'NV';
             
@@ -4581,11 +4582,16 @@ function distanceMatrixStatus(state) {
             // chance to run. Fire-and-forget, same as before: never lets a
             // fetch failure here block dispatch generation or this early
             // "nothing to show" message.
-            fetch('/.netlify/functions/get-unmatched-tickets?state=' + CURRENT_STATE, { cache: 'no-store' })
-                .then(r => r.ok ? r.json() : null)
-                .then(data => {
-                    if (data && data.unmatched && data.unmatched.length > 0) {
-                        setTimeout(() => showAddLocationPromptQueueForTickets(data.unmatched), 900);
+            // 2026-10-28: Alabama is dispatched from the Georgia board (like
+            // NC/SC), so an unmatched Alabama ticket must prompt here too.
+            Promise.all((CURRENT_STATE === 'GA' ? ['GA', 'AL'] : [CURRENT_STATE]).map(st =>
+                fetch('/.netlify/functions/get-unmatched-tickets?state=' + st, { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : null).catch(() => null)))
+                .then(results => {
+                    const unmatched = [];
+                    results.forEach(d => { if (d && d.unmatched) unmatched.push(...d.unmatched); });
+                    if (unmatched.length > 0) {
+                        setTimeout(() => showAddLocationPromptQueueForTickets(unmatched), 900);
                     }
                 })
                 .catch(e => console.warn('[dispatch] get-unmatched-tickets check failed (non-fatal):', e.message));
@@ -5153,7 +5159,7 @@ function distanceMatrixStatus(state) {
             // Also rebuild printable summary for PDF/print view
             const regionLabel = CURRENT_STATE === 'FL'
                 ? 'Florida'
-                : (CURRENT_STATE === 'GA' ? 'Georgia / NC / SC' : CURRENT_STATE);
+                : (CURRENT_STATE === 'GA' ? 'Georgia / NC / SC / AL' : CURRENT_STATE);
             window._lastDateStr = dateStr;
             window._lastRegionLabel = regionLabel;
             buildPrintableReport(window.currentAssignments, dateStr, regionLabel);
@@ -6867,7 +6873,7 @@ function distanceMatrixStatus(state) {
             items = items.filter(i => {
                 const statePrefix = (i.code || '').substring(0, 2);
                 return CURRENT_STATE === 'GA'
-                    ? ['GA','NC','SC'].includes(statePrefix)
+                    ? ['GA','NC','SC','AL'].includes(statePrefix)
                     : statePrefix === CURRENT_STATE;
             });
             if (items.length === 0) return;
@@ -8957,7 +8963,7 @@ ${content}
             // Roster (for each tech's home state, which TECHS does not keep for NC/SC)
             const homeState = {};
             const rosterNames = [];
-            const allowed = CURRENT_STATE === 'GA' ? ['GA','NC','SC'] : [CURRENT_STATE];
+            const allowed = CURRENT_STATE === 'GA' ? ['GA','NC','SC','AL'] : [CURRENT_STATE];
             try {
                 const res = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(CURRENT_STATE), { cache: 'no-store' });
                 if (res.ok) {
@@ -8972,8 +8978,8 @@ ${content}
 
             const stateOf = (name) => homeState[name] || (TECHS[name] && TECHS[name].state) || CURRENT_STATE;
             const names = [...new Set([...withStops, ...rosterNames])];
-            const GROUP_ORDER = ['GA','NC','SC'];
-            const GROUP_LABEL = { GA: 'Georgia', NC: 'North Carolina', SC: 'South Carolina' };
+            const GROUP_ORDER = ['GA','NC','SC','AL'];
+            const GROUP_LABEL = { GA: 'Georgia', NC: 'North Carolina', SC: 'South Carolina', AL: 'Alabama' };
             const groups = {};
             names.forEach(n => { (groups[stateOf(n)] = groups[stateOf(n)] || []).push(n); });
             const groupKeys = Object.keys(groups).sort((a, b) => {
@@ -10166,7 +10172,7 @@ ${content}
                 if (meta) meta.textContent = 'No stops on this board';
                 const note = document.getElementById('dispatchMapNote');
                 if (note) {
-                    const region = CURRENT_STATE === 'FL' ? 'Florida' : (CURRENT_STATE === 'GA' ? 'Georgia / NC / SC' : (CURRENT_STATE || 'this region'));
+                    const region = CURRENT_STATE === 'FL' ? 'Florida' : (CURRENT_STATE === 'GA' ? 'Georgia / NC / SC / AL' : (CURRENT_STATE || 'this region'));
                     note.style.display = '';
                     note.textContent = 'No stops for ' + region + ' — basemap only.';
                 }
@@ -10623,7 +10629,7 @@ ${content}
 
         window._restockScheduleByCode = window._restockScheduleByCode || {};
         function restockScheduleStatesFor(state) {
-            if (state === 'GA') return ['GA', 'NC', 'SC'];
+            if (state === 'GA') return ['GA', 'NC', 'SC', 'AL'];
             return [state];
         }
         async function ensureRestockScheduleCache(force) {
