@@ -6,7 +6,7 @@
  */
 const { createClient } = require('@supabase/supabase-js');
 const auth = require('./lib/auth');
-const { toE164, configured } = require('./lib/sms-send.js');
+const { toE164, configured, fromNumber } = require('./lib/sms-send.js');
 const { formatForTwilio } = require('./lib/sms-format.js');
 
 const json = (s, o) => ({ statusCode: s, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
@@ -17,7 +17,8 @@ exports.handler = async (event) => {
     const who = await auth.requireUser(createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY), event);
     if (who.error) return json(who.status || 401, { ok: false, error: who.error });
   }
-  const missing = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM'].filter(k => !process.env[k]);
+  const missing = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'].filter(k => !process.env[k]);
+  if (!fromNumber()) missing.push('TWILIO_FROM_NUMBER');
   if (missing.length) return json(200, { ok: false, step: 'setup', error: 'Missing Netlify environment variable(s): ' + missing.join(', ') });
   if (!configured()) return json(200, { ok: false, step: 'setup', error: 'SMS_VIA_TWILIO is set to 0' });
   let to;
@@ -27,7 +28,7 @@ exports.handler = async (event) => {
   const resp = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + sid + '/Messages.json', {
     method: 'POST',
     headers: { 'Authorization': 'Basic ' + Buffer.from(sid + ':' + process.env.TWILIO_AUTH_TOKEN).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ To: to, From: process.env.TWILIO_FROM, Body: formatForTwilio('Test text from the dispatch platform. If you can read this, Twilio texting works.') }).toString(),
+    body: new URLSearchParams({ To: to, From: fromNumber(), Body: formatForTwilio('Test text from the dispatch platform. If you can read this, Twilio texting works.') }).toString(),
   });
   const j = await resp.json().catch(() => ({}));
   return json(200, { ok: resp.ok, status: resp.status, sid: j.sid, twilioCode: j.code, error: resp.ok ? undefined : j.message, to });
