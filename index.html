@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-330 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-331 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -7943,6 +7943,7 @@ function distanceMatrixStatus(state) {
             let html = `<div style="margin-bottom:20px;display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="big-btn" onclick="renderReviewBoard()" style="background:#6c757d;flex:1;">⬅ Back</button>
                 <button class="big-btn" id="publishFromMessagesBtn" onclick="publishFromMessages()" style="background:#1e7e34;flex:1;">Publish to techs</button>
+                <button class="big-btn" onclick="sendAllMessages()" style="background:#007bff;flex:1;">📤 Send all</button>
             </div>`;
             // 2026-10-22: the blanket "DCO required" checkbox was removed. Messages now carry a per-stop
             // "Also needs a DCO" line (dcoDueFor) only for sites that still owe one, so mixed lists stay accurate.
@@ -8196,6 +8197,103 @@ function distanceMatrixStatus(state) {
             if (!txt.trim()) { alert('No message to send.'); return; }
             return sendPlainMessage(techName, txt);
         }
+
+
+        // 2026-10-28: one-click send of every message on screen. First compares the board with the field-service
+        // Gantt (as of the last status sync). Everything matching: it goes. Anything that disagrees: a list is
+        // shown and the dispatcher chooses. Warns only; never blocks.
+        function sfMatchReport() {
+            const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
+            const OPEN = ['Scheduled', 'Dispatched', 'In Progress'];
+            const rep = { match: 0, mismatch: [], notInSf: 0, closed: [], newest: null };
+            Object.keys(window.currentAssignments || {}).forEach(tech => {
+                const all = window.currentAssignments[tech] || [];
+                const day = all.filter(i => i.isSameDay !== false);
+                (day.length ? day : all).forEach(item => {
+                    const info = (window.sfByCode || {})[item.code];
+                    const sf = info && info.sf;
+                    if (!sf) { rep.notInSf++; return; }
+                    if (sf.seenAt && (!rep.newest || sf.seenAt > rep.newest)) rep.newest = sf.seenAt;
+                    if (sf.status === 'Completed' || sf.status === 'Canceled') { rep.closed.push({ tech, name: item.name || item.code, sf }); return; }
+                    if (OPEN.includes(sf.status) && sf.techName && norm(sf.techName) !== norm(tech)) rep.mismatch.push({ tech, name: item.name || item.code, sf });
+                    else rep.match++;
+                });
+            });
+            return rep;
+        }
+
+        async function sendAllMessages() {
+            const msgs = collectMessagesFromView();
+            const names = Object.keys(msgs);
+            if (!names.length) { alert('No messages to send.'); return; }
+            let techs = {};
+            try { const r = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(CURRENT_STATE)); techs = await r.json(); } catch (e) {}
+            const plan = names.map(n => {
+                const t = techs[n.toLowerCase().replace(/\s+/g, '-')] || {};
+                const blocked = !!(t.smsOptedOut && t.smsAddress);
+                const sms = (!blocked && t.smsAddress) ? t.smsAddress : null;
+                const email = t.email || null;
+                const how = sms ? '📱 text' : (email ? (blocked ? '📧 email only (texts blocked)' : '📧 email only') : '⚠ no contact on file');
+                return { n, txt: msgs[n], sms, email, how };
+            });
+            const rep = sfMatchReport();
+            const ago = rep.newest ? Math.max(0, Math.round((Date.now() - new Date(rep.newest).getTime()) / 60000)) : null;
+            const agoStr = ago == null ? '' : (ago < 1 ? 'just now' : ago + ' min ago');
+            const e = (typeof esc === 'function') ? esc : (x) => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            let sfHtml;
+            if (rep.mismatch.length) {
+                sfHtml = '<div style="color:#e8b44c;font-weight:bold;margin-bottom:4px;">⚠ ' + rep.mismatch.length + ' stop' + (rep.mismatch.length !== 1 ? 's' : '') + ' disagree with the field-service Gantt' + (agoStr ? ' (checked ' + agoStr + ')' : '') + '</div>' +
+                    rep.mismatch.map(m => '<div style="font-size:12px;color:#ddd;margin:2px 0;">' + e(m.name) + ': board has ' + e(m.tech.split(' ')[0]) + ', Gantt has ' + e(String(m.sf.techName).split(' ')[0]) + '</div>').join('');
+            } else {
+                sfHtml = '<div style="color:#5bc8af;font-weight:bold;">✅ Assignments match the field-service Gantt' + (agoStr ? ' (checked ' + agoStr + ')' : '') + '</div>';
+            }
+            const notes = [];
+            if (rep.closed.length) notes.push(rep.closed.length + ' already closed or canceled in the Gantt');
+            if (rep.notInSf) notes.push(rep.notInSf + ' not in the Gantt yet');
+            if (notes.length) sfHtml += '<div style="font-size:12px;color:#9aa0a6;margin-top:4px;">' + notes.join(' · ') + '</div>';
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:1px solid #007bff;border-radius:8px;padding:16px;z-index:9999;width:min(92vw,440px);max-height:85vh;overflow:auto;box-shadow:0 4px 24px rgba(0,0,0,0.6);font-size:14px;color:#f0f0f0;';
+            modal.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;">📤 Send all (' + plan.length + ')</div>' +
+                '<div style="margin-bottom:10px;">' + sfHtml + '</div>' +
+                '<div style="font-size:13px;margin-bottom:10px;">' + plan.map(p => '<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;"><span>' + e(p.n) + '</span><span style="color:#9aa0a6;">' + p.how + '</span></div>').join('') + '</div>' +
+                '<div style="display:flex;gap:8px;"><button id="sendall-cancel" style="flex:1;padding:8px;background:#444;color:#fff;border:none;border-radius:5px;cursor:pointer;">Cancel</button>' +
+                '<button id="sendall-go" style="flex:1;padding:8px;background:#007bff;color:#fff;border:none;border-radius:5px;cursor:pointer;">' + (rep.mismatch.length ? 'Send anyway' : 'Send all') + '</button></div>';
+            document.body.appendChild(modal);
+            document.getElementById('sendall-cancel').onclick = () => modal.remove();
+            document.getElementById('sendall-go').onclick = async () => {
+                const go = document.getElementById('sendall-go');
+                go.disabled = true; go.textContent = 'Sending…';
+                const results = [];
+                for (const p of plan) {
+                    if (!p.sms && !p.email) { results.push({ n: p.n, ok: false, msg: 'no contact on file' }); continue; }
+                    try {
+                        const stopCount = (p.txt.match(/^\d+\./gm) || []).length;
+                        const dm = p.txt.match(/\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d+/i);
+                        const dEl = document.getElementById('dispatchDate');
+                        const dd = (dEl && dEl.value) ? new Date(dEl.value + 'T12:00:00') : new Date();
+                        const dateStr = dm ? dm[0] : (dd.toDateString() === new Date().toDateString() ? 'today' : 'tomorrow');
+                        const shortPing = stopCount > 0
+                            ? 'MCR Dispatch: You have ' + stopCount + ' stop' + (stopCount !== 1 ? 's' : '') + ' for ' + dateStr + '. Details sent to your email.'
+                            : String(p.txt).slice(0, 300);
+                        const textHasAll = !!p.sms && p.txt.length <= 1200;
+                        const html = '<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">' + e(p.txt) + '</pre>';
+                        const r = await fetch('/.netlify/functions/send-sms', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ to: p.sms, email: textHasAll ? null : p.email, emailFallback: textHasAll ? p.email : null, body: textHasAll ? p.txt.trim() : shortPing, smsFallback: shortPing, htmlBody: html, subject: 'MCR Dispatch — ' + dateStr })
+                        });
+                        const d = await r.json();
+                        results.push({ n: p.n, ok: !!d.ok, msg: d.ok ? (d.results || []).map(x => x.type === 'sms' ? 'text' : 'email').join(' + ') : (d.error || 'failed') });
+                    } catch (err) { results.push({ n: p.n, ok: false, msg: err.message }); }
+                }
+                const okN = results.filter(x => x.ok).length;
+                modal.innerHTML = '<div style="font-weight:bold;margin-bottom:8px;">' + (okN === results.length ? '✅ ' : '⚠️ ') + 'Sent ' + okN + ' of ' + results.length + '</div>' +
+                    '<div style="font-size:13px;margin-bottom:10px;">' + results.map(x => '<div style="padding:2px 0;">' + (x.ok ? '✅ ' : '❌ ') + e(x.n) + ' <span style="color:#9aa0a6;">' + e(x.msg) + '</span></div>').join('') + '</div>' +
+                    '<button id="sendall-done" style="width:100%;padding:8px;background:#444;color:#fff;border:none;border-radius:5px;cursor:pointer;">Close</button>';
+                document.getElementById('sendall-done').onclick = () => modal.remove();
+            };
+        }
+        window.sendAllMessages = sendAllMessages;
 
         function digitsOnlyPhone(v) {
             return String(v || '').replace(/\D/g, '');

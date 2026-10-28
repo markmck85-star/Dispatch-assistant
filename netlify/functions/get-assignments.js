@@ -90,12 +90,12 @@ exports.handler = async (event) => {
       if (wos.length) {
         const { data: sfRows } = await supabase
           .from("sa_live_status")
-          .select("work_order, status, status_category, resource_name, sf_last_modified, actual_start, actual_end")
+          .select("work_order, status, status_category, resource_name, sf_last_modified, actual_start, actual_end, seen_at")
           .in("work_order", wos);
         for (const r of (sfRows || [])) {
           const prev = sfByWo[r.work_order];
           if (!prev || (r.sf_last_modified || "") >= (prev.changedAt || "")) {
-            sfByWo[r.work_order] = { status: r.status, category: r.status_category, techName: r.resource_name, changedAt: r.sf_last_modified, actualStart: r.actual_start, actualEnd: r.actual_end };
+            sfByWo[r.work_order] = { status: r.status, category: r.status_category, techName: r.resource_name, changedAt: r.sf_last_modified, actualStart: r.actual_start, actualEnd: r.actual_end, seenAt: r.seen_at };
           }
         }
       }
