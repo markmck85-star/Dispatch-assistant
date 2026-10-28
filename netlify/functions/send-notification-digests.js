@@ -34,6 +34,9 @@ const STATE_TIMEZONES = {
 };
 
 async function sendSms(to, body, subject) {
+  // 2026-10-27: Twilio toll-free first; the Mailgun gateway path below is the fallback
+  const tw = await require('./lib/sms-send.js').tryTwilio(to, body);
+  if (tw.handled) return tw.ok;
   const apiKey = process.env.MAILGUN_API_KEY;
   const domain = process.env.MAILGUN_DOMAIN || 'mcrdispatch.net';
   if (!apiKey) {
