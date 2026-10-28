@@ -9,7 +9,7 @@
  * Needs three Netlify environment variables:
  *   TWILIO_ACCOUNT_SID   starts with AC
  *   TWILIO_AUTH_TOKEN
- *   TWILIO_FROM          +18559270336
+ *   TWILIO_FROM (or TWILIO_FROM_NUMBER)   +18559270336
  * Optional: SMS_VIA_TWILIO=0 switches it off without removing the keys.
  *
  * The recipient list still stores gateway addresses (6787794352@vtext.com); the
@@ -17,8 +17,11 @@
  */
 const { formatForTwilio } = require('./sms-format.js');
 
+// The sending number may be stored as TWILIO_FROM or TWILIO_FROM_NUMBER
+const fromNumber = () => process.env.TWILIO_FROM || process.env.TWILIO_FROM_NUMBER || '';
+
 function configured() {
-  return !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM)
+  return !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && fromNumber())
     && process.env.SMS_VIA_TWILIO !== '0';
 }
 
@@ -50,7 +53,7 @@ async function tryTwilio(to, body) {
         'Authorization': 'Basic ' + Buffer.from(sid + ':' + process.env.TWILIO_AUTH_TOKEN).toString('base64'),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({ To: num, From: process.env.TWILIO_FROM, Body: formatForTwilio(body) }).toString(),
+      body: new URLSearchParams({ To: num, From: fromNumber(), Body: formatForTwilio(body) }).toString(),
     });
     const j = await resp.json().catch(() => ({}));
     if (resp.ok) return { handled: true, ok: true, sid: j.sid };
@@ -64,4 +67,4 @@ async function tryTwilio(to, body) {
   }
 }
 
-module.exports = { tryTwilio, toE164, configured };
+module.exports = { tryTwilio, toE164, configured, fromNumber };
