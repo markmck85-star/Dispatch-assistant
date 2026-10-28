@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-329 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-330 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -8369,12 +8369,16 @@ function distanceMatrixStatus(state) {
                 const finalHtml = '<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">' + 
                     finalTxt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>';
                 try {
+                    // 2026-10-28: when the text carries the full message, skip the email (saves the email
+                    // charge). The server still sends the email if the text can't go through Twilio.
+                    const textHasAll = !!smsAddress && String(finalTxt).length <= 1200;
                     const r = await fetch('/.netlify/functions/send-sms', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             to: smsAddress,
-                            email: techEmail,
+                            email: textHasAll ? null : techEmail,
+                            emailFallback: textHasAll ? techEmail : null,
                             body: String(finalTxt).length <= 1200 ? String(finalTxt).trim() : smsShortPing,
                             smsFallback: smsShortPing,
                             htmlBody: finalHtml,
@@ -8383,7 +8387,8 @@ function distanceMatrixStatus(state) {
                     });
                     const d = await r.json();
                     if (d.ok) {
-                        alert(`✅ Sent to ${techName}!${techEmail ? '\n📧 Full details emailed' : ''}${smsAddress ? '\n📱 Text sent' : ''}`);
+                        const sent = (d.results || []).map(x => x.type === 'sms' ? '\n📱 Text sent' : '\n📧 Emailed').join('');
+                        alert(`✅ Sent to ${techName}!${sent}`);
                     } else {
                         alert(`${d.smsBlocked ? '⚠️' : '❌'} ${d.smsBlocked ? '' : 'Send failed: '}${d.error || 'Unknown error'}`);
                     }

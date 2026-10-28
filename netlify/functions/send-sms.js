@@ -20,7 +20,7 @@ exports.handler = async (event) => {
     }
 
     try {
-        const { to, email, body, htmlBody, subject, deliverAt, smsFallback } = JSON.parse(event.body);
+        const { to, email, body, htmlBody, subject, deliverAt, smsFallback, emailFallback } = JSON.parse(event.body);
 
         const apiKey = process.env.MAILGUN_API_KEY;
         const domain = process.env.MAILGUN_DOMAIN || 'mcrdispatch.net';
@@ -74,10 +74,14 @@ exports.handler = async (event) => {
         }
 
         // Send full HTML email if email address provided
-        if (email) {
+        // The email is skipped when the text carries everything, but it is still sent if the text
+        // could not go out through Twilio (the gateway fallback only says "details sent to your email").
+        const twilioOk = results.some(r => r.type === 'sms' && r.via === 'twilio' && r.ok);
+        const emailTo = email || (!twilioOk ? emailFallback : null);
+        if (emailTo) {
             const emailParams = new URLSearchParams({
                 from: `MCR Dispatch <dispatch@${domain}>`,
-                to: email,
+                to: emailTo,
                 subject: subject || 'MCR Dispatch',
                 text: body || '',
                 html: htmlBody || body || ''
