@@ -127,14 +127,25 @@ async function runStatusPass(page, supabase, opts) {
     try { await tab.goto(HOME_URL, { waitUntil: 'commit' }); } catch (e) { /* often benign */ }
 
     // wait for the Gantt's data calls (up to ~50 s), then a short settle for the second call
-    const deadline = Date.now() + 50000;
+    const deadline = Date.now() + 90000;
     let got = false;
     while (Date.now() < deadline) {
       await tab.waitForTimeout(2500);
       await Promise.allSettled(pending.splice(0));
       if (bodies.some((b) => /GetTimePhasedObjects|loadServicesInBulk/.test(b))) { got = true; break; }
     }
-    if (got) { await tab.waitForTimeout(5000); await Promise.allSettled(pending.splice(0)); }
+    if (got) {
+      // With many territories selected the Gantt streams its data in several batches. Keep reading
+      // until no new batch has arrived for ~8 s (hard cap ~60 s) instead of stopping after a fixed 5 s.
+      const settleCap = Date.now() + 60000;
+      let lastCount = -1, quietSince = Date.now();
+      while (Date.now() < settleCap) {
+        await tab.waitForTimeout(2000);
+        await Promise.allSettled(pending.splice(0));
+        if (bodies.length !== lastCount) { lastCount = bodies.length; quietSince = Date.now(); }
+        else if (Date.now() - quietSince >= 8000) break;
+      }
+    }
 
     const rows = new Map();
     for (const b of bodies) {
