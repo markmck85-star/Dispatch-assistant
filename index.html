@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-335 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-336 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -753,7 +753,6 @@
                 <div class="board-context">
                     <label>Region
                         <select id="stateSelector" onchange="updateContext(); updateWatchdogLink(); updateIndianaPlannerButton(); updateInboundMailLink(); updateLocationLookupLink(); updateRestockLink(); updateStateConsoleLink(); updateLocationLookupLink(); updateIndianaPlannerButton();">
-                            <option value="AL">Alabama</option>
                             <option value="CA">California</option>
                             <option value="CO">Colorado</option>
                             <option value="FL">Florida</option>
@@ -2872,7 +2871,7 @@ function distanceMatrixStatus(state) {
                 const p = new URLSearchParams(window.location.search);
                 let st = (p.get('state') || sessionStorage.getItem('mcr_pending_dispatch_state') || '').trim().toUpperCase();
                 sessionStorage.removeItem('mcr_pending_dispatch_state');
-                st = ({ NC: 'GA', SC: 'GA' })[st] || st;
+                st = ({ NC: 'GA', SC: 'GA', AL: 'GA' })[st] || st;
                 if (/^[A-Z]{2}$/.test(st)) {
                     localStorage.setItem('lastSelectedState', st);
                     // A leftover admin-return value would otherwise win over it.
@@ -2889,8 +2888,8 @@ function distanceMatrixStatus(state) {
             } catch (e) { /* storage blocked: fall back to normal restore */ }
         })();
 
-        const BOARD_STATE_MAP = { NC: 'GA', SC: 'GA' };
-        const BOARD_ALL_STATES = ['AL','CA','CO','FL','GA','ID','IL','IN','MI','MN','NV','OH','OR','WV'];
+        const BOARD_STATE_MAP = { NC: 'GA', SC: 'GA', AL: 'GA' }; // AL has no board of its own: it rides the combined Georgia board (Georgia techs cover it)
+        const BOARD_ALL_STATES = ['CA','CO','FL','GA','ID','IL','IN','MI','MN','NV','OH','OR','WV'];
         window.CURRENT_USER = null;
 
         function boardStateFor(code) {
@@ -3076,7 +3075,7 @@ function distanceMatrixStatus(state) {
                         // path rather than doing what was intended. Normalize
                         // here, on the receiving side, since this board is
                         // the one that knows what its own selector supports.
-                        const HANDOFF_STATE_MAP = { NC: 'GA', SC: 'GA' };
+                        const HANDOFF_STATE_MAP = { NC: 'GA', SC: 'GA', AL: 'GA' };
                         const normalizedState = HANDOFF_STATE_MAP[data.state] || data.state;
                         const sel = document.getElementById('stateSelector');
                         if (sel) { sel.value = normalizedState; await updateContext(); }
