@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-343 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-344 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -4266,7 +4266,19 @@ function distanceMatrixStatus(state) {
             // stops keep their persisted technician below instead of re-deriving
             // one from availability/fallback rules.
             const existingByCode = await fetchExistingAssignments(dateStr);
-            window.sfByCode = existingByCode; // live appointment status per stop (reference chips on the cards)
+            // 2026-10-28: stops carry their OWN date (e.g. a restock pushed to tomorrow still shows on today's
+            // board), so the chips must read the status from each stop's own day, not only the picker's day.
+            // Otherwise those cards silently show no Gantt chip.
+            const sfMerged = Object.assign({}, existingByCode);
+            try {
+                const otherDays = new Set();
+                relevant.forEach(i => { const d = getItemEffectiveDateStr(i, dateStr); if (d && d !== dateStr) otherDays.add(d); });
+                for (const d of otherDays) {
+                    const m = await fetchPriorAssignmentsCached(d);
+                    Object.keys(m || {}).forEach(k => { if (!sfMerged[k]) sfMerged[k] = m[k]; });
+                }
+            } catch (e) { /* chips are reference only */ }
+            window.sfByCode = sfMerged; // live appointment status per stop (reference chips on the cards)
             window.removedStops = [];
 
             // 2026-10-16: EARLY-CATCH lookup (see the early-catch block further
