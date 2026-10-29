@@ -176,7 +176,7 @@ exports.handler = async (event) => {
       ok: true, today,
       team: techs.map((t) => ({ name: t.name, title: t.title, phone: t.phone, email: t.email, city: t.city, contractor: !!t.is_contractor, rosterOnly: !!t.roster_only })),
       sites: siteRows,
-      restock: { listReceivedAt: list ? list.receivedAt : null, rows: restock },
+      restock: { listReceivedAt: list ? list.receivedAt : null, listAgeDays: list ? Math.floor((Date.now() - Date.parse(list.receivedAt)) / 86400000) : null, rows: restock },
       tickets, visits, visitCount: visitsAll.length,
     });
   } catch (e) {

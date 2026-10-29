@@ -65,8 +65,9 @@ function ctyOpts(){var s={};D.sites.forEach(function(x){if(x.county)s[x.county]=
 function restock(){
  var r=D.restock;
  if(!r.listReceivedAt)return '<div class="empty">No California dispatch list has arrived yet. When the first one is received, every California stop on it appears here with how many days late it is, oldest first.</div>';
- var h='<p class="sub">From the dispatch list received '+fd(r.listReceivedAt)+'. Days late counts from the date the call was first requested.</p><div class="scroll"><table><thead><tr><th>Site</th><th>Needs</th><th>Requested</th><th>Status</th><th>Default tech</th><th>Last restock</th></tr></thead><tbody>';
- r.rows.forEach(function(x){h+='<tr><td><span class="code">'+esc(x.code)+'</span><br>'+esc(x.name||'Not in site list')+'<div class="mut">'+esc(x.county||'')+'</div></td><td>'+esc(x.consumables)+'</td><td>'+fd(x.requestedOn)+'</td><td>'+late(x.daysLate)+'</td><td>'+esc(x.primary||'')+'</td><td>'+(x.lastRestock?fd(x.lastRestock):'<span class="mut">none on file</span>')+'</td></tr>'});
+ var stale=r.listAgeDays>3;
+ var h=(stale?'<div class="empty" style="margin-bottom:10px"><b>This list is out of date.</b> It was received '+fd(r.listReceivedAt)+' ('+r.listAgeDays+' days ago) and is the newest California list the app has. Items done since then are still on it, so days late are not shown. The next California list replaces it.</div>':'<p class="sub">From the dispatch list received '+fd(r.listReceivedAt)+'. Days late counts from the date the call was first requested.</p>')+'<div class="scroll"><table><thead><tr><th>Site</th><th>Needs</th><th>Requested</th><th>Status</th><th>Default tech</th><th>Last restock</th></tr></thead><tbody>';
+ r.rows.forEach(function(x){h+='<tr><td><span class="code">'+esc(x.code)+'</span><br>'+esc(x.name||'Not in site list')+'<div class="mut">'+esc(x.county||'')+'</div></td><td>'+esc(x.consumables)+'</td><td>'+fd(x.requestedOn)+'</td><td>'+(stale?'<span class="mut">Old list</span>':late(x.daysLate))+'</td><td>'+esc(x.primary||'')+'</td><td>'+(x.lastRestock?fd(x.lastRestock):'<span class="mut">none on file</span>')+'</td></tr>'});
  return h+'</tbody></table></div>'}
 function tickets(){
  if(!D.tickets.length)return '<div class="empty">No open California tickets. They appear here as soon as the dispatch app receives them.</div>';
