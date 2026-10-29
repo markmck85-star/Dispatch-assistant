@@ -65,7 +65,7 @@ exports.handler = async (event) => {
             }
         }
 
-        const out = await require('./lib/send-message.js').sendMessage({ to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime });
+        const out = await require('./lib/send-message.js').sendMessage({ to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime, techName });
         return {
             statusCode: out.allOk ? 200 : 502,
             body: JSON.stringify({ ok: out.allOk, results: out.results, scheduledFor: out.scheduledFor, smsBlocked: out.smsBlocked,

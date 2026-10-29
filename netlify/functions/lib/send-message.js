@@ -29,6 +29,23 @@ function splitForSms(body) {
     return parts.map((t, i) => '(' + (i + 1) + '/' + parts.length + ') ' + t.trim());
 }
 
+// Saves the full text under a long random token and returns the link, or null if that fails.
+// The page is served by dispatch-link.js; rows expire after 14 days.
+async function makeDispatchLink(fullText, subject, techName) {
+    try {
+        if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return null;
+        const { createClient } = require('@supabase/supabase-js');
+        const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+        const token = require('crypto').randomBytes(12).toString('base64url');
+        const { error } = await sb.from('dispatch_links').insert({
+            token, tech_name: techName || null, subject: subject || null, body: String(fullText).trim(),
+            expires_at: new Date(Date.now() + 14 * 86400000).toISOString(),
+        });
+        if (error) { console.log('[send-message] dispatch link not saved:', error.message); return null; }
+        return 'https://mcrdispatch.net/d/' + token;
+    } catch (e) { console.log('[send-message] dispatch link failed:', e.message); return null; }
+}
+
 async function sendMessage(p) {
     const { to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime } = p;
     const apiKey = process.env.MAILGUN_API_KEY;
@@ -41,7 +58,18 @@ async function sendMessage(p) {
     // "to" is a 10-digit number, +1 number, or an old saved gateway address (the digits before the @ are used).
     // If the text cannot be sent, the result says so and the email fallback below still goes out.
     if (to) {
-        const parts = splitForSms(body || 'MCR Dispatch notification');
+        // A long dispatch goes out as one short text with a private link to the full list (the email
+        // still carries it too). If the link cannot be made, it falls back to several numbered texts.
+        let textBody = body || 'MCR Dispatch notification';
+        if (String(textBody).trim().length > ONE_TEXT_MAX) {
+            const url = await makeDispatchLink(textBody, subject, p.techName);
+            if (url) {
+                const n = (String(textBody).match(/^\s*\d+\.\s/gm) || []).length;
+                const when = (String(textBody).match(/\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\w+\s+\d+/i) || [])[0];
+                textBody = 'MCR Dispatch: ' + (n ? 'you have ' + n + ' stop' + (n !== 1 ? 's' : '') : 'your dispatch') + (when ? ' for ' + when : '') + '. Full list: ' + url;
+            }
+        }
+        const parts = splitForSms(textBody);
         let tw = null;
         for (const part of parts) {   // one after another, so they arrive in order
             tw = await require('./sms-send.js').tryTwilio(to, part);

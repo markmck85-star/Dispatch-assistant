@@ -23,6 +23,7 @@ const PUBLIC = new Set([
   'sms-optin',                      // consent form on the company website (insert only)
   'tech-api',                       // technician portal: its own sign-in
   'confirm-receipt',                // /ack link technicians tap (signed token inside)
+  'dispatch-link',                  // /d/<token> page behind the link in a long dispatch text (random token)
   'mailgun-inbound',                // Mailgun webhook
   'twilio-sms-webhook',             // Twilio STOP/START notices (checks Twilio's signature)
   'mcp-server',                     // has its own shared secret

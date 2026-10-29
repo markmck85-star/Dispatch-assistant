@@ -44,6 +44,7 @@
 /ga-inventory-board      /inventory-board.html    200
 
 /ack             /.netlify/functions/confirm-receipt  200
+/d/*             /.netlify/functions/dispatch-link?t=:splat  200
 
 /:state          /state.html?state=:state    200
 /watchdog/:state /watchdog-log.html?state=:state    200
