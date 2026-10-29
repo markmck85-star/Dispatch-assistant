@@ -31,7 +31,7 @@
   .stop-row .grow { width:210px; max-width:58vw; flex:0 0 auto; }
   .stop-row .odo { width:96px; flex:0 0 96px; text-align:right; }
   .stop-row input { width:100%; box-sizing:border-box; }
-  /* Driving mode (v0.59): big dark screens for a phone in a car mount */
+  /* Driving mode (v0.60): big dark screens for a phone in a car mount */
   #dm { display:none; position:fixed; inset:0; z-index:1000; background:#0d0d0d; color:#f5f5f5; flex-direction:column; padding:14px; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
   #dm.open { display:flex; }
   #dm button { border:none; border-radius:16px; font-weight:800; color:#fff; background:#2a2a2a; padding:0; }
@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.59</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.60</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -495,6 +495,31 @@ function shortName(s) {
   return tidy(raw[0] || s.name || s.site_code);
 }
 
+// Saved places (driving mode): a place typed once ("UPS Store Suwanee") is remembered on this phone and,
+// when the nearby-stops switch is on, keeps the spot where it was typed so it shows up as a close stop next time.
+// Kept only in this phone's storage; nothing here goes to the server.
+function placesKey() { const u = (typeof currentUser === 'function' && currentUser()) || {}; return 'mcrSavedPlaces:' + (u.username || ''); }
+function loadPlaces() {
+  try { const a = JSON.parse(localStorage.getItem(placesKey()) || '[]'); return Array.isArray(a) ? a.filter(x => x && x.name) : []; } catch (e) { return []; }
+}
+function storePlaces(a) { try { localStorage.setItem(placesKey(), JSON.stringify(a.slice(0, 60))); return true; } catch (e) { return false; } }
+// returns 'spot' (saved with its location), 'name' (saved without one) or '' (not saved)
+function dmSavePlace(name) {
+  const t = String(name || '').trim();
+  if (t.length < 2) return '';
+  const a = loadPlaces();
+  const k = t.toLowerCase();
+  const hit = a.find(x => x.name.toLowerCase() === k);
+  const spot = dmPos && Number.isFinite(dmPos.lat) && Number.isFinite(dmPos.lng) ? { lat: Math.round(dmPos.lat * 1e5) / 1e5, lng: Math.round(dmPos.lng * 1e5) / 1e5 } : null;
+  if (hit) { if (spot) { hit.lat = spot.lat; hit.lng = spot.lng; } }
+  else a.unshift(Object.assign({ name: t }, spot || {}));
+  if (!storePlaces(a)) return '';
+  return spot ? 'spot' : 'name';
+}
+function dmForgetPlace(i) {
+  const a = loadPlaces(); a.splice(i, 1); storePlaces(a); dmRender();
+}
+
 function allStops() {
   if (!ctx) return [];
   const out = [homeStop()];
@@ -519,6 +544,12 @@ function allStops() {
   (ctx.sites_usual || []).forEach(push);
   (ctx.sites_other || []).forEach(push);
   const seenOther = {};
+  loadPlaces().forEach(pl => {
+    const k = pl.name.toLowerCase();
+    if (seenOther[k]) return;
+    seenOther[k] = 1;
+    out.push({ kind: 'other', recent: true, saved: true, id: null, picker: pl.name, print: pl.name, search: k, lat: pl.lat, lng: pl.lng });
+  });
   legs.forEach(l => ['from', 'to'].forEach(side => {
     if (l[side + '_kind'] === 'other') {
       const n = String(l[side + '_print'] || l[side + '_picker'] || '').trim();
@@ -2163,7 +2194,15 @@ function dmRender() {
       '<div class="dm-last" style="margin-top:8px;font-size:clamp(16px,4vw,30px);display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
       '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Closest stops first. Your location is never stored.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
       '<button type="button" onclick="dmToggleGps()" style="min-width:clamp(84px,20vw,150px);padding:clamp(12px,3vw,24px) 14px;font-size:clamp(18px,4.6vw,34px);background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
+      '<button type="button" class="dm-wide" onclick="dmGoPlaces()" style="margin-top:8px;">⭐ Saved places (' + loadPlaces().length + ')</button>' +
       '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
+  } else if (dmStage === 'places') {
+    const pl = loadPlaces();
+    body.innerHTML = '<div class="dm-title">Saved places</div>' +
+      (pl.length ? '<div class="dm-tiles">' + pl.map((x, i) => '<div style="display:flex;gap:8px;align-items:stretch;"><div class="dm-tile" style="flex:1;cursor:default;">' + escHtml(x.name) + '<small>' + (x.lat != null ? 'location remembered' : 'name only') + '</small></div><button type="button" onclick="dmForgetPlace(' + i + ')" style="min-width:clamp(90px,22vw,160px);font-size:clamp(16px,4vw,28px);">Forget</button></div>').join('') + '</div>'
+        : '<div class="dm-hint">Nothing saved yet. When you pick a stop that is not in the list, such as UPS Store Suwanee, it is saved here automatically.</div>') +
+      '<div class="dm-hint">Saved places stay on this phone only.</div>' +
+      '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmBack()">Back</button>';
   } else if (dmStage === 'report') {
     body.innerHTML = dmReportHtml();
   } else if (dmStage === 'pick') {
@@ -2564,6 +2603,7 @@ function dmSearchInput(v) {
   if (el) { el.focus(); try { el.setSelectionRange(v.length, v.length); } catch (e) {} }
 }
 
+function dmGoPlaces() { dmStage = 'places'; dmRender(); }
 function dmGoPick() { dmSearch = ''; dmStage = 'pick'; dmGetPos(); dmRender(); }
 
 function dmBack() {
@@ -2614,8 +2654,11 @@ async function dmChoose(i) {
 async function dmChooseTyped() {
   const t = dmSearch.trim();
   dmLog('stop_typed');
+  const saved = dmSavePlace(t);
   dmSetTo({ kind: 'other', id: null, picker: t, print: t });
   await dmAfterPick();
+  if (saved === 'spot') dmToastMsg('Saved “' + t + '”. It will show up as a close stop next time you are here.');
+  else if (saved === 'name') dmToastMsg('Saved “' + t + '”. Turn on nearby stops to also remember where it is.');
 }
 
 async function dmEndDay() {
