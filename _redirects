@@ -20,6 +20,8 @@
 /restock-tracker         /restock-tracker.html    200
 /restock-forecast.html   /restock-forecast.html    200
 /restock-forecast        /restock-forecast.html    200
+/california.html         /california.html          200
+/california              /california.html          200
 /dispatch-list-backfill.html /dispatch-list-backfill.html 200
 /dispatch-list-backfill  /dispatch-list-backfill.html 200
 /shipments.html          /shipments.html          200

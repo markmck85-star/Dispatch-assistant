@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>California</title>
+<style>
+:root{--bg:#f5f3ef;--card:#fff;--text:#2c2c28;--muted:#6f6e68;--border:rgba(0,0,0,.12);--accent:#0b5d3b;--accent-fg:#fff;
+--late-bg:#fdeaea;--late-tc:#a32d2d;--soon-bg:#fef3db;--soon-tc:#854f0b;--ok-bg:#eaf3de;--ok-tc:#3b6d11;--chip:#ece9e2}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1a18;--card:#2c2c28;--text:#e4e2dc;--muted:#a8a8a2;--border:rgba(255,255,255,.14);--accent:#5fcf97;--accent-fg:#0c1a13;
+--late-bg:#2d0f0f;--late-tc:#f7c1c1;--soon-bg:#2e1a04;--soon-tc:#fac775;--ok-bg:#173404;--ok-tc:#c0dd97;--chip:#3a3a35}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif;padding:16px}
+.wrap{max-width:960px;margin:0 auto}
+a.back{color:var(--accent);text-decoration:none;font-size:13px}
+h1{font-size:22px;margin:6px 0 2px}
+.sub{color:var(--muted);font-size:12px;margin:0 0 12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.tabs button{font:inherit;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.tabs .n{opacity:.75;margin-left:4px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.bar input,.bar select{font:inherit;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);min-width:0}
+.bar input{flex:1 1 220px}.bar select{flex:1 1 150px}
+.empty{background:var(--card);border:1px dashed var(--border);border-radius:8px;padding:18px;color:var(--muted)}
+.scroll{overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:8px}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap}
+.late{background:var(--late-bg);color:var(--late-tc)}.soon{background:var(--soon-bg);color:var(--soon-tc)}.ok{background:var(--ok-bg);color:var(--ok-tc)}
+.code{font-weight:700;color:var(--accent);white-space:nowrap}
+.mut{color:var(--muted);font-size:12px}
+.mapbtn{display:inline-block;background:var(--accent);color:var(--accent-fg);text-decoration:none;font-weight:600;font-size:12px;padding:5px 10px;border-radius:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;min-width:0;overflow-wrap:anywhere}
+.tag{display:inline-block;font-size:11px;font-weight:600;background:var(--chip);border-radius:4px;padding:1px 6px;margin-left:6px}
+.co{font-weight:700;color:var(--accent);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.04em;font-size:13px}
+.s{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+.s>div{min-width:0;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="/index.html">&larr; Dispatch board</a>
+<h1>California</h1>
+<p class="sub" id="sub">Loading&hellip;</p>
+<div class="tabs" role="tablist" id="tabs"></div>
+<div id="view"></div>
+</div>
+<script>
+var D=null,tab='restock',filt={q:'',tech:'',cty:''};
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function mapUrl(a){return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a)}
+function fd(s){if(!s)return '';var d=new Date(s);if(isNaN(d))return esc(s);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:/^\d{4}-\d{2}-\d{2}$/.test(s)?'UTC':'America/Los_Angeles'})}
+function late(n){if(n==null)return '';var c=n>0?'late':(n>=-1?'soon':'ok');var t=n>0?(n+' day'+(n===1?'':'s')+' late'):(n===0?'due today':'due in '+(-n)+' day'+(n===-1?'':'s'));return '<span class="pill '+c+'">'+t+'</span>'}
+var TABS=[['restock','Restock list'],['tickets','Open tickets'],['visits','Recent visits'],['team','Team'],['sites','Sites']];
+function counts(){return {restock:D.restock.rows.length,tickets:D.tickets.length,visits:D.visitCount,team:D.team.length,sites:D.sites.length}}
+function drawTabs(){var c=counts();document.getElementById('tabs').innerHTML=TABS.map(function(t){return '<button role="tab" aria-selected="'+(t[0]===tab)+'" data-t="'+t[0]+'">'+t[1]+'<span class="n">'+c[t[0]]+'</span></button>'}).join('')}
+document.getElementById('tabs').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;tab=b.dataset.t;draw()});
+function techOpts(){var s={};D.sites.forEach(function(x){if(x.primary)s[x.primary]=1});return Object.keys(s).sort()}
+function ctyOpts(){var s={};D.sites.forEach(function(x){if(x.county)s[x.county]=1});return Object.keys(s).sort()}
+function restock(){
+ var r=D.restock;
+ if(!r.listReceivedAt)return '<div class="empty">No California dispatch list has arrived yet. When the first one is received, every California stop on it appears here with how many days late it is, oldest first.</div>';
+ var h='<p class="sub">From the dispatch list received '+fd(r.listReceivedAt)+'. Days late counts from the date the call was first requested.</p><div class="scroll"><table><thead><tr><th>Site</th><th>Needs</th><th>Requested</th><th>Status</th><th>Default tech</th><th>Last restock</th></tr></thead><tbody>';
+ r.rows.forEach(function(x){h+='<tr><td><span class="code">'+esc(x.code)+'</span><br>'+esc(x.name||'Not in site list')+'<div class="mut">'+esc(x.county||'')+'</div></td><td>'+esc(x.consumables)+'</td><td>'+fd(x.requestedOn)+'</td><td>'+late(x.daysLate)+'</td><td>'+esc(x.primary||'')+'</td><td>'+(x.lastRestock?fd(x.lastRestock):'<span class="mut">none on file</span>')+'</td></tr>'});
+ return h+'</tbody></table></div>'}
+function tickets(){
+ if(!D.tickets.length)return '<div class="empty">No open California tickets. They appear here as soon as the dispatch app receives them.</div>';
+ var h='<div class="scroll"><table><thead><tr><th>Site</th><th>WO</th><th>Type</th><th>Issue</th><th>Received</th><th>Due</th><th>Default tech</th></tr></thead><tbody>';
+ D.tickets.forEach(function(t){h+='<tr><td><span class="code">'+esc(t.code||'')+'</span><br>'+esc(t.site||'')+'</td><td>'+esc(t.wo||'')+'</td><td>'+esc(t.kind||'')+'</td><td>'+esc(t.issue||'')+'</td><td>'+fd(t.receivedAt)+'</td><td>'+fd(t.dueAt)+'</td><td>'+esc(t.primary||'')+'</td></tr>'});
+ return h+'</tbody></table></div>'}
+function visits(){
+ if(!D.visits.length)return '<div class="empty">No California visits on file yet. Closed California calls appear here once they are imported after the takeover.</div>';
+ var h='<div class="scroll"><table><thead><tr><th>Date</th><th>Site</th><th>Technician</th><th>Result</th></tr></thead><tbody>';
+ D.visits.forEach(function(v){h+='<tr><td>'+fd(v.at)+'</td><td><span class="code">'+esc(v.code||'')+'</span><br>'+esc(v.site||'')+'</td><td>'+esc(v.tech||'')+'</td><td>'+(v.restock?'<span class="tag">Restock</span> ':'')+esc(v.remediation||'')+'<div class="mut">'+esc(v.note)+'</div></td></tr>'});
+ return h+'</tbody></table></div>'}
+function team(){return '<div class="grid">'+D.team.map(function(t){return '<div class="card"><b>'+esc(t.name)+'</b>'+(t.contractor?'<span class="tag">Contractor</span>':'')+'<div class="mut">'+esc(t.title||'')+(t.city?' &middot; '+esc(t.city):'')+'</div><div>'+esc(t.phone||'')+'</div><div>'+esc(t.email||'')+'</div></div>'}).join('')+'</div>'}
+function sites(){
+ var f=D.sites.filter(function(s){return(!filt.tech||s.primary===filt.tech)&&(!filt.cty||s.county===filt.cty)&&(!filt.q||(s.code+' '+s.name+' '+s.address+' '+(s.primary||'')+' '+(s.fallback||'')).toLowerCase().indexOf(filt.q)>-1)});
+ var h='<div class="bar"><input id="fq" type="search" placeholder="Search code, name, address, technician" aria-label="Search sites" value="'+esc(filt.q)+'"><select id="ft" aria-label="Default technician"><option value="">All technicians</option>'+techOpts().map(function(t){return '<option'+(t===filt.tech?' selected':'')+'>'+esc(t)+'</option>'}).join('')+'</select><select id="fc" aria-label="County"><option value="">All counties</option>'+ctyOpts().map(function(t){return '<option'+(t===filt.cty?' selected':'')+'>'+esc(t)+'</option>'}).join('')+'</select></div><p class="sub">'+f.length+' of '+D.sites.length+' sites. Miles are driving distance from the technician\'s home.</p><div id="sl">';
+ var last='';
+ f.forEach(function(s){if(s.county!==last){h+='<div class="co">'+esc(s.county||'No county')+' County</div>';last=s.county}
+  h+='<div class="s"><div><span class="code">'+esc(s.code)+'</span> <b>'+esc(s.name)+'</b><div class="mut">'+esc(s.address)+'</div><div>Default: <b>'+esc(s.primary||'none')+'</b>'+(s.primaryMi!=null?' ('+s.primaryMi+' mi)':'')+(s.fallback?' &middot; Backup: '+esc(s.fallback)+(s.fallbackMi!=null?' ('+s.fallbackMi+' mi)':''):'')+'</div></div><a class="mapbtn" href="'+mapUrl(s.address)+'" target="_blank" rel="noopener">Map</a></div>'});
+ return h+'</div>'}
+function draw(){
+ drawTabs();
+ var v=document.getElementById('view');
+ v.innerHTML=({restock:restock,tickets:tickets,visits:visits,team:team,sites:sites})[tab]();
+ if(tab==='sites'){
+  var q=document.getElementById('fq'),t=document.getElementById('ft'),c=document.getElementById('fc');
+  q.addEventListener('input',function(){filt.q=q.value.toLowerCase();var pos=q.selectionStart;draw();var n=document.getElementById('fq');n.focus();n.setSelectionRange(pos,pos)});
+  t.addEventListener('change',function(){filt.tech=t.value;draw()});c.addEventListener('change',function(){filt.cty=c.value;draw()});
+ }
+}
+fetch('/.netlify/functions/get-california-overview',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
+ if(d.error)throw new Error(d.error);D=d;
+ document.getElementById('sub').textContent=D.sites.length+' sites, '+D.team.length+' people. Updates automatically as California lists, tickets and closed calls arrive.';
+ draw();
+}).catch(function(e){document.getElementById('sub').textContent='Could not load California data: '+e.message});
+</script>
+</body>
+</html>
