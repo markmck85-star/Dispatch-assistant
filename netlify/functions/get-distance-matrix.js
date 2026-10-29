@@ -102,7 +102,7 @@ exports.handler = async (event) => {
 
     const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
       fetchAllPages(() => supabase.from('sites').select('id, site_code').eq('state', state).order('id')),
-      fetchAllPages(() => supabase.from('technicians').select('id, slug').or(`home_state.eq.${state},additional_states.cs.{${state}}`).order('id')),
+      fetchAllPages(() => supabase.from('technicians').select('id, slug').or(`home_state.eq.${state},distance_extra_states.cs.{${state}}`).order('id')),
     ]);
     if (sitesErr || techsErr) return await blobsFallback(state);
 
