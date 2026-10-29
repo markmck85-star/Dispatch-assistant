@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-345 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-346 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -5554,7 +5554,7 @@ function distanceMatrixStatus(state) {
                     // dispatcher reassigned here and has not made the change in the Gantt yet). Open appointments only.
                     const _sfNorm = (x) => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
                     const sfDiffStr = (_sf && _sf.techName && ['Scheduled', 'Dispatched', 'In Progress'].includes(_sf.status) && _sfNorm(_sf.techName) !== _sfNorm(tech))
-                        ? `<div style="font-size:11px;color:#9aa0a6;margin-top:3px;">Gantt still has this on ${String(_sf.techName).split(' ')[0]}</div>`
+                        ? `<div style="font-size:12px;font-weight:bold;color:#fff;background:#b3201f;border-radius:4px;padding:3px 7px;margin-top:4px;">🛑 Gantt has this on ${String(_sf.techName).split(' ')[0]}, not ${String(tech).split(' ')[0]}</div>`
                         : '';
                     const sfMovedStr = (_sfInfo && _sfInfo.sfSyncedAt && _sfInfo.techName === tech)
                         ? `<div style="font-size:11px;color:#4fb3e8;margin-top:3px;">↪ Moved to match the field-service Gantt${_sfInfo.sfPrevTech ? ' (was ' + _sfInfo.sfPrevTech.split(' ')[0] + ')' : ''}</div>`
@@ -8241,8 +8241,9 @@ function distanceMatrixStatus(state) {
                 const agoStr = ago == null ? '' : ' (checked ' + (ago < 1 ? 'just now' : ago + ' min ago') + ')';
                 const e = (x) => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 if (bad.length) {
-                    return '<div style="color:#e8b44c;font-size:12px;margin-bottom:8px;">⚠ Differs from the field-service Gantt' + agoStr + ':' +
-                        bad.map(b => '<div style="color:#ddd;">' + e(b.item.name || b.item.code) + ': Gantt has ' + e(String(b.sf.techName).split(' ')[0]) + '</div>').join('') + '</div>';
+                    return '<div style="background:#7a1218;border:2px solid #ff4d4d;border-radius:6px;padding:8px 10px;color:#fff; font-size:13px;margin-bottom:8px;"><div style="font-weight:bold;">🛑 Different technician in the field-service Gantt' + agoStr + '</div>' +
+                        bad.map(b => '<div style="margin-top:3px;">' + e(b.item.name || b.item.code) + ': Gantt has <strong>' + e(String(b.sf.techName).split(' ')[0]) + '</strong></div>').join('') +
+                        '<div style="margin-top:5px;font-size:12px;">Sending this tells one technician while Salesforce notifies another. Fix one side first so two people do not go to the same stop.</div></div>';
                 }
                 let line = '<div style="color:#5bc8af;font-size:12px;margin-bottom:8px;">✅ ' + match + ' stop' + (match !== 1 ? 's' : '') + ' match' + (match === 1 ? 'es' : '') + ' the field-service Gantt' + agoStr;
                 if (none) line += '<span style="color:#9aa0a6;"> · ' + none + ' not assigned there yet</span>';
@@ -8311,8 +8312,9 @@ function distanceMatrixStatus(state) {
             const e = (typeof esc === 'function') ? esc : (x) => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             let sfHtml;
             if (rep.mismatch.length) {
-                sfHtml = '<div style="color:#e8b44c;font-weight:bold;margin-bottom:4px;">⚠ ' + rep.mismatch.length + ' stop' + (rep.mismatch.length !== 1 ? 's' : '') + ' disagree with the field-service Gantt' + (agoStr ? ' (checked ' + agoStr + ')' : '') + '</div>' +
-                    rep.mismatch.map(m => '<div style="font-size:12px;color:#ddd;margin:2px 0;">' + e(m.name) + ': board has ' + e(m.tech.split(' ')[0]) + ', Gantt has ' + e(String(m.sf.techName).split(' ')[0]) + '</div>').join('');
+                sfHtml = '<div style="background:#7a1218;border:2px solid #ff4d4d;border-radius:6px;padding:8px 10px;color:#fff; margin-bottom:6px;"><div style="font-weight:bold;">🛑 ' + rep.mismatch.length + ' stop' + (rep.mismatch.length !== 1 ? 's' : '') + ' on a different technician in the field-service Gantt' + (agoStr ? ' (checked ' + agoStr + ')' : '') + '</div>' +
+                    rep.mismatch.map(m => '<div style="font-size:13px;margin:3px 0;">' + e(m.name) + ': board has <strong>' + e(m.tech.split(' ')[0]) + '</strong>, Gantt has <strong>' + e(String(m.sf.techName).split(' ')[0]) + '</strong></div>').join('') +
+                    '<div style="font-size:12px;margin-top:4px;">Sending now tells one technician while Salesforce notifies another. Fix one side first so two people do not go to the same stop.</div></div>';
             } else {
                 sfHtml = '<div style="color:#5bc8af;font-weight:bold;">✅ Assignments match the field-service Gantt' + (agoStr ? ' (checked ' + agoStr + ')' : '') + '</div>';
             }
