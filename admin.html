@@ -3451,7 +3451,13 @@
         var locSearchQuery = '';
 
         function renderLocations() {
-            var keys = Object.keys(locationsData).sort();
+            // get-locations also returns alias keys (e.g. KR9 -> CA1200) pointing at the same
+            // record so pasted dispatch lists resolve. Those are lookups, not separate sites,
+            // so list each real site once (key === its own code).
+            var keys = Object.keys(locationsData).filter(function(k) {
+                var l = locationsData[k];
+                return !l || !l.code || String(l.code).toUpperCase() === String(k).toUpperCase();
+            }).sort();
             var q = locSearchQuery.trim().toLowerCase();
             document.getElementById('locCount').textContent = keys.length;
             var html = '';
