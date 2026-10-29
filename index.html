@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-346 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-347 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -5553,7 +5553,7 @@ function distanceMatrixStatus(state) {
                     // Reference only: the board's technician differs from the one the Gantt has the appointment on (a
                     // dispatcher reassigned here and has not made the change in the Gantt yet). Open appointments only.
                     const _sfNorm = (x) => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
-                    const sfDiffStr = (_sf && _sf.techName && ['Scheduled', 'Dispatched', 'In Progress'].includes(_sf.status) && _sfNorm(_sf.techName) !== _sfNorm(tech))
+                    const sfDiffStr = (_sf && _sf.techName && ['Scheduled', 'Dispatched', 'In Progress'].includes(_sf.status) && !sfSameName(_sf.techName, tech))
                         ? `<div style="font-size:12px;font-weight:bold;color:#fff;background:#b3201f;border-radius:4px;padding:3px 7px;margin-top:4px;">🛑 Gantt has this on ${String(_sf.techName).split(' ')[0]}, not ${String(tech).split(' ')[0]}</div>`
                         : '';
                     const sfMovedStr = (_sfInfo && _sfInfo.sfSyncedAt && _sfInfo.techName === tech)
@@ -8233,7 +8233,7 @@ function distanceMatrixStatus(state) {
                     if (!sf || sf.status === 'Unscheduled' || !sf.techName) { none++; return; }   // not dragged to anyone yet
                     if (sf.seenAt && (!newest || sf.seenAt > newest)) newest = sf.seenAt;
                     if (sf.status === 'Completed' || sf.status === 'Canceled') { closed.push(item); return; }
-                    if (OPEN.includes(sf.status) && sf.techName && norm(sf.techName) !== norm(tech)) bad.push({ item, sf });
+                    if (OPEN.includes(sf.status) && sf.techName && !sfSameName(sf.techName, tech)) bad.push({ item, sf });
                     else match++;
                 });
                 if (!match && !bad.length && !closed.length) return '';   // nothing seen in the Gantt for these stops
@@ -8252,6 +8252,26 @@ function distanceMatrixStatus(state) {
             } catch (err) { return ''; }
         }
 
+
+        // 2026-10-29: the Gantt and the app can spell the same technician differently (Steve/Steven, Ed/Edward,
+        // Caden/Cayden). Same last name and a compatible first name counts as the same person.
+        function sfSameName(a, b) {
+            const toks = (x) => String(x || '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean);
+            const A = toks(a), B = toks(b);
+            if (!A.length || !B.length) return false;
+            if (A.join('') === B.join('')) return true;
+            if (A.length < 2 || B.length < 2) return false;
+            if (A[A.length - 1] !== B[B.length - 1]) return false;
+            const x = A[0], y = B[0];
+            if (x === y || x.startsWith(y) || y.startsWith(x)) return true;
+            if (x.length >= 3 && y.length >= 3 && x.slice(0, 3) === y.slice(0, 3)) return true;
+            if (Math.abs(x.length - y.length) <= 1) {
+                let i = 0; while (i < x.length && i < y.length && x[i] === y[i]) i++;
+                const rx = x.slice(i), ry = y.slice(i);
+                if (rx.slice(1) === ry || ry.slice(1) === rx || rx.slice(1) === ry.slice(1)) return true;
+            }
+            return false;
+        }
 
         // 2026-10-28: one-click send of every message on screen. First compares the board with the field-service
         // Gantt (as of the last status sync). Everything matching: it goes. Anything that disagrees: a list is
@@ -8285,7 +8305,7 @@ function distanceMatrixStatus(state) {
                     if (!sf || sf.status === 'Unscheduled' || !sf.techName) { rep.notInSf++; return; }   // not dragged to anyone yet
                     if (sf.seenAt && (!rep.newest || sf.seenAt > rep.newest)) rep.newest = sf.seenAt;
                     if (sf.status === 'Completed' || sf.status === 'Canceled') { rep.closed.push({ tech, name: item.name || item.code, sf }); return; }
-                    if (OPEN.includes(sf.status) && sf.techName && norm(sf.techName) !== norm(tech)) rep.mismatch.push({ tech, name: item.name || item.code, sf });
+                    if (OPEN.includes(sf.status) && sf.techName && !sfSameName(sf.techName, tech)) rep.mismatch.push({ tech, name: item.name || item.code, sf });
                     else rep.match++;
                 });
             });
