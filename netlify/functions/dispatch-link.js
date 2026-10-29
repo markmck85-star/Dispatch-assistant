@@ -48,7 +48,10 @@ function render(body) {
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'GET') return page(405, 'Not allowed', '<p class="sub">Not allowed.</p>');
-  const token = String((event.queryStringParameters || {}).t || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  // The code is the last part of the address the person opened (/d/<code>). The redirect rule does not
+  // carry it into a query value, so read it from the path; a ?t= value is still accepted.
+  const fromPath = (String(event.rawUrl || '').split('?')[0].match(/\/d\/([A-Za-z0-9_-]+)\/?$/) || String(event.path || '').match(/\/d\/([A-Za-z0-9_-]+)\/?$/) || [])[1];
+  const token = String(fromPath || (event.queryStringParameters || {}).t || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
   if (token.length < 12) return page(404, 'Link not found', '<h1>Link not found</h1><p class="sub">This link looks incomplete. Check the text message it came in.</p>');
   try {
     const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
