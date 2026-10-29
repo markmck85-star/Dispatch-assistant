@@ -20,13 +20,31 @@ exports.handler = async (event) => {
     }
 
     try {
-        const { to, email, body, htmlBody, subject, deliverAt, smsFallback, emailFallback } = JSON.parse(event.body);
+        const { to, email, body, htmlBody, subject, deliverAt, smsFallback, emailFallback, holdUntil, techName } = JSON.parse(event.body);
 
-        const apiKey = process.env.MAILGUN_API_KEY;
-        const domain = process.env.MAILGUN_DOMAIN || 'mcrdispatch.net';
-
-        if (!apiKey) {
+        if (!process.env.MAILGUN_API_KEY) {
             return { statusCode: 500, body: JSON.stringify({ error: 'MAILGUN_API_KEY not set' }) };
+        }
+
+        // 2026-10-29: hold until a later time (the "not before 8:00 AM the technician's time" rule).
+        // The message waits in held_texts and release-held-texts sends it, the same way, when due.
+        // Past or invalid times are ignored (sends now); capped at 24 hours ahead.
+        if (holdUntil) {
+            const when = new Date(holdUntil);
+            const msAhead = when.getTime() - Date.now();
+            if (!isNaN(when.getTime()) && msAhead > 60 * 1000 && msAhead < 24 * 60 * 60 * 1000) {
+                const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+                const { data: row, error } = await supabase.from('held_texts').insert({
+                    deliver_at: when.toISOString(),
+                    tech_name: techName || null,
+                    payload: { to, email, body, htmlBody, subject, smsFallback, emailFallback },
+                    created_by: (event.headers && (event.headers['x-mcr-user'] || event.headers['X-Mcr-User'])) || null,
+                }).select('id').single();
+                if (error) {
+                    return { statusCode: 500, body: JSON.stringify({ ok: false, error: 'Could not hold the message: ' + error.message }) };
+                }
+                return { statusCode: 200, body: JSON.stringify({ ok: true, held: true, heldId: row.id, deliverAt: when.toISOString(), results: [{ type: 'held', ok: true }] }) };
+            }
         }
 
         // Optional scheduled delivery (used by the Saturday on-call page when
@@ -43,69 +61,11 @@ exports.handler = async (event) => {
             }
         }
 
-        const results = [];
-
-        // Send SMS ping if SMS address provided
-        let twilioDone = false;
-        if (to && !deliveryTime) {
-            // 2026-10-27: Twilio toll-free first (scheduled sends keep using the gateway: Mailgun holds them)
-            const tw = await require('./lib/sms-send.js').tryTwilio(to, body || 'MCR Dispatch notification');
-            if (tw.handled) { results.push({ type: 'sms', ok: tw.ok, via: 'twilio', error: tw.error }); twilioDone = true; }
-        }
-        if (to && !twilioDone) {
-            const smsParams = new URLSearchParams({
-                from: `MCR Dispatch <dispatch@${domain}>`,
-                to: to,
-                subject: 'MCR Dispatch',
-                text: smsFallback || body || 'MCR Dispatch notification'
-            });
-            if (deliveryTime) smsParams.set('o:deliverytime', deliveryTime);
-
-            const smsResp = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': 'Basic ' + Buffer.from(`api:${apiKey}`).toString('base64'),
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: smsParams.toString()
-            });
-
-            results.push({ type: 'sms', ok: smsResp.ok, status: smsResp.status });
-        }
-
-        // Send full HTML email if email address provided
-        // The email is skipped when the text carries everything, but it is still sent if the text
-        // could not go out through Twilio (the gateway fallback only says "details sent to your email").
-        const twilioOk = results.some(r => r.type === 'sms' && r.via === 'twilio' && r.ok);
-        const emailTo = email || (!twilioOk ? emailFallback : null);
-        if (emailTo) {
-            const emailParams = new URLSearchParams({
-                from: `MCR Dispatch <dispatch@${domain}>`,
-                to: emailTo,
-                subject: subject || 'MCR Dispatch',
-                text: body || '',
-                html: htmlBody || body || ''
-            });
-            if (deliveryTime) emailParams.set('o:deliverytime', deliveryTime);
-
-            const emailResp = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': 'Basic ' + Buffer.from(`api:${apiKey}`).toString('base64'),
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: emailParams.toString()
-            });
-
-            results.push({ type: 'email', ok: emailResp.ok, status: emailResp.status });
-        }
-
-        const allOk = results.length > 0 && results.every(r => r.ok);
-        const smsBlocked = results.some(r => r.type === 'sms' && r.error === 'recipient opted out');
+        const out = await require('./lib/send-message.js').sendMessage({ to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime });
         return {
-            statusCode: allOk ? 200 : 502,
-            body: JSON.stringify({ ok: allOk, results, scheduledFor: deliveryTime, smsBlocked,
-                error: allOk ? undefined : (smsBlocked ? 'This person replied STOP, so texts are blocked. Email was still sent.' : undefined) })
+            statusCode: out.allOk ? 200 : 502,
+            body: JSON.stringify({ ok: out.allOk, results: out.results, scheduledFor: out.scheduledFor, smsBlocked: out.smsBlocked,
+                error: out.allOk ? undefined : (out.smsBlocked ? 'This person replied STOP, so texts are blocked. Email was still sent.' : undefined) })
         };
 
     } catch (err) {

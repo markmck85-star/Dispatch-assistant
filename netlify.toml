@@ -69,3 +69,7 @@
   for = "/*"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow, noarchive"
+
+# 2026-10-29: releases texts held until 8:00 AM the technician's local time (see lib/text-hold.js).
+[functions."release-held-texts"]
+  schedule = "*/5 * * * *"
