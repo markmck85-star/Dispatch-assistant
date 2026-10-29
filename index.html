@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-361 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-362 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -8415,11 +8415,12 @@ function distanceMatrixStatus(state) {
                             ? 'MCR Dispatch: You have ' + stopCount + ' stop' + (stopCount !== 1 ? 's' : '') + ' for ' + dateStr + '. Details sent to your email.'
                             : String(p.txt).slice(0, 300);
                         const textHasAll = !!p.sms && p.txt.length <= 1200;
+                        const textBody = p.sms ? p.txt.trim() : shortPing;   // long ones are split into several texts on the server
                         const html = '<pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">' + e(p.txt) + '</pre>';
                         const r = await fetch('/.netlify/functions/send-sms', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ to: p.sms, email: textHasAll ? null : p.email, emailFallback: textHasAll ? p.email : null, body: textHasAll ? p.txt.trim() : shortPing, smsFallback: shortPing, htmlBody: html, subject: 'MCR Dispatch — ' + dateStr, holdUntil: holdIso || undefined, techName: p.n })
+                            body: JSON.stringify({ to: p.sms, email: textHasAll ? null : p.email, emailFallback: textHasAll ? p.email : null, body: textBody, smsFallback: shortPing, htmlBody: html, subject: 'MCR Dispatch — ' + dateStr, holdUntil: holdIso || undefined, techName: p.n })
                         });
                         const d = await r.json();
                         results.push({ n: p.n, ok: !!d.ok, msg: d.ok ? (d.held ? 'held until ' + ((_hi && _hi.label) || 'morning') : (d.results || []).map(x => x.type === 'sms' ? 'text' : 'email').join(' + ')) : (d.error || 'failed') });
@@ -8605,7 +8606,7 @@ function distanceMatrixStatus(state) {
                             to: smsAddress,
                             email: textHasAll ? null : techEmail,
                             emailFallback: textHasAll ? techEmail : null,
-                            body: String(finalTxt).length <= 1200 ? String(finalTxt).trim() : smsShortPing,
+                            body: (smsAddress || String(finalTxt).length <= 1200) ? String(finalTxt).trim() : smsShortPing,   // long texts are split server-side
                             smsFallback: smsShortPing,
                             htmlBody: finalHtml,
                             subject: mailSubject,

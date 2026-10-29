@@ -4,6 +4,31 @@
 //   input:  { to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime }
 //   output: { allOk, results, smsBlocked, scheduledFor }   (throws only on a missing Mailgun key)
 
+// A dispatch longer than one comfortable text is sent as several texts, split between stops
+// (a stop starts with "1.", "2." ...). The opening line stays with the first part and the closing
+// lines ("Min loadout", "Please acknowledge") with the last. Parts are marked "(1/3)".
+const ONE_TEXT_MAX = 1200;   // at or under this the text goes out as a single message, unchanged
+const PART_MAX = 1000;       // target size of each part when it has to be split
+function splitForSms(body) {
+    const text = String(body || '').trim();
+    if (text.length <= ONE_TEXT_MAX) return [text];
+    const lines = text.split('\n');
+    const blocks = [];
+    for (const ln of lines) {
+        if (/^\s*\d+\.\s/.test(ln) || !blocks.length) blocks.push(ln);
+        else blocks[blocks.length - 1] += '\n' + ln;
+    }
+    const parts = [];
+    let cur = '';
+    for (const b of blocks) {
+        if (cur && (cur + '\n' + b).length > PART_MAX) { parts.push(cur); cur = b; }
+        else cur = cur ? cur + '\n' + b : b;
+    }
+    if (cur) parts.push(cur);
+    if (parts.length < 2) return [text];
+    return parts.map((t, i) => '(' + (i + 1) + '/' + parts.length + ') ' + t.trim());
+}
+
 async function sendMessage(p) {
     const { to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime } = p;
     const apiKey = process.env.MAILGUN_API_KEY;
@@ -16,8 +41,13 @@ async function sendMessage(p) {
     // "to" is a 10-digit number, +1 number, or an old saved gateway address (the digits before the @ are used).
     // If the text cannot be sent, the result says so and the email fallback below still goes out.
     if (to) {
-        const tw = await require('./sms-send.js').tryTwilio(to, body || 'MCR Dispatch notification');
-        if (tw.handled) results.push({ type: 'sms', ok: tw.ok, via: 'twilio', error: tw.error });
+        const parts = splitForSms(body || 'MCR Dispatch notification');
+        let tw = null;
+        for (const part of parts) {   // one after another, so they arrive in order
+            tw = await require('./sms-send.js').tryTwilio(to, part);
+            if (!(tw.handled && tw.ok)) break;
+        }
+        if (tw.handled) results.push({ type: 'sms', ok: tw.ok, via: 'twilio', error: tw.error, parts: parts.length });
         else results.push({ type: 'sms', ok: false, via: 'twilio', error: 'text not sent (' + (tw.error || tw.reason || 'Twilio unavailable') + ')' });
     }
 
