@@ -3487,6 +3487,8 @@
             document.getElementById('locAddress').value = '';
             document.getElementById('locAliases').value = '';
             document.getElementById('locAliasesReadonlyNote').textContent = '';
+            locTechMiles = {};
+            populateTechDropdowns();
             document.getElementById('locPrimaryTech').value = '';
             document.getElementById('locFallbackTech').value = '';
             document.getElementById('locContractorOverride').checked = false;
@@ -3520,6 +3522,8 @@
                 }
             }
             document.getElementById('locFallbackTech').value = loc.fallbackTech || '';
+            // Sort both tech drop-downs nearest-first with miles; selections are kept across the re-sort.
+            loadLocTechMiles(code);
             document.getElementById('locContractorOverride').checked = !!loc.contractorOverride;
             document.getElementById('locMachineType').value = loc.machineType || 'SK';
             document.getElementById('locRemote').checked = !!loc.remote;
@@ -3665,23 +3669,67 @@
             populateTechDropdowns();
         }
 
+        // Option values are the technician's NAME (what save-location matches on), not the
+        // slug key. Labels show drive miles to the location being edited, nearest first.
+        var locTechMiles = {};   // technician name -> miles for the location open in the form
         function populateTechDropdowns() {
-            var names = Object.keys(techniciansData).sort();
             var primarySel = document.getElementById('locPrimaryTech');
             var fallbackSel = document.getElementById('locFallbackTech');
-            // Preserve current selections
             var prevPrimary = primarySel.value;
             var prevFallback = fallbackSel.value;
-            // Rebuild options
-            primarySel.innerHTML = '<option value="">— Select primary tech —</option>';
-            fallbackSel.innerHTML = '<option value="">— None —</option>';
-            names.forEach(function(name) {
-                primarySel.innerHTML += '<option value="' + name + '">' + name + '</option>';
-                fallbackSel.innerHTML += '<option value="' + name + '">' + name + '</option>';
+            var list = Object.keys(techniciansData).map(function(k) {
+                var t = techniciansData[k] || {};
+                var nm = t.name || k;
+                var mi = locTechMiles[nm];
+                return { name: nm, mi: (typeof mi === 'number') ? mi : null };
             });
-            // Restore selections if still valid
+            list.sort(function(a, b) {
+                if (a.mi !== null && b.mi !== null) return a.mi - b.mi || a.name.localeCompare(b.name);
+                if (a.mi !== null) return -1;
+                if (b.mi !== null) return 1;
+                return a.name.localeCompare(b.name);
+            });
+            var anyMiles = list.some(function(x) { return x.mi !== null; });
+            var pHtml = '<option value="">— Select primary tech —</option>';
+            var fHtml = '<option value="">— None —</option>';
+            list.forEach(function(x) {
+                var label = esc(x.name) + (x.mi !== null ? ' — ' + Math.round(x.mi) + ' mi' : (anyMiles ? ' — no distance yet' : ''));
+                var opt = '<option value="' + escAttr(x.name) + '">' + label + '</option>';
+                pHtml += opt; fHtml += opt;
+            });
+            primarySel.innerHTML = pHtml;
+            fallbackSel.innerHTML = fHtml;
             if (prevPrimary) primarySel.value = prevPrimary;
             if (prevFallback) fallbackSel.value = prevFallback;
+        }
+
+        // Fetches each listed technician's drive miles to one site and re-sorts both drop-downs.
+        async function loadLocTechMiles(code) {
+            locTechMiles = {};
+            try {
+                var idToName = {};
+                Object.keys(techniciansData).forEach(function(k) {
+                    var t = techniciansData[k] || {};
+                    if (t.id) idToName[t.id] = t.name || k;
+                });
+                var ids = Object.keys(idToName);
+                if (ids.length) {
+                    var res = await fetch('/.netlify/functions/get-tech-site-distances?siteCode=' + encodeURIComponent(code) +
+                        '&technicianIds=' + encodeURIComponent(ids.join(',')), { cache: 'no-store' });
+                    if (res.ok) {
+                        var data = await res.json();
+                        var d = (data && data.distances) || {};
+                        Object.keys(d).forEach(function(id) {
+                            var mi = Number(d[id] && d[id].distanceMi);
+                            if (idToName[id] && isFinite(mi)) locTechMiles[idToName[id]] = mi;
+                        });
+                    }
+                }
+            } catch (e) { console.warn('tech miles lookup failed:', e); }
+            // Only re-sort if the form is still showing this location.
+            if (document.getElementById('locCode').value.trim().toUpperCase() === String(code).toUpperCase()) {
+                populateTechDropdowns();
+            }
         }
 
         function renderTechnicians() {

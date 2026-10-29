@@ -134,14 +134,19 @@ exports.handler = async (event) => {
             let primaryTechId = null, fallbackTechId = null;
             const primaryName = merged.primaryTech || merged.defaultTech || "";
             const fallbackName = merged.fallbackTech || "";
-            if (primaryName) {
-              const { data: pRow } = await supabase.from("technicians").select("id").eq("name", primaryName).maybeSingle();
-              if (pRow) primaryTechId = pRow.id;
-            }
-            if (fallbackName) {
-              const { data: fRow } = await supabase.from("technicians").select("id").eq("name", fallbackName).maybeSingle();
-              if (fRow) fallbackTechId = fRow.id;
-            }
+            // Accepts a display name ("Allen Levinsky") or a slug ("allen-levinsky"); the admin
+            // drop-down once sent slugs, which silently matched nothing and cleared the technician.
+            const findTechId = async (nm) => {
+              const { data: byName } = await supabase.from("technicians").select("id").eq("name", nm).maybeSingle();
+              if (byName) return byName.id;
+              const { data: all } = await supabase.from("technicians").select("id, name, slug");
+              const want = nm.toLowerCase().replace(/[\s_-]+/g, "-");
+              const hit = (all || []).find((t) => (t.slug && t.slug.toLowerCase() === want) ||
+                String(t.name || "").toLowerCase().replace(/[\s_-]+/g, "-") === want);
+              return hit ? hit.id : null;
+            };
+            if (primaryName) primaryTechId = await findTechId(primaryName);
+            if (fallbackName) fallbackTechId = await findTechId(fallbackName);
 
             const siteRow = {
               site_code: code,
