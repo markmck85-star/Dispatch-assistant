@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-365 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-366 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -8118,8 +8118,10 @@ function distanceMatrixStatus(state) {
                     if (loadoutTally.JP > 0) tally.push(`JP×${loadoutTally.JP}`);
                     if (tally.length > 0) msg += `\n📦 Min loadout: ${tally.join('  ')}`;
                 }
-                msg += `\nPlease acknowledge receipt.`;
-                
+                // 2026-10-29: "Please acknowledge receipt." removed. Texts now come from the app's number,
+                // where replies are not read by anyone, and dispatch does not need a confirmation.
+                // To bring it back: msg += `\nPlease acknowledge receipt.`;
+
                 messagesByTech[tech] = msg;
                 html += `<div class="tech-card">
                             <div class="tech-header">📱 ${tech}</div>
