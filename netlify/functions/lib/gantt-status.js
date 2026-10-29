@@ -187,9 +187,11 @@ async function runStatusPass(page, supabase, opts) {
     if (!rows.size) throw new Error(got ? 'The Gantt responded but no appointments could be read from it (format may have changed).' : 'The Gantt data calls never arrived (page did not load the Gantt; ended on ' + String(tab.url()).slice(0, 120) + (await tab.locator('#username').count().catch(() => 0) ? ', which is a sign-in page' : '') + ').');
 
     // match technicians by name
-    const { data: techs } = await supabase.from('technicians').select('id, name').eq('active', true);
+    const { data: techs } = await supabase.from('technicians').select('id, name, sf_name_alias').eq('active', true);
     const byName = new Map();
     for (const t of techs || []) byName.set(norm(t.name), t.id);
+    // explicit Salesforce spelling set on the technician (admin-set), wins over fuzzy matching
+    for (const t of techs || []) if (t.sf_name_alias) byName.set(norm(t.sf_name_alias), t.id);
     const matched = new Set();
     const list = Array.from(rows.values());
     for (const r of list) {

@@ -90,12 +90,20 @@ exports.handler = async (event) => {
       if (wos.length) {
         const { data: sfRows } = await supabase
           .from("sa_live_status")
-          .select("work_order, status, status_category, resource_name, sf_last_modified, actual_start, actual_end, seen_at")
+          .select("work_order, status, status_category, resource_name, technician_id, sf_last_modified, actual_start, actual_end, seen_at")
           .in("work_order", wos);
+        // Show the app's own name for a Gantt technician the sync matched (the Gantt may spell it
+        // differently: Steve/Steven, Heriberto/Eddie), so the board compares like with like.
+        const sfTechIds = [...new Set((sfRows || []).map(r => r.technician_id).filter(Boolean))];
+        const sfTechName = {};
+        if (sfTechIds.length) {
+          const { data: tn } = await supabase.from("technicians").select("id, name").in("id", sfTechIds);
+          (tn || []).forEach(t => { sfTechName[t.id] = t.name; });
+        }
         for (const r of (sfRows || [])) {
           const prev = sfByWo[r.work_order];
           if (!prev || (r.sf_last_modified || "") >= (prev.changedAt || "")) {
-            sfByWo[r.work_order] = { status: r.status, category: r.status_category, techName: r.resource_name, changedAt: r.sf_last_modified, actualStart: r.actual_start, actualEnd: r.actual_end, seenAt: r.seen_at };
+            sfByWo[r.work_order] = { status: r.status, category: r.status_category, techName: (r.technician_id && sfTechName[r.technician_id]) || r.resource_name, changedAt: r.sf_last_modified, actualStart: r.actual_start, actualEnd: r.actual_end, seenAt: r.seen_at };
           }
         }
       }
