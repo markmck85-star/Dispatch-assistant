@@ -111,6 +111,24 @@ const MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json";
 const DEST_BATCH = 10; // destinations per Distance Matrix API call
 const TECH_BATCHES_PER_CALL = 1; // techs (each with their own full destination sweep) processed per invocation -- see v5 comment above
 const R_MI = 3958.8;  // Earth radius in miles
+
+// 2026-10-28: cross-state coverage, opt-in per tech. A tech is priced against
+// every site of their home_state; beyond that only against (a) all sites of any
+// state in distance_extra_states (e.g. a GA tech covering Alabama) and (b) the
+// specific site codes in distance_extra_sites (e.g. Michael: Augusta + Charlotte).
+// Techs who merely appear under another state via additional_states are NOT
+// priced there. techs must be fetched with the TECH_COLS below.
+const TECH_COLS = "id, slug, lat, lng, active, home_state, distance_extra_states, distance_extra_sites";
+function techInState(t, state, stateSiteCodes) {
+  if (t.home_state === state) return true;
+  if ((t.distance_extra_states || []).includes(state)) return true;
+  return (t.distance_extra_sites || []).some((c) => stateSiteCodes.has(c));
+}
+function techCoversSite(t, state, siteCode) {
+  if (t.home_state === state) return true;
+  if ((t.distance_extra_states || []).includes(state)) return true;
+  return (t.distance_extra_sites || []).includes(siteCode);
+}
 // v7 (2026-10-01): hard ceiling for a Quick Add run. Quick Add accepts a dispatcher's own admin login
 // instead of the shared password, so the server (not just the admin page) refuses anything that would
 // cost more than this after the monthly free allowance. Bigger jobs go through the password-protected
@@ -286,15 +304,17 @@ exports.handler = async (event) => {
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const [{ data: pSites, error: pSitesErr }, { data: pTechs, error: pTechsErr }] = await Promise.all([
       supabasePreview.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true),
-      supabasePreview.from("technicians").select("id, slug, lat, lng").or(`home_state.eq.${state},distance_extra_states.cs.{${state}}`).eq("active", true), // 2026-10-28: also techs who cover this state via additional_states (opt-in column distance_extra_states, NOT additional_states, so only techs deliberately listed are priced across state lines)
+      supabasePreview.from("technicians").select(TECH_COLS).or(`home_state.eq.${state},distance_extra_states.cs.{${state}},distance_extra_sites.neq.{}`).eq("active", true),
     ]);
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
     if (pTechsErr) return json(500, { ok: false, error: "technicians fetch failed: " + pTechsErr.message });
 
     const priceSites = (pSites || []).filter((s) => s.lat != null && s.lng != null);
-    const priceTechs = (pTechs || []).filter((t) => t.lat != null && t.lng != null);
+    const pStateCodes = new Set((pSites || []).map((x) => x.site_code));
+    const priceTechs = (pTechs || []).filter((t) => t.lat != null && t.lng != null && techInState(t, state, pStateCodes));
 
-    let elementCount = priceTechs.length * priceSites.length;
+    let elementCount = 0;
+    for (const t of priceTechs) for (const x of priceSites) if (techCoversSite(t, state, x.site_code)) elementCount++;
     if (additive) {
       let coverageRows;
       try {
@@ -303,8 +323,14 @@ exports.handler = async (event) => {
         return json(500, { ok: false, error: "existing distances fetch failed: " + e.message });
       }
       const siteIdSet = new Set(priceSites.map((s) => s.id));
+      const codeBySiteId = Object.fromEntries(priceSites.map((x) => [x.id, x.site_code]));
+      const techById = Object.fromEntries(priceTechs.map((t) => [t.id, t]));
       const covered = new Set();
-      for (const r of coverageRows) if (siteIdSet.has(r.site_id)) covered.add(r.technician_id + "|" + r.site_id);
+      for (const r of coverageRows) {
+        if (!siteIdSet.has(r.site_id)) continue;
+        const tt = techById[r.technician_id];
+        if (tt && techCoversSite(tt, state, codeBySiteId[r.site_id])) covered.add(r.technician_id + "|" + r.site_id);
+      }
       elementCount = Math.max(0, elementCount - covered.size);
     }
 
@@ -416,13 +442,17 @@ exports.handler = async (event) => {
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
     supabase.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true)
       .order("site_code", { ascending: true }), // v5 (2026-09-23): deterministic ordering across chunks, same fix as compute-site-distance-matrix.js v4
-    supabase.from("technicians").select("id, slug, lat, lng, active").or(`home_state.eq.${state},distance_extra_states.cs.{${state}}`) // 2026-10-28: include cross-state coverage techs
+    supabase.from("technicians").select(TECH_COLS).or(`home_state.eq.${state},distance_extra_states.cs.{${state}},distance_extra_sites.neq.{}`)
       .order("slug", { ascending: true }), // v5: same reasoning, techs are now also chunked across calls
   ]);
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
   if (techsErr) return json(500, { error: "technicians fetch failed: " + techsErr.message });
 
-  const techEntries = (techs || [])
+  const mainStateCodes = new Set((sites || []).map((x) => x.site_code));
+  const techsInScope = (techs || []).filter((t) => techInState(t, state, mainStateCodes));
+  const techBySlugFull = Object.fromEntries(techsInScope.map((t) => [t.slug, t]));
+  const pairAllowed = (techKey, code) => { const t = techBySlugFull[techKey]; return !!t && techCoversSite(t, state, code); };
+  const techEntries = techsInScope
     .filter((t) => t.lat != null && t.lng != null && t.active !== false)
     .map((t) => [t.slug, { lat: t.lat, lng: t.lng }]);
   const locEntries = (sites || [])
@@ -430,7 +460,7 @@ exports.handler = async (event) => {
     .map((s) => [s.site_code, { lat: s.lat, lng: s.lng }]);
 
   const siteIdByCode = Object.fromEntries((sites || []).map((s) => [s.site_code, s.id]));
-  const techIdBySlug = Object.fromEntries((techs || []).map((t) => [t.slug, t.id]));
+  const techIdBySlug = Object.fromEntries(techsInScope.map((t) => [t.slug, t.id]));
 
   if (techEntries.length === 0) return json(400, { error: "No techs with lat/lng found for " + state + ". Run geocode-addresses first." });
   if (locEntries.length === 0) return json(400, { error: "No locations with lat/lng found for " + state + ". Run geocode-addresses first." });
@@ -444,6 +474,7 @@ exports.handler = async (event) => {
     let preservedDrivingCount = 0;
     for (const [techKey, tech] of techEntries) {
       for (const [locCode, loc] of locEntries) {
+        if (!pairAllowed(techKey, locCode)) continue;
         const key = techKey + "|" + locCode;
         const existingEntry = existingMatrixForHaversine[key];
         if (existingEntry && existingEntry.type === "driving") {
@@ -502,7 +533,7 @@ exports.handler = async (event) => {
     matrix = {};
     for (const [key, val] of Object.entries(existingMatrix)) {
       const [techKey, locCode] = key.split("|");
-      if (!techMap.has(techKey) || !locMap.has(locCode)) { prunedCount++; continue; }
+      if (!techMap.has(techKey) || !locMap.has(locCode) || !pairAllowed(techKey, locCode)) { prunedCount++; continue; }
       if (additive && val.type === "driving") matrix[key] = val;
       // non-additive (full rebuild): nothing carried over, everything gets re-queried.
       // additive + non-driving existing entry: left out, falls into "missing" below.
@@ -513,16 +544,16 @@ exports.handler = async (event) => {
     if (additive) {
       let coverageRows;
       try {
-        coverageRows = await loadDrivingRows(supabase, (techs || []).map((t) => t.id));
+        coverageRows = await loadDrivingRows(supabase, techsInScope.map((t) => t.id));
       } catch (e) {
         return json(500, { error: "existing distances fetch failed: " + e.message });
       }
-      const slugById = Object.fromEntries((techs || []).map((t) => [t.id, t.slug]));
+      const slugById = Object.fromEntries(techsInScope.map((t) => [t.id, t.slug]));
       const codeById = Object.fromEntries((sites || []).map((x) => [x.id, x.site_code]));
       for (const r of coverageRows) {
         const slug = slugById[r.technician_id];
         const code = codeById[r.site_id];
-        if (!slug || !code || !techMap.has(slug) || !locMap.has(code)) continue;
+        if (!slug || !code || !techMap.has(slug) || !locMap.has(code) || !pairAllowed(slug, code)) continue;
         const key = slug + "|" + code;
         if (!matrix[key]) {
           matrix[key] = {
@@ -539,7 +570,7 @@ exports.handler = async (event) => {
     if (quickAdd) {
       let plannedElements = 0;
       for (const [techKey] of techEntries) {
-        for (const [code] of locEntries) if (!matrix[techKey + "|" + code]) plannedElements++;
+        for (const [code] of locEntries) if (pairAllowed(techKey, code) && !matrix[techKey + "|" + code]) plannedElements++;
       }
       const est = estimateCost(plannedElements, await getMonthlyElementsUsed(store));
       if (est.estimatedCost > QUICKADD_MAX_COST) {
@@ -556,9 +587,9 @@ exports.handler = async (event) => {
   for (const [techKey, tech] of chunkTechs) {
     let destCodes;
     if (additive) {
-      destCodes = locEntries.map(([code]) => code).filter((code) => !matrix[techKey + "|" + code]);
+      destCodes = locEntries.map(([code]) => code).filter((code) => pairAllowed(techKey, code) && !matrix[techKey + "|" + code]);
     } else {
-      destCodes = locEntries.map(([code]) => code);
+      destCodes = locEntries.map(([code]) => code).filter((code) => pairAllowed(techKey, code));
     }
     if (!destCodes.length) continue; // this tech already fully covered
     const results = await queryTechAgainstDestinations(apiKey, techKey, tech, destCodes, locMap, failedPairs);
