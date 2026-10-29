@@ -112,63 +112,27 @@ async function readPlanWithRetry(store, planKey) {
 // is exactly reproducible -- calling it twice with the same underlying
 // data always returns the same list in the same order.
 async function computeMissingPairs(supabase, state) {
+  // v5 (2026-10-28): the diff now runs in Postgres (missing_site_pairs RPC)
+  // instead of paging every existing pair through the function. Michigan
+  // (227 sites, ~25.8k pairs) needed hundreds of sequential page queries and
+  // blew past the 30s gateway limit (504 -> HTML -> "Unexpected token '<'").
+  // Same definition of "missing" as before: every unique pair of active,
+  // geocoded sites in the state with no row in site_site_distances.
   const { data: sites, error: sitesErr } = await supabase
     .from("sites")
-    .select("id, site_code, lat, lng")
+    .select("site_code, lat, lng")
     .eq("state", state)
     .eq("active", true)
     .order("site_code", { ascending: true });
   if (sitesErr) throw new Error("sites fetch failed: " + sitesErr.message);
-
   const geocoded = (sites || []).filter((s) => s.lat != null && s.lng != null);
-  const ids = geocoded.map((s) => s.id);
 
-  const existingKeys = new Set();
-  const CHUNK = 150; // .in() batching for larger states -- keeps each query's id-list size reasonable
-  const PAGE_SIZE = 1000; // v2 (2026-09-23) BUG FIX: Supabase/PostgREST caps a single query's rows
-  // at 1000 by default -- CA has 22,105 existing pairs, so the very first
-  // un-paginated attempt at this silently truncated to ~1000 rows per
-  // chunk, making almost every real pair look "missing" and inflating the
-  // gap-fill estimate to $202 (nearly a full rebuild) instead of the true
-  // ~$99 for the actual 19,800-pair gap. Every query here now loops with
-  // an explicit .range() until a page comes back shorter than PAGE_SIZE,
-  // guaranteeing the full result set is read regardless of size.
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK);
-    if (!chunk.length) continue;
-    let page = 0;
-    for (;;) {
-      const from = page * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-      const { data: rows, error: distErr } = await supabase
-        .from("site_site_distances")
-        .select("site_a, site_b")
-        .or(`site_a.in.(${chunk.join(",")}),site_b.in.(${chunk.join(",")})`)
-        .range(from, to);
-      if (distErr) throw new Error("site_site_distances fetch failed: " + distErr.message);
-      for (const row of rows || []) {
-        const [a, b] = row.site_a < row.site_b ? [row.site_a, row.site_b] : [row.site_b, row.site_a];
-        existingKeys.add(a + "|" + b);
-      }
-      if (!rows || rows.length < PAGE_SIZE) break;
-      page++;
-    }
-  }
+  const { data: rpc, error: rpcErr } = await supabase.rpc("missing_site_pairs", { p_state: state });
+  if (rpcErr) throw new Error("missing_site_pairs failed: " + rpcErr.message);
 
-  const missing = [];
   const latLngByCode = {};
   for (const s of geocoded) latLngByCode[s.site_code] = { lat: s.lat, lng: s.lng };
-
-  for (let i = 0; i < geocoded.length; i++) {
-    for (let j = i + 1; j < geocoded.length; j++) {
-      const a = geocoded[i], b = geocoded[j];
-      const [idA, idB] = a.id < b.id ? [a.id, b.id] : [b.id, a.id];
-      if (existingKeys.has(idA + "|" + idB)) continue;
-      missing.push([a.site_code, b.site_code]);
-    }
-  }
-
-  return { missing, latLngByCode, siteCount: geocoded.length };
+  return { missing: (rpc && rpc.missing) || [], latLngByCode, siteCount: geocoded.length };
 }
 
 exports.handler = async (event) => {
