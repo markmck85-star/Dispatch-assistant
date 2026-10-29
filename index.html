@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-359 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-360 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -5545,7 +5545,7 @@ function distanceMatrixStatus(state) {
                     // by the status sync says so, with who it was on before.
                     const _sfInfo = (window.sfByCode || {})[item.code];
                     const _sf = _sfInfo && _sfInfo.sf;
-                    const _sfMap = { 'Scheduled': ['#f4c542', '#3a2f00', 'Scheduled'], 'Dispatched': ['#4fb3e8', '#04273a', 'On the way'], 'In Progress': ['#9b6bd6', '#ffffff', 'In progress'], 'Completed': ['#4caf50', '#ffffff', 'Done'], 'Canceled': ['#8a8f98', '#ffffff', 'Canceled'] };
+                    const _sfMap = { 'Scheduled': ['#f4c542', '#3a2f00', 'Dispatched'], 'Dispatched': ['#4fb3e8', '#04273a', 'On the way'], 'In Progress': ['#9b6bd6', '#ffffff', 'In progress'], 'Completed': ['#4caf50', '#ffffff', 'Done'], 'Canceled': ['#8a8f98', '#ffffff', 'Canceled'] };
                     const _sfStyle = _sf && _sfMap[_sf.status];
                     const sfBadge = _sfStyle
                         ? `<span style="background:${_sfStyle[0]};color:${_sfStyle[1]};font-size:10px;font-weight:bold;padding:1px 6px;border-radius:3px;margin-left:4px;" title="Appointment status in the field-service Gantt${_sf.changedAt ? ', changed ' + new Date(_sf.changedAt).toLocaleString('en-US',{weekday:'short',hour:'numeric',minute:'2-digit'}) : ''}">${_sfStyle[2]}${_sf.changedAt ? ' · ' + (new Date(_sf.changedAt).toDateString() === new Date().toDateString() ? '' : new Date(_sf.changedAt).toLocaleDateString('en-US',{weekday:'short'}) + ' ') + new Date(_sf.changedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : ''}</span>`
