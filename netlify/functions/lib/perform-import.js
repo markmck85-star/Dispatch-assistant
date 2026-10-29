@@ -273,7 +273,7 @@ async function stampCloserOnAssignments(supabase, assignmentIds) {
 async function performImport(supabase, rows) {
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }, { data: aliases, error: aliasesErr }] = await Promise.all([
     supabase.from('sites').select('id, name, state'),
-    supabase.from('technicians').select('id, name'),
+    supabase.from('technicians').select('id, name, sf_name_alias'),
     supabase.from('site_aliases').select('alias, site_id'),
   ]);
   if (sitesErr) throw new Error('sites fetch failed: ' + sitesErr.message);
@@ -288,8 +288,8 @@ async function performImport(supabase, rows) {
     if (!sitesByState[s.state]) sitesByState[s.state] = [];
     sitesByState[s.state].push(s);
   }
-  const techByLowerName = {};
-  for (const t of techs) techByLowerName[t.name.trim().toLowerCase()] = t.id;
+  // exact name, the technician's Salesforce spelling, or an unambiguous close match (Steve/Steven, Paul/Rich Gerhart...)
+  const matchTech = require('./tech-name-match').makeTechMatcher(techs);
 
   const incomingApptNumbers = rows.map((r) => r.appointmentNumber).filter(Boolean);
   const existingSet = new Set();
@@ -461,7 +461,7 @@ async function performImport(supabase, rows) {
       if (reviewSamples.length < 25) reviewSamples.push({ state: r.state, accountName: r.accountName });
     }
 
-    const technicianId = r.techName ? techByLowerName[r.techName.trim().toLowerCase()] || null : null;
+    const technicianId = r.techName ? matchTech(r.techName) : null;
     if (technicianId) techMatchedCount++;
 
     const ticketId = linkedTicket ? linkedTicket.id : null;
