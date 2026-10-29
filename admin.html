@@ -279,6 +279,7 @@
                 <input type="text" id="techTitle" placeholder="Field Technician" autocomplete="off">
                 <label for="techCity">City <span style="color:#888;font-weight:400;font-size:12px;">(roster "Tech Location")</span></label>
                 <input type="text" id="techCity" placeholder="e.g. Temecula" autocomplete="off">
+                <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;margin:4px 0 10px;"><input type="checkbox" id="techRosterOnly" style="margin-top:3px;"> <span>Roster only <span style="color:#888;font-size:12px;">(shows on the company roster, but is not dispatched and does not appear in dispatch lists)</span></span></label>
                 <label for="techCarrier">Carrier</label>
                 <select id="techCarrier" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px;" onchange="updateTechSmsAddress()">
                     <option value="">-- Select carrier --</option>
@@ -3659,7 +3660,7 @@
         async function loadTechnicians() {
             if (!currentState) return;
             try {
-                var res = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(currentState), { cache: 'no-store' });
+                var res = await fetch('/.netlify/functions/get-technicians?includeRosterOnly=1&state=' + encodeURIComponent(currentState), { cache: 'no-store' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 techniciansData = (await res.json()) || {};
             } catch (e) {
@@ -3677,7 +3678,7 @@
             var fallbackSel = document.getElementById('locFallbackTech');
             var prevPrimary = primarySel.value;
             var prevFallback = fallbackSel.value;
-            var list = Object.keys(techniciansData).map(function(k) {
+            var list = Object.keys(techniciansData).filter(function(k) { return !(techniciansData[k] && techniciansData[k].rosterOnly); }).map(function(k) {
                 var t = techniciansData[k] || {};
                 var nm = t.name || k;
                 var mi = locTechMiles[nm];
@@ -3773,6 +3774,7 @@
             document.getElementById('techEmail').value = '';
             document.getElementById('techTitle').value = '';
             document.getElementById('techCity').value = '';
+            document.getElementById('techRosterOnly').checked = false;
             document.getElementById('techCarrier').value = '';
             document.getElementById('techSmsAddress').value = '';
             document.getElementById('techRegion').value = '';
@@ -3800,6 +3802,7 @@
             document.getElementById('techEmail').value = tech.email || '';
             document.getElementById('techTitle').value = tech.title || '';
             document.getElementById('techCity').value = tech.city || '';
+            document.getElementById('techRosterOnly').checked = tech.rosterOnly === true;
             document.getElementById('techRegion').value = tech.region || '';
             document.getElementById('techStartLocation').value = tech.homeAddress || '';
             document.getElementById('techAdditionalStates').value = (tech.additionalStates || []).join(', ');
@@ -3838,6 +3841,7 @@
                 email: document.getElementById('techEmail').value.trim(),
                 title: document.getElementById('techTitle').value.trim(),
                 city: document.getElementById('techCity').value.trim(),
+                rosterOnly: document.getElementById('techRosterOnly').checked,
                 region: document.getElementById('techRegion').value.trim(),
                 homeAddress: document.getElementById('techStartLocation').value.trim(),
                 smsAddress: document.getElementById('techSmsAddress').value.trim(),
@@ -4111,7 +4115,7 @@
             const byState = {};
             for (const state of ROSTER_STATE_ORDER) {
                 try {
-                    const res = await fetch('/.netlify/functions/get-technicians?state=' + state, { cache: 'no-store' });
+                    const res = await fetch('/.netlify/functions/get-technicians?includeRosterOnly=1&state=' + state, { cache: 'no-store' });
                     if (!res.ok) continue;
                     const data = await res.json();
                     // Only credit a tech to THIS state's section if it's really
@@ -4232,11 +4236,14 @@ async function colLetterRoster(n) {
 
             // ---- Employees tab ----
             const director = allTechs.find((t) => t.active && String(t.title || '').trim() === ROSTER_TOP_TITLE);
-            const leadRows = ROSTER_LEADERSHIP.map((p) => ({ title: p.title, city: '', name: p.name, phone: fmtPhone(p.phone), email: p.email }));
+            // The President (and any other top-of-roster person) comes from the Technicians tab now (title "President").
+            const leadRows = allTechs.filter((t) => t.active && String(t.title || '').trim() === 'President')
+                .map((t) => ({ title: 'President', city: t.city || '', name: t.name, phone: fmtPhone(t.phone), email: t.email || '' }));
+            if (!leadRows.length) ROSTER_LEADERSHIP.forEach((p) => leadRows.push({ title: p.title, city: '', name: p.name, phone: fmtPhone(p.phone), email: p.email }));
             if (director) leadRows.push({ title: ROSTER_TOP_TITLE, city: director.city || '', name: director.name, phone: fmtPhone(director.phone), email: director.email || '' });
             const empSections = ROSTER_STATE_ORDER.map((state) => {
                 const people = (byState[state] || [])
-                    .filter((t) => t.active && !t.isContractor && !isExcluded(t) && String(t.title || '').trim() !== ROSTER_TOP_TITLE)
+                    .filter((t) => t.active && !t.isContractor && !isExcluded(t) && String(t.title || '').trim() !== ROSTER_TOP_TITLE && String(t.title || '').trim() !== 'President')
                     .sort((a, b) => rankOf(a.title || 'Field Technician') - rankOf(b.title || 'Field Technician') || a.name.localeCompare(b.name))
                     .map((t) => ({ title: t.title || 'Field Technician', city: t.city || '', name: t.name, phone: fmtPhone(t.phone), email: t.email || '' }));
                 return { blurb: ROSTER_STATE_BLURB[state] || state, people };

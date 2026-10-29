@@ -82,7 +82,7 @@ exports.handler = async (event) => {
       // real NC/SC home_state.
       const { data: techs, error: techErr } = await supabase
         .from("technicians")
-        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, sms_opted_out, active, title, city, is_contractor, lat, lng, geocoded_at")
+        .select("id, slug, name, home_state, additional_states, phone, email, home_address, sms_address, sms_opted_out, active, title, city, is_contractor, roster_only, lat, lng, geocoded_at")
         .or(`home_state.eq.${state},additional_states.cs.{${state}}`);
 
       if (techErr) throw techErr;
@@ -103,6 +103,9 @@ exports.handler = async (event) => {
       // rather than patching every downstream consumer separately.
       for (const t of (techs || [])) {
         if (t.name === 'Unassigned (New Site)') continue;
+        // Roster-only people (warehouse manager, president...) are on the company roster but are not
+        // dispatched, so they stay out of every dispatch list unless the caller asks for them.
+        if (t.roster_only === true && params.includeRosterOnly !== '1') continue;
         result[t.slug] = {
           id: t.id,
           name: t.name,
@@ -117,6 +120,7 @@ exports.handler = async (event) => {
           title: t.title || "",
           city: t.city || "",
           isContractor: t.is_contractor === true,
+          rosterOnly: t.roster_only === true,
           ...(t.lat != null && t.lng != null ? {
             lat: t.lat,
             lng: t.lng,

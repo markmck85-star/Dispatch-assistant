@@ -144,6 +144,8 @@ exports.handler = async (event) => {
   const hasCity = typeof payload.city === "string";
   if (hasTitle) record.title = payload.title.trim();
   if (hasCity) record.city = payload.city.trim();
+  const hasRosterOnly = typeof payload.rosterOnly === "boolean";
+  if (hasRosterOnly) record.rosterOnly = payload.rosterOnly;
   if (lat != null && lng != null) {
     record.lat = lat;
     record.lng = lng;
@@ -193,6 +195,7 @@ exports.handler = async (event) => {
             // Only included when sent, so an upsert never blanks a saved title or city.
             if (hasTitle) techRow.title = record.title || null;
             if (hasCity) techRow.city = record.city || null;
+            if (hasRosterOnly) techRow.roster_only = record.rosterOnly;
             if (merged.lat != null && merged.lng != null) {
               techRow.lat = merged.lat;
               techRow.lng = merged.lng;
