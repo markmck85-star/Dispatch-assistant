@@ -17,6 +17,11 @@ function formatForTwilio(body) {
   let t = String(body == null ? '' : body);
   t = t
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}️]/gu, '') // emoji such as the siren
+    .replace(/[×✕]/g, 'x')                      // the multiplication sign (LF×5) is not in the basic text alphabet either
+    .replace(/…/g, '...')
+    .replace(/[•·]/g, '-')
+    .replace(/→/g, '->')
+    .replace(/[\u00A0\u202F]/g, ' ')
     .replace(/[–—]/g, '-')
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
