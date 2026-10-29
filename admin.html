@@ -5459,7 +5459,7 @@ ${withDrawing ? '<drawing r:id="rId1"/>' : ''}
                     const flagRows = (r.flagged_legs || []).map(f =>
                         `<div style="padding:6px 10px; background:#2a1010; border-left:3px solid #e05555; border-radius:0 4px 4px 0; margin-top:4px; font-size:12px;">`
                         + `${mcFmtDate(f.date)}: <strong>${f.fromRaw}</strong> → <strong>${f.toRaw}</strong> -- `
-                        + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource})`
+                        + `claimed ${f.claimedMiles} mi, expected ~${f.expectedMiles} mi (${f.expectedSource === 'haversine-fallback' || f.expectedSource === 'haversine' ? 'straight-line estimate, no driving distance on file for this pair, so the real route may be longer' : f.expectedSource === 'town-estimate' ? 'town-to-town estimate' : f.expectedSource === 'driving' ? 'driving distance' : f.expectedSource})`
                         + (f.reason === 'negative_or_zero' ? ' -- negative/zero mileage' : ` -- ${f.ratio}x expected`)
                         + `</div>`
                     ).join('');

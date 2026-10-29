@@ -204,7 +204,7 @@ function reportDetailHtml(r) {
     const cluster = f.cluster ? " — part of a run of flags this day; the order of stops may be off, not just this number" : "";
     const why = f.reason === "negative_or_zero" ? " — negative or zero mileage" : (f.ratio != null ? " — " + f.ratio + "x expected" : " — flagged");
     h += '<div class="flag">' + esc(fmtDay(f.date)) + ": <strong>" + esc(f.fromRaw) + "</strong> &rarr; <strong>" + esc(f.toRaw) + "</strong> — claimed " + esc(f.claimedMiles) +
-      " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc(f.expectedSource === "town-estimate" ? "town-to-town estimate" : f.expectedSource) + ")" + esc(why) + esc(cluster) + "</div>";
+      " mi, expected ~" + esc(f.expectedMiles) + " mi (" + esc((f.expectedSource === "town-estimate" ? "town-to-town estimate" : (f.expectedSource === "haversine-fallback" || f.expectedSource === "haversine") ? "straight-line estimate, no driving distance on file for this pair, so the real route may be longer" : f.expectedSource === "driving" ? "driving distance" : f.expectedSource)) + ")" + esc(why) + esc(cluster) + "</div>";
   });
   if (cov) {
     h += '<div class="unm">Could not check this sheet. Only ' + esc(r.matched_legs) + " of " + esc(r.total_legs) + " hops matched a known site, so nothing here is confirmed either way. The miles claimed are not shown to be right or wrong.</div>";
@@ -470,7 +470,7 @@ function exportCsv() {
   current.received.forEach((p) => {
     const r = p.report; if (!r) return;
     (r.flagged_legs || []).forEach((f) => {
-      const base = f.reason === "negative_or_zero" ? "negative or zero mileage" : f.ratio + "x expected (" + (f.expectedSource === "town-estimate" ? "town-to-town estimate" : f.expectedSource) + ")";
+      const base = f.reason === "negative_or_zero" ? "negative or zero mileage" : f.ratio + "x expected (" + ((f.expectedSource === "town-estimate" ? "town-to-town estimate" : (f.expectedSource === "haversine-fallback" || f.expectedSource === "haversine") ? "straight-line estimate, no driving distance on file for this pair, so the real route may be longer" : f.expectedSource === "driving" ? "driving distance" : f.expectedSource)) + ")";
       rows.push([p.name, fmtDay(f.date), f.fromRaw, f.toRaw, f.claimedMiles, f.expectedMiles == null ? "" : f.expectedMiles, f.cluster ? base + " -- part of a same-day run, check the order" : base].map(q).join(","));
     });
     (r.unmatched_legs || []).forEach((u) => {
