@@ -84,7 +84,7 @@
 </head>
 <body>
   <h1>Mileage log</h1>
-  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.60</span></div>
+  <div class="sub">Optional. The spreadsheet is still official. Flagged rows can still be saved. <span class="muted">v0.61</span></div>
   <div id="loginBox" class="card">
     <label>Username <input id="loginUser" autocomplete="username"></label>
     <label>PIN <input id="loginPin" type="password" maxlength="64" autocomplete="current-password"></label>
@@ -2038,7 +2038,7 @@ function printLog() {
       if (typeof mi === 'number') { sub += mi; total += mi; }
       const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || '');
       const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || '');
-      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + (l.estimated && l.est_field === 'start' ? ' (est.)' : '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + (l.estimated && l.est_field === 'end' ? ' (est.)' : '') + '</td><td>' + mi + '</td><td></td></tr>';
+      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
     });
     rows += '<tr><td colspan="6"></td><td><strong>' + sub + '</strong></td></tr>';
   });
@@ -2393,7 +2393,7 @@ function dmReportHtml() {
     });
     const lastL = byDay[d][byDay[d].length - 1];
     if (lastL && lastL.to_kind !== 'home' && lastL.odo_end != null) {
-      h += '<button type="button" class="dm-wide" style="margin-top:6px;background:#2a2a2a;color:#f59e0b;min-height:clamp(52px,7vh,84px);font-size:clamp(17px,4.4vw,30px);" onclick="dmAddHome(\'' + d + '\')">＋ Add the trip home (estimate)</button>';
+      h += '<button type="button" class="dm-wide" style="margin-top:6px;background:#2a2a2a;color:#f59e0b;min-height:clamp(52px,7vh,84px);font-size:clamp(17px,4.4vw,30px);" onclick="dmAddHome(\'' + d + '\')">＋ Add the trip home</button>';
     }
     h += '<div class="dm-rtot">Day total: ' + sub + ' mi</div>';
   });
