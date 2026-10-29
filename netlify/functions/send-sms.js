@@ -29,10 +29,14 @@ exports.handler = async (event) => {
         // 2026-10-29: hold until a later time (the "not before 8:00 AM the technician's time" rule).
         // The message waits in held_texts and release-held-texts sends it, the same way, when due.
         // Past or invalid times are ignored (sends now); capped at 24 hours ahead.
-        if (holdUntil) {
-            const when = new Date(holdUntil);
+        // Scheduled sends (deliverAt, used by the Saturday on-call page) use the same queue now that
+        // texts no longer go through Mailgun's scheduler; those may be up to 3 days ahead.
+        const holdAt = holdUntil || deliverAt;
+        if (holdAt) {
+            const when = new Date(holdAt);
             const msAhead = when.getTime() - Date.now();
-            if (!isNaN(when.getTime()) && msAhead > 60 * 1000 && msAhead < 24 * 60 * 60 * 1000) {
+            const maxAhead = holdUntil ? 24 * 60 * 60 * 1000 : 3 * 24 * 60 * 60 * 1000;
+            if (!isNaN(when.getTime()) && msAhead > 60 * 1000 && msAhead < maxAhead) {
                 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
                 const { data: row, error } = await supabase.from('held_texts').insert({
                     deliver_at: when.toISOString(),

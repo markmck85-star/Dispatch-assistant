@@ -1,5 +1,5 @@
 // lib/send-message.js -- 2026-10-29
-// The actual delivery of one dispatch message (text via Twilio, gateway fallback, email via Mailgun).
+// The actual delivery of one dispatch message (text via Twilio, email via Mailgun).
 // Moved out of send-sms.js unchanged so the held-text releaser sends exactly the same way.
 //   input:  { to, email, body, htmlBody, subject, smsFallback, emailFallback, deliveryTime }
 //   output: { allOk, results, smsBlocked, scheduledFor }   (throws only on a missing Mailgun key)
@@ -12,31 +12,13 @@ async function sendMessage(p) {
 
     const results = [];
 
-    // Send SMS ping if SMS address provided
-    let twilioDone = false;
-    if (to && !deliveryTime) {
-        // 2026-10-27: Twilio toll-free first (scheduled sends keep using the gateway: Mailgun holds them)
+    // Text goes out through Twilio only (the email-to-text carrier gateway is retired).
+    // "to" is a 10-digit number, +1 number, or an old saved gateway address (the digits before the @ are used).
+    // If the text cannot be sent, the result says so and the email fallback below still goes out.
+    if (to) {
         const tw = await require('./sms-send.js').tryTwilio(to, body || 'MCR Dispatch notification');
-        if (tw.handled) { results.push({ type: 'sms', ok: tw.ok, via: 'twilio', error: tw.error }); twilioDone = true; }
-    }
-    if (to && !twilioDone) {
-        const smsParams = new URLSearchParams({
-            from: `MCR Dispatch <dispatch@${domain}>`,
-            to: to,
-            subject: 'MCR Dispatch',
-            text: smsFallback || body || 'MCR Dispatch notification'
-        });
-        if (deliveryTime) smsParams.set('o:deliverytime', deliveryTime);
-
-        const smsResp = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
-            method: 'POST',
-            headers: {
-                'Authorization': 'Basic ' + Buffer.from(`api:${apiKey}`).toString('base64'),
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: smsParams.toString()
-        });
-        results.push({ type: 'sms', ok: smsResp.ok, status: smsResp.status });
+        if (tw.handled) results.push({ type: 'sms', ok: tw.ok, via: 'twilio', error: tw.error });
+        else results.push({ type: 'sms', ok: false, via: 'twilio', error: 'text not sent (' + (tw.error || tw.reason || 'Twilio unavailable') + ')' });
     }
 
     // Send full HTML email if email address provided. The email is skipped when the text carries

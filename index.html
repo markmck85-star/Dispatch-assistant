@@ -610,7 +610,7 @@
         <div class="desktop-layout controls-collapsed">
             <div class="input-panel">
                 <div style="font-size:13px;font-weight:700;color:#333;line-height:1.2;">MCR Dispatch Hub</div>
-                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-350 <span id="buildViewport"></span></div>
+                <div style="color:#888;font-size:11px;margin:0 0 6px;">Build: rail-351 <span id="buildViewport"></span></div>
                 <button type="button" id="panelToggleBtn" class="panel-toggle" onclick="toggleControls()" aria-expanded="false">📁 Hide Controls</button>
                 <div class="top-row">
 
@@ -8359,8 +8359,9 @@ function distanceMatrixStatus(state) {
             try { const r = await fetch('/.netlify/functions/get-technicians?state=' + encodeURIComponent(CURRENT_STATE)); techs = await r.json(); } catch (e) {}
             const plan = names.map(n => {
                 const t = techs[n.toLowerCase().replace(/\s+/g, '-')] || {};
-                const blocked = !!(t.smsOptedOut && t.smsAddress);
-                const sms = (!blocked && t.smsAddress) ? t.smsAddress : null;
+                const target = techTextTarget(t);
+                const blocked = !!(t.smsOptedOut && target);
+                const sms = (!blocked && target) ? target : null;
                 const email = t.email || null;
                 const how = sms ? '📱 text' : (email ? (blocked ? '📧 email only (texts blocked)' : '📧 email only') : '⚠ no contact on file');
                 return { n, txt: msgs[n], sms, email, how };
@@ -8436,30 +8437,26 @@ function distanceMatrixStatus(state) {
         function digitsOnlyPhone(v) {
             return String(v || '').replace(/\D/g, '');
         }
+        // The number a text goes to: a saved text address if there is one (old records), else the
+        // technician's phone number. Texts go out through Twilio, so no carrier is needed.
+        function techTextTarget(t) {
+            if (!t) return null;
+            if (t.smsAddress) return t.smsAddress;
+            let d = digitsOnlyPhone(t.phone);
+            if (d.length === 11 && d[0] === '1') d = d.slice(1);
+            return d.length === 10 ? d : null;
+        }
+        // Asked only when a technician has no usable phone number on file.
         function promptMissingSms(techName, techEmail, knownPhone) {
             return new Promise((resolve) => {
                 const wrap = document.createElement('div');
                 wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
                 const phoneStart = digitsOnlyPhone(knownPhone);
                 wrap.innerHTML = `<div style="background:#1e1e2e;color:#f0f0f0;border-radius:10px;padding:16px;width:min(92vw,420px);border:1px solid #c98a1e;">
-                    <div style="font-weight:700;margin-bottom:8px;">No cell carrier on file for ${techName}</div>
-                    <div style="font-size:13px;color:#ccc;margin-bottom:10px;">Pick ${techName.split(' ')[0]}'s carrier to send this as a text and save it for next time.</div>
+                    <div style="font-weight:700;margin-bottom:8px;">No cell number on file for ${techName}</div>
+                    <div style="font-size:13px;color:#ccc;margin-bottom:10px;">Enter ${techName.split(' ')[0]}'s cell number to send this as a text. It is saved for next time.</div>
                     <label style="font-size:12px;color:#aaa;">Cell number</label>
-                    <input id="sms-missing-phone" inputmode="tel" value="${phoneStart}" placeholder="10-digit number" style="width:100%;box-sizing:border-box;margin:4px 0 8px;padding:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#fff;">
-                    <label style="font-size:12px;color:#aaa;">Carrier</label>
-                    <select id="sms-missing-carrier" style="width:100%;box-sizing:border-box;margin:4px 0 8px;padding:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#fff;">
-                        <option value="">-- Select carrier --</option>
-                        <option value="@vtext.com">Verizon</option>
-                        <option value="@tmomail.net">T-Mobile</option>
-                        <option value="@txt.att.net">AT&amp;T</option>
-                        <option value="@messaging.sprintpcs.com">Sprint</option>
-                        <option value="other">None of these / type it in</option>
-                    </select>
-                    <div id="sms-missing-manual-wrap" style="display:none;">
-                        <label style="font-size:12px;color:#aaa;">Full carrier address</label>
-                        <input id="sms-missing-addr" placeholder="6785551212@vtext.com" style="width:100%;box-sizing:border-box;margin:4px 0 8px;padding:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#fff;">
-                    </div>
-                    <div id="sms-missing-preview" style="font-size:12px;color:#8ab;margin:0 0 12px;min-height:16px;"></div>
+                    <input id="sms-missing-phone" inputmode="tel" value="${phoneStart}" placeholder="10-digit number" style="width:100%;box-sizing:border-box;margin:4px 0 12px;padding:8px;border-radius:5px;border:1px solid #555;background:#2a2a3e;color:#fff;">
                     <div style="display:flex;flex-wrap:wrap;gap:8px;">
                         <button id="sms-missing-ok" style="flex:1;padding:8px;background:#1d4e89;color:#fff;border:none;border-radius:5px;cursor:pointer;">Use this number</button>
                         ${techEmail ? '<button id="sms-missing-email" style="flex:1;padding:8px;background:#0a6e5c;color:#fff;border:none;border-radius:5px;cursor:pointer;">Email only<br><span style="font-size:11px;font-weight:normal;">' + techEmail + '</span></button>' : '<button id="sms-missing-email" disabled style="flex:1;padding:8px;background:#444;color:#888;border:none;border-radius:5px;">No email on file</button>'}
@@ -8468,37 +8465,13 @@ function distanceMatrixStatus(state) {
                 </div>`;
                 document.body.appendChild(wrap);
                 const phoneEl = wrap.querySelector('#sms-missing-phone');
-                const carrierEl = wrap.querySelector('#sms-missing-carrier');
-                const manualWrap = wrap.querySelector('#sms-missing-manual-wrap');
-                const addrEl = wrap.querySelector('#sms-missing-addr');
-                const preview = wrap.querySelector('#sms-missing-preview');
-                const builtAddr = () => {
-                    const carrier = carrierEl.value;
-                    if (carrier === 'other') return (addrEl.value || '').trim();
-                    const digits = digitsOnlyPhone(phoneEl.value);
-                    if (!carrier || digits.length < 10) return '';
-                    return digits.slice(-10) + carrier;
-                };
-                const sync = () => {
-                    const other = carrierEl.value === 'other';
-                    manualWrap.style.display = other ? 'block' : 'none';
-                    const addr = builtAddr();
-                    preview.textContent = addr ? ('Will text: ' + addr) : '';
-                };
-                carrierEl.addEventListener('change', sync);
-                phoneEl.addEventListener('input', sync);
-                addrEl.addEventListener('input', sync);
                 const done = (v) => { wrap.remove(); resolve(v); };
                 wrap.querySelector('#sms-missing-cancel').onclick = () => done(null);
                 wrap.querySelector('#sms-missing-ok').onclick = () => {
-                    const addr = builtAddr();
-                    if (!addr || addr.indexOf('@') < 0) {
-                        alert(carrierEl.value === 'other'
-                            ? 'Enter a carrier email like 6785551212@vtext.com'
-                            : 'Pick a carrier and a 10-digit cell number.');
-                        return;
-                    }
-                    done({ mode: 'sms', smsAddress: addr, save: true });
+                    let d = digitsOnlyPhone(phoneEl.value);
+                    if (d.length === 11 && d[0] === '1') d = d.slice(1);
+                    if (d.length !== 10) { alert('Enter a 10-digit cell number.'); return; }
+                    done({ mode: 'sms', smsAddress: d, savePhone: d });
                 };
                 wrap.querySelector('#sms-missing-email').onclick = () => {
                     if (!techEmail) return;
@@ -8522,7 +8495,7 @@ function distanceMatrixStatus(state) {
                 const res = await fetch(`/.netlify/functions/get-technicians?state=${CURRENT_STATE}`);
                 const data = await res.json();
                 const tech = data[techKey];
-                smsAddress = tech && tech.smsAddress ? tech.smsAddress : null;
+                smsAddress = techTextTarget(tech);
                 if (tech && tech.smsOptedOut && smsAddress) { smsBlocked = true; smsAddress = null; }
                 techEmail = tech && tech.email ? tech.email : null;
                 if (tech && tech.phone) techPhone = tech.phone;
@@ -8536,11 +8509,11 @@ function distanceMatrixStatus(state) {
                     smsAddress = null;
                 } else {
                     smsAddress = picked.smsAddress;
-                    if (picked.save && smsAddress) {
+                    if (picked.savePhone) {
                         fetch('/.netlify/functions/save-technician', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name: techName, state: CURRENT_STATE, smsAddress })
+                            body: JSON.stringify({ name: techName, state: CURRENT_STATE, phone: picked.savePhone })
                         }).catch(() => {});
                     }
                 }

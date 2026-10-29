@@ -67,7 +67,7 @@ async function tryTwilio(to, body) {
   }
 }
 
-// Remember (or clear) the opt-out on the technician whose saved text address or phone has this number.
+// Remember (or clear) the opt-out on every technician whose saved text address or phone has this number.
 async function setOptOut(e164, optedOut) {
   try {
     const d = String(e164).replace(/\D/g, '').slice(-10);
@@ -75,7 +75,12 @@ async function setOptOut(e164, optedOut) {
     const { createClient } = require('@supabase/supabase-js');
     const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const patch = { sms_opted_out: optedOut, sms_opted_out_at: optedOut ? new Date().toISOString() : null };
-    const { data } = await sb.from('technicians').update(patch).ilike('sms_address', d + '@%').select('id');
+    // Match on the saved text address OR the phone number (phones are stored in mixed formats, so compare digits).
+    const last10 = (v) => String(v || '').split('@')[0].replace(/\D/g, '').slice(-10);
+    const { data: techs } = await sb.from('technicians').select('id, phone, sms_address');
+    const ids = (techs || []).filter(t => last10(t.sms_address) === d || last10(t.phone) === d).map(t => t.id);
+    if (!ids.length) return 0;
+    const { data } = await sb.from('technicians').update(patch).in('id', ids).select('id');
     return (data || []).length;
   } catch (e) { console.log('[sms-send] setOptOut failed:', e.message); return 0; }
 }
