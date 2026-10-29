@@ -56,8 +56,8 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return
 function mapUrl(a){return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a)}
 function fd(s){if(!s)return '';var d=new Date(s);if(isNaN(d))return esc(s);return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:/^\d{4}-\d{2}-\d{2}$/.test(s)?'UTC':'America/Los_Angeles'})}
 function late(n){if(n==null)return '';var c=n>0?'late':(n>=-1?'soon':'ok');var t=n>0?(n+' day'+(n===1?'':'s')+' late'):(n===0?'due today':'due in '+(-n)+' day'+(n===-1?'':'s'));return '<span class="pill '+c+'">'+t+'</span>'}
-var TABS=[['restock','Restock list'],['tickets','Open tickets'],['visits','Recent visits'],['team','Team'],['sites','Sites'],['notes','Notes']];
-function counts(){return {restock:D.restock.rows.length,tickets:D.tickets.length,visits:D.visitCount,team:D.team.length,sites:D.sites.length,notes:5}}
+var TABS=[['restock','Restock list'],['tickets','Open tickets'],['visits','Recent visits'],['team','Team'],['sites','Sites'],['contacts','Contacts'],['notes','Notes']];
+function counts(){return {restock:D.restock.rows.length,tickets:D.tickets.length,visits:D.visitCount,team:D.team.length,sites:D.sites.length,contacts:3,notes:5}}
 function drawTabs(){var c=counts();document.getElementById('tabs').innerHTML=TABS.map(function(t){return '<button role="tab" aria-selected="'+(t[0]===tab)+'" data-t="'+t[0]+'">'+t[1]+'<span class="n">'+c[t[0]]+'</span></button>'}).join('')}
 document.getElementById('tabs').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;tab=b.dataset.t;draw()});
 function techOpts(){var s={};D.sites.forEach(function(x){if(x.primary)s[x.primary]=1});return Object.keys(s).sort()}
@@ -79,6 +79,9 @@ function visits(){
  var h='<div class="scroll"><table><thead><tr><th>Date</th><th>Site</th><th>Technician</th><th>Result</th></tr></thead><tbody>';
  D.visits.forEach(function(v){h+='<tr><td>'+fd(v.at)+'</td><td><span class="code">'+esc(v.code||'')+'</span><br>'+esc(v.site||'')+'</td><td>'+esc(v.tech||'')+'</td><td>'+(v.restock?'<span class="tag">Restock</span> ':'')+esc(v.remediation||'')+'<div class="mut">'+esc(v.note)+'</div></td></tr>'});
  return h+'</tbody></table></div>'}
+function contacts(){
+ var C=[['Ryan Stetter','Loomis armored truck','Ryan.Stetter@us.loomis.com','Replies on Michigan meet emails'],['Andrew Brown','Loomis armored truck','Andrew.Brown@us.loomis.com','Replies on Oregon meet emails'],['Dianne Ilang Ilang','Neumo','Dianne.IlangIlang@neumo.com','Forwards meet requests, including the Ventura DMV one']];
+ return '<p class="sub">Armored truck meet contacts seen on past meet emails in other states. They may not apply to California, so treat them as a starting point. Add or replace them as California contacts become known.</p><div class="grid">'+C.map(function(c){return '<div class="card"><b>'+esc(c[0])+'</b><div class="mut">'+esc(c[1])+'</div><div>'+esc(c[2])+'</div><div class="mut">'+esc(c[3])+'</div></div>'}).join('')+'</div>'}
 function notes(){return '<div class="card"><ul style="margin:0;padding-left:18px"><li>Default and backup technician are the app\'s suggestion based on distance from each technician\'s home. Miles are driving distance.</li><li>Every site address was checked against the master location sheet. Map links search the street address.</li><li>Machine type is blank for most California sites.</li><li>The California tickets email address (californiaiticalls) forwarding into the dispatch app has not been verified. Open tickets will not appear here until it is.</li><li>California closed calls import after the Nov 1 Salesforce takeover. Issac Williams\' name may be spelled differently in Salesforce.</li></ul></div>'}
 function team(){var ord=D.team.slice().sort(function(a,b){return (b.rosterOnly?1:0)-(a.rosterOnly?1:0)});return '<div class="grid">'+ord.map(function(t){return '<div class="card"><b>'+esc(t.name)+'</b>'+(t.rosterOnly?'<span class="tag">California warehouse</span>':'')+(t.contractor?'<span class="tag">Contractor</span>':'')+'<div class="mut">'+esc(t.title||'')+(t.city?' &middot; '+esc(t.city):'')+'</div><div>'+esc(t.phone||'')+'</div><div>'+esc(t.email||'')+'</div>'+(t.rosterOnly?'<div class="mut">Warehouse address not entered yet</div>':'')+'</div>'}).join('')+'</div>'}
 function sites(){
@@ -91,7 +94,7 @@ function sites(){
 function draw(){
  drawTabs();
  var v=document.getElementById('view');
- v.innerHTML=({restock:restock,tickets:tickets,visits:visits,team:team,sites:sites,notes:notes})[tab]();
+ v.innerHTML=({restock:restock,tickets:tickets,visits:visits,team:team,sites:sites,contacts:contacts,notes:notes})[tab]();
  if(tab==='sites'){
   var q=document.getElementById('fq'),t=document.getElementById('ft'),c=document.getElementById('fc');
   q.addEventListener('input',function(){filt.q=q.value.toLowerCase();var pos=q.selectionStart;draw();var n=document.getElementById('fq');n.focus();n.setSelectionRange(pos,pos)});
