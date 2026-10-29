@@ -286,7 +286,7 @@ exports.handler = async (event) => {
     const supabasePreview = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const [{ data: pSites, error: pSitesErr }, { data: pTechs, error: pTechsErr }] = await Promise.all([
       supabasePreview.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true),
-      supabasePreview.from("technicians").select("id, slug, lat, lng").eq("home_state", state).eq("active", true),
+      supabasePreview.from("technicians").select("id, slug, lat, lng").or(`home_state.eq.${state},additional_states.cs.{${state}}`).eq("active", true), // 2026-10-28: also techs who cover this state via additional_states (e.g. a GA tech covering AL)
     ]);
     if (pSitesErr) return json(500, { ok: false, error: "sites fetch failed: " + pSitesErr.message });
     if (pTechsErr) return json(500, { ok: false, error: "technicians fetch failed: " + pTechsErr.message });
@@ -416,7 +416,7 @@ exports.handler = async (event) => {
   const [{ data: sites, error: sitesErr }, { data: techs, error: techsErr }] = await Promise.all([
     supabase.from("sites").select("id, site_code, lat, lng").eq("state", state).eq("active", true)
       .order("site_code", { ascending: true }), // v5 (2026-09-23): deterministic ordering across chunks, same fix as compute-site-distance-matrix.js v4
-    supabase.from("technicians").select("id, slug, lat, lng, active").eq("home_state", state)
+    supabase.from("technicians").select("id, slug, lat, lng, active").or(`home_state.eq.${state},additional_states.cs.{${state}}`) // 2026-10-28: include cross-state coverage techs
       .order("slug", { ascending: true }), // v5: same reasoning, techs are now also chunked across calls
   ]);
   if (sitesErr) return json(500, { error: "sites fetch failed: " + sitesErr.message });
