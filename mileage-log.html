@@ -2194,8 +2194,13 @@ function dmRender() {
       '<div class="dm-last" style="margin-top:8px;font-size:clamp(16px,4vw,30px);display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
       '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Closest stops first. Your location is never stored.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
       '<button type="button" onclick="dmToggleGps()" style="min-width:clamp(84px,20vw,150px);padding:clamp(12px,3vw,24px) 14px;font-size:clamp(18px,4.6vw,34px);background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
+      '<button type="button" class="dm-wide" onclick="dmGoRoute()" style="margin-top:8px;">📋 Today\'s stops</button>' +
       '<button type="button" class="dm-wide" onclick="dmGoPlaces()" style="margin-top:8px;">⭐ Saved places (' + loadPlaces().length + ')</button>' +
       '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
+  } else if (dmStage === 'route') {
+    body.innerHTML = dmRouteHtml();
+  } else if (dmStage === 'card') {
+    body.innerHTML = dmCardHtml();
   } else if (dmStage === 'places') {
     const pl = loadPlaces();
     body.innerHTML = '<div class="dm-title">Saved places</div>' +
@@ -2607,6 +2612,16 @@ function dmGoPlaces() { dmStage = 'places'; dmRender(); }
 function dmGoPick() { dmSearch = ''; dmStage = 'pick'; dmGetPos(); dmRender(); }
 
 function dmBack() {
+  if (dmStage === 'route') { dmStage = 'home'; dmRender(); return; }
+  if (dmStage === 'card') { dmStage = 'route'; dmRender(); return; }
+  if (dmFromCard && (dmStage === 'end' || dmStage === 'start') && !dmEditStart) {
+    picked.to = null; expectedMi = null; autoPrefix = '';
+    document.getElementById('odoEnd').value = '';
+    dmDigits = '';
+    dmStage = 'card';
+    dmRender();
+    return;
+  }
   if (dmEditStart) { dmEditStart = false; dmDigits = ''; dmStage = 'home'; dmRender(); return; }
   if (dmStage === 'end' || dmStage === 'start') {
     picked.to = null; expectedMi = null; autoPrefix = '';
@@ -2731,7 +2746,8 @@ async function dmFinish(est) {
   if (legs.length <= before) { dmStage = 'home'; dmRender(); return; }
   const idx = legs.length - 1, leg = legs[idx];
   dmDigits = '';
-  dmStage = 'home';
+  dmStage = dmFromCard ? 'route' : 'home';
+  dmFromCard = false;
   dmRender();
   dmToastMsg('Logged ' + name + ' · ' + (leg.miles != null ? leg.miles + ' mi' : '') + (est ? ' (estimate)' : ''), () => { if (legs[idx] === leg) { removeLeg(idx); dmRender(); } });
 }
@@ -2749,6 +2765,162 @@ function dmToastMsg(text, undoFn) {
   el.style.display = 'flex';
   clearTimeout(dmToastTimer);
   dmToastTimer = setTimeout(() => { el.style.display = 'none'; }, 12000);
+}
+
+// ---------- Today's stops (stop list + card) ----------
+// The list follows the order the dispatch app sorted the day. A stop leaves the list when its trip is
+// logged (Arrived) or when the tech commits to the next stop (Navigate). Opening a card changes nothing.
+let dmDay = null;          // { date, stops, loading, err }
+let dmCardIdx = -1;
+let dmFromCard = false;
+let dmDoneOpen = false;
+
+function dmDayKey() { return localKey() + ':dayState'; }
+function dmDayState(date) {
+  try {
+    const o = JSON.parse(localStorage.getItem(dmDayKey()) || 'null');
+    if (o && o.date === date) return o;
+  } catch (e) {}
+  return { date, done: [], current: null, pinned: [] };
+}
+function dmDaySave(st) { try { localStorage.setItem(dmDayKey(), JSON.stringify(st)); } catch (e) {} }
+
+async function dmGoRoute() {
+  dmLog('stops_open');
+  dmStage = 'route';
+  dmDoneOpen = false;
+  const date = document.getElementById('legDate').value;
+  if (!dmDay || dmDay.date !== date || dmDay.err) {
+    dmDay = { date, stops: [], loading: true, err: '' };
+    dmRender();
+    try {
+      const r = await fetch('/.netlify/functions/get-my-day?technician_id=' + encodeURIComponent(ctx.technician.id) + '&date=' + encodeURIComponent(date));
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'failed');
+      dmDay = { date, stops: j.stops || [], loading: false, err: '' };
+    } catch (er) {
+      dmDay = { date, stops: [], loading: false, err: 'Could not load your stops. Check your signal and try again.' };
+    }
+  }
+  dmRender();
+}
+
+function dmStopDone(st, s) {
+  if (st.done.indexOf(s.site_id) !== -1) return true;
+  return dmTodayLegs().some(l => l.to_kind === 'site' && l.to_site_id === s.site_id) && st.pinned.indexOf(s.site_id) === -1;
+}
+
+function dmRouteHtml() {
+  if (!dmDay || dmDay.loading) return '<div class="dm-title">Today\'s stops</div><div class="dm-hint">Loading…</div>';
+  const st = dmDayState(dmDay.date);
+  let pending = [], done = [];
+  dmDay.stops.forEach((s, i) => { (dmStopDone(st, s) ? done : pending).push(i); });
+  pending.sort((a, b) => (st.pinned.indexOf(dmDay.stops[b].site_id) !== -1) - (st.pinned.indexOf(dmDay.stops[a].site_id) !== -1));
+  let h = '<div class="dm-title">Today\'s stops</div>';
+  if (dmDay.err) h += '<div class="dm-hint bad">' + escHtml(dmDay.err) + '</div>';
+  else if (!dmDay.stops.length) h += '<div class="dm-hint">No stops on the schedule for this day. You can still log stops with LOG STOP.</div>';
+  h += '<div class="dm-tiles">' + pending.map(i => {
+    const s = dmDay.stops[i], cur = st.current === s.site_id;
+    return '<button type="button" class="dm-tile" onclick="dmOpenCard(' + i + ')">' + (cur ? '➡ ' : '') + escHtml(s.name) +
+      '<small>' + (cur ? 'Heading here · ' : '') + escHtml(dmKindLabel(s)) + '</small></button>';
+  }).join('') + '</div>';
+  if (dmDay.stops.length) h += '<button type="button" class="dm-tile home" style="margin-top:10px;width:100%;" onclick="dmEndDay()">🏠 Heading home</button>';
+  if (done.length) {
+    h += '<button type="button" class="dm-wide" style="margin-top:12px;font-size:clamp(16px,4vw,26px);" onclick="dmToggleDone()">Done today (' + done.length + ') ' + (dmDoneOpen ? '▲' : '▼') + '</button>';
+    if (dmDoneOpen) h += '<div class="dm-tiles" style="margin-top:8px;">' + done.map(i => {
+      const s = dmDay.stops[i];
+      return '<div style="display:flex;gap:8px;align-items:stretch;"><div class="dm-tile" style="flex:1;cursor:default;opacity:.7;">' + escHtml(s.name) + '</div><button type="button" onclick="dmUndoDone(' + i + ')" style="min-width:clamp(90px,22vw,160px);font-size:clamp(16px,4vw,28px);">Undo</button></div>';
+    }).join('') + '</div>';
+  }
+  h += '<button type="button" class="dm-wide" style="margin-top:12px;" onclick="dmBack()">Back</button>';
+  return h;
+}
+
+function dmKindLabel(s) {
+  const k = String(s.kind || '').toLowerCase();
+  if (k === 'restock') return 'Restock';
+  if (k === 'trouble' || k === 'trouble_ticket' || k === 'service') return 'Service call';
+  return s.kind ? String(s.kind) : 'Stop';
+}
+
+function dmToggleDone() { dmDoneOpen = !dmDoneOpen; dmRender(); }
+
+function dmOpenCard(i) { dmCardIdx = i; dmStage = 'card'; dmRender(); }
+
+function dmCardHtml() {
+  const s = dmDay && dmDay.stops[dmCardIdx];
+  if (!s) return '<div class="dm-hint">Stop not found.</div><button type="button" class="dm-wide" onclick="dmBack()">Back</button>';
+  const readers = (s.readers || []);
+  let h = '<div class="dm-last"><b>' + escHtml(s.name) + '</b>' +
+    '<div style="color:#888;font-size:clamp(14px,3.6vw,24px);margin-top:4px;">' + escHtml(dmKindLabel(s)) + (s.site_code ? ' · ' + escHtml(s.site_code) : '') + '</div>' +
+    (s.address ? '<div style="margin-top:6px;font-size:clamp(15px,3.8vw,26px);">' + escHtml(s.address) + '</div>' : '') + '</div>';
+  h += '<div class="dm-last">Reader number on record<br>' + (readers.length
+    ? readers.map(n => '<span style="display:inline-flex;align-items:center;gap:10px;margin:6px 10px 0 0;"><b style="font-size:clamp(26px,7vw,46px);">' + escHtml(n) + '</b><button type="button" onclick="dmCopy(\'' + escHtml(n) + '\',this)" style="padding:8px 14px;font-size:clamp(14px,3.6vw,22px);">Copy</button></span>').join('')
+    : '<span style="color:#888;">None on file yet</span>') +
+    '<div style="color:#888;font-size:clamp(12px,3vw,20px);margin-top:6px;">Check the sticker on the reader matches.</div></div>';
+  h += '<button type="button" class="dm-wide dm-amber" style="margin-top:6px;" onclick="dmNavigate(' + dmCardIdx + ')">🧭 Navigate</button>' +
+    '<button type="button" class="dm-wide dm-go" style="margin-top:10px;" onclick="dmArrived(' + dmCardIdx + ')">✔ Arrived</button>' +
+    '<button type="button" class="dm-wide" style="margin-top:10px;" onclick="dmBack()">Back to list</button>';
+  return h;
+}
+
+function dmCopy(text, btn) {
+  const done = () => { if (btn) { btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); } };
+  try { navigator.clipboard.writeText(text).then(done, done); } catch (e) { done(); }
+}
+
+function dmMarkPreviousDone(st, s) {
+  if (st.current && st.current !== s.site_id && st.done.indexOf(st.current) === -1) st.done.push(st.current);
+  st.pinned = st.pinned.filter(x => x !== st.current);
+}
+
+function dmNavigate(i) {
+  const s = dmDay.stops[i];
+  if (!s) return;
+  dmLog('stop_navigate');
+  const st = dmDayState(dmDay.date);
+  dmMarkPreviousDone(st, s);
+  st.current = s.site_id;
+  st.done = st.done.filter(x => x !== s.site_id);
+  dmDaySave(st);
+  const dest = (s.lat != null && s.lng != null) ? s.lat + ',' + s.lng : (s.address || s.name);
+  window.open('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest), '_blank');
+  dmStage = 'route';
+  dmRender();
+}
+
+async function dmArrived(i) {
+  const s = dmDay.stops[i];
+  if (!s) return;
+  dmLog('stop_arrived');
+  const st = dmDayState(dmDay.date);
+  dmMarkPreviousDone(st, s);
+  st.current = null;
+  st.pinned = st.pinned.filter(x => x !== s.site_id);
+  dmDaySave(st);
+  let stop = allStops().find(x => x.kind === 'site' && x.id === s.site_id);
+  if (!stop) stop = { kind: 'site', id: s.site_id, site_code: s.site_code, name: s.name, picker: s.name, print: s.name, lat: s.lat, lng: s.lng };
+  else stop = Object.assign({}, stop);
+  if (picked.from && picked.from.kind === 'site' && picked.from.id === s.site_id) { dmToastMsg('You are already at ' + s.name + '.'); dmStage = 'route'; dmRender(); return; }
+  dmFromCard = true;
+  dmSetTo(stop);
+  await dmAfterPick();
+}
+
+function dmUndoDone(i) {
+  const s = dmDay.stops[i];
+  if (!s) return;
+  dmLog('stop_undo');
+  const st = dmDayState(dmDay.date);
+  const date = dmDay.date;
+  for (let k = legs.length - 1; k >= 0; k--) {
+    if (legs[k].date === date && legs[k].to_kind === 'site' && legs[k].to_site_id === s.site_id) { removeLeg(k); break; }
+  }
+  st.done = st.done.filter(x => x !== s.site_id);
+  if (st.current === s.site_id) st.current = null;
+  if (st.pinned.indexOf(s.site_id) === -1) st.pinned.push(s.site_id);
+  dmDaySave(st);
+  dmRender();
 }
 
 initPeriod();

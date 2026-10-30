@@ -63,7 +63,7 @@ const ADMIN_ONLY = new Set([
 
 // What a technician (role "tech") sign-in may call: the mileage log page.
 const TECH_OK = new Set([
-  'get-mileage-log', 'save-mileage-log', 'get-leg-distance', 'get-my-closings',
+  'get-mileage-log', 'save-mileage-log', 'get-leg-distance', 'get-my-closings', 'get-my-day',
 ]);
 
 const SEEN_MS = 60 * 1000;
