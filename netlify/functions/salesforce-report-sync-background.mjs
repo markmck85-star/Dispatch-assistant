@@ -74,7 +74,7 @@ import fs from 'fs';
 import perfImportPkg from './lib/perform-import.js';
 const { performImport } = perfImportPkg;
 import closingNotesPkg from './lib/closing-notes.js';
-const { runClosingNotesPass } = closingNotesPkg;
+const { runClosingNotesPass, runReaderTagPass } = closingNotesPkg;
 import ganttStatusPkg from './lib/gantt-status.js';
 const { runStatusPass } = ganttStatusPkg;
 
@@ -470,6 +470,15 @@ export default async (req, context) => {
         if (settings.closingNotesEnabled === true) {
           const TARGET_TOTAL_ELAPSED_MS = 12 * 60 * 1000;
           const deadlineAt = functionStartTime + TARGET_TOTAL_ELAPSED_MS;
+          // 2026-10-29: Georgia reader asset tags, a few sites per night run, BEFORE the notes backfill
+          // so a long notes backlog cannot starve it. Own 5-minute slice; goes quiet once every site has a tag.
+          try {
+            await setStage('Night reader-tag backfill');
+            const tagSummary = await runReaderTagPass(page, supabase, { limit: 12, deadlineAt: Math.min(deadlineAt, Date.now() + 5 * 60 * 1000) });
+            console.log(`[reader-tag] Night pass: ${tagSummary.found} tag(s) read, ${tagSummary.linked} reader entr(ies) linked, ${tagSummary.blank} blank, ${tagSummary.notFound} not found, ${tagSummary.layoutMisses} field-not-found, ${tagSummary.failed} failed (of ${tagSummary.attempted}).`);
+          } catch (tagErr) {
+            console.error('[reader-tag] Night pass threw (notes backfill continues):', tagErr);
+          }
           await setStage('Night closing-notes backfill');
           notesSummary = await runClosingNotesPass(page, supabase, {
             daysBack: 90,
