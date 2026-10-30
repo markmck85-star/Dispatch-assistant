@@ -2178,7 +2178,13 @@ function dmStatsHtml() {
   return mi.toLocaleString() + ' mi<span>' + t.length + ' stop' + (t.length === 1 ? '' : 's') + ' today</span>';
 }
 
+let dmLastRenderedStage = '';
 function dmRender() {
+  // a new screen starts at the top (the long report and stop lists leave the page scrolled down)
+  if (dmLastRenderedStage !== dmStage) {
+    dmLastRenderedStage = dmStage;
+    try { const d = document.getElementById('dm'); if (d) d.scrollTop = 0; window.scrollTo(0, 0); } catch (e) {}
+  }
   // the home screen shows the totals big under the button, so the corner copy is only for the other screens
   document.getElementById('dmStats').innerHTML = dmStage === 'home' ? '<button type="button" class="dm-x" onclick="dmOpenReport()">📄 Report</button>' : (dmStage === 'report' ? '' : dmStatsHtml());
   const body = document.getElementById('dmBody');
