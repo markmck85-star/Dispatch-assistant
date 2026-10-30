@@ -260,6 +260,7 @@ function localKey() {
 }
 
 function persistLocal() {
+  if (window.__demoLoaded) return;
   try {
     localStorage.setItem(localKey(), JSON.stringify({
       legs: legs,
@@ -1376,7 +1377,7 @@ function scheduleRetry() {
 window.addEventListener('online', () => { if (dirty) saveLog('draft'); });
 
 async function saveLog(status) {
-  if (!ctx) return;
+  if (!ctx || window.__demoLoaded) return;
   persistLocal();
   const sentCount = legs.length;
   setSaveState('saving');
@@ -1807,7 +1808,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && ct
 
 function loadSampleTwoWeeks() {
   if (!ctx) return;
-  if (!confirm('Load a few demo days with made-up store names? This replaces the current draft on screen.')) return;
+  // The demo replaces what is on screen, so it is only allowed on an empty period, and it is never saved.
+  if (legs.length) { alert('This pay period already has stops, so demo days are turned off. Demo days would replace your real stops.'); return; }
+  if (!confirm('Load a few demo days with made-up store names? They are for viewing only and are not saved.')) return;
+  window.__demoLoaded = true;
   const start = document.getElementById('periodStart').value;
   const homePrint = ctx.technician.home_label_print || 'Home city';
   const plan = {
@@ -1880,7 +1884,6 @@ function loadSampleTwoWeeks() {
     odo += 3;
   }
   legs = next;
-  persistLocal();
   renderLegs();
   document.getElementById('status').textContent = 'Sample two weeks loaded — export to see the full sheet. Not official.';
 }
@@ -2999,6 +3002,14 @@ function dmUndoDone(i) {
 initPeriod();
 window.addEventListener('beforeunload', persistLocal);
 try { if (sessionStorage.getItem('mileageFromPortal') === '1') document.getElementById('portalBack').style.display = 'block'; } catch (e) {}
+try {
+  // ?resetlocal=1 drops this phone's unsent copy of the drafts so the saved log from the server is used
+  if (/[?&]resetlocal=1/.test(location.search)) {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf('mileageDraft:') === 0) keys.push(k); }
+    keys.forEach(k => localStorage.removeItem(k));
+  }
+} catch (e) {}
 if (currentUser()) {
   showApp();
   if (/[?&]drive=1/.test(location.search)) {
