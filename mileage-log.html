@@ -2071,22 +2071,36 @@ function printLog() {
   }
   rows += '<tr class="tot"><td></td><td></td><td></td><td class="r"><b>TOTAL MILEAGE (SUM OF SUBTOTALS)</b></td><td></td><td></td><td class="c"><b>' + total + '</b></td></tr>';
   const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mileage Log</title>' +
-    '<style>body{font-family:Arial,sans-serif;padding:10px;font-size:11px;color:#000;} .wrap{overflow-x:auto;} table{border-collapse:collapse;width:100%;min-width:560px;table-layout:fixed;} ' +
-    'td,th{border:1px solid #000;padding:2px 3px;font-size:11px;height:15px;overflow:hidden;white-space:nowrap;} td:nth-child(2),td:nth-child(4){white-space:normal;} th{background:#D9E2F3;border-top:2px solid #000;border-bottom:2px solid #000;} ' +
+    '<style>body{font-family:Arial,sans-serif;padding:16px;font-size:11px;color:#000;max-width:760px;margin:0 auto;} .wrap{overflow-x:auto;} table{border-collapse:collapse;width:100%;table-layout:fixed;} ' +
+    'td,th{border:1px solid #000;padding:2px 3px;font-size:10px;height:15px;overflow:hidden;white-space:nowrap;} td:nth-child(2),td:nth-child(4){white-space:normal;} th{white-space:normal;font-size:9px;padding:2px 1px;background:#D9E2F3;border-top:2px solid #000;border-bottom:2px solid #000;} ' +
     'td.c{text-align:center;} td.r{text-align:right;} tr.de td{border-bottom:2px solid #000;} tr.tot td{border-top:2px solid #000;border-bottom:2px solid #000;} ' +
     'h2,h3{text-align:center;margin:4px;} h2{font-size:15px;} h3{font-size:11px;} .meta{display:flex;justify-content:space-between;font-weight:bold;margin:8px 0;} ' +
-    '.btn{font-size:16px;padding:10px 16px;margin-bottom:8px;} @media print {.btn{display:none;} body{padding:0;} td,th{font-size:8pt;height:12px;} @page{size:portrait;margin:0.4in;}}</style></head><body>' +
-    '<button class="btn" onclick="window.print()">Save as PDF / Print</button>' +
+    '.btn{display:block;width:100%;padding:14px;background:#007bff;color:#fff;border:none;border-radius:8px;font-size:17px;font-weight:600;margin-bottom:10px;cursor:pointer;} .btn.back{background:#555;} @media print {.btn{display:none;} body{padding:0;} td,th{font-size:8pt;height:12px;} @page{size:portrait;margin:0.4in;}}</style></head><body>' +
+    '<button class="btn back" onclick="parent.closeMilePrint()">← Back to app</button>' +
+    '<button class="btn" onclick="window.print()">🖨️ Save as PDF / Print</button>' +
     '<h2>MCR TECHNICAL SERVICE, LLC</h2>' +
     '<h3>(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)</h3>' +
     '<div class="meta"><span>NAME: ' + esc(ctx.technician.name) + '</span><span>PAY PERIOD: ' + shortDate(start) + ' - ' + shortDate(end) + '</span></div>' +
-    '<div class="wrap"><table><colgroup><col style="width:14%"><col style="width:20%"><col style="width:11%"><col style="width:23%"><col style="width:11%"><col style="width:9%"><col style="width:12%"></colgroup>' +
+    '<div class="wrap"><table><colgroup><col style="width:16%"><col style="width:18%"><col style="width:11%"><col style="width:21%"><col style="width:11%"><col style="width:10%"><col style="width:13%"></colgroup>' +
     '<tr><th>Date</th><th>Start</th><th>Odometer</th><th>To</th><th>Odometer</th><th>Mileage</th><th>Daily sub.</th></tr>' +
     rows + '</table></div></body></html>';
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
+  // Same in-app full-screen page as the dispatch summary print: the page has its own Back and Print buttons
+  let el = document.getElementById('milePrintOverlay');
+  if (el) el.remove();
+  el = document.createElement('div');
+  el.id = 'milePrintOverlay';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#fff;';
+  const fr = document.createElement('iframe');
+  fr.style.cssText = 'border:0;width:100%;height:100%;background:#fff;';
+  fr.srcdoc = html;
+  el.appendChild(fr);
+  document.body.appendChild(el);
 }
+function closeMilePrint() {
+  const el = document.getElementById('milePrintOverlay');
+  if (el) el.remove();
+}
+window.closeMilePrint = closeMilePrint;
 
 // ---------- Driving mode (v0.59) ----------
 // A thin layer over the normal form: it sets From/To/odometer exactly as the regular page does and
