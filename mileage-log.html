@@ -2033,34 +2033,56 @@ function exportExcel() {
 
 function printLog() {
   if (!ctx) return;
-  const name = ctx.technician.name;
+  // Mirrors the Excel export: same columns, pay period line, a block of rows per day (weekday, then the
+  // date under it), a heavier line at the end of each day with its subtotal, and the boxed total.
+  const esc = escHtml;
+  const start = document.getElementById('periodStart').value || '';
+  const end = document.getElementById('periodEnd').value || '';
+  const shortDate = (iso) => { if (!iso) return ''; const p = iso.split('-'); return Number(p[1]) + '/' + Number(p[2]) + '/' + String(p[0]).slice(-2); };
+  const longDate = (iso) => { const p = iso.split('-'); return Number(p[1]) + '/' + Number(p[2]) + '/' + p[0]; };
+  const shortDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const byDay = {};
-  legs.forEach(l => {
-    if (!byDay[l.date]) byDay[l.date] = [];
-    byDay[l.date].push(l);
-  });
+  legs.forEach(l => { (byDay[l.date] = byDay[l.date] || []).push(l); });
   let rows = '';
   let total = 0;
-  Object.keys(byDay).sort().forEach(d => {
+  const t = new Date(start + 'T12:00:00'), last = new Date(end + 'T12:00:00');
+  while (t <= last) {
+    const iso = t.toISOString().slice(0, 10);
+    const dayLegs = byDay[iso] || [];
     let sub = 0;
-    byDay[d].forEach(l => {
-      const mi = typeof l.miles === 'number' ? l.miles : '';
-      if (typeof mi === 'number') { sub += mi; total += mi; }
-      const from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || '');
-      const to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || '');
-      rows += '<tr><td>' + weekdayLabel(d) + '</td><td>' + from + '</td><td>' + (l.odo_start || '') + '</td><td>' + to + '</td><td>' + (l.odo_end || '') + '</td><td>' + mi + '</td><td></td></tr>';
-    });
-    rows += '<tr><td colspan="6"></td><td><strong>' + sub + '</strong></td></tr>';
-  });
-  rows += '<tr><td colspan="6"><strong>TOTAL MILEAGE (SUM OF SUBTOTALS)</strong></td><td><strong>' + total + '</strong></td></tr>';
-  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Mileage Log</title>' +
-    '<style>body{font-family:Arial,sans-serif;padding:16px;font-size:13px;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #999;padding:4px;} h2,h3{text-align:center;margin:4px;} @media print {.btn{display:none;}}</style></head><body>' +
+    dayLegs.forEach(l => { if (typeof l.miles === 'number') sub += l.miles; });
+    total += sub;
+    const block = Math.max(9, dayLegs.length + 1);
+    for (let i = 0; i < block; i++) {
+      const l = dayLegs[i];
+      const dateCell = i === 0 ? shortDays[t.getDay()] : (i === 1 ? longDate(iso) : '');
+      const cls = i === block - 1 ? ' class="de"' : '';
+      let from = '', to = '', o1 = '', o2 = '', mi = '';
+      if (l) {
+        from = l.from_kind === 'home' ? ctx.technician.home_label_print : (l.from_print || l.from_picker || '');
+        to = l.to_kind === 'home' ? ctx.technician.home_label_print : (l.to_print || l.to_picker || '');
+        o1 = l.odo_start != null ? l.odo_start : '';
+        o2 = l.odo_end != null ? l.odo_end : '';
+        mi = typeof l.miles === 'number' ? l.miles : '';
+      }
+      rows += '<tr' + cls + '><td>' + esc(dateCell) + '</td><td>' + esc(from) + '</td><td class="c">' + esc(o1) + '</td><td>' + esc(to) + '</td><td class="c">' + esc(o2) + '</td><td class="c">' + esc(mi) + '</td><td class="c">' + (i === block - 1 ? '<b>' + sub + '</b>' : '') + '</td></tr>';
+    }
+    t.setDate(t.getDate() + 1);
+  }
+  rows += '<tr class="tot"><td></td><td></td><td></td><td class="r"><b>TOTAL MILEAGE (SUM OF SUBTOTALS)</b></td><td></td><td></td><td class="c"><b>' + total + '</b></td></tr>';
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mileage Log</title>' +
+    '<style>body{font-family:Arial,sans-serif;padding:10px;font-size:11px;color:#000;} .wrap{overflow-x:auto;} table{border-collapse:collapse;width:100%;min-width:560px;table-layout:fixed;} ' +
+    'td,th{border:1px solid #000;padding:2px 3px;font-size:11px;height:15px;overflow:hidden;white-space:nowrap;} td:nth-child(2),td:nth-child(4){white-space:normal;} th{background:#D9E2F3;border-top:2px solid #000;border-bottom:2px solid #000;} ' +
+    'td.c{text-align:center;} td.r{text-align:right;} tr.de td{border-bottom:2px solid #000;} tr.tot td{border-top:2px solid #000;border-bottom:2px solid #000;} ' +
+    'h2,h3{text-align:center;margin:4px;} h2{font-size:15px;} h3{font-size:11px;} .meta{display:flex;justify-content:space-between;font-weight:bold;margin:8px 0;} ' +
+    '.btn{font-size:16px;padding:10px 16px;margin-bottom:8px;} @media print {.btn{display:none;} body{padding:0;} td,th{font-size:8pt;height:12px;} @page{size:portrait;margin:0.4in;}}</style></head><body>' +
     '<button class="btn" onclick="window.print()">Save as PDF / Print</button>' +
     '<h2>MCR TECHNICAL SERVICE, LLC</h2>' +
     '<h3>(THIS MILEAGE LOG NEEDS TO BE TURNED IN WITH EXPENSE REPORT IN ORDER TO BE REIMBURSED)</h3>' +
-    '<p>NAME: ' + name + '</p>' +
-    '<table><tr><th>Date</th><th>Start</th><th>Odometer</th><th>To</th><th>Odometer</th><th>Mileage</th><th>Daily sub.</th></tr>' +
-    rows + '</table></body></html>';
+    '<div class="meta"><span>NAME: ' + esc(ctx.technician.name) + '</span><span>PAY PERIOD: ' + shortDate(start) + ' - ' + shortDate(end) + '</span></div>' +
+    '<div class="wrap"><table><colgroup><col style="width:14%"><col style="width:20%"><col style="width:11%"><col style="width:23%"><col style="width:11%"><col style="width:9%"><col style="width:12%"></colgroup>' +
+    '<tr><th>Date</th><th>Start</th><th>Odometer</th><th>To</th><th>Odometer</th><th>Mileage</th><th>Daily sub.</th></tr>' +
+    rows + '</table></div></body></html>';
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
