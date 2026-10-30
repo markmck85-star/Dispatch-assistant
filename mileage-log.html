@@ -2891,7 +2891,11 @@ function dmNavigate(i) {
   st.done = st.done.filter(x => x !== s.site_id);
   dmDaySave(st);
   const dest = (s.lat != null && s.lng != null) ? s.lat + ',' + s.lng : (s.address || s.name);
-  window.open('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest), '_blank');
+  const isApple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const mapUrl = isApple
+    ? 'https://maps.apple.com/?dirflg=d&daddr=' + encodeURIComponent(dest)
+    : 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(dest);
+  window.open(mapUrl, '_blank');
   dmStage = 'route';
   dmRender();
 }
