@@ -295,6 +295,7 @@
   }
 
   function signOut() {
+    try { localStorage.removeItem('mileageHandoff'); } catch (e) {}
     TOKEN = null; store('mcr_tech_token', null);
     $('appView').classList.add('hidden');
     $('loginView').classList.remove('hidden');
@@ -414,6 +415,14 @@
         role: KIND === 's' ? 'staff' : 'tech'
       }));
       sessionStorage.setItem('mileageFromPortal', '1');
+    } catch (e) {}
+    // Backup for browsers that open the mileage page in a fresh tab or window (no shared session storage):
+    // a short-lived note the mileage page can pick up. It carries only the name and technician link.
+    try {
+      localStorage.setItem('mileageHandoff', JSON.stringify({
+        ts: Date.now(),
+        user: { username: ME_NAME, displayName: ME_NAME, name: ME_NAME, technician_id: ME_TECH_ID, role: KIND === 's' ? 'staff' : 'tech' }
+      }));
     } catch (e) {}
     location.href = '/mileage-log' + (drive ? '?drive=1' : '');
   }

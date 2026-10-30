@@ -249,7 +249,20 @@ let editingDay = null;     // date whose stops are open for editing
 let homePromptDate = null; // day where Next day already offered the drive-home step
 
 function currentUser() {
-  try { return JSON.parse(sessionStorage.getItem('dispatchUser') || 'null'); } catch (e) { return null; }
+  try {
+    const u = JSON.parse(sessionStorage.getItem('dispatchUser') || 'null');
+    if (u) return u;
+  } catch (e) {}
+  // Opened from the technician portal in a new tab or window: use its short-lived hand-off note
+  try {
+    const h = JSON.parse(localStorage.getItem('mileageHandoff') || 'null');
+    if (h && h.user && h.ts && Date.now() - h.ts < 10 * 60 * 1000) {
+      sessionStorage.setItem('dispatchUser', JSON.stringify(h.user));
+      sessionStorage.setItem('mileageFromPortal', '1');
+      return h.user;
+    }
+  } catch (e) {}
+  return null;
 }
 
 function localKey() {
@@ -309,6 +322,7 @@ async function doLogin() {
 
 function doLogout() {
   sessionStorage.removeItem('dispatchUser');
+  try { localStorage.removeItem('mileageHandoff'); } catch (e) {}
   let done = false;
   const again = function () { if (!done) { done = true; location.reload(); } };
   try {
