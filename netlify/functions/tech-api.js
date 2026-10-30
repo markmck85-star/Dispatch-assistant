@@ -1369,6 +1369,38 @@ exports.handler = async (event) => {
     const ctx = await authenticate(supabase, body.token);
     if (!ctx) return json(401, { ok: false, error: 'Session expired. Please sign in again.', expired: true });
 
+    // Mileage log hand-off: the mileage functions sit behind the main app's sign-in cookie,
+    // which a portal login does not have. A technician signed in here gets a
+    // limited "tech" cookie (mileage log functions only, see the gate) tied to a
+    // login row that has no password anyone knows. Technicians only, never staff.
+    if (action === 'mileage_session') {
+      if (ctx.kind !== 't' || !ctx.tech) return json(200, { ok: false, error: 'Not for this login.' });
+      const authLib = require('./lib/auth');
+      const uname = 'tech.' + String(ctx.tech.id).slice(0, 8);
+      const cols = 'id, username, role, states, active, technician_id, pin_changed_at, created_at';
+      let { data: row } = await supabase.from('dispatchers').select(cols).eq('username', uname).maybeSingle();
+      if (!row) {
+        const ins = await supabase.from('dispatchers').insert({
+          username: uname,
+          pin: '',
+          pin_hash: authLib.hashPin(require('crypto').randomBytes(24).toString('hex')),
+          role: 'tech',
+          states: [],
+          active: true,
+          technician_id: ctx.tech.id,
+          must_change_pin: false,
+        }).select(cols).single();
+        if (ins.error) return json(500, { ok: false, error: 'Could not open the mileage log.' });
+        row = ins.data;
+      }
+      if (row.role !== 'tech' || row.active !== true || row.technician_id !== ctx.tech.id) return json(200, { ok: false, error: 'Not available.' });
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Set-Cookie': authLib.cookieHeader(authLib.makeToken(row)) },
+        body: JSON.stringify({ ok: true, username: row.username, role: 'tech', technician_id: row.technician_id }),
+      };
+    }
+
     if (action === 'me') return json(200, { ok: true, me: await buildMe(supabase, ctx.kind, ctx.name, ctx.states, ctx.defaultState, ctx.role, ctx.kind === 's' ? ctx.technicianId : (ctx.tech && ctx.tech.id)) });
     if (action === 'search') return await doSearch(supabase, ctx, body);
     if (action === 'site') return await doSite(supabase, ctx, body);

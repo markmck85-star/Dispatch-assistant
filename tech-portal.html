@@ -407,8 +407,15 @@
     if (name === 'Summ') loadSumm();
   }
   // Mileage tab: hands the signed-in person to the mileage log page (same site, same tab).
-  function openMileage(drive) {
+  async function openMileage(drive) {
     if (!ME_TECH_ID) return;
+    // Technicians need the mileage sign-in cookie; people already signed in to the main app keep theirs.
+    if (KIND !== 's') {
+      try {
+        var chk = await fetch('/.netlify/functions/login', { cache: 'no-store' }).then(function (r) { return r.json(); }).catch(function () { return {}; });
+        if (!chk || !chk.signedIn) await call('mileage_session');
+      } catch (e) {}
+    }
     try {
       sessionStorage.setItem('dispatchUser', JSON.stringify({
         username: ME_NAME, displayName: ME_NAME, name: ME_NAME, technician_id: ME_TECH_ID,
