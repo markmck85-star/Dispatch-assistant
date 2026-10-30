@@ -2298,6 +2298,7 @@ function dmRender() {
       '<div class="dm-readout">' + readout + '</div>' +
       '<button type="button" class="dm-wide" style="min-height:clamp(60px,8vh,100px);font-size:clamp(20px,5vw,34px);margin-bottom:4px;' + (dmListening ? 'background:#dc2626;' : '') + '" onclick="dmVoice()">' + (dmListening ? '🎙 Listening… tap to stop' : '🎙 Say the last 3 digits') + '</button>' +
       '<div class="dm-hint' + (bad ? ' bad' : '') + '">' + hint + '</div>' +
+      ((isStart && !dmEditStart) ? '<div style="text-align:center;color:#888;font-size:clamp(13px,3.2vw,22px);margin-bottom:6px;">Remember to set On the Way in the Salesforce app.</div>' : '') +
       '<div class="dm-pad">' + [1,2,3,4,5,6,7,8,9].map(n => '<button type="button" onclick="dmKey(' + n + ')">' + n + '</button>').join('') +
       '<button type="button" onclick="dmInsBackToPick()" style="font-size:clamp(20px,5vw,36px);">Back</button><button type="button" onclick="dmKey(0)">0</button><button type="button" onclick="dmKey(\'x\')">⌫</button></div>' +
       '<button type="button" class="dm-wide dm-amber" style="min-height:clamp(64px,9vh,110px);font-size:clamp(20px,5vw,34px);" onclick="dmInsSave(true)">Not sure · Estimate it</button>' +
