@@ -2164,7 +2164,7 @@ function dmRender() {
       '<div class="dm-bigstats"><div><div class="n">' + dmTodayMiles().toLocaleString() + '</div><div class="l">miles today</div></div>' +
       '<div><div class="n">' + dmTodayLegs().length + '</div><div class="l">stops today</div></div></div></div>' +
       '<div class="dm-last" style="margin-top:8px;font-size:clamp(16px,4vw,30px);display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
-      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Closest stops first. Your location is never stored.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
+      '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Closest stops first.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
       '<button type="button" onclick="dmToggleGps()" style="min-width:clamp(84px,20vw,150px);padding:clamp(12px,3vw,24px) 14px;font-size:clamp(18px,4.6vw,34px);background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
       '<button type="button" class="dm-wide" onclick="dmGoRoute()" style="margin-top:8px;">📋 Your stops</button>' +
       '<button type="button" class="dm-wide" onclick="dmGoPlaces()" style="margin-top:8px;">⭐ Saved places (' + loadPlaces().length + ')</button>' +
