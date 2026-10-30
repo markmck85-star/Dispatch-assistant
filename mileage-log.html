@@ -519,6 +519,13 @@ function dmSavePlace(name) {
   if (!storePlaces(a)) return '';
   return spot ? 'spot' : 'name';
 }
+// Save a place you already logged (typed stops only; listed sites do not need saving)
+function dmSaveFromLeg(i) {
+  const l = legs[i];
+  if (!l) return;
+  const name = String(l.to_picker || l.to_print || '').trim();
+  if (dmSavePlace(name)) { dmRender(); dmToastMsg('Saved “' + name + '” to your saved places.'); }
+}
 function dmForgetPlace(i) {
   const a = loadPlaces(); a.splice(i, 1); storePlaces(a); dmRender();
 }
@@ -2392,7 +2399,10 @@ function dmReportHtml() {
           '<div style="display:flex;gap:10px;"><button type="button" class="dm-wide" style="background:#b91c1c;color:#fff;" onclick="dmConfirmDelete(' + li + ')">Delete</button>' +
           '<button type="button" class="dm-wide" onclick="dmCancelDelete()">Keep</button></div></div>';
       } else {
-        h += '<div class="dm-rrow"><span>' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + '</span><b>' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.estimated ? ' <span style="color:#888;font-weight:500;font-size:.7em;">est.</span>' : '') + '</b>' +
+        const toName = l.to_kind === 'other' ? String(l.to_picker || l.to_print || '').trim() : '';
+        const saveBtn = (toName && !loadPlaces().some(x => x.name.toLowerCase() === toName.toLowerCase()))
+          ? '<br><button type="button" onclick="dmSaveFromLeg(' + li + ')" style="margin-top:6px;padding:6px 12px;font-size:clamp(14px,3.6vw,22px);background:#2a2a2a;color:#f59e0b;">☆ Save ' + escHtml(toName) + '</button>' : '';
+        h += '<div class="dm-rrow"><span>' + dmLegName(l, 'from') + ' → ' + dmLegName(l, 'to') + saveBtn + '</span><b>' + (l.miles == null ? '?' : l.miles) + ' mi' + (l.estimated ? ' <span style="color:#888;font-weight:500;font-size:.7em;">est.</span>' : '') + '</b>' +
           '<button type="button" aria-label="Add a missed stop in this trip" onclick="dmOpenIns(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#f59e0b;">＋</button>' +
           '<button type="button" aria-label="Delete this stop" onclick="dmAskDelete(' + li + ')" style="margin-left:4px;min-width:clamp(44px,11vw,72px);padding:clamp(8px,2vw,14px);font-size:clamp(18px,4.6vw,30px);background:#2a2a2a;color:#ef4444;">✕</button></div>';
       }
