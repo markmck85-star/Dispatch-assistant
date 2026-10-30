@@ -1,7 +1,7 @@
 // get-my-day.js
-// A technician's stops for one day, in the order the dispatch app sorted them.
-// Order comes from the published dispatch text (numbered lines) when it matches the date,
-// else assignments.sequence_order, else name. Read only.
+// A technician's stops, taken only from the schedule the dispatcher actually sent them
+// (published_dispatches message text), in the order of that text. Days are labelled by the
+// date in the message header. Read only.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -50,105 +50,102 @@ function matchSite(line, sites, used) {
   return best;
 }
 
+
+const MONTH_IDX = {}; MO.forEach((m, i) => { MONTH_IDX[m.toLowerCase()] = i; });
+
+// "...dispatches for Thursday, October 29:" -> ISO date, year taken from when it was published
+function headerDate(text, publishedAt) {
+  const m = String(text).match(/for\s+([A-Za-z]+),\s+([A-Za-z]+)\s+(\d{1,2})/);
+  if (!m || MONTH_IDX[m[2].toLowerCase()] == null) return null;
+  const pub = new Date(publishedAt || Date.now());
+  let year = pub.getUTCFullYear();
+  const mi = MONTH_IDX[m[2].toLowerCase()];
+  if (mi < pub.getUTCMonth() - 6) year += 1;
+  else if (mi > pub.getUTCMonth() + 6) year -= 1;
+  return year + '-' + String(mi + 1).padStart(2, '0') + '-' + String(Number(m[3])).padStart(2, '0');
+}
+
+function easternToday() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
 exports.handler = async (event) => {
   const params = event.queryStringParameters || {};
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
   try {
     const techId = params.technician_id;
-    const date = params.date;
-    if (!techId || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return json(400, { ok: false, error: 'technician_id and date required' });
-
-    const { data: tech } = await supabase.from('technicians').select('id, name, home_state, additional_states').eq('id', techId).single();
+    if (!techId) return json(400, { ok: false, error: 'technician_id required' });
+    const { data: tech } = await supabase.from('technicians').select('id, name').eq('id', techId).single();
     if (!tech) return json(404, { ok: false, error: 'Technician not found' });
 
-    const { data: asg, error } = await supabase
-      .from('assignments')
-      .select('id, site_id, ticket_id, sequence_order, status')
-      .eq('technician_id', techId)
-      .eq('dispatch_date', date)
-      .neq('status', 'removed');
-    if (error) return json(500, { ok: false, error: error.message });
-    if (!asg || !asg.length) return json(200, { ok: true, date, stops: [], order_source: 'none' });
+    const since = new Date(Date.now() - 10 * 86400000).toISOString();
+    const { data: pubs } = await supabase
+      .from('published_dispatches')
+      .select('dispatch_date, published_at, messages')
+      .gte('published_at', since)
+      .order('published_at', { ascending: false })
+      .limit(40);
 
-    const siteIds = [...new Set(asg.map((a) => a.site_id).filter(Boolean))];
-    const ticketIds = [...new Set(asg.map((a) => a.ticket_id).filter(Boolean))];
-    const { data: sites } = await supabase.from('sites').select('id, site_code, name, address, lat, lng').in('id', siteIds);
-    const siteById = {};
-    for (const s of sites || []) siteById[s.id] = s;
+    // newest sent message per date for this tech
+    const byDate = {};
+    for (const p of pubs || []) {
+      const msgs = p.messages || {};
+      const key = Object.keys(msgs).find((k) => norm(k) === norm(tech.name));
+      const text = key ? String(msgs[key] || '') : '';
+      if (!text) continue;
+      const d = headerDate(text, p.published_at);
+      if (d && !byDate[d]) byDate[d] = text;
+    }
+    const today = easternToday();
+    const dates = Object.keys(byDate).filter((d) => d >= today).sort();
+    // also keep today if sent earlier; otherwise nothing to show
+    const days = dates.map((d) => ({ date: d, label: dateLabel(d) }));
+    if (!days.length) return json(200, { ok: true, today, days: [], date: null, stops: [] });
 
-    let ticketById = {};
+    const date = params.date && byDate[params.date] ? params.date : days[0].date;
+    const parsed = parseMessageStops(byDate[date]);
+
+    const { data: allSites } = await supabase.from('sites').select('id, site_code, name, address, lat, lng');
+    const { data: asg } = await supabase
+      .from('assignments').select('site_id, ticket_id, status')
+      .eq('technician_id', techId).eq('dispatch_date', date).neq('status', 'removed');
+    const ticketIds = [...new Set((asg || []).map((a) => a.ticket_id).filter(Boolean))];
+    const ticketBySite = {};
     if (ticketIds.length) {
-      const { data: tk } = await supabase.from('tickets').select('id, ticket_kind, description, wo_number').in('id', ticketIds);
-      for (const t of tk || []) ticketById[t.id] = t;
+      const { data: tk } = await supabase.from('tickets').select('id, ticket_kind').in('id', ticketIds);
+      const tById = {}; for (const t of tk || []) tById[t.id] = t;
+      for (const a of asg || []) if (a.ticket_id && tById[a.ticket_id]) ticketBySite[a.site_id] = tById[a.ticket_id];
     }
 
-    // reader numbers: reader_lookup by site code, plus the tag read from the latest visit
-    const codes = (sites || []).map((s) => s.site_code).filter(Boolean);
-    const readerBySite = {};
+    const used = new Set();
+    const picked = [];
+    for (const ps of parsed) {
+      const hit = matchSite(ps.text, allSites || [], used);
+      if (hit) { used.add(hit.id); picked.push({ site: hit, text: ps.text }); }
+      else picked.push({ site: null, text: ps.text });
+    }
+    const codes = picked.map((x) => x.site && x.site.site_code).filter(Boolean);
+    const readerByCode = {};
     if (codes.length) {
       const { data: rl } = await supabase.from('reader_lookup').select('num, site_code').in('site_code', codes);
-      for (const r of rl || []) {
-        const s = (sites || []).find((x) => x.site_code === r.site_code);
-        if (s) (readerBySite[s.id] = readerBySite[s.id] || new Set()).add(r.num);
-      }
+      for (const r of rl || []) (readerByCode[r.site_code] = readerByCode[r.site_code] || new Set()).add(r.num);
     }
-
-    // order from the published dispatch text
-    let orderSource = 'sequence';
-    const rank = {};
-    try {
-      const from = new Date(date + 'T00:00:00Z'); from.setUTCDate(from.getUTCDate() - 7);
-      const { data: pubs } = await supabase
-        .from('published_dispatches')
-        .select('dispatch_date, published_at, messages')
-        .gte('dispatch_date', from.toISOString().slice(0, 10))
-        .order('published_at', { ascending: false })
-        .limit(20);
-      const label = dateLabel(date);
-      for (const p of pubs || []) {
-        const msgs = p.messages || {};
-        const key = Object.keys(msgs).find((k) => norm(k) === norm(tech.name));
-        const text = key ? String(msgs[key] || '') : '';
-        if (!text || text.indexOf(label) === -1) continue;
-        const parsed = parseMessageStops(text);
-        if (!parsed.length) continue;
-        const used = new Set();
-        for (const ps of parsed) {
-          const hit = matchSite(ps.text, sites || [], used);
-          if (hit) { used.add(hit.id); rank[hit.id] = ps.n; }
-        }
-        if (Object.keys(rank).length) { orderSource = 'dispatch_text'; break; }
-      }
-    } catch (e) { /* fall back to sequence_order */ }
-
-    const stops = asg.map((a) => {
-      const s = siteById[a.site_id] || {};
-      const t = ticketById[a.ticket_id] || {};
+    const stops = picked.map((x, i) => {
+      const s = x.site;
+      const typeMatch = x.text.match(/\s-\s([A-Z][^⚡]*?)\s*(?:⚡.*)?$/);
+      const tk = s ? ticketBySite[s.id] : null;
       return {
-        assignment_id: a.id,
-        site_id: a.site_id,
-        site_code: s.site_code || null,
-        name: s.name || 'Stop',
-        address: s.address || null,
-        lat: s.lat != null ? Number(s.lat) : null,
-        lng: s.lng != null ? Number(s.lng) : null,
-        kind: t.ticket_kind || null,
-        description: t.description || null,
-        readers: Array.from(readerBySite[a.site_id] || []),
-        _rank: rank[a.site_id] != null ? rank[a.site_id] : null,
-        _seq: a.sequence_order != null ? a.sequence_order : 9999,
+        site_id: s ? s.id : 'msg' + i,
+        site_code: s ? s.site_code : null,
+        name: s ? s.name : x.text.replace(/\s-\s[A-Z][^-]*$/, ''),
+        address: s ? s.address : null,
+        lat: s && s.lat != null ? Number(s.lat) : null,
+        lng: s && s.lng != null ? Number(s.lng) : null,
+        kind: tk ? tk.ticket_kind : (typeMatch ? typeMatch[1].trim() : null),
+        readers: s && s.site_code ? Array.from(readerByCode[s.site_code] || []) : [],
       };
     });
-    stops.sort((x, y) => {
-      if (orderSource === 'dispatch_text') {
-        const rx = x._rank != null ? x._rank : 999, ry = y._rank != null ? y._rank : 999;
-        if (rx !== ry) return rx - ry;
-      }
-      if (x._seq !== y._seq) return x._seq - y._seq;
-      return String(x.name).localeCompare(String(y.name));
-    });
-    for (const s of stops) { delete s._rank; delete s._seq; }
-    return json(200, { ok: true, date, order_source: orderSource, stops });
+    return json(200, { ok: true, today, days, date, label: dateLabel(date), stops });
   } catch (e) {
     return json(500, { ok: false, error: String(e && e.message || e) });
   }

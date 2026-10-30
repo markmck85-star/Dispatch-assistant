@@ -2194,7 +2194,7 @@ function dmRender() {
       '<div class="dm-last" style="margin-top:8px;font-size:clamp(16px,4vw,30px);display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
       '<span>📍 Suggest nearby stops<br><span style="color:#888;font-size:clamp(13px,3.2vw,24px);">' + (dmGpsOn ? 'On. Closest stops first. Your location is never stored.' : 'Off. Turn on to list the closest stops first. Your phone will ask permission once.') + '</span></span>' +
       '<button type="button" onclick="dmToggleGps()" style="min-width:clamp(84px,20vw,150px);padding:clamp(12px,3vw,24px) 14px;font-size:clamp(18px,4.6vw,34px);background:' + (dmGpsOn ? '#16a34a' : '#444') + ';">' + (dmGpsOn ? 'ON' : 'OFF') + '</button></div>' +
-      '<button type="button" class="dm-wide" onclick="dmGoRoute()" style="margin-top:8px;">📋 Today\'s stops</button>' +
+      '<button type="button" class="dm-wide" onclick="dmGoRoute()" style="margin-top:8px;">📋 Your stops</button>' +
       '<button type="button" class="dm-wide" onclick="dmGoPlaces()" style="margin-top:8px;">⭐ Saved places (' + loadPlaces().length + ')</button>' +
       '<button type="button" class="dm-wide" onclick="dmEndDay()" style="margin-top:8px;">Heading home</button>';
   } else if (dmStage === 'route') {
@@ -2789,36 +2789,40 @@ async function dmGoRoute() {
   dmLog('stops_open');
   dmStage = 'route';
   dmDoneOpen = false;
-  const date = document.getElementById('legDate').value;
-  if (!dmDay || dmDay.date !== date || dmDay.err) {
-    dmDay = { date, stops: [], loading: true, err: '' };
-    dmRender();
-    try {
-      const r = await fetch('/.netlify/functions/get-my-day?technician_id=' + encodeURIComponent(ctx.technician.id) + '&date=' + encodeURIComponent(date));
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || 'failed');
-      dmDay = { date, stops: j.stops || [], loading: false, err: '' };
-    } catch (er) {
-      dmDay = { date, stops: [], loading: false, err: 'Could not load your stops. Check your signal and try again.' };
-    }
+  await dmLoadDay(null);
+}
+
+// Stops come only from the schedule the dispatcher sent. The day is labelled from that message.
+async function dmLoadDay(date) {
+  dmDay = { date: date || '', label: '', days: [], stops: [], loading: true, err: '' };
+  dmRender();
+  try {
+    const r = await fetch('/.netlify/functions/get-my-day?technician_id=' + encodeURIComponent(ctx.technician.id) + (date ? '&date=' + encodeURIComponent(date) : ''));
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'failed');
+    dmDay = { date: j.date || '', label: j.label || '', days: j.days || [], today: j.today, stops: j.stops || [], loading: false, err: '' };
+  } catch (er) {
+    dmDay = { date: '', label: '', days: [], stops: [], loading: false, err: 'Could not load your stops. Check your signal and try again.' };
   }
   dmRender();
 }
 
 function dmStopDone(st, s) {
   if (st.done.indexOf(s.site_id) !== -1) return true;
-  return dmTodayLegs().some(l => l.to_kind === 'site' && l.to_site_id === s.site_id) && st.pinned.indexOf(s.site_id) === -1;
+  return legs.some(l => l.date === dmDay.date && l.to_kind === 'site' && l.to_site_id === s.site_id) && st.pinned.indexOf(s.site_id) === -1;
 }
 
 function dmRouteHtml() {
-  if (!dmDay || dmDay.loading) return '<div class="dm-title">Today\'s stops</div><div class="dm-hint">Loading…</div>';
+  if (!dmDay || dmDay.loading) return '<div class="dm-title">Your stops</div><div class="dm-hint">Loading…</div>';
   const st = dmDayState(dmDay.date);
   let pending = [], done = [];
   dmDay.stops.forEach((s, i) => { (dmStopDone(st, s) ? done : pending).push(i); });
   pending.sort((a, b) => (st.pinned.indexOf(dmDay.stops[b].site_id) !== -1) - (st.pinned.indexOf(dmDay.stops[a].site_id) !== -1));
-  let h = '<div class="dm-title">Today\'s stops</div>';
+  let h = '<div class="dm-title">' + escHtml(dmDay.label || 'Your stops') + '</div>';
+  if (dmDay.days.length > 1) h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' + dmDay.days.map(d => '<button type="button" onclick="dmLoadDay(\'' + d.date + '\')" style="padding:10px 14px;font-size:clamp(15px,3.8vw,24px);' + (d.date === dmDay.date ? 'background:#f59e0b;color:#000;' : '') + '">' + escHtml(d.label) + '</button>').join('') + '</div>';
+  if (dmDay.date && dmDay.today && dmDay.date !== dmDay.today) h += '<div class="dm-hint">This list is for ' + escHtml(dmDay.label) + ', not today.</div>';
   if (dmDay.err) h += '<div class="dm-hint bad">' + escHtml(dmDay.err) + '</div>';
-  else if (!dmDay.stops.length) h += '<div class="dm-hint">No stops on the schedule for this day. You can still log stops with LOG STOP.</div>';
+  else if (!dmDay.stops.length) h += '<div class="dm-hint">Your dispatcher has not sent your schedule yet. You can still log stops with LOG STOP.</div>';
   h += '<div class="dm-tiles">' + pending.map(i => {
     const s = dmDay.stops[i], cur = st.current === s.site_id;
     return '<button type="button" class="dm-tile" onclick="dmOpenCard(' + i + ')">' + (cur ? '➡ ' : '') + escHtml(s.name) +
@@ -2858,6 +2862,8 @@ function dmCardHtml() {
     ? readers.map(n => '<span style="display:inline-flex;align-items:center;gap:10px;margin:6px 10px 0 0;"><b style="font-size:clamp(26px,7vw,46px);">' + escHtml(n) + '</b><button type="button" onclick="dmCopy(\'' + escHtml(n) + '\',this)" style="padding:8px 14px;font-size:clamp(14px,3.6vw,22px);">Copy</button></span>').join('')
     : '<span style="color:#888;">None on file yet</span>') +
     '<div style="color:#888;font-size:clamp(12px,3vw,20px);margin-top:6px;">Check the sticker on the reader matches.</div></div>';
+  const notToday = dmDay.today && dmDay.date !== dmDay.today;
+  if (notToday) return h + '<div class="dm-hint">This stop is for ' + escHtml(dmDay.label) + '. Navigate and Arrived work on the day itself.</div><button type="button" class="dm-wide" style="margin-top:10px;" onclick="dmBack()">Back to list</button>';
   h += '<button type="button" class="dm-wide dm-amber" style="margin-top:6px;" onclick="dmNavigate(' + dmCardIdx + ')">🧭 Navigate</button>' +
     '<button type="button" class="dm-wide dm-go" style="margin-top:10px;" onclick="dmArrived(' + dmCardIdx + ')">✔ Arrived</button>' +
     '<button type="button" class="dm-wide" style="margin-top:10px;" onclick="dmBack()">Back to list</button>';
