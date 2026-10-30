@@ -397,6 +397,8 @@
     });
     // The portal state bar does not apply to the account or watchdog tabs
     // (the watchdog tab has its own selector).
+    // Mileage opens straight into driving mode; the full log is reachable from inside it.
+    if (name === 'Mileage' && ME_TECH_ID) { openMileage(true); return; }
     $('stateBar').classList.toggle('hidden', name === 'Acct' || name === 'Watch' || name === 'Summ' || name === 'Names' || $('stateSel').options.length < 2);
     if (name === 'Names') loadNames();
     if (name === 'Ship') loadShipments();

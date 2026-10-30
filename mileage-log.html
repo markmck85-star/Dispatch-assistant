@@ -2185,7 +2185,7 @@ function dmRender() {
     const date = document.getElementById('legDate').value;
     const off = date !== todayLocal();
     body.innerHTML =
-      '<div class="dm-last" onclick="dmStartEdit()" style="cursor:pointer;">' + (off ? '<b>' + weekdayLabel(date) + '</b> (not today)<br>' : '') +
+      '<div class="dm-last" onclick="dmStartEdit()" style="cursor:pointer;">' + '<b>' + weekdayLabel(date) + '</b>' + (off ? ' (not today)' : '') + '<br>' +
       'Last: <b>' + escHtml(from) + '</b>' + (odo ? ' at <b>' + dmFmt(odo) + '</b>' : ' (no reading yet)') +
       '<div style="color:#888;font-size:clamp(12px,3vw,20px);margin-top:2px;">Wrong reading? Tap here to correct it</div></div>' +
       '<div class="dm-center"><button type="button" class="dm-big" onclick="dmGoPick()">LOG STOP</button>' +
@@ -2620,6 +2620,7 @@ function dmBack() {
     document.getElementById('odoEnd').value = '';
     dmDigits = '';
     dmStage = 'card';
+    dmPendingDone = null;
     dmRender();
     return;
   }
@@ -2747,6 +2748,13 @@ async function dmFinish(est) {
   if (legs.length <= before) { dmStage = 'home'; dmRender(); return; }
   const idx = legs.length - 1, leg = legs[idx];
   dmDigits = '';
+  if (dmPendingDone) {
+    const pst = dmDayState(dmPendingDone.date);
+    if (pst.done.indexOf(dmPendingDone.site_id) === -1) pst.done.push(dmPendingDone.site_id);
+    pst.pinned = pst.pinned.filter(x => x !== dmPendingDone.site_id);
+    dmDaySave(pst);
+  }
+  dmPendingDone = null;
   dmStage = dmFromCard ? 'route' : 'home';
   dmFromCard = false;
   dmRender();
@@ -2775,6 +2783,7 @@ let dmDay = null;          // { date, stops, loading, err }
 let dmCardIdx = -1;
 let dmFromCard = false;
 let dmDoneOpen = false;
+let dmPendingDone = null;   // { date, site_id } set when Arrived is tapped, applied once the trip is logged
 
 function dmDayKey() { return localKey() + ':dayState'; }
 function dmDayState(date) {
@@ -2864,7 +2873,7 @@ function dmCardHtml() {
     : '<span style="color:#888;">None on file yet</span>') +
     '<div style="color:#888;font-size:clamp(12px,3vw,20px);margin-top:6px;">Check the sticker on the reader matches.</div></div>';
   const notToday = dmDay.today && dmDay.date !== dmDay.today;
-  if (notToday) return h + '<div class="dm-hint">This stop is for ' + escHtml(dmDay.label) + '. Navigate and Arrived work on the day itself.</div><button type="button" class="dm-wide" style="margin-top:10px;" onclick="dmBack()">Back to list</button>';
+  if (notToday) h += '<div class="dm-hint">This stop is scheduled for ' + escHtml(dmDay.label) + '. Arrived logs it today.</div>';
   h += '<button type="button" class="dm-wide dm-amber" style="margin-top:6px;" onclick="dmNavigate(' + dmCardIdx + ')">🧭 Navigate</button>' +
     '<button type="button" class="dm-wide dm-go" style="margin-top:10px;" onclick="dmArrived(' + dmCardIdx + ')">✔ Arrived</button>' +
     '<button type="button" class="dm-wide" style="margin-top:10px;" onclick="dmBack()">Back to list</button>';
@@ -2910,6 +2919,7 @@ async function dmArrived(i) {
   else stop = Object.assign({}, stop);
   if (picked.from && picked.from.kind === 'site' && picked.from.id === s.site_id) { dmToastMsg('You are already at ' + s.name + '.'); dmStage = 'route'; dmRender(); return; }
   dmFromCard = true;
+  dmPendingDone = { date: dmDay.date, site_id: s.site_id };
   dmSetTo(stop);
   await dmAfterPick();
 }
@@ -2921,7 +2931,7 @@ function dmUndoDone(i) {
   const st = dmDayState(dmDay.date);
   const date = dmDay.date;
   for (let k = legs.length - 1; k >= 0; k--) {
-    if (legs[k].date === date && legs[k].to_kind === 'site' && legs[k].to_site_id === s.site_id) { removeLeg(k); break; }
+    if ((legs[k].date === date || legs[k].date === dmDay.today) && legs[k].to_kind === 'site' && legs[k].to_site_id === s.site_id) { removeLeg(k); break; }
   }
   st.done = st.done.filter(x => x !== s.site_id);
   if (st.current === s.site_id) st.current = null;
